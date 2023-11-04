@@ -374,10 +374,18 @@ def getSearch():
             # limit results
             qLimit = f"with distinct a, apoc.coll.toSet(collect(matching)) as matching, collect(score) as score order by score limit {limit} "
 
-            # return results
-            qReturn = "return distinct a, matching, apoc.coll.min(score) as score"
+            # get country
+            qCountry = """
+                        optional match (a)<-[:DISTRICT_OF]-(c:ADM0)
+                        with a, matching, collect(c.CMName) as country, score
+                        """
 
-            cypher_query = qStart + qContext + qLimit + qReturn
+
+
+            # return results
+            qReturn = "return distinct a, matching, apoc.coll.min(score) as score, country"
+
+            cypher_query = qStart + qContext + qLimit + qCountry + qReturn
             
             # Execute the Cypher queries
             result = session.run(cypher_query)
@@ -389,11 +397,13 @@ def getSearch():
                 a = record['a']
                 matching = record['matching']
                 score = record['score']
+                country = record['country']
 
                 data[a.id] = {
                     "node": serialize_node(a),
                     "matching": matching,
-                    "score": score
+                    "score": score,
+                    "country": country
                     }
 
             driver.close()
