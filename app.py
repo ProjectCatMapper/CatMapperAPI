@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 from flask_cors import CORS
 from fuzzywuzzy import fuzz
 import json
+import ast
+import string as str
 
 load_dotenv()
 uri = os.getenv("uri")
@@ -309,16 +311,37 @@ def getSearch():
         elif database == "ArchaMap":
             driver = connectionAM()
         else:
-            raise Exception("must specify database as SocioMap or ArchaMap")
+            raise Exception("must specify database as 'SocioMap' or 'ArchaMap'")
         
         if domain is None:
             domain = "CATEGORY"
 
-        # need to add check to make sure property is valid
-        # need to add check to make sure yearStart and yearEnd are valid
-        # need to add check to make sure context is valid
-        # need to add check to make sure limit is valid
+        # need to add check to make sure property is valid and domain is valid
+
+        try:
+            if yearStart is not None:
+                yearStart = int(yearStart)
+        except ValueError:
+            raise Exception("yearStart must be an integer")
         
+        try:
+            if yearEnd is not None:
+                yearEnd = int(yearEnd)
+        except ValueError:
+            raise Exception("yearEnd must be an integer")
+
+        if yearEnd is None and yearStart is not None:
+            raise Exception("must specify yearEnd property")
+        
+        if yearStart is None and yearEnd is not None:
+            raise Exception("must specify yearStart property")
+
+        try:
+            if limit is not None:
+                limit = int(limit)
+        except ValueError:
+            raise Exception("limit must be an integer")
+
         if limit is None:
             limit = 10
         
@@ -333,46 +356,82 @@ def getSearch():
                 qStart = f"match (a:{domain}) with a, '' as matching, 0 as score" 
             elif property == "Key":
                  qStart = f"""
-                            call db.index.fulltext.queryRelationships('keys',replace(term,':','\\:')) yield relationship
+                            call db.index.fulltext.queryRelationships('keys',replace($term,':','\\:')) yield relationship
                             with endnode(relationship) as a, relationship.Key as matching
                             where '{domain}' in labels(a)
                             with a, matching, 0 as score
                             """
             elif property == "Name":
                 if domain == "DATASET":
-                    qStart = f"""
-                        call {{ with custom.cleanText("{term}") as term
+                    qStart = """
+                        call { with custom.cleanText($term) as term
                         call db.index.fulltext.queryNodes('DATASET', replace(term,\"'\",'\\\'')) yield node return node
-                        union with custom.cleanText("{term}") as term
-                        call db.index.fulltext.queryNodes('DATASET',replace(term,\"'\",'\\\'') + '~') yield node return node}}
-                        with node as a, node.CMName as matching, apoc.text.levenshteinDistance(custom.cleanText(node.CMName), custom.cleanText("{term}")) as score
+                        union with custom.cleanText($term) as term
+                        call db.index.fulltext.queryNodes('DATASET',replace(term,\"'\",'\\\'') + '~') yield node return node}
+                        with node as a, node.CMName as matching, apoc.text.levenshteinDistance(custom.cleanText(node.CMName), custom.cleanText($term)) as score
                         """
                 else:
                     qStart = f"""
-                        call {{ with custom.cleanText("{term}") as term
+                        call {{ with custom.cleanText($term) as term
                         call db.index.fulltext.queryRelationships('CATEGORY', replace(term,\"'\",'\\\'')) yield relationship return relationship
-                        union with custom.cleanText("{term}") as term
+                        union with custom.cleanText($term) as term
                         call db.index.fulltext.queryRelationships('CATEGORY',replace(term,\"'\",'\\\'') + '~') yield relationship return relationship}}
                         match (a:{domain})<-[relationship]-()
                         call {{ with relationship with custom.anytoList(collect(relationship.Name)) as namelist
-                        return custom.matchingDist(apoc.coll.flatten([namelist],true),'{term}') as matching
+                        return custom.matchingDist(apoc.coll.flatten([namelist],true),$term) as matching
                         }}
                         with a, matching.matching as matching, matching.score as score
                         """
             else:
-                qStart = f"match (a:{domain}) where tolower(a.{property}) = tolower({term}) " +  f"with a, a.{property} as matching, 0 as score "
+                qStart = f""""
+                match (a:{domain}) where tolower(a.{property}) = tolower($term)
+                with a, a.{property} as matching, 0 as score
+                """
 
-              # filter by context
+            # filter by domain
+
+            qDomain = f" where '{domain}' in labels(a) "
+
+            qUnique = """
+            with a, collect(matching) as matchingL, collect(score) as scores call {with matchingL, scores unwind matchingL as matching unwind scores as score return distinct matching, score order by score limit 1}
+            with a, matching, score
+            """
+
+
+
+             # filter by context
             if context is not None:
-                qContext = f"""
-                            where (a)<-[]-({{CMID: '{context}'}})
+                qContext = """
+                            where (a)<-[]-({CMID: $context})
                             with a, matching, score
                            """
             else:
+                context = ""
                 qContext = " "
-                
+
+             # filter by year
+            if yearStart is not None:
+                if domain == "DATASET":
+                    qYear = """
+                            call {with a with a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
+                            else a.ApplicableYears end as yearMatch, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
+                            with a, years, apoc.convert.toIntList(apoc.coll.toSet(apoc.coll.flatten(collect(yearMatch),true))) as yearMatch 
+                            where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}
+                            with node as a, matching, score
+                            """   
+                else:
+                    qYear = """
+                            call {with a with a, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years 
+                            match (a)<-[r:USES]-(:DATASET) unwind r.yearStart as yearStart 
+                            unwind r.yearEnd as yearEnd with years, a, r, apoc.coll.toSet(collect(yearStart) + collect(yearEnd)) as yearMatch 
+                            where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}
+                            with node as a, matching, score order by score desc
+                            """   
+            else: 
+                qYear = " "
+            
             # limit results
-            qLimit = f"with distinct a, apoc.coll.toSet(collect(matching)) as matching, collect(score) as score order by score limit {limit} "
+            qLimit = f"with distinct a, matching, score order by score limit {limit} "
 
             # get country
             qCountry = """
@@ -383,28 +442,19 @@ def getSearch():
 
 
             # return results
-            qReturn = "return distinct a, matching, apoc.coll.min(score) as score, country"
+            qReturn = """
+            return distinct a.CMID as CMID, a.CMName as CMName, 
+            [i in labels(a) where not i = 'CATEGORY'] as domain, matching, score as matchingDistance, 
+            country order by matchingDistance
+            """
 
-            cypher_query = qStart + qContext + qLimit + qCountry + qReturn
+            cypher_query = qStart + qDomain + qUnique + qContext + qYear + qLimit + qCountry + qReturn
             
             # Execute the Cypher queries
-            result = session.run(cypher_query)
+            result = session.run(cypher_query, term = term, context = context)
         
             # Process the query results and generate the dynamic JSON
-            data = {}
-
-            for record in result:
-                a = record['a']
-                matching = record['matching']
-                score = record['score']
-                country = record['country']
-
-                data[a.id] = {
-                    "node": serialize_node(a),
-                    "matching": matching,
-                    "score": score,
-                    "country": country
-                    }
+            data = [dict(record) for record in result]
 
             driver.close()
                 
@@ -416,6 +466,247 @@ def getSearch():
         data = {"error": error_message}
 
         return jsonify(data), 500
+
+@app.route('/translate', methods=['GET','POST'])
+def getTranslate():
+    try:
+        if request.method == "GET":
+            database = request.args.get('database')
+            term = request.args.get('term')
+            property = request.args.get('property')
+            domain = request.args.get('domain')
+            yearStart = request.args.get('yearStart')
+            yearEnd = request.args.get('yearEnd')
+            context = request.args.get('context')
+            dataset = request.args.get('dataset')
+            query = request.args.get('query')
+            # if request.method == 'POST':
+            #     data = request.get_data()
+            term = ast.literal_eval(term)
+            x = len(term)
+            empty = '"",' * x
+            empty = empty.rstrip(",")
+            if yearStart is None:
+                yearStart = f'[{empty}]'
+            if yearEnd is None:
+                yearEnd = f'[{empty}]'
+            if context is None:
+                context = f'[{empty}]'
+            if dataset is None:
+                dataset = f'[{empty}]'
+            if query is None:
+                query = 'false'
+
+            domain = ast.literal_eval(domain)
+            dom = domain[0]
+            yearStart = ast.literal_eval(yearStart)
+            yearEnd = ast.literal_eval(yearEnd)
+            context = ast.literal_eval(context)
+            dataset = ast.literal_eval(dataset)
+            rows = []
+            for term_item, domain_item, context_item, dataset_item, yearStart_item, yearEnd_item in zip(term, domain, context, dataset, yearStart, yearEnd):
+                rows.append({"term": term_item, "domain": domain_item, "context": context_item, "dataset": dataset_item, "yearStart": yearStart_item, "yearEnd": yearEnd_item})
+        if request.method == 'POST':
+            rows = request.get_data()  
+            rows = json.loads(rows)
+            database = rows.get("database")[0]
+            context = rows.get("context")
+            if context == {}:
+                context = [""]
+            dataset = rows.get("dataset")
+            if dataset == {}:
+                dataset = [""]
+            property = rows.get("property")[0]
+            domain = rows.get("domain")
+            dom = domain[0]
+            yearStart = rows.get("yearStart")
+            if yearStart == {}:
+                yearStart = [""]
+            query = rows.get("query")[0]
+            if query == {}:
+                query = "false"
+            rows = list(rows)
+
+        if database == "SocioMap":
+            driver = connection()
+        elif database == "ArchaMap":
+            driver = connectionAM()
+        else:
+            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+
+        # Define the Cypher query
+        
+        qLoad = "unwind $rows as row with row call {"
+
+        if property == "Key":
+                qStart = """
+                        with row call db.index.fulltext.queryRelationships('keys',replace(row.term,':','\\:')) yield relationship
+                        with endnode(relationship) as a, relationship.Key as matching
+                        with row, a, matching, 0 as score
+                        """
+        elif property == "Name":
+            if dom == "DATASET":
+                qStart = """
+                            with row call { with row with row, custom.cleanText(row.term) as term
+                            call db.index.fulltext.queryNodes('DATASET', replace(term,\"'\",'\\\'')) yield node return node
+                            union with row with row, custom.cleanText(row.term) as term
+                            call db.index.fulltext.queryNodes('DATASET',replace(term,\"'\",'\\\'') + '~') yield node return node}
+                            with row, node as a, node.CMName as matching, apoc.text.levenshteinDistance(custom.cleanText(node.CMName), custom.cleanText(row.term)) as score
+                        """
+            else:
+                qStart = """
+                            with row call { with row with row, custom.cleanText(row.term) as term
+                            call db.index.fulltext.queryRelationships('CATEGORY', replace(term,\"'\",'\\\'')) yield relationship return relationship
+                            union with row with row, custom.cleanText(row.term) as term
+                            call db.index.fulltext.queryRelationships('CATEGORY',replace(term,\"'\",'\\\'') + '~') yield relationship return relationship}
+                            match (a)<-[relationship]-()
+                            call {with row, relationship with row, custom.anytoList(collect(relationship.Name)) as namelist
+                            return custom.matchingDist(apoc.coll.flatten([namelist],true),row.term) as matching
+                            }
+                            with row, a, matching.matching as matching, matching.score as score
+                        """
+        else:
+            qStart = """ 
+            with row call apoc.cypher.run('match (a) where tolower(a.' + row.property + ') = tolower(\"' + row.term + '\") return a, a.' + row.property + ' as matching',{}) yield value 
+            with row, value.a as a, value.matching as matching, 0 as score
+            """
+
+        # filter by domain
+
+        qDomain = f" where row.domain in labels(a) with row, a, matching, score "
+
+        # filter by context
+        if context[0] != "":
+            qContext = """
+                        where (a)<-[]-({CMID: row.context})
+                        with row, a, matching, score
+                        """
+        else:
+            qContext = " "
+
+        # filter by dataset
+        if dataset[0] != "":
+            qDataset = """
+                        where (a)<-[:USES]-(:DATASET{CMID: row.dataset})
+                        with row, a, matching, score
+                        """
+        else:
+            qDataset = " "
+
+            # filter by year
+        if yearStart[0] != "":
+            if dom == "DATASET":
+                qYear = """
+                            call {with row, a with row, a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
+                            else a.ApplicableYears end as yearMatch, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
+                            with a, years, apoc.convert.toIntList(apoc.coll.toSet(apoc.coll.flatten(collect(yearMatch),true))) as yearMatch 
+                            where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}
+                            with node as a, matching, score
+                        """   
+            else:
+                qYear = f"""
+                            call {{with row, a with row, a, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years 
+                            match (a)<-[r:USES]-(:DATASET) unwind r.yearStart as yearStart 
+                            unwind r.yearEnd as yearEnd with years, a, r, apoc.coll.toSet(collect(yearStart) + collect(yearEnd)) as yearMatch 
+                            where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}}
+                            with row, node as a, matching, score order by score desc
+                        """   
+        else: 
+            qYear = " "
+        
+        # limit results
+        qLimit = """
+        with row, collect(a{a, matching, score}) as nodes, collect(score) as scores
+        with row, nodes, apoc.coll.min(scores) as minScore
+        unwind nodes as node
+        with row, node.a as a, node.matching as matching, node.score as score, minScore
+        where score = minScore
+        return distinct a, matching, score}
+        with row, a, matching, score
+        """
+
+        # get country
+        qCountry = """
+                    optional match (a)<-[:DISTRICT_OF]-(c:ADM0)
+                    with row, a, matching, collect(c.CMName) as country, score
+                    """
+
+
+
+        # return results
+        qReturn = """
+        return distinct row.term as term, a.CMID as CMID, a.CMName as CMName, [i in labels(a) where not i = 'CATEGORY'] as label, 
+        matching, score as matchingDistance, country order by matchingDistance
+        """
+        cypher_query = qLoad + qStart + qDomain + qContext + qDataset + qYear + qLimit + qCountry + qReturn
+        if(query == "true"):
+            cypher_queryQ = qLoad + qStart + qDomain + qContext + qDataset + qYear + qLimit + qCountry + qReturn
+            cypher_query = qLoad + " return row"
+            # Execute the Cypher queries
+        with driver.session() as session:
+            result = session.run(cypher_query, rows = rows)
+        
+            # Process the query results and generate the dynamic JSON
+            if(query == "true"):
+                data = [cypher_queryQ.replace("\n"," "),result.value()]
+            else:
+                data = [dict(record) for record in result]
+
+            driver.close()
+                
+        rowsType = type(rows)
+        return [rowsType,jsonify(data)]
+    
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        error_message = str(e)  # Convert the exception to a string
+        data = {"error": error_message}
+
+        return jsonify(data), 500
+
+@app.route('/test', methods=['GET','POST'])
+def getTest():
+    if request.method == "GET":
+        database = request.args.get('database')
+        term = request.args.get('term')
+        property = request.args.get('property')
+        domain = request.args.get('domain')
+        yearStart = request.args.get('yearStart')
+        yearEnd = request.args.get('yearEnd')
+        context = request.args.get('context')
+        dataset = request.args.get('dataset')
+        query = request.args.get('query')
+        term = ast.literal_eval(term)
+        x = len(term)
+        empty = '"",' * x
+        empty = empty.rstrip(",")
+        if yearStart is None:
+            yearStart = f'[{empty}]'
+        if yearEnd is None:
+            yearEnd = f'[{empty}]'
+        if context is None:
+            context = f'[{empty}]'
+        if query is None:
+            query = 'false'
+
+        domain = ast.literal_eval(domain)
+        dom = domain[0]
+        yearStart = ast.literal_eval(yearStart)
+        yearEnd = ast.literal_eval(yearEnd)
+        context = ast.literal_eval(context)
+        rows = []
+        for term_item, domain_item, context_item, yearStart_item, yearEnd_item in zip(term, domain, context, yearStart,yearEnd):
+            rows.append({"term": term_item, "domain": domain_item, "context": context_item, "yearStart": yearStart_item, "yearEnd": yearEnd_item})
+        if database == "SocioMap":
+            driver = connection()
+        elif database == "ArchaMap":
+            driver = connectionAM()
+        return(jsonify(rows))
+    if request.method == 'POST':
+        data = request.get_data()  
+        data = json.loads(data)
+        return(data)
+         
 
 if __name__== "__main__":
     app.run(debug=True,port=5001)
