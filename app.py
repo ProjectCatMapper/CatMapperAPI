@@ -7,8 +7,8 @@ from dotenv import load_dotenv
 from flask_cors import CORS
 from fuzzywuzzy import fuzz
 import json
-import ast
-import string as str
+import re
+import string
 
 load_dotenv()
 uri = os.getenv("uri")
@@ -21,16 +21,16 @@ uriAM = os.getenv("uriAM")
 pwdAM = os.getenv("pwdAM")
 
 def connectionSM():
-    driverSM = GraphDatabase.driver(uri=uri,auth=(user,pwd))
-    return driverSM
+    driver = GraphDatabase.driver(uri=uri,auth=(user,pwd))
+    return driver
 
 def connectionGIS():
-    driverGIS = GraphDatabase.driver(uri=uri1,auth=(user1,pwd1))
-    return driverGIS
+    driver = GraphDatabase.driver(uri=uri1,auth=(user1,pwd1))
+    return driver
 
 def connectionAM():
-    driverAM = GraphDatabase.driver(uri=uriAM,auth=(user,pwdAM))
-    return driverAM
+    driver = GraphDatabase.driver(uri=uriAM,auth=(user,pwdAM))
+    return driver
 
 def verifyUser(driver,user,pwd):
     with driver.session() as session:
@@ -40,27 +40,72 @@ def verifyUser(driver,user,pwd):
         driver.close()
     return result
 
-def getPolygon(CMID,driver):
+def getPolygon(CMID,driver, simple = True):
     try:
         with driver.session() as session:
-            query = "match (:CATEGORY {CMID: $CMID})<-[r:USES]-(:DATASET) where not r.geoPolygon is null return distinct r.geoPolygon as geomID"
-            result = session.run(query, CMID = CMID)
-            for record in result:
-                geomID = record["geomID"]
+            query = """
+    match (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET) where not r.geoPolygon is null 
+    return distinct r.geoPolygon as geomID, d.shortName as source
+    """
+            results = session.run(query, CMID = CMID)
+            result = [dict(record) for record in results]
             driver.close()
         driverGIS = connectionGIS() 
-        print(driverGIS)
         with driverGIS.session() as session:
-            query = "with apoc.coll.toSet(apoc.coll.flatten([$geomID],true)) as geomid match (g:GEOMETRY) where g.geomID in geomid return g.geometry as geometry"
-            result = session.run(query, geomID = geomID)
-            geometry = [dict(record) for record in result]
+            if simple == True:
+                query = """
+    unwind $rows as row 
+    unwind row.geomID as geomID
+    unwind row.source as source
+    with geomID, source
+    match (g:GEOMETRY)
+    where g.geomID = geomID
+    return source, coalesce(g.simplified,g.geometry) as geometry, g.simplified is not null as simple
+    """         
+            else:
+                query = """
+    unwind $rows as row 
+    unwind row.geomID as geomID
+    unwind row.source as source
+    with geomID, source
+    match (g:GEOMETRY) 
+    where g.geomID = geomID
+    return source, g.geometry as geometry
+    """         
+            # query = "unwind $rows as row return row"
+            polygons = session.run(query, rows = result)
+            polygons = [dict(record) for record in polygons]
             driverGIS.close()
-        return geometry
-    except Exception as e: 
-        print(e)
+        return polygons
+    except Exception as e:
+        return {"firstResult":result,"query":query,"error",str(e)}
+    
+def getPoints(CMID,driver):
+    with driver.session() as session:
+        query = "match (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET) where not r.geoCoords is null return distinct r.geoCoords as geometry, d.shortName as source"
+        result = session.run(query, CMID = CMID)
+        points = [dict(record) for record in result]
+        driver.close()
+    return points
 
-        return e
+def getRelations(CMID,driver):
+    with driver.session() as session:
+        query = "match ({CMID: $CMID})-[r]-() return distinct type(r) as relation"
+        result = session.run(query, CMID = CMID)
+        for record in result:
+            relations = record["relation"]
+        driver.close()
+    return relations
 
+def flatten_json(json_obj, parent_key='', sep='_'):
+    flat_dict = {}
+    for key, value in json_obj.items():
+        new_key = f"{key}" if parent_key else key
+        if isinstance(value, dict):
+            flat_dict.update(flatten_json(value, new_key, sep=sep))
+        else:
+            flat_dict[new_key] = value
+    return flat_dict
 
 #app=FastAPI()
 app = Flask(__name__)
@@ -204,10 +249,15 @@ apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Sourc
         #             if results1['type'] == "MultiPolygon":
 
         #                 center = (results1['coordinates'][0][0][0])[::-1]
+    
+    # polygon = json.dumps(polygon)
 
-        #             with open('data.json', 'w', encoding='utf-8') as f:
-        #                 json.dump(results1, f, ensure_ascii=False, indent=4)
+    # polygon = json.loads(polygon)
+    # print(type(polygon))
 
+    with open('data.json', 'w') as f:
+         json.dump(polygon[0], f, ensure_ascii=True, indent=4)
+    # center = (polygon[0]['coordinates'][0][0][0])[::-1]
                         
         #         break
             
@@ -248,6 +298,7 @@ apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Sourc
         #     results1 = []
         # print(polygon)
         # print(type(polygon))
+    
     payload = {
     "current_response": results,
     "future_response": [polygon],
@@ -260,6 +311,89 @@ apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Sourc
     #     print(payload)
     return jsonify(payload)
         #return (results.data())
+
+@app.route("/explore",methods=['GET'])
+def getExplore():
+    
+    cmid = request.args.get('cmid')
+    database = request.args.get('database')
+
+    if database == "SocioMap":
+        driver = connectionSM()
+        label = re.search("^SM",cmid)
+    elif database == "ArchaMap":
+        driver = connectionAM()
+        label = re.search("^SM",cmid)
+    else:
+        pass
+
+    if label is not None:
+        label = "CATEGORY"
+    else: 
+        label = "DATASET"
+
+    if label == "CATEGORY":
+        qInfo = '''
+unwind $cmid as cmid match (a)<-[r:USES]-(d:DATASET)
+where a.CMID = cmid with a,r,d
+call apoc.when(r.country is not null,'return custom.getName($id) as name','return null as name',{id:r.country}) yield value as country
+call apoc.when(r.language is not null,'return custom.getGlot($id) as name','return null as name',{id:r.language}) yield value as language
+call apoc.when(r.religion is not null,'return custom.getName($id) as name','return null as name',{id:r.religion}) yield value as religion
+with a,r,d, country, language, religion,
+case when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is not null then custom.getMinYear(r.yearStart) + '-' + custom.getMaxYear(r.yearEnd)
+when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is null then custom.getMinYear(r.yearStart) + '-present'
+when custom.getMinYear(r.yearStart) is null and custom.getMaxYear(r.yearEnd) is not null then custom.getMaxYear(r.yearEnd)
+else null
+end as timeSpan
+return a.CMName as CMName, custom.anytoList(collect(split(country.name,', ')),true) as Location, 
+a.CMID as CMID, apoc.text.join([i in labels(a) where not i = 'CATEGORY'],', ') as Labels, 
+custom.anytoList(collect(split(language.name,', ')),true) as Languages, custom.anytoList(collect(split(religion.name,', ')),true) as Religions, 
+custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
+'''        
+        qSamples = ''' 
+unwind $cmid as cmid
+match (a)<-[r:USES]-(d:DATASET)
+where a.CMID = cmid
+with custom.anytoList(collect(r.Name),true) as Name, r.country as LocationID, d.project as Source, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, 
+toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
+call apoc.when(LocationID is not null,'return custom.getName($id) as Location','return null',{id:LocationID}) yield value
+return Name, custom.anytoList(collect(value.Location),true) as Location, type as Type, 
+apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),
+toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),
+toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Population est.`,  
+apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Source, Version, Link order by `Time span`, Source, Name
+'''
+        with driver.session() as session:
+            samples = session.run(qSamples, cmid = cmid)
+            samples = [dict(record) for record in samples]
+            driver.close()
+    else:
+        qInfo = '''
+unwind $cmid as cmid 
+match (a:DATASET) 
+where a.CMID = cmid 
+with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
+'return null as name',{id:a.District}) yield value as Location 
+return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
+labels(a) as Labels, a.parent as Dataset, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.Note as Note
+'''
+        samples = []
+    
+    with driver.session() as session:
+        info = session.run(qInfo, cmid = cmid)
+        info = [dict(record) for record in info]
+        driver.close()
+
+    polygons = getPolygon(cmid,driver)
+    points = getPoints(cmid,driver)
+
+    return {
+        "info": info,
+        "samples": samples,
+        "polygons": polygons,
+        "points": points
+    }
+    
 
 # Function to serialize a Neo4j Node object into a serializable dictionary
 def serialize_node(node):
@@ -278,69 +412,76 @@ def serialize_relationship(relationship):
         "properties": dict(relationship.items())
     }
 
-@app.route('/properties', methods=['GET'])
-def getProperties():
+@app.route('/network', methods=['GET'])
+def getNetwork():
     try:
         cmid = request.args.get('cmid')
+        cmid = re.split(",",cmid)
+        domain = request.args.get('domain')
+        if domain is not None:
+            domain = re.split(",",domain)
+        else:
+            domain = ["CATEGORY","DATASET"]
+
+        endcmid = request.args.get('endcmid')
+        relation = request.args.get('relation')
+        if relation is None:
+            relation = "USES"
         database = request.args.get('database')
 
         if database == "SocioMap":
-            driverSM = connectionSM()
+            driver = connectionSM()
         elif database == "ArchaMap":
-            driverSM = connectionAM()
+            driver = connectionAM()
         else:
             raise Exception("must specify database as SocioMap or ArchaMap")
+
+        if endcmid is not None:
+            cypher_query = """
+unwind $cmid as cmid unwind $endcmid as endcmid unwind $relation as relation 
+MATCH (a) 
+WHERE a.CMID = cmid
+optional match (a)-[r]-(e) 
+where type(r) = relation and e.CMID = endcmid and
+not isEmpty([label IN labels(e) 
+WHERE label IN apoc.coll.flatten([$domain],true)]) 
+return distinct a,r,e limit 10
+"""        
+        else:
+            cypher_query = """
+unwind $cmid as cmid unwind $relation as relation MATCH (a) 
+WHERE a.CMID = cmid 
+optional match (a)-[r]-(e) 
+where type(r) = relation and
+not isEmpty([label IN labels(e) 
+WHERE label IN apoc.coll.flatten([$domain],true)]) 
+return distinct a,r,e limit 10
+"""        
         
-        with driverSM.session() as session:
-            # Define the Cypher query
-            cypher_query = f"MATCH (a) WHERE a.CMID = '{cmid}' optional match (a)<-[r:USES]-(d:DATASET) return a,r,d"
-            
+        with driver.session() as session:
             # Execute the Cypher queries
-            result = session.run(cypher_query)
-        
-            # Process the query results and generate the dynamic JSON
-            data = {
-                "CATEGORY": {},
-                "USES": {}  # Use a dictionary instead of a list
-            }
-
-            unique_nodes = set()  # To track unique nodes
-
+            result = session.run(cypher_query, cmid = cmid, relation = relation,domain = domain, endcmid = endcmid)
+            node = []
+            rel = []
+            end = []
             for record in result:
                 a = record['a']
+                node.append({"node":serialize_node(a)})
                 r = record['r']
-                d = record['d']
+                e = record['e']
+                r = serialize_relationship(r)
+                e = serialize_node(e)
+                rel.append({"relation":r})
+                end.append({"end":e})
 
-                # Ensure nodes are unique
-                if a is not None:
-                    data["CATEGORY"] = serialize_node(a)
-                    unique_nodes.add(a)
+        driver.close()
+        node = [flatten_json(entry) for entry in node]
+        rel = [flatten_json(entry) for entry in rel]
+        end = [flatten_json(entry) for entry in end]
 
-                # Create a dictionary for the relationship and dataset data with r.id as the key
-                if r is not None:
-                    if r.id not in data["USES"]:
-                        data["USES"][r.id] = {
-                            "relationship": {},
-                            "dataset": {}
-                        }
-
-                    # Add relationship data
-                    data["USES"][r.id]["relationship"] = serialize_relationship(r)
-
-                # Add dataset data
-                if d is not None:
-                    data["USES"][r.id]["dataset"] = serialize_node(d)
-
-            driverSM.close()
-                
-        return jsonify(data)
-    
+        return {"node":node,"relations":rel,"relNodes":end,"query":cypher_query,"params":[{"cmid":cmid,"database":database,"domain":domain,"relation":relation,"endcmid":endcmid}]}
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
-        error_message = str(e)  # Convert the exception to a string
-        data = {"error": error_message}
-
-        return jsonify(data), 500
+        return str(e), 500
     
 @app.route('/search', methods=['GET'])
 def getSearch():
@@ -365,7 +506,7 @@ def getSearch():
         if domain is None:
             domain = "CATEGORY"
 
-        # need to add check to make sure property is valid and domain is valid
+        # need to add check to mak sure property is valid and domain is valid
 
         try:
             if yearStart is not None:
@@ -411,12 +552,25 @@ where '{domain}' in labels(a)
 with a, matching, 0 as score
 """
         elif property == "Name":
+            if domain == "CATEGORY":
                 qStart = f"""
 call {{ with custom.cleanText($term) as term
 call db.index.fulltext.queryNodes('{domain}', replace(term,"'","\\'")) yield node return node
 union with custom.cleanText($term) as term
 call db.index.fulltext.queryNodes('{domain}',replace(term,"'","\\'") + '~') yield node return node}}
-with node as a, node.CMName as matching, apoc.text.levenshteinDistance(custom.cleanText(node.CMName), custom.cleanText($term)) as score
+with node as a
+with a, custom.matchingDist(a.names, $term) as matching
+with a, matching.matching as matching, toInteger(matching.score) as score
+"""
+            else:
+                qStart = f"""
+call {{ with custom.cleanText($term) as term
+call db.index.fulltext.queryNodes('{domain}', replace(term,"'","\\'")) yield node return node
+union with custom.cleanText($term) as term
+call db.index.fulltext.queryNodes('{domain}',replace(term,"'","\\'") + '~') yield node return node}}
+with node as a
+with a, custom.matchingDist([a.CMName, a.shortName, a.DatasetCitation], $term) as matching
+with a, matching.matching as matching, toInteger(matching.score) as score
 """
         else:
             qStart = f"""
@@ -429,7 +583,10 @@ with a, a.{property} as matching, 0 as score
         qDomain = f" where '{domain}' in labels(a) "
 
         qUnique = """
-with a, collect(matching) as matchingL, collect(score) as scores call {with matchingL, scores unwind matchingL as matching unwind scores as score return distinct matching, score order by score limit 1}
+with a, collect(matching) as matchingL, 
+collect(score) as scores call {with matchingL, 
+scores unwind matchingL as matching 
+unwind scores as score return distinct matching, score order by score limit 1}
 with a, matching, score
 """
 
@@ -501,72 +658,30 @@ country order by matchingDistance
             # return([qStart,qDomain,qUnique,qContext,qYear,qLimit,qCountry,qReturn])
             return(cypher_query)
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
-        error_message = str(e)  # Convert the exception to a string
-        data = {"error": error_message}
+        return str(e), 500
 
-        return jsonify(data), 500
-
-@app.route('/translate', methods=['GET','POST'])
+@app.route('/translate', methods=['POST'])
 def getTranslate():
     try:
-        if request.method == "GET":
-            database = request.args.get('database')
-            term = request.args.get('term')
-            property = request.args.get('property')
-            domain = request.args.get('domain')
-            yearStart = request.args.get('yearStart')
-            yearEnd = request.args.get('yearEnd')
-            context = request.args.get('context')
-            dataset = request.args.get('dataset')
-            query = request.args.get('query')
-            # if request.method == 'POST':
-            #     data = request.get_data()
-            term = ast.literal_eval(term)
-            x = len(term)
-            empty = '"",' * x
-            empty = empty.rstrip(",")
-            if yearStart is None:
-                yearStart = f'[{empty}]'
-            if yearEnd is None:
-                yearEnd = f'[{empty}]'
-            if context is None:
-                context = f'[{empty}]'
-            if dataset is None:
-                dataset = f'[{empty}]'
-            if query is None:
-                query = 'false'
-
-            domain = ast.literal_eval(domain)
-            dom = domain[0]
-            yearStart = ast.literal_eval(yearStart)
-            yearEnd = ast.literal_eval(yearEnd)
-            context = ast.literal_eval(context)
-            dataset = ast.literal_eval(dataset)
-            rows = []
-            for term_item, domain_item, context_item, dataset_item, yearStart_item, yearEnd_item in zip(term, domain, context, dataset, yearStart, yearEnd):
-                rows.append({"term": term_item, "domain": domain_item, "context": context_item, "dataset": dataset_item, "yearStart": yearStart_item, "yearEnd": yearEnd_item})
-
-        if request.method == 'POST':
-            rows = request.get_data()  
-            rows = json.loads(rows)
-            database = rows.get("database")[0]
-            context = rows.get("context")
-            if context == {}:
-                context = [""]
-            dataset = rows.get("dataset")
-            if dataset == {}:
-                dataset = [""]
-            property = rows.get("property")[0]
-            domain = rows.get("domain")
-            dom = domain[0]
-            yearStart = rows.get("yearStart")
-            if yearStart == {}:
-                yearStart = [""]
-            query = rows.get("query")[0]
-            if query == {}:
-                query = "false"
-            rows = rows.get("rows")
+        data = request.get_data()  
+        data = json.loads(data)
+        database = data.get("database")[0]
+        context = data.get("context")
+        if context == {}:
+            context = [""]
+        dataset = data.get("dataset")
+        if dataset == {}:
+            dataset = [""]
+        property = data.get("property")[0]
+        domain = data.get("domain")
+        dom = domain[0]
+        yearStart = data.get("yearStart")
+        if yearStart == {}:
+            yearStart = [""]
+        query = data.get("query")[0]
+        if query == {}:
+            query = "false"
+        rows = data.get("rows")
 
         if database == "SocioMap":
             driver = connectionSM()
@@ -576,22 +691,36 @@ def getTranslate():
             raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
         
         # Define the Cypher query
-        
+    
         qLoad = "unwind $rows as row with row call {"
 
         if property == "Key":
-                qStart = """
+            qStart = """
 with row call db.index.fulltext.queryRelationships('keys',replace(row.term,':','\\:')) yield relationship
 with endnode(relationship) as a, relationship.Key as matching
 with row, a, matching, 0 as score
 """
         elif property == "Name":
-            qStart = f"""
+    
+            if dom != "DATASET":
+                qStart = f"""
 with row call {{ with row with row, custom.cleanText(row.term) as term
-call db.index.fulltext.queryNodes('{dom}', replace(term,\"'\",'\\\'')) yield node return node
+call db.index.fulltext.queryNodes('{dom}', replace(term,"'","\\'")) yield node return node
 union with row with row, custom.cleanText(row.term) as term
-call db.index.fulltext.queryNodes('{dom}',replace(term,\"'\",'\\\'') + '~') yield node return node}}
-with row, node as a, node.CMName as matching, apoc.text.levenshteinDistance(custom.cleanText(node.CMName), custom.cleanText(row.term)) as score
+call db.index.fulltext.queryNodes('{dom}',replace(term,"'","\\'") + '~') yield node return node}}
+with row, node as a
+with row, a, custom.matchingDist(a.names, row.term) as matching
+with row, a, matching.matching as matching, toInteger(matching.score) as score
+"""
+            else:
+                qStart = f"""
+with row call {{ with row with row, custom.cleanText(row.term) as term
+call db.index.fulltext.queryNodes('{dom}', replace(term,"'","\\'")) yield node return node
+union with row with row, custom.cleanText(row.term) as term
+call db.index.fulltext.queryNodes('{dom}',replace(term,"'","\\'") + '~') yield node return node}}
+with row, node as a
+with row, a, custom.matchingDist([a.CMName, a.shortName, a.DatasetCitation], row.term) as matching
+with row, a, matching.matching as matching, toInteger(matching.score) as score
 """
         else:
             qStart = """ 
@@ -599,11 +728,11 @@ with row call apoc.cypher.run('match (a) where tolower(a.' + row.property + ') =
 with row, value.a as a, value.matching as matching, 0 as score
 """
 
-        # filter by domain
+    # filter by domain
 
-        qDomain = f" where row.domain in labels(a) with row, a, matching, score "
+        qDomain = f" where '{dom}' in labels(a) with row, a, matching, score "
 
-        # filter by context
+    # filter by context
         if context[0] != "":
             qContext = """
 where (a)<-[]-({CMID: row.context})
@@ -612,7 +741,7 @@ with row, a, matching, score
         else:
             qContext = " "
 
-        # filter by dataset
+    # filter by dataset
         if dataset[0] != "":
             qDataset = """
 where (a)<-[:USES]-(:DATASET {CMID: row.dataset})
@@ -621,7 +750,7 @@ with row, a, matching, score
         else:
             qDataset = " "
 
-            # filter by year
+        # filter by year
         if yearStart[0] != "":
             if dom == "DATASET":
                 qYear = """
@@ -641,7 +770,7 @@ with row, node as a, matching, score order by score desc
 """   
         else: 
             qYear = " "
-        
+    
         # limit results
         qLimit = """
 with row, collect(a{a, matching, score}) as nodes, collect(score) as scores
@@ -658,48 +787,34 @@ with row, a, matching, score
 optional match (a)<-[:DISTRICT_OF]-(c:ADM0)
 with row, a, matching, collect(c.CMName) as country, score
 """
-
-
-
         # return results
-        if request.method == 'POST':
-            qReturn = """
+        qReturn = """
 return distinct row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, [i in labels(a) where not i = 'CATEGORY'] as label, 
-matching, score as matchingDistance, country order by matchingDistance
-"""
-        else:    
-            qReturn = """
-return distinct row.term as term, a.CMID as CMID, a.CMName as CMName, [i in labels(a) where not i = 'CATEGORY'] as label, 
 matching, score as matchingDistance, country order by matchingDistance
 """
         cypher_query = qLoad + qStart + qDomain + qContext + qDataset + qYear + qLimit + qCountry + qReturn
         if query == "true":
             return [{"query": cypher_query,"params":rows}]
         else:
-            # Execute the Cypher queries
+        # Execute the Cypher queries
             with driver.session() as session:
                 result = session.run(cypher_query, rows = rows)
-            
-                # Process the query results and generate the dynamic JSON
+        
+            # Process the query results and generate the dynamic JSON
                 if(query == "true"):
-                    data = [cypher_queryQ.replace("\n"," "),result.value()]
+                    data = {"query":[cypher_query.replace("\n"," "),result.value()]}
                 else:
                     data = [dict(record) for record in result]
 
                 driver.close()
-                    
-            return jsonify(data)
+                
+        return data
 
-    
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
-        error_message = str(e)  # Convert the exception to a string
-        data = {"error": error_message}
-
-        return jsonify(data), 500
+        return str(e), 500
 
 @app.route('/query', methods=['POST'])
-def getTest():
+def getQuery():
     try:
         rows = request.get_data()  
         rows = json.loads(rows)
@@ -724,10 +839,7 @@ def getTest():
                 verified = item
             
         except Exception as e:
-            error_message = "User is not verified"  # Convert the exception to a string
-            data = {"error": error_message,"response":str(e)}
-
-            return jsonify(data), 500
+            return str(e), 500
     
         if verified == "verified":
             with driver.session() as session:
@@ -741,34 +853,43 @@ def getTest():
 
     except Exception as e:
     # In case of an error, return an error response with an appropriate HTTP status code
-        error_message = str(e)  # Convert the exception to a string
-        data = {"error": error_message}
+        data = str(e)
 
-        return jsonify(data), 500
+        return data, 500
 
 
 @app.route('/geometry', methods=['GET'])
 def getGeometry():
-    try:
-        database = request.args.get('database')
-        cmid = request.args.get('cmid')
-        if database == "SocioMap":
-            driver = connectionSM()
-        elif database == "ArchaMap":
-            driver = connectionAM()
-        elif database == "gisdb":
-            driver = connectionGIS()
-        else:
-            pass
+    database = request.args.get('database')
+    cmid = request.args.get('cmid')
+    simple = request.args.get('simple')
+    if simple is None:
+        simple = True
+    if database == "SocioMap":
+        driver = connectionSM()
+    elif database == "ArchaMap":
+        driver = connectionAM()
+    elif database == "gisdb":
+        driver = connectionGIS()
 
-        geometry = getPolygon(cmid,driver)
-        return geometry
-    except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
-        error_message = e  # Convert the exception to a string
-        data = {"error": error_message}
+    polygons = getPolygon(cmid,driver,simple = True)
+    points = getPoints(cmid,driver)
+    return {"polygons":polygons,"points":points}
 
-        return jsonify(data), 500
+@app.route('/test', methods=['POST'])
+def getTest():
+    rows = request.get_data()  
+    rows = json.loads(rows)
+    cypher_query = "unwind $rows as row return row.term as term"
+    driver = connectionSM()
+        
+    with driver.session() as session:
+        # Execute the Cypher queries
+        result = session.run(cypher_query, rows = rows["rows"])
+        node = [dict(record) for record in result]
+        driver.close()
+
+    return {"row":node}
 
 if __name__== "__main__":
     app.run(debug=True,port=5001)
