@@ -78,7 +78,7 @@ def getPolygon(CMID,driver, simple = True):
             driverGIS.close()
         return polygons
     except Exception as e:
-        return {"firstResult":result,"query":query,"error",str(e)}
+        return {"firstResult":result,"query":query,"error":str(e)}
     
 def getPoints(CMID,driver):
     with driver.session() as session:
@@ -178,14 +178,14 @@ def catm():
     session = driver_neo4j.session()
     driverGIS = connectionGIS()
     sessionGIS = driverGIS.session()
-    q = f"match (a) where a.CMID = '{cmid}' optional match (a)-[r]-() return distinct head(labels(a)) as label, type(r) as types"
+    q = f"match (a) where a.CMID = '{cmid}' optional match (a)-[r]-() return distinct labels(a) as label, type(r) as types"
     result = session.run(q)
     for record in result:
-        label = record["label"]
+        label = record["label"][-1]
         rel_name = record["types"]
-    for i in rel_name:
-        if i in relations:
-            relnames.append(i['label'])
+        if rel_name in relations:
+            relnames.append(rel_name)
+    print(label)
     q =   f''' 
 match (a)<-[r:USES]-(d:DATASET)
 where a.CMID = '{cmid}'
@@ -204,6 +204,7 @@ apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Sourc
     # results1 = session.run(q1)
     # resultsm = results1.data()
     polygon = getPolygon(cmid,driver_neo4j)
+
     # return jsonify({"results":[results],"polygon":[polygon]})
         # points = []
         # flag = 0
@@ -255,8 +256,18 @@ apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Sourc
     # polygon = json.loads(polygon)
     # print(type(polygon))
 
+    # polygon = polygon[0]
+    # polygon = polygon.pop("geometry")
+    # polygon ={"geometry" : polygon}
+    # print(type(polygon))
+
+    polygon = json.loads(polygon[0]['geometry'])
+    polygon['type'] = polygon['type'][0]
+
     with open('data.json', 'w') as f:
-         json.dump(polygon[0], f, ensure_ascii=True, indent=4)
+         json.dump(polygon, f, ensure_ascii=True, indent=4)
+
+
     # center = (polygon[0]['coordinates'][0][0][0])[::-1]
                         
         #         break
@@ -298,10 +309,10 @@ apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Sourc
         #     results1 = []
         # print(polygon)
         # print(type(polygon))
-    
+        
     payload = {
     "current_response": results,
-    "future_response": [polygon],
+    "future_response": polygon,
     # "center": center,
     # "poid": poid,
     "label":label,
@@ -387,12 +398,12 @@ labels(a) as Labels, a.parent as Dataset, a.DatasetCitation as Citation, a.Datas
     polygons = getPolygon(cmid,driver)
     points = getPoints(cmid,driver)
 
-    return {
+    return jsonify({
         "info": info,
         "samples": samples,
         "polygons": polygons,
         "points": points
-    }
+    })
     
 
 # Function to serialize a Neo4j Node object into a serializable dictionary
@@ -697,7 +708,7 @@ def getTranslate():
         if property == "Key":
             qStart = """
 with row call db.index.fulltext.queryRelationships('keys',replace(row.term,':','\\:')) yield relationship
-with endnode(relationship) as a, relationship.Key as matching
+with row, endnode(relationship) as a, relationship.Key as matching where matching in row.term
 with row, a, matching, 0 as score
 """
         elif property == "Name":
@@ -723,8 +734,8 @@ with row, a, custom.matchingDist([a.CMName, a.shortName, a.DatasetCitation], row
 with row, a, matching.matching as matching, toInteger(matching.score) as score
 """
         else:
-            qStart = """ 
-with row call apoc.cypher.run('match (a) where tolower(a.' + row.property + ') = tolower(\"' + row.term + '\") return a, a.' + row.property + ' as matching',{}) yield value 
+            qStart = f""" 
+with row call apoc.cypher.run('match (a) where tolower(a.{property}) = tolower(\"' + row.term + '\") return a, a.{property} as matching',{{}}) yield value 
 with row, value.a as a, value.matching as matching, 0 as score
 """
 
@@ -794,17 +805,17 @@ matching, score as matchingDistance, country order by matchingDistance
 """
         cypher_query = qLoad + qStart + qDomain + qContext + qDataset + qYear + qLimit + qCountry + qReturn
         if query == "true":
-            return [{"query": cypher_query,"params":rows}]
+            with driver.session() as session:
+                result = session.run("unwind $rows as rows unwind rows as row return row.term as term, row.CMuniqueRowID as CMuniqueRowID", rows = rows)
+                qResult = [dict(record) for record in result]
+            return [{"query": cypher_query.replace("\n"," "),"params":qResult}]
         else:
         # Execute the Cypher queries
             with driver.session() as session:
                 result = session.run(cypher_query, rows = rows)
         
             # Process the query results and generate the dynamic JSON
-                if(query == "true"):
-                    data = {"query":[cypher_query.replace("\n"," "),result.value()]}
-                else:
-                    data = [dict(record) for record in result]
+                data = [dict(record) for record in result]
 
                 driver.close()
                 
@@ -874,7 +885,54 @@ def getGeometry():
 
     polygons = getPolygon(cmid,driver,simple = True)
     points = getPoints(cmid,driver)
-    return {"polygons":polygons,"points":points}
+    return jsonify({"polygons":polygons,"points":points})
+
+@app.route('/newuser', methods=['POST'])
+def getnewuser():
+    try:
+        data = request.get_data()  
+        data = json.loads(data)
+        database = data.get("database")
+        firstName = data.get("firstName")
+        lastName = data.get("lastName")
+        email = data.get("email")
+        username = data.get("username")
+        password = data.get("password")
+        
+        if database == "SocioMap":
+            driver = connectionSM()
+        elif database == "ArchaMap":
+            driver = connectionAM()
+        elif database == "gisdb":
+            driver = connectionGIS()
+        else:
+            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")   
+            
+        query = """
+match (p:USER) with toInteger(p.userID) + 1 as id order by id desc limit 1
+merge (u:USER {username: $username}) 
+on create set u.username = $username,
+u.First = $firstName,
+u.Last = $lastName,
+u.Email = $email,
+u.access = "disabled",
+u.log = toString(datetime()) + ": created user via API",
+u.password = $password,
+u.userID = id,
+u.role = 'user'
+return u.userID as userID
+"""
+        with driver.session() as session:
+            result = session.run(query,firstName = firstName, lastName = lastName, email = email, password = password,username = username)
+            data = [dict(record) for record in result]
+            driver.close()
+        return jsonify(data)
+
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        data = str(e)
+
+        return data, 500
 
 @app.route('/test', methods=['POST'])
 def getTest():
