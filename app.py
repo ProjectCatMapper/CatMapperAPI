@@ -829,10 +829,10 @@ def getQuery():
     try:
         rows = request.get_data()  
         rows = json.loads(rows)
-        database = rows.get("database")[0]
-        query = rows.get("query")[0]
-        user = rows.get("user")[0]
-        pwd = rows.get("pwd")[0]
+        database = rows.get("database")
+        query = rows.get("query")
+        user = rows.get("user")
+        pwd = rows.get("pwd")
         params = rows.get("params")
         
         if database == "SocioMap":
@@ -844,7 +844,8 @@ def getQuery():
         
         try:
             verified = verifyUser(driver,user,pwd)
-            verified = verified[0]
+            for item in verified:
+                verified = item
 
             for item in verified:
                 verified = item
@@ -860,7 +861,7 @@ def getQuery():
             return jsonify(data)
         else:
             data = {"error": "User is not verified","verified": verified}
-            return jsonify(data)
+            return jsonify(data), 500
 
     except Exception as e:
     # In case of an error, return an error response with an appropriate HTTP status code
@@ -907,7 +908,31 @@ def getnewuser():
             driver = connectionGIS()
         else:
             raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")   
-            
+        
+        queryExists = """
+match (u:USER {username: $username}) 
+return true as exists
+"""
+        with driver.session() as session:
+            result = session.run(queryExists, username = username)
+            data = [dict(record) for record in result]
+            driver.close()
+        
+        if isinstance(data, list) and data and data[0].get("exists") is not None:
+            raise Exception("Username already exists. Please try another username.")
+        
+        queryExists = """
+match (u:USER {Email: $email}) 
+return true as exists
+"""
+        with driver.session() as session:
+            result = session.run(queryExists, email = email)
+            data = [dict(record) for record in result]
+            driver.close()
+        
+        if isinstance(data, list) and data and data[0].get("exists") is not None:
+            raise Exception("Account with this email already exists. Please contact admin@catmapper.org to reset password.")
+        
         query = """
 match (p:USER) with toInteger(p.userID) + 1 as id order by id desc limit 1
 merge (u:USER {username: $username}) 
@@ -915,10 +940,10 @@ on create set u.username = $username,
 u.First = $firstName,
 u.Last = $lastName,
 u.Email = $email,
-u.access = "disabled",
+u.access = "new",
 u.log = toString(datetime()) + ": created user via API",
 u.password = $password,
-u.userID = id,
+u.userID = toString(id),
 u.role = 'user'
 return u.userID as userID
 """
@@ -928,11 +953,21 @@ return u.userID as userID
             driver.close()
         return jsonify(data)
 
-    except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
-        data = str(e)
 
-        return data, 500
+    except Exception as e:
+        # Check for specific error messages
+        error_message = str(e)
+        
+        if "Account with this email already exists." in error_message:
+            return f"Error: {error_message}", 400  # Return 400 Bad Request
+
+        elif "Username already exists" in error_message:
+            return f"Error: {error_message}", 400  # Return 400 Bad Request
+
+        else:
+            # Default error message
+            return f"Error: please contact admin@catmapper.org. Error: {error_message}", 500 # Return 400 Bad Request
+
 
 @app.route('/test', methods=['POST'])
 def getTest():
