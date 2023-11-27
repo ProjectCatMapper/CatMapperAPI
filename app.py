@@ -112,6 +112,7 @@ app = Flask(__name__)
 CORS(app)
 app.config['CORS_HEADERS']='Content-Type'
 app.config['PERMANENT_SESSION_LIFETIME'] = 999999999
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 
 @app.route("/")
 def root ():
@@ -262,13 +263,15 @@ apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Sourc
     # print(type(polygon))
 
     polygon = json.loads(polygon[0]['geometry'])
-    polygon['type'] = polygon['type'][0]
+    # polygon['type'] = polygon['type'][0]
 
     with open('data.json', 'w') as f:
          json.dump(polygon, f, ensure_ascii=True, indent=4)
 
 
-    # center = (polygon[0]['coordinates'][0][0][0])[::-1]
+    center = (polygon['coordinates'][0][0][0])
+    center = center[::-1]
+    print(center)
                         
         #         break
             
@@ -313,7 +316,7 @@ apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Sourc
     payload = {
     "current_response": results,
     "future_response": polygon,
-    # "center": center,
+    "center": center,
     # "poid": poid,
     "label":label,
     "relnames": relnames
@@ -558,12 +561,12 @@ def getSearch():
         elif property == "Key":
                 qStart = f"""
 call db.index.fulltext.queryRelationships('keys',replace($term,':','\\:')) yield relationship
-with endnode(relationship) as a, relationship.Key as matching
-where '{domain}' in labels(a)
+with endnode(relationship) as a, relationship.Key as matching, case when $term contains ":" then $term else ": " + $term end as term
+where '{domain}' in labels(a) and matching ends with term
 with a, matching, 0 as score
 """
         elif property == "Name":
-            if domain == "CATEGORY":
+            if domain != "DATASET":
                 qStart = f"""
 call {{ with custom.cleanText($term) as term
 call db.index.fulltext.queryNodes('{domain}', replace(term,"'","\\'")) yield node return node
@@ -606,7 +609,7 @@ with a, matching, score
             # filter by context
         if context is not None:
             qContext = """
-where (a)<-[]-({CMID: $context})
+where (a)<--({CMID: $context})
 with a, matching, score
 """
         else:
@@ -667,7 +670,7 @@ country order by matchingDistance
             return jsonify(data)
         else:
             # return([qStart,qDomain,qUnique,qContext,qYear,qLimit,qCountry,qReturn])
-            return(cypher_query)
+            return({"query":cypher_query,"term": term,"context":context})
     except Exception as e:
         return str(e), 500
 
@@ -706,9 +709,10 @@ def getTranslate():
         qLoad = "unwind $rows as row with row call {"
 
         if property == "Key":
-            qStart = """
+            qStart = f"""
 with row call db.index.fulltext.queryRelationships('keys',replace(row.term,':','\\:')) yield relationship
-with row, endnode(relationship) as a, relationship.Key as matching where matching in row.term
+with row, endnode(relationship) as a, relationship.Key as matching, case when row.term contains ":" then row.term else ": " + row.term end as term
+where '{dom}' in labels(a) and matching ends with term
 with row, a, matching, 0 as score
 """
         elif property == "Name":
