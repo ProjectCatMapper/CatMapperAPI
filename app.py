@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 from flask_cors import CORS
 from fuzzywuzzy import fuzz
 import json
+import re
+import string
 
 load_dotenv()
 uri = os.getenv("uri")
@@ -15,19 +17,102 @@ pwd = os.getenv("pwd")
 uri1 = os.getenv("uri1")
 user1 = os.getenv("user1")
 pwd1 = os.getenv("pwd1")
+uriAM = os.getenv("uriAM")
+pwdAM = os.getenv("pwdAM")
 
-def connection():
+def connectionSM():
     driver = GraphDatabase.driver(uri=uri,auth=(user,pwd))
     return driver
 
-def connection1():
-    driver1 = GraphDatabase.driver(uri=uri1,auth=(user1,pwd1))
-    return driver1
+def connectionGIS():
+    driver = GraphDatabase.driver(uri=uri1,auth=(user1,pwd1))
+    return driver
+
+def connectionAM():
+    driver = GraphDatabase.driver(uri=uriAM,auth=(user,pwdAM))
+    return driver
+
+def verifyUser(driver,user,pwd):
+    with driver.session() as session:
+        query = "match (u:USER {userID: $user,password: $pwd}) return true as verified"
+        result = session.run(query, user = user, pwd = pwd)
+        result = [dict(record) for record in result]
+        driver.close()
+    return result
+
+def getPolygon(CMID,driver, simple = True):
+    try:
+        with driver.session() as session:
+            query = """
+    match (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET) where not r.geoPolygon is null 
+    return distinct r.geoPolygon as geomID, d.shortName as source
+    """
+            results = session.run(query, CMID = CMID)
+            result = [dict(record) for record in results]
+            driver.close()
+        driverGIS = connectionGIS() 
+        with driverGIS.session() as session:
+            if simple == True:
+                query = """
+    unwind $rows as row 
+    unwind row.geomID as geomID
+    unwind row.source as source
+    with geomID, source
+    match (g:GEOMETRY)
+    where g.geomID = geomID
+    return source, coalesce(g.simplified,g.geometry) as geometry, g.simplified is not null as simple
+    """         
+            else:
+                query = """
+    unwind $rows as row 
+    unwind row.geomID as geomID
+    unwind row.source as source
+    with geomID, source
+    match (g:GEOMETRY) 
+    where g.geomID = geomID
+    return source, g.geometry as geometry
+    """         
+            # query = "unwind $rows as row return row"
+            polygons = session.run(query, rows = result)
+            polygons = [dict(record) for record in polygons]
+            driverGIS.close()
+        return polygons
+    except Exception as e:
+        return {"firstResult":result,"query":query,"error":str(e)}
+    
+def getPoints(CMID,driver):
+    with driver.session() as session:
+        query = "match (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET) where not r.geoCoords is null return distinct r.geoCoords as geometry, d.shortName as source"
+        result = session.run(query, CMID = CMID)
+        points = [dict(record) for record in result]
+        driver.close()
+    return points
+
+def getRelations(CMID,driver):
+    with driver.session() as session:
+        query = "match ({CMID: $CMID})-[r]-() return distinct type(r) as relation"
+        result = session.run(query, CMID = CMID)
+        for record in result:
+            relations = record["relation"]
+        driver.close()
+    return relations
+
+def flatten_json(json_obj, parent_key='', sep='_'):
+    flat_dict = {}
+    for key, value in json_obj.items():
+        new_key = f"{key}" if parent_key else key
+        if isinstance(value, dict):
+            flat_dict.update(flatten_json(value, new_key, sep=sep))
+        else:
+            flat_dict[new_key] = value
+    return flat_dict
 
 #app=FastAPI()
 app = Flask(__name__)
 CORS(app)
 app.config['CORS_HEADERS']='Content-Type'
+app.config['PERMANENT_SESSION_LIFETIME'] = 999999999
+app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 
 @app.route("/")
 def root ():
@@ -47,7 +132,7 @@ def abst():
         print(text[0])
         print(text[1])
         print(text[2])
-        driver_neo4j =connection()
+        driver_neo4j = connectionSM()
         session = driver_neo4j.session()
         if text[2] == "" or text[2] == "Name":
           if text[1] == "":
@@ -80,11 +165,10 @@ def abst():
             results = session.run(q1)
             results = results.data()
             #print(results)
-            return results
+            return jsonify(results)
         
         
 
-socioid=[""]
 @app.route("/category",methods=['GET'])
 def catm():
         center = 0

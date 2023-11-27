@@ -1,0 +1,9 @@
+["\"\n            match (a:ETHNICITY) where tolower(a.CMID) = tolower($term)\n            with a, a.CMID as matching, 0 as score\n            ",
+    " where 'ETHNICITY' in labels(a) ",
+    "\n        with a, collect(matching) as matchingL, collect(score) as scores call {with matchingL, scores unwind matchingL as matching unwind scores as score return distinct matching, score order by score limit 1}\n        with a, matching, score\n        ",
+    " ",
+    " ",
+    "with distinct a, matching, score order by score limit 10 ",
+    "\n                    optional match (a)<-[:DISTRICT_OF]-(c:ADM0)\n                    with a, matching, collect(c.CMName) as country, score\n                    ",
+    "\n        return distinct a.CMID as CMID, a.CMName as CMName, \n        [i in labels(a) where not i = 'CATEGORY'] as domain, matching, score as matchingDistance, \n        country order by matchingDistance\n        "
+]
