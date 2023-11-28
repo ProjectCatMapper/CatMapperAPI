@@ -168,16 +168,16 @@ def abst():
             return jsonify(results)
         
         
-
+socioid=[""]
 @app.route("/category",methods=['GET'])
 def catm():
         center = 0
         relnames= []
         relations = ["USES","CONTAINS","DISTRICT_OF","LANGUOID_OF","RELIGION_OF"]
         socioid[0] = request.args.get('value')
-        driver_neo4j =connection()
+        driver_neo4j = connectionSM()
         session = driver_neo4j.session()
-        driver_neo4j1 =connection1()
+        driver_neo4j1 =connectionGIS()
         session1 = driver_neo4j1.session()
         q = "match (a) where a.CMID = '"+socioid[0]+"' return id(a) as id,labels(a) as label"
         r = session.run(q)
@@ -206,7 +206,7 @@ return Name, custom.anytoList(collect(value.Location),true) as Location, type as
                 relid = resultsm[i]['polygon']
                 if isinstance(relid,list):
                     relid = str(relid[0])
-                    q1 = '''match (g:GEOMETRY)<-[r:USES {relid: "'''+relid+'''"}]-() return g.geometry'''
+                    q1 = '''match (g:GEOMETRY) where g.geomID = "'''+relid+'''" return g.geometry'''
                     results1=''
                     results1 = session1.run(q1)
                     results1 = results1.data()
@@ -220,7 +220,7 @@ return Name, custom.anytoList(collect(value.Location),true) as Location, type as
                         center = (results1['coordinates'][0][0][0])[::-1]
                 else:
                     relid = str(relid)
-                    q1 = '''match (g:GEOMETRY)<-[r:USES {relid: "'''+relid+'''"}]-() return g.geometry'''
+                    q1 = '''match (g:GEOMETRY) where g.geomID = "'''+relid+'''" return g.geometry'''
                     results1=''
                     results1 = session1.run(q1)
                     results1 = results1.data()
@@ -294,7 +294,7 @@ def net():
     p0 = request.args.get('value')
     p1 = request.args.get('id')
     p2 = request.args.get('relation')
-    driver_neo4j =connection()
+    driver_neo4j =connectionSM()
     session = driver_neo4j.session()
     def get_properties(self):
         return self._properties
