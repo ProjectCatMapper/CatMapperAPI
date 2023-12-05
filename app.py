@@ -322,7 +322,7 @@ def getExplore():
         label = re.search("^SM",cmid)
     elif database == "ArchaMap":
         driver = connectionAM()
-        label = re.search("^SM",cmid)
+        label = re.search("^AM",cmid)
     else:
         pass
 
@@ -724,7 +724,7 @@ with row, a, matching.matching as matching, toInteger(matching.score) as score
 """
         else:
             qStart = f""" 
-with row call apoc.cypher.run('match (a) where tolower(a.{property}) = tolower(\"' + row.term + '\") return a, a.{property} as matching',{{}}) yield value 
+with row call apoc.cypher.run('match (a:{dom}) where not a.{property} is null and tolower(a.{property}) = tolower(\"' + row.term + '\") return a, a.{property} as matching',{{}}) yield value 
 with row, value.a as a, value.matching as matching, 0 as score
 """
 
