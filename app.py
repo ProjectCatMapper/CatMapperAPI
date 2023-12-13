@@ -604,19 +604,19 @@ with a, matching, score
             # filter by year
         if yearStart is not None:
             if domain == "DATASET":
-                qYear = """
-call {with a with a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
-else a.ApplicableYears end as yearMatch, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
+                qYear = f"""
+call {{with a with a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
+else a.ApplicableYears end as yearMatch, range(toInteger('{yearStart}'),toInteger('{yearEnd}')) as years
 with a, years, apoc.convert.toIntList(apoc.coll.toSet(apoc.coll.flatten(collect(yearMatch),true))) as yearMatch 
-where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}
+where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}}
 with node as a, matching, score
 """   
             else:
-                qYear = """
-call {with a with a, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years 
-match (a)<-[r:USES]-(:DATASET) unwind r.yearStart as yearStart 
-unwind r.yearEnd as yearEnd with years, a, r, apoc.coll.toSet(collect(yearStart) + collect(yearEnd)) as yearMatch 
-where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}
+                qYear = f"""
+call {{ with a with a, range(toInteger('{yearStart}'),toInteger('{yearEnd}')) as inputYears 
+match (a)<-[r:USES]-(:DATASET) with a, inputYears, range(apoc.coll.min([i in apoc.coll.flatten(collect(r.yearStart),true) | 
+toInteger(i)]), apoc.coll.max([i in apoc.coll.flatten(collect(r.yearEnd),true) | 
+toInteger(i)])) as years where not isEmpty([i in inputYears where i in years]) return a as node}}
 with node as a, matching, score order by score desc
 """   
         else: 
