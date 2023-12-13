@@ -193,7 +193,7 @@ def catm():
 where id(a) = '''+r+'''
 with custom.anytoList(collect(r.Name),true) as Name, r.country as LocationID, d.project as Source, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
 call apoc.when(LocationID is not null,'return custom.getName($id) as Location','return null',{id:LocationID}) yield value
-return Name, custom.anytoList(collect(value.Location),true) as Location, type as Type, apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Population est.`,  apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Source, Version, Link order by `Time span`, Source, Name'''
+return Name, custom.anytoList(collect(value.Location),true) as Location, type as Type, apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Populationest`,  apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Source, Version, Link order by `Time span`, Source, Name'''
         results = session.run(q)
         q1 = '''match (a)<-[r:USES]-(d:DATASET) where id(a) = '''+r+''' and (r.geoCoords is not null or r.geoPolygon is not null) return r.geoCoords as point, r.geoPolygon as polygon, d.shortName as source, r.Key as Key'''
         results1 = session.run(q1)
@@ -495,6 +495,8 @@ def getSearch():
         limit = request.args.get('limit')
         query = request.args.get('query')
 
+        print(context)
+
         if database == "SocioMap":
             driver = connectionSM()
         elif database == "ArchaMap":
@@ -607,7 +609,7 @@ with a, matching, score
                 qYear = f"""
 call {{with a with a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
 else a.ApplicableYears end as yearMatch, range(toInteger('{yearStart}'),toInteger('{yearEnd}')) as years
-with a, years, apoc.convert.toIntList(apoc.coll.toSet(apoc.coll.flatten(collect(yearMatch),true))) as yearMatch 
+with a, years, [i in apoc.coll.toSet(apoc.coll.flatten(collect(yearMatch),true))) | toInteger(i)] as yearMatch 
 where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}}
 with node as a, matching, score
 """   
@@ -615,8 +617,7 @@ with node as a, matching, score
                 qYear = f"""
 call {{ with a with a, range(toInteger('{yearStart}'),toInteger('{yearEnd}')) as inputYears 
 match (a)<-[r:USES]-(:DATASET) with a, inputYears, range(apoc.coll.min([i in apoc.coll.flatten(collect(r.yearStart),true) | 
-toInteger(i)]), apoc.coll.max([i in apoc.coll.flatten(collect(r.yearEnd),true) | 
-toInteger(i)])) as years where not isEmpty([i in inputYears where i in years]) return a as node}}
+toInteger(i)]), apoc.coll.max(custom.getYear(collect(r.yearEnd)))) as years where not isEmpty([i in inputYears where i in years]) return a as node}}
 with node as a, matching, score order by score desc
 """   
         else: 
@@ -651,9 +652,9 @@ country order by matchingDistance
                 data = [dict(record) for record in result]
 
                 driver.close()
-                    
             return jsonify(data)
         else:
+            print(cypher_query)
             # return([qStart,qDomain,qUnique,qContext,qYear,qLimit,qCountry,qReturn])
             return({"query":cypher_query,"term": term,"context":context})
     except Exception as e:
