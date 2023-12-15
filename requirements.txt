@@ -3,3 +3,6 @@ neo4j>=5.11.0
 flask_cors>=4.0.0
 fuzzywuzzy>=0.18.0
 python-dotenv>=1.0.0
+setuptools
+flasgger==0.9.7b2
+# werkzeug>=0.16.1
