@@ -9,6 +9,8 @@ from fuzzywuzzy import fuzz
 import json
 import re
 import string
+from flasgger import Swagger, LazyString, LazyJSONEncoder
+# from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 uri = os.getenv("uri")
@@ -100,7 +102,7 @@ def getRelations(CMID,driver):
 def flatten_json(json_obj, parent_key='', sep='_'):
     flat_dict = {}
     for key, value in json_obj.items():
-        new_key = f"{key}" if parent_key else key
+        new_key = key if parent_key else key
         if isinstance(value, dict):
             flat_dict.update(flatten_json(value, new_key, sep=sep))
         else:
@@ -109,13 +111,31 @@ def flatten_json(json_obj, parent_key='', sep='_'):
 
 #app=FastAPI()
 app = Flask(__name__)
+
 CORS(app)
 app.config['CORS_HEADERS']='Content-Type'
 app.config['PERMANENT_SESSION_LIFETIME'] = 999999999
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 
+# swagger documentation
+# app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)
+app.config['SWAGGER'] = {
+    'title': 'CatMapper API',
+    'version': '0.1', 
+    'basePath': '/api/apidocs',
+    'host': 'catmapper.org',
+    'schemes': ['https']
+}
+app.json_encoder = LazyJSONEncoder
+
+template = dict(swaggerUiPrefix=LazyString(lambda : request.environ.get('HTTP_X_SCRIPT_NAME', '')))
+swagger = Swagger(app, template=template)
+
 @app.route("/")
 def root ():
+    """Home
+    Welcome to the CatMapper API. Please email support@catmapper.org for questions or help.
+    """
     return {"response":"you are in root"}
 
 #tvalue = request.json['tvalue']
@@ -374,7 +394,7 @@ where a.CMID = cmid
 with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
 'return null as name',{id:a.District}) yield value as Location 
 return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
-labels(a) as Labels, a.parent as Dataset, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.Note as Note
+labels(a) as Labels, a.parent as Parent, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
 '''
         samples = []
     
@@ -484,6 +504,94 @@ return distinct a,r,e limit 10
     
 @app.route('/search', methods=['GET'])
 def getSearch():
+    """Search endpoint for explore page
+    This endpoint is used for database searches of a single or empty term.
+    ---
+    parameters:
+        - name: database
+          in: query
+          type: string
+          enum: ['SocioMap','ArchaMap']
+          required: true
+          description: Name of the CatMapper database to search
+        - name: term
+          in: query
+          type: string
+          required: false
+          description: Search term
+        - name: property
+          in: query
+          type: string
+          required: false
+          enum: ['Name','CMID','Key']
+          description: Property to search by
+        - name: domain
+          in: query
+          type: string
+          required: false  
+          enum: ['DISTRICT','ETHNICITY','STONE']
+          default: CATEGORY 
+          description: Domain containing the category
+        - name: yearStart
+          in: query
+          type: integer
+          required: false  
+          description: Earliest year the category existed or data was collected from (will return a result if category year range intersects with year range)
+        - name: yearEnd
+          in: query
+          type: integer
+          required: false  
+          description: Latest year the category existed or data was collected from
+        - name: context
+          in: query
+          type: string
+          required: false  
+          description: CMID of parent node in network
+        - name: limit
+          in: query
+          type: string
+          required: false 
+          default: 10000    
+          description: Number of results to limit search to
+        - name: query
+          in: query
+          type: string
+          enum: ['true','false']
+          required: false     
+          description: Whether to return results or cypher query
+    response:
+        200:
+            description: JSON of search results unless query is true, then a JSON with the cypher query is returned.
+            schema:
+                type: object
+                properties:
+                    CMID: 
+                        type: string
+                        example: SM1
+                    CMName:
+                        type: string
+                        example: Afghanistan
+                    country: 
+                        type: array
+                        items:
+                            type: string
+                        example: ["United States of America"]
+                    domain:
+                        type: array
+                        items:
+                            type: string
+                        example: ["DISTRICT","FEATURE"]
+                    matching: 
+                        type: string
+                        example: Afghanistan
+                    matchingDistance:
+                        type: integer
+                        example: 1
+        500: 
+            description: JSON of error
+            schema:
+            type: string                           
+    """
     try:
         database = request.args.get('database')
         term = request.args.get('term')
@@ -504,10 +612,31 @@ def getSearch():
         else:
             raise Exception("must specify database as 'SocioMap' or 'ArchaMap'")
         
+        if term == "":
+            term = None
+
+        if property == "":
+            property = None
+
+        if domain == "":
+            domain = None
+
         if domain is None:
             domain = "CATEGORY"
 
         # need to add check to mak sure property is valid and domain is valid
+
+        if context is not None:
+            if context == "":
+                context = None
+            if re.search("^SM|^SD|^AD|^AM",context) is None:
+                raise Exception("context must be a valid CMID")
+
+        if yearStart == "":
+            yearStart = None
+
+        if yearEnd == "":
+            yearEnd = None
 
         try:
             if yearStart is not None:
@@ -607,16 +736,16 @@ with a, matching, score
         if yearStart is not None:
             if domain == "DATASET":
                 qYear = f"""
-call {{with a with a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
+call {{with a where not a.ApplicableYears is null with a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
 else a.ApplicableYears end as yearMatch, range(toInteger('{yearStart}'),toInteger('{yearEnd}')) as years
 with a, years, [i in apoc.coll.toSet(apoc.coll.flatten(collect(yearMatch),true))) | toInteger(i)] as yearMatch 
-where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}}
+where not isEmpty([i in yearMatch where toInteger(i) in years]) return a as node}}
 with node as a, matching, score
 """   
             else:
                 qYear = f"""
 call {{ with a with a, range(toInteger('{yearStart}'),toInteger('{yearEnd}')) as inputYears 
-match (a)<-[r:USES]-(:DATASET) with a, inputYears, range(apoc.coll.min([i in apoc.coll.flatten(collect(r.yearStart),true) | 
+match (a)<-[r:USES]-(:DATASET) where r.yearStart is not null and not isEmpty(r.yearStart) with a, inputYears, range(apoc.coll.min([i in apoc.coll.flatten(collect(r.yearStart),true) | 
 toInteger(i)]), apoc.coll.max(custom.getYear(collect(r.yearEnd)))) as years where not isEmpty([i in inputYears where i in years]) return a as node}}
 with node as a, matching, score order by score desc
 """   
@@ -656,7 +785,7 @@ country order by matchingDistance
         else:
             print(cypher_query)
             # return([qStart,qDomain,qUnique,qContext,qYear,qLimit,qCountry,qReturn])
-            return({"query":cypher_query,"term": term,"context":context})
+            return({"query":cypher_query,"parameters":[{"term": term,"context":context,"domain":domain,"yearStart":yearStart,"yearEnd":yearEnd}]})
     except Exception as e:
         return str(e), 500
 
@@ -678,6 +807,15 @@ def getTranslate():
         yearStart = data.get("yearStart")
         if yearStart == {}:
             yearStart = [""]
+            key = data.get("key")
+        if key is not None:
+            key = key[0]
+            if key != 'true':
+                key = None
+        if dataset is None:
+            key = None
+        if dataset == [""]:
+            key = None
         query = data.get("query")[0]
         if query == {}:
             query = "false"
@@ -788,12 +926,22 @@ with row, a, matching, score
 optional match (a)<-[:DISTRICT_OF]-(c:ADM0)
 with row, a, matching, collect(c.CMName) as country, score
 """
+
+        # get keys
+        if key is not None:
+            qKey = """
+match (a)<-[r:USES]-(d:DATASET {CMID: row.dataset}) 
+with row, a, matching, country, score, r.Key as Key
+"""
+        else:
+            qKey = "with row, a, matching, country, score, '' as Key"
+
         # return results
         qReturn = """
 return distinct row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, [i in labels(a) where not i = 'CATEGORY'] as label, 
-matching, score as matchingDistance, country order by matchingDistance
+matching, score as matchingDistance, country, Key order by matchingDistance
 """
-        cypher_query = qLoad + qStart + qDomain + qContext + qDataset + qYear + qLimit + qCountry + qReturn
+        cypher_query = qLoad + qStart + qDomain + qContext + qDataset + qYear + qLimit + qCountry + qKey + qReturn
         if query == "true":
             with driver.session() as session:
                 result = session.run("unwind $rows as rows unwind rows as row return row.term as term, row.CMuniqueRowID as CMuniqueRowID", rows = rows)
@@ -959,20 +1107,9 @@ return u.userID as userID
             return f"Error: please contact admin@catmapper.org. Error: {error_message}", 500 # Return 400 Bad Request
 
 
-@app.route('/test', methods=['POST'])
+@app.route('/admin/edit', methods=['GET'])
 def getTest():
-    rows = request.get_data()  
-    rows = json.loads(rows)
-    cypher_query = "unwind $rows as row return row.term as term"
-    driver = connectionSM()
-        
-    with driver.session() as session:
-        # Execute the Cypher queries
-        result = session.run(cypher_query, rows = rows["rows"])
-        node = [dict(record) for record in result]
-        driver.close()
-
-    return {"row":node}
+    return "what is up?"
 
 if __name__== "__main__":
     app.run(debug=True,port=5001)
