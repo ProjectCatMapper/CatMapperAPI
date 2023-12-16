@@ -1,6 +1,6 @@
 #from fastapi import FastAPI
 from flask import Flask,request
-from flask import jsonify
+from flask import jsonify, render_template, make_response
 from neo4j import GraphDatabase
 import os
 from dotenv import load_dotenv
@@ -21,6 +21,7 @@ user1 = os.getenv("user1")
 pwd1 = os.getenv("pwd1")
 uriAM = os.getenv("uriAM")
 pwdAM = os.getenv("pwdAM")
+apikeyEnv = os.getenv("apikey")
 
 def connectionSM():
     driver = GraphDatabase.driver(uri=uri,auth=(user,pwd))
@@ -542,6 +543,11 @@ def getSearch():
           type: integer
           required: false  
           description: Latest year the category existed or data was collected from
+        - name: country
+          in: query
+          type: string
+          required: false  
+          description: CMID of ADM0 node with DISTRICT_OF tie
         - name: context
           in: query
           type: string
@@ -600,6 +606,7 @@ def getSearch():
         yearStart = request.args.get('yearStart')
         yearEnd = request.args.get('yearEnd')
         context = request.args.get('context')
+        country = request.args.get('country')
         limit = request.args.get('limit')
         query = request.args.get('query')
 
@@ -631,6 +638,12 @@ def getSearch():
                 context = None
             if re.search("^SM|^SD|^AD|^AM",context) is None:
                 raise Exception("context must be a valid CMID")
+            
+        if country is not None:
+            if country == "":
+                country = None
+            if re.search("^SM|^SD|^AD|^AM",country) is None:
+                raise Exception("country must be a valid CMID")
 
         if yearStart == "":
             yearStart = None
@@ -720,9 +733,17 @@ unwind scores as score return distinct matching, score order by score limit 1}
 with a, matching, score
 """
 
+        # filter by context
+        if country is not None:
+            qCountryFilter = """
+where (a)<-[:DISTRICT_OF]-(:ADM0 {CMID: $country})
+with a, matching, score
+"""
+        else:
+            country = ""
+            qCountryFilter = " "
 
-
-            # filter by context
+        # filter by context
         if context is not None:
             qContext = """
 where (a)<--({CMID: $context})
@@ -770,12 +791,12 @@ return distinct a.CMID as CMID, a.CMName as CMName,
 country order by matchingDistance
 """
 
-        cypher_query = qStart + qDomain + qUnique + qContext + qYear + qLimit + qCountry + qReturn
+        cypher_query = qStart + qDomain + qUnique + qCountryFilter + qContext + qYear + qLimit + qCountry + qReturn
             
         if query != 'true':   
             # Execute the Cypher queries
             with driver.session() as session:
-                result = session.run(cypher_query, term = term, context = context)
+                result = session.run(cypher_query, term = term, context = context, country = country)
             
                 # Process the query results and generate the dynamic JSON
                 data = [dict(record) for record in result]
@@ -785,7 +806,7 @@ country order by matchingDistance
         else:
             print(cypher_query)
             # return([qStart,qDomain,qUnique,qContext,qYear,qLimit,qCountry,qReturn])
-            return({"query":cypher_query,"parameters":[{"term": term,"context":context,"domain":domain,"yearStart":yearStart,"yearEnd":yearEnd}]})
+            return({"query":cypher_query,"parameters":[{"term": term,"context":context,"country":country,"domain":domain,"yearStart":yearStart,"yearEnd":yearEnd}]})
     except Exception as e:
         return str(e), 500
 
@@ -1104,12 +1125,123 @@ return u.userID as userID
 
         else:
             # Default error message
-            return f"Error: please contact admin@catmapper.org. Error: {error_message}", 500 # Return 400 Bad Request
+            return f"Error: please contact admin@catmapper.org. Error: {error_message}", 500
 
+@app.route('/admin', methods=['GET'])
+def getAdmin():
+    headers = {'Content-Type': 'text/html'}
+    return make_response(render_template('admin.html'),200,headers)
+
+def getUSESrels(request, driver):
+    try:
+        cmid = request.args.get('cmid') 
+        if re.search("^AM|^AD|^SM|^AD", cmid) is None:
+            raise Exception("Invalid CMID")
+        query = f"""
+unwind $cmid as cmid 
+match (a)-[r:USES]->(b) 
+where b.CMID = cmid 
+return distinct id(r) as relID, 
+a.CMName + '-' + type(r) + '-' + coalesce(r.Key,'') + '->' + b.CMName as relationship 
+order by relationship
+"""
+        with driver.session() as session:
+            result = session.run(query,cmid = cmid)
+            data = [dict(record) for record in result]
+            driver.close()
+        return data
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        return str(e)
+
+# function to merge nodes
+def mergeNodes(request,driver):
+    try:
+        keepcmid = request.args.get('keepcmid') 
+        deletecmid = request.args.get('deletecmid') 
+        keepcmid=keepcmid[0]
+        deletecmid=deletecmid[0]
+        if re.search("^AM|^AD|^SM|^AD", keepcmid) is None:
+            raise Exception("Invalid keepcmid")
+        if re.search("^AM|^AD|^SM|^AD", deletecmid) is None:
+            raise Exception("Invalid deletecmid")
+        query = """
+match (a) where a.CMID = $keepcmid
+match (b) where b.CMID = $deletecmid 
+WITH collect(a) + collect(b) AS nodes
+CALL apoc.refactor.mergeNodes(nodes,{properties: {
+CMID:'discard',
+CMName:'discard',
+`.*`: 'combine'} })
+YIELD node
+with node
+unwind node as a
+MATCH (a)<-[r:USES]-(:DATASET)
+unwind keys(r) as property
+return distinct property
+"""
+        with driver.session() as session:
+            result = session.run(query,keepcmid = keepcmid,deletecmid = deletecmid)
+            properties = [dict(record) for record in result]
+            result = session.run("match (m:PROPERTY) where m.relationship is not null return m.property as property")
+            contextProps = [dict(record) for record in result]
+            contextProps = [item['property'] for item in contextProps]
+            driver.close()
+        for prop in properties:
+            property = prop['property']
+            if property in contextProps:
+                print(f"updating {property} with new CMID")
+                replaceProperty(cmid = keepcmid, property = property, old = deletecmid, new = keepcmid, driver = driver)    
+        return "Completed"
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        return str(e)
+
+def replaceProperty(cmid, property, old, new, driver):
+    try:
+        query = f"""
+match (c {{CMID: $cmid}})--(node)
+match (node)<-[r:USES]-(d) 
+where not r.{property} is null 
+with r, case when apoc.meta.cypher.type(r.{property}) contains "LIST" 
+then apoc.coll.toSet([x in [i in r.{property} | replace(i,$old,$new)] where not x = ""]) 
+else replace(r.{property},$old,$new) end as prop 
+with r, prop, case when isEmpty(prop) then NULL else prop end as valid 
+set r.{property} = valid
+"""
+        with driver.session() as session:
+            session.run(query,cmid = cmid, old = old, new = new)
+            driver.close()
+        return f"Completed {cmid} property {property}"
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        return str(e)
 
 @app.route('/admin/edit', methods=['GET'])
-def getTest():
-    return "what is up?"
+def getAdminEdit():
+    # will not be documented in swagger at this point
+    try:
+        database = request.args.get('database')
+        fun = request.args.get('fun')
+        apikey = request.args.get('apikey')
+        if apikey != apikeyEnv:
+            raise Exception("Error: apikey is invalid")
+        if database == "SocioMap":
+            driver = connectionSM()
+        elif database == "ArchaMap":
+            driver = connectionAM()
+        else:
+            raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
+        result = "Nothing returned"
+        if fun == "getUSESrels":
+            result = getUSESrels(request,driver)
+        else:
+            raise Exception("Function does not exist")
+        return result
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        data = str(e)
+        return data, 500
 
 if __name__== "__main__":
     app.run(debug=True,port=5001)
