@@ -815,33 +815,31 @@ def getTranslate():
     try:
         data = request.get_data()  
         data = json.loads(data)
-        database = data.get("database")[0]
-        context = data.get("context")
-        if context == {}:
-            context = [""]
-        dataset = data.get("dataset")
-        if dataset == {}:
-            dataset = [""]
-        property = data.get("property")[0]
+        database = data.get("database")
+        if isinstance(database, list):
+            database = database[0]
+        property = data.get("property")
+        if isinstance(property, list):
+            property = property[0]
         domain = data.get("domain")
-        dom = domain[0]
-        yearStart = data.get("yearStart")
-        if yearStart == {}:
-            yearStart = [""]
-            key = data.get("key")
-        if key is not None:
+        if isinstance(domain, list):
+            dom = domain[0]
+        else: 
+            dom = domain
+
+        key = data.get("key")
+        if isinstance(key, list):
             key = key[0]
-            if key != 'true':
-                key = None
-        if dataset is None:
-            key = None
-        if dataset == [""]:
+        if key != 'true':
             key = None
         query = data.get("query")[0]
-        if query == {}:
-            query = "false"
+        if isinstance(query, list):
+            query = query[0]
+        if query != 'true':
+            query = 'false'
         rows = data.get("rows")
-
+        if 'dataset' not in rows:
+            key = None
         if database == "SocioMap":
             driver = connectionSM()
         elif database == "ArchaMap":
@@ -892,8 +890,17 @@ with row, value.a as a, value.matching as matching, 0 as score
 
         qDomain = f" where '{dom}' in labels(a) with row, a, matching, score "
 
+    # filter by country
+        if 'country' in rows:
+            qCountryFilter = """
+where (a)<-[:DISTRICT_OF]-(:ADM0 {CMID: row.country})
+with row, a, matching, score
+"""
+        else:
+            qCountryFilter = " "
+
     # filter by context
-        if context[0] != "":
+        if 'context' in rows:
             qContext = """
 where (a)<-[]-({CMID: row.context})
 with row, a, matching, score
@@ -902,7 +909,7 @@ with row, a, matching, score
             qContext = " "
 
     # filter by dataset
-        if dataset[0] != "":
+        if 'dataset' in rows:
             qDataset = """
 where (a)<-[:USES]-(:DATASET {CMID: row.dataset})
 with row, a, matching, score
@@ -911,7 +918,7 @@ with row, a, matching, score
             qDataset = " "
 
         # filter by year
-        if yearStart[0] != "":
+        if 'yearStart' in rows and 'yearEnd' in rows:
             if dom == "DATASET":
                 qYear = """
 call {with row, a with row, a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
@@ -962,7 +969,7 @@ with row, a, matching, country, score, r.Key as Key
 return distinct row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, [i in labels(a) where not i = 'CATEGORY'] as label, 
 matching, score as matchingDistance, country, Key order by matchingDistance
 """
-        cypher_query = qLoad + qStart + qDomain + qContext + qDataset + qYear + qLimit + qCountry + qKey + qReturn
+        cypher_query = qLoad + qStart + qDomain + qCountryFilter + qContext + qDataset + qYear + qLimit + qCountry + qKey + qReturn
         if query == "true":
             with driver.session() as session:
                 result = session.run("unwind $rows as rows unwind rows as row return row.term as term, row.CMuniqueRowID as CMuniqueRowID", rows = rows)
