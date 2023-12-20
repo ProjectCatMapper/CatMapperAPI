@@ -192,123 +192,233 @@ def abst():
 socioid=[""]
 @app.route("/category",methods=['GET'])
 def catm():
-        center = 0
+        
+        cmid = request.args.get('cmid')
+        database = request.args.get('database')
+
         relnames= []
         relations = ["USES","CONTAINS","DISTRICT_OF","LANGUOID_OF","RELIGION_OF"]
-        socioid[0] = request.args.get('value')
+        q = "match (a) where a.CMID = '"+cmid+"' return id(a) as id,labels(a) as label"
         driver_neo4j = connectionSM()
         session = driver_neo4j.session()
-        driver_neo4j1 =connectionGIS()
-        session1 = driver_neo4j1.session()
-        q = "match (a) where a.CMID = '"+socioid[0]+"' return id(a) as id,labels(a) as label"
-        r = session.run(q)
-        r = str(r.data()[0]['id'])
-        label = session.run(q)
-        label = str(label.data()[0]['label'][-1])
-        q = "MATCH (n:"+label+" {CMID:'"+socioid[0]+"'})-[r]-(n1) RETURN DISTINCT TYPE(r) as label"
+        labels = session.run(q)
+        labels = str(labels.data()[0]['label'][-1])
+        q = "MATCH (n:"+labels+" {CMID:'"+cmid+"'})-[r]-(n1) RETURN DISTINCT TYPE(r) as label"
         rel_name = session.run(q).data()
         for i in rel_name:
             if i['label'] in relations:
                 relnames.append(i['label'])
-        q =   ''' match (a)<-[r:USES]-(d:DATASET)
-where id(a) = '''+r+'''
-with custom.anytoList(collect(r.Name),true) as Name, r.country as LocationID, d.project as Source, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
+        driver_neo4j.close()
+
+        if database == "SocioMap":
+            driver = connectionSM()
+            label = re.search("^SM",cmid)
+        elif database == "ArchaMap":
+            driver = connectionAM()
+            label = re.search("^AM",cmid)
+        else:
+            pass
+
+
+        if label is not None:
+            label = "CATEGORY"
+        else: 
+            label = "DATASET"
+        
+        if label == "CATEGORY":
+            print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")    
+            qInfo = '''
+unwind $cmid as cmid match (a)<-[r:USES]-(d:DATASET)
+where a.CMID = cmid with a,r,d
+call apoc.when(r.country is not null,'return custom.getName($id) as name','return null as name',{id:r.country}) yield value as country
+call apoc.when(r.language is not null,'return custom.getGlot($id) as name','return null as name',{id:r.language}) yield value as language
+call apoc.when(r.religion is not null,'return custom.getName($id) as name','return null as name',{id:r.religion}) yield value as religion
+with a,r,d, country, language, religion,
+case when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is not null then custom.getMinYear(r.yearStart) + '-' + custom.getMaxYear(r.yearEnd)
+when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is null then custom.getMinYear(r.yearStart) + '-present'
+when custom.getMinYear(r.yearStart) is null and custom.getMaxYear(r.yearEnd) is not null then custom.getMaxYear(r.yearEnd)
+else null
+end as timeSpan
+return a.CMName as CMName, custom.anytoList(collect(split(country.name,', ')),true) as Location, 
+a.CMID as CMID, apoc.text.join([i in labels(a) where not i = 'CATEGORY'],', ') as Labels, 
+custom.anytoList(collect(split(language.name,', ')),true) as Languages, custom.anytoList(collect(split(religion.name,', ')),true) as Religions, 
+custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
+'''        
+            qSamples = ''' 
+unwind $cmid as cmid
+match (a)<-[r:USES]-(d:DATASET)
+where a.CMID = cmid
+with custom.anytoList(collect(r.Name),true) as Name, r.country as LocationID, d.project as Source, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, 
+toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
 call apoc.when(LocationID is not null,'return custom.getName($id) as Location','return null',{id:LocationID}) yield value
-return Name, custom.anytoList(collect(value.Location),true) as Location, type as Type, apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Populationest`,  apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Source, Version, Link order by `Time span`, Source, Name'''
-        results = session.run(q)
-        q1 = '''match (a)<-[r:USES]-(d:DATASET) where id(a) = '''+r+''' and (r.geoCoords is not null or r.geoPolygon is not null) return r.geoCoords as point, r.geoPolygon as polygon, d.shortName as source, r.Key as Key'''
-        results1 = session.run(q1)
-        resultsm = results1.data()
-        flag = 0
-        for i in range(0,len(resultsm)):
-            if resultsm[i]['polygon'] is not None:
-                print("...................................")
-                flag =1
-                relid = resultsm[i]['polygon']
-                if isinstance(relid,list):
-                    relid = str(relid[0])
-                    q1 = '''match (g:GEOMETRY) where g.geomID = "'''+relid+'''" return g.geometry'''
-                    results1=''
-                    results1 = session1.run(q1)
-                    results1 = results1.data()
-                    results1 = (results1[0]['g.geometry']).replace("u\'","\'")
-                    results1 = json.loads(results1)
-                    with open('data.json', 'w', encoding='utf-8') as f:
-                         json.dump(results1, f, ensure_ascii=False, indent=4)
-                    if results1['type'] == "Polygon":
-                        center = (results1['coordinates'][0][0])[::-1]
-                    if results1['type'] == "MultiPolygon":
-                        center = (results1['coordinates'][0][0][0])[::-1]
-                else:
-                    relid = str(relid)
-                    q1 = '''match (g:GEOMETRY) where g.geomID = "'''+relid+'''" return g.geometry'''
-                    results1=''
-                    results1 = session1.run(q1)
-                    results1 = results1.data()
-                    results1 = (results1[0]['g.geometry']).replace("u\'","\'")
-                    if "features" in results1:
-                        results1 = json.loads(results1)
-                        results1 = results1['features'][0]
-                        if results1['geometry']['type'] == "Polygon":
-                            center = (results1['geometry']['coordinates'][0][0])[::-1]
-                        if results1['geometry']['type'] == "MultiPolygon":
-                            center = (results1['geometry']['coordinates'][0][0][0])[::-1]
-                    else:
-                        results1 = json.loads(results1)
-                        if results1['type'] == "Polygon":
-                            center = (results1['coordinates'][0][0])[::-1]
-                        if results1['type'] == "MultiPolygon":
+return Name, custom.anytoList(collect(value.Location),true) as Location, type as Type, 
+apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),
+toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),
+toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Population est.`,  
+apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Source, Version, Link order by `Time span`, Source, Name
+'''
+            
+            with driver.session() as session:
+                samples = session.run(qSamples, cmid = cmid)
+                samples = [dict(record) for record in samples]
+                driver.close()
+        
+        else:
+            qInfo = '''
+unwind $cmid as cmid 
+match (a:DATASET) 
+where a.CMID = cmid 
+with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
+'return null as name',{id:a.District}) yield value as Location 
+return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
+labels(a) as Labels, a.parent as Parent, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
+'''
+            samples = []
+        
+        with driver.session() as session:
+            info = session.run(qInfo, cmid = cmid)
+            info = [dict(record) for record in info]
+            driver.close()
 
-                            center = (results1['coordinates'][0][0][0])[::-1]
-                    with open('data.json', 'w', encoding='utf-8') as f:
-                         json.dump(results1, f, ensure_ascii=False, indent=4)
+        polygons = getPolygon(cmid,driver)
+        points = getPoints(cmid,driver)
+
+        polygons = polygons[0]['geometry']
+        polygons = json.loads(polygons)
+
+        if len(points) > 0:
+            for i in range(0,len(points)):
+                points[i] = {"cood" : json.loads(points[i]['geometry'])["coordinates"][0][::-1],"source": points[i]["source"]}
+
+
+        with open('data.json', 'w', encoding='utf-8') as f:
+            json.dump(points, f, ensure_ascii=False, indent=4)
+
+        return jsonify({
+        "info": info[0],
+        "samples": samples,
+        "polygons": polygons,
+        "points": points,
+        "label":labels,
+        "relnames": relnames
+    })
+
+#         center = 0
+#         relnames= []
+#         relations = ["USES","CONTAINS","DISTRICT_OF","LANGUOID_OF","RELIGION_OF"]
+#         socioid[0] = request.args.get('cmid')
+#         driver_neo4j = connectionSM()
+#         session = driver_neo4j.session()
+#         driver_neo4j1 =connectionGIS()
+#         session1 = driver_neo4j1.session()
+#         q = "match (a) where a.CMID = '"+socioid[0]+"' return id(a) as id,labels(a) as label"
+#         r = session.run(q)
+#         r = str(r.data()[0]['id'])
+#         label = session.run(q)
+#         label = str(label.data()[0]['label'][-1])
+#         q = "MATCH (n:"+label+" {CMID:'"+socioid[0]+"'})-[r]-(n1) RETURN DISTINCT TYPE(r) as label"
+#         rel_name = session.run(q).data()
+#         for i in rel_name:
+#             if i['label'] in relations:
+#                 relnames.append(i['label'])
+#         q =   ''' match (a)<-[r:USES]-(d:DATASET)
+# where id(a) = '''+r+'''
+# with custom.anytoList(collect(r.Name),true) as Name, r.country as LocationID, d.project as Source, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
+# call apoc.when(LocationID is not null,'return custom.getName($id) as Location','return null',{id:LocationID}) yield value
+# return Name, custom.anytoList(collect(value.Location),true) as Location, type as Type, apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Populationest`,  apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Source, Version, Link order by `Time span`, Source, Name'''
+#         results = session.run(q)
+#         q1 = '''match (a)<-[r:USES]-(d:DATASET) where id(a) = '''+r+''' and (r.geoCoords is not null or r.geoPolygon is not null) return r.geoCoords as point, r.geoPolygon as polygon, d.shortName as source, r.Key as Key'''
+#         results1 = session.run(q1)
+#         resultsm = results1.data()
+#         flag = 0
+#         for i in range(0,len(resultsm)):
+#             if resultsm[i]['polygon'] is not None:
+#                 print("...................................")
+#                 flag =1
+#                 relid = resultsm[i]['polygon']
+#                 if isinstance(relid,list):
+#                     relid = str(relid[0])
+#                     q1 = '''match (g:GEOMETRY) where g.geomID = "'''+relid+'''" return g.geometry'''
+#                     results1=''
+#                     results1 = session1.run(q1)
+#                     results1 = results1.data()
+#                     results1 = (results1[0]['g.geometry']).replace("u\'","\'")
+#                     results1 = json.loads(results1)
+#                     with open('data.json', 'w', encoding='utf-8') as f:
+#                          json.dump(results1, f, ensure_ascii=False, indent=4)
+#                     if results1['type'] == "Polygon":
+#                         center = (results1['coordinates'][0][0])[::-1]
+#                     if results1['type'] == "MultiPolygon":
+#                         center = (results1['coordinates'][0][0][0])[::-1]
+#                 else:
+#                     relid = str(relid)
+#                     q1 = '''match (g:GEOMETRY) where g.geomID = "'''+relid+'''" return g.geometry'''
+#                     results1=''
+#                     results1 = session1.run(q1)
+#                     results1 = results1.data()
+#                     results1 = (results1[0]['g.geometry']).replace("u\'","\'")
+#                     if "features" in results1:
+#                         results1 = json.loads(results1)
+#                         results1 = results1['features'][0]
+#                         if results1['geometry']['type'] == "Polygon":
+#                             center = (results1['geometry']['coordinates'][0][0])[::-1]
+#                         if results1['geometry']['type'] == "MultiPolygon":
+#                             center = (results1['geometry']['coordinates'][0][0][0])[::-1]
+#                     else:
+#                         results1 = json.loads(results1)
+#                         if results1['type'] == "Polygon":
+#                             center = (results1['coordinates'][0][0])[::-1]
+#                         if results1['type'] == "MultiPolygon":
+
+#                             center = (results1['coordinates'][0][0][0])[::-1]
+#                     with open('data.json', 'w', encoding='utf-8') as f:
+#                          json.dump(results1, f, ensure_ascii=False, indent=4)
                     
-                break
+#                 break
         
-        if flag == 0:
-            results1=[]
+#         if flag == 0:
+#             results1=[]
 
         
-        poid=[]
-        for i in range(0,len(resultsm)):
-            if resultsm[i]['point'] is not None:
-                #poid[resultsm[i]['source']] = json.loads(resultsm[i]['point'])['coordinates'][0]
-                print((resultsm[i]['point']))
-                if isinstance(resultsm[i]['point'], list):
-                    cood=(json.loads(resultsm[i]['point'][0])['coordinates'])
-                else:
-                    cood=(json.loads(resultsm[i]['point'])['coordinates'])
-                if isinstance(cood, list):
-                    cood = cood[::-1]
-                print(cood)
-                poid.append(dict([("id",resultsm[i]['source']),('coordinates',cood)]))
-                #poid[i]['id'] = resultsm[i]['source']
-                #poid[i]['coordinates'] = json.loads(resultsm[i]['point'])['coordinates'][0]
+#         poid=[]
+#         for i in range(0,len(resultsm)):
+#             if resultsm[i]['point'] is not None:
+#                 #poid[resultsm[i]['source']] = json.loads(resultsm[i]['point'])['coordinates'][0]
+#                 print((resultsm[i]['point']))
+#                 if isinstance(resultsm[i]['point'], list):
+#                     cood=(json.loads(resultsm[i]['point'][0])['coordinates'])
+#                 else:
+#                     cood=(json.loads(resultsm[i]['point'])['coordinates'])
+#                 if isinstance(cood, list):
+#                     cood = cood[::-1]
+#                 print(cood)
+#                 poid.append(dict([("id",resultsm[i]['source']),('coordinates',cood)]))
+#                 #poid[i]['id'] = resultsm[i]['source']
+#                 #poid[i]['coordinates'] = json.loads(resultsm[i]['point'])['coordinates'][0]
         
-        print(poid)
+#         print(poid)
 
-        '''
-        for obj in results1:
-             if "coordinates" in obj:
-                 northing = obj["coordinates"][0]
-                 easting = obj["coordinates"][1]
-                 obj["coordinates"] = [ easting, northing ]
-        '''
-        #results1 = results1['features'][0]['geometry']['coordinates'][0]
-        #return '{} {}'.format(results.data(), results1)
+#         '''
+#         for obj in results1:
+#              if "coordinates" in obj:
+#                  northing = obj["coordinates"][0]
+#                  easting = obj["coordinates"][1]
+#                  obj["coordinates"] = [ easting, northing ]
+#         '''
+    
         
-        payload = {
-    "current_response": results.data(),
-    "future_response": results1,
-    "center": center,
-    "poid": poid,
-    "label":label,
-    "relnames": relnames
-}
+#         payload = {
+#     "current_response": results.data(),
+#     "future_response": results1,
+#     "center": center,
+#     "poid": poid,
+#     "label":label,
+#     "relnames": relnames
+# }
         
-        #print(payload)
-        return jsonify(payload)
-        #return (results.data())
+#         #print(payload)
+#         return jsonify(payload)
+#         #return (results.data())
 
 @app.route("/network",methods=['GET'])
 def net():
@@ -610,7 +720,7 @@ def getSearch():
         limit = request.args.get('limit')
         query = request.args.get('query')
 
-        print(context)
+        print("A",country)
 
         if database == "SocioMap":
             driver = connectionSM()
@@ -634,21 +744,23 @@ def getSearch():
         # need to add check to mak sure property is valid and domain is valid
 
         if context is not None:
-            if context == "":
+            if context == "null" or context == "":
                 context = None
-            if re.search("^SM|^SD|^AD|^AM",context) is None:
-                raise Exception("context must be a valid CMID")
+            else:
+                if re.search("^SM|^SD|^AD|^AM",context) is None:
+                    raise Exception("context must be a valid CMID")
             
         if country is not None:
-            if country == "":
+            if country == "null":
                 country = None
-            if re.search("^SM|^SD|^AD|^AM",country) is None:
-                raise Exception("country must be a valid CMID")
-
-        if yearStart == "":
+            else:
+                if re.search("^SM|^SD|^AD|^AM",country) is None:
+                    raise Exception("country must be a valid CMID")
+                  
+        if yearStart == "null":
             yearStart = None
 
-        if yearEnd == "":
+        if yearEnd == "null":
             yearEnd = None
 
         try:
@@ -681,7 +793,6 @@ def getSearch():
         if property is None and term is not None:
             raise Exception("Must specify a property (e.g., Name, CMID, or Key)")
         
-
         # Define the Cypher query
 
         # if no term specified
