@@ -943,14 +943,12 @@ def getTranslate():
             key = key[0]
         if key != 'true':
             key = None
-        query = data.get("query")[0]
+        query = data.get("query")
         if isinstance(query, list):
             query = query[0]
         if query != 'true':
             query = 'false'
         rows = data.get("rows")
-        if 'dataset' not in rows:
-            key = None
         if database == "SocioMap":
             driver = connectionSM()
         elif database == "ArchaMap":
@@ -1002,7 +1000,7 @@ with row, value.a as a, value.matching as matching, 0 as score
         qDomain = f" where '{dom}' in labels(a) with row, a, matching, score "
 
     # filter by country
-        if 'country' in rows:
+        if 'country' in rows[0]:
             qCountryFilter = """
 where (a)<-[:DISTRICT_OF]-(:ADM0 {CMID: row.country})
 with row, a, matching, score
@@ -1011,7 +1009,7 @@ with row, a, matching, score
             qCountryFilter = " "
 
     # filter by context
-        if 'context' in rows:
+        if 'context' in rows[0]:
             qContext = """
 where (a)<-[]-({CMID: row.context})
 with row, a, matching, score
@@ -1020,23 +1018,30 @@ with row, a, matching, score
             qContext = " "
 
     # filter by dataset
-        if 'dataset' in rows:
-            qDataset = """
-where (a)<-[:USES]-(:DATASET {CMID: row.dataset})
-with row, a, matching, score
-"""
+        if 'dataset' in rows[0]:
+            # get keys
+            if key is not None:
+                qDataset = """
+    match (a)<-[r:USES]-(d:DATASET {CMID: row.dataset}) 
+    with row, a, matching, score, r.Key as Key
+    """
+            else:
+                qDataset = """
+    where (a)<-[:USES]-(:DATASET {CMID: row.dataset})
+    with row, a, matching, score, '' as Key
+    """
         else:
-            qDataset = " "
+            qDataset = "with row, a, matching, score, '' as Key"
 
         # filter by year
-        if 'yearStart' in rows and 'yearEnd' in rows:
+        if 'yearStart' in rows[0] and 'yearEnd' in rows[0]:
             if dom == "DATASET":
                 qYear = """
 call {with row, a with row, a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
 else a.ApplicableYears end as yearMatch, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
 with a, years, apoc.convert.toIntList(apoc.coll.toSet(apoc.coll.flatten(collect(yearMatch),true))) as yearMatch 
 where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}
-with node as a, matching, score
+with node as a, matching, score, Key
 """
             else:
                 qYear = f"""
@@ -1044,48 +1049,41 @@ call {{with row, a with row, a, range(toInteger(row.yearStart),toInteger(row.yea
 match (a)<-[r:USES]-(:DATASET) unwind r.yearStart as yearStart 
 unwind r.yearEnd as yearEnd with years, a, r, apoc.coll.toSet(collect(yearStart) + collect(yearEnd)) as yearMatch 
 where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}}
-with row, node as a, matching, score order by score desc
+with row, node as a, matching, score, Key order by score desc
 """   
         else: 
             qYear = " "
     
         # limit results
         qLimit = """
-with row, collect(a{a, matching, score}) as nodes, collect(score) as scores
-with row, nodes, apoc.coll.min(scores) as minScore
+with row, collect(a{a, matching, score}) as nodes, collect(score) as scores, Key
+with row, nodes, apoc.coll.min(scores) as minScore, Key
 unwind nodes as node
-with row, node.a as a, node.matching as matching, node.score as score, minScore
+with row, node.a as a, node.matching as matching, node.score as score, minScore, Key
 where score = minScore
-return distinct a, matching, score}
-with row, a, matching, score
+return distinct a, matching, score, Key}
+with row, a, matching, score, Key
 """
 
         # get country
         qCountry = """
 optional match (a)<-[:DISTRICT_OF]-(c:ADM0)
-with row, a, matching, collect(c.CMName) as country, score
+with row, a, matching, collect(c.CMName) as country, score, Key
 """
-
-        # get keys
-        if key is not None:
-            qKey = """
-match (a)<-[r:USES]-(d:DATASET {CMID: row.dataset}) 
-with row, a, matching, country, score, r.Key as Key
-"""
-        else:
-            qKey = "with row, a, matching, country, score, '' as Key"
 
         # return results
         qReturn = """
 return distinct row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, [i in labels(a) where not i = 'CATEGORY'] as label, 
 matching, score as matchingDistance, country, Key order by matchingDistance
 """
-        cypher_query = qLoad + qStart + qDomain + qCountryFilter + qContext + qDataset + qYear + qLimit + qCountry + qKey + qReturn
+        cypher_query = qLoad + qStart + qDomain + qCountryFilter + qContext + qDataset + qYear + qLimit + qCountry + qReturn
         if query == "true":
             with driver.session() as session:
                 result = session.run("unwind $rows as rows unwind rows as row return row.term as term, row.CMuniqueRowID as CMuniqueRowID", rows = rows)
                 qResult = [dict(record) for record in result]
-            return [{"query": cypher_query.replace("\n"," "),"params":qResult}]
+                print("printing rows")
+                print(rows)
+            return [{"query": cypher_query.replace("\n"," "),"params":qResult,"rows":rows}]
         else:
         # Execute the Cypher queries
             with driver.session() as session:
@@ -1270,15 +1268,13 @@ order by relationship
         return data
     except Exception as e:
     # In case of an error, return an error response with an appropriate HTTP status code
-        return str(e)
+        return str(e), 500
 
 # function to merge nodes
 def mergeNodes(request,driver):
     try:
         keepcmid = request.args.get('keepcmid') 
-        deletecmid = request.args.get('deletecmid') 
-        keepcmid=keepcmid[0]
-        deletecmid=deletecmid[0]
+        deletecmid = request.args.get('deletecmid')
         if re.search("^AM|^AD|^SM|^AD", keepcmid) is None:
             raise Exception("Invalid keepcmid")
         if re.search("^AM|^AD|^SM|^AD", deletecmid) is None:
@@ -1334,6 +1330,24 @@ set r.{property} = valid
     except Exception as e:
     # In case of an error, return an error response with an appropriate HTTP status code
         return str(e)
+    
+def mergeRels(cmid, driver):
+    try:
+        query = """
+unwind $cmid as cmid match (a)-[r]-(b) 
+where a.CMID = cmid and not type(r) = 'USES' 
+with id(a) as id1, id(b) as id2, type(r) as type, count(r) as c 
+where c > 1 
+return id1, id2, type
+"""
+        with driver.session() as session:
+            results = session.run(query,cmid = cmid)
+            rels = [dict(record) for record in results]
+            driver.close()
+        return ""
+
+    except Exception as e:
+        return str(e)
 
 @app.route('/admin/edit', methods=['GET'])
 def getAdminEdit():
@@ -1353,6 +1367,8 @@ def getAdminEdit():
         result = "Nothing returned"
         if fun == "getUSESrels":
             result = getUSESrels(request,driver)
+        if fun == "mergeNodes":
+            result = mergeNodes(request,driver)
         else:
             raise Exception("Function does not exist")
         return result

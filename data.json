@@ -1,18 +1,1 @@
-[
-    {
-        "geometry": [
-            "{\"type\":\"Point\",\"coordinates\":[28.0,-16.0]}"
-        ],
-        "source": "HRAF"
-    },
-    {
-        "geometry": "{\"type\":\"Point\",\"coordinates\":[28.0,-16.0]}",
-        "source": "EthnographicAtlas"
-    },
-    {
-        "geometry": [
-            "{\"type\":\"Point\",\"coordinates\":[28.0,-25.0]}"
-        ],
-        "source": "HRAF"
-    }
-]
+[]
