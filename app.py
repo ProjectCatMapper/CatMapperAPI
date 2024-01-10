@@ -1277,68 +1277,25 @@ return u.userID as userID
 
 @app.route('/admin', methods=['GET'])
 def getAdmin():
+    """
+    Retrieve the 'admin.html' template and return it as a response.
+
+    Returns:
+    - Response: A Flask response containing the 'admin.html' template.
+
+    Example:
+    ```python
+    from flask import Flask
+
+    app = Flask(__name__)
+
+    @app.route('/admin')
+    def admin_route():
+        return getAdmin()
+    ```
+    """
     headers = {'Content-Type': 'text/html'}
     return make_response(render_template('admin.html'),200,headers)
-
-def getUSESrels(request, driver):
-    try:
-        cmid = request.args.get('cmid') 
-        if re.search("^AM|^AD|^SM|^AD", cmid) is None:
-            raise Exception("Invalid CMID")
-        query = f"""
-unwind $cmid as cmid 
-match (a)-[r:USES]->(b) 
-where b.CMID = cmid 
-return distinct id(r) as relID, 
-a.CMName + '-' + type(r) + '-' + coalesce(r.Key,'') + '->' + b.CMName as relationship 
-order by relationship
-"""
-        with driver.session() as session:
-            result = session.run(query,cmid = cmid)
-            data = [dict(record) for record in result]
-            driver.close()
-        return data
-    except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
-        return str(e), 500
-
-def replaceProperty(cmid, property, old, new, driver):
-    try:
-        query = f"""
-match (c {{CMID: $cmid}})--(node)
-match (node)<-[r:USES]-(d) 
-where not r.{property} is null 
-with r, case when apoc.meta.cypher.type(r.{property}) contains "LIST" 
-then apoc.coll.toSet([x in [i in r.{property} | replace(i,$old,$new)] where not x = ""]) 
-else replace(r.{property},$old,$new) end as prop 
-with r, prop, case when isEmpty(prop) then NULL else prop end as valid 
-set r.{property} = valid
-"""
-        with driver.session() as session:
-            session.run(query,cmid = cmid, old = old, new = new)
-            driver.close()
-        return f"Completed {cmid} property {property}"
-    except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
-        return str(e)
-    
-def mergeRels(cmid, driver):
-    try:
-        query = """
-unwind $cmid as cmid match (a)-[r]-(b) 
-where a.CMID = cmid and not type(r) = 'USES' 
-with id(a) as id1, id(b) as id2, type(r) as type, count(r) as c 
-where c > 1 
-return id1, id2, type
-"""
-        with driver.session() as session:
-            results = session.run(query,cmid = cmid)
-            rels = [dict(record) for record in results]
-            driver.close()
-        return ""
-
-    except Exception as e:
-        return str(e)
 
 @app.route('/admin/edit', methods=['GET'])
 def getAdminEdit():
@@ -1357,7 +1314,7 @@ def getAdminEdit():
             raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
         result = "Nothing returned"
         if fun == "getUSESrels":
-            result = getUSESrels(request,driver)
+            result = CM.getUSESrels(request,driver)
         if fun == "mergeNodes":
             result = CM.mergeNodes(request,driver)
         else:
