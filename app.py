@@ -10,6 +10,7 @@ import json
 import re
 import string
 from flasgger import Swagger, LazyString, LazyJSONEncoder
+import CM
 # from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
@@ -219,14 +220,12 @@ def catm():
         else:
             pass
 
-
         if label is not None:
             label = "CATEGORY"
         else: 
             label = "DATASET"
         
         if label == "CATEGORY":
-            print("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")    
             qInfo = '''
 unwind $cmid as cmid match (a)<-[r:USES]-(d:DATASET)
 where a.CMID = cmid with a,r,d
@@ -283,17 +282,50 @@ labels(a) as Labels, a.parent as Parent, a.DatasetCitation as Citation, a.Datase
         polygons = getPolygon(cmid,driver)
         points = getPoints(cmid,driver)
 
-        polygons = polygons[0]['geometry']
-        polygons = json.loads(polygons)
+        with open('poly.json', 'w', encoding='utf-8') as f:
+            json.dump(polygons, f, ensure_ascii=False, indent=4)
+        
+        if polygons != "":
+            if len(polygons) > 1:
+                poly = {"type": 'FeatureCollection',"features": []}
+                for i in range(0,len(polygons)):
+                    poly["features"].append(json.loads(polygons[i]['geometry']))
+                    poly["features"][i]["source"] = (polygons[i]['source'])
+                polygons = poly
+                # polygons = json.loads(polygons)
+            else:
+                temp = polygons
+                polygons = [json.loads(polygons[0]['geometry'])]
+                polygons[0]["source"] = (temp[0]['source'])
+                temp = None
 
+        with open('new.json', 'w', encoding='utf-8') as f:
+            json.dump(polygons, f, ensure_ascii=False, indent=4)
+        
         if len(points) > 0:
             for i in range(0,len(points)):
-                points[i] = {"cood" : json.loads(points[i]['geometry'])["coordinates"][0][::-1],"source": points[i]["source"]}
+                if json.loads(points[i]['geometry'])["type"] != "MultiPoint":
+                    points[i] = {"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]}
+                else:
+                    temp = points[i]
+                    del points[i]
+                    source = temp['source']
+                    for j in range(0,len(json.loads(temp['geometry'])['coordinates'])):
+                        points.append({'cood' : json.loads(temp['geometry'])['coordinates'][j][::-1], "source" : source })
 
+        # if len(points) > 0:
+        #     for i in range(0,len(points)):
+        #         if isinstance(json.loads(points[i]['geometry'])["coordinates"][0],int):
+        #             points[i] = {"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]}
+        #         elif isinstance(json.loads(points[i]['geometry'])["coordinates"][0],float):
+        #             points[i] = {"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]}
+        #         else:
+        #             for j in range(0,len(json.loads(points[i]['geometry'])["coordinates"])):
+        #                 print(points[i])
 
         with open('data.json', 'w', encoding='utf-8') as f:
-            json.dump(points, f, ensure_ascii=False, indent=4)
-
+                json.dump(points, f, ensure_ascii=False, indent=4)
+                
         return jsonify({
         "info": info[0],
         "samples": samples,
@@ -898,7 +930,7 @@ with a, matching, collect(c.CMName) as country, score
         # return results
         qReturn = """
 return distinct a.CMID as CMID, a.CMName as CMName, 
-[i in labels(a) where not i = 'CATEGORY'] as domain, matching, score as matchingDistance, 
+custom.getLabel(a) as domain, matching, score as matchingDistance, 
 country order by matchingDistance
 """
 
@@ -1270,47 +1302,6 @@ order by relationship
     # In case of an error, return an error response with an appropriate HTTP status code
         return str(e), 500
 
-# function to merge nodes
-def mergeNodes(request,driver):
-    try:
-        keepcmid = request.args.get('keepcmid') 
-        deletecmid = request.args.get('deletecmid')
-        if re.search("^AM|^AD|^SM|^AD", keepcmid) is None:
-            raise Exception("Invalid keepcmid")
-        if re.search("^AM|^AD|^SM|^AD", deletecmid) is None:
-            raise Exception("Invalid deletecmid")
-        query = """
-match (a) where a.CMID = $keepcmid
-match (b) where b.CMID = $deletecmid 
-WITH collect(a) + collect(b) AS nodes
-CALL apoc.refactor.mergeNodes(nodes,{properties: {
-CMID:'discard',
-CMName:'discard',
-`.*`: 'combine'} })
-YIELD node
-with node
-unwind node as a
-MATCH (a)<-[r:USES]-(:DATASET)
-unwind keys(r) as property
-return distinct property
-"""
-        with driver.session() as session:
-            result = session.run(query,keepcmid = keepcmid,deletecmid = deletecmid)
-            properties = [dict(record) for record in result]
-            result = session.run("match (m:PROPERTY) where m.relationship is not null return m.property as property")
-            contextProps = [dict(record) for record in result]
-            contextProps = [item['property'] for item in contextProps]
-            driver.close()
-        for prop in properties:
-            property = prop['property']
-            if property in contextProps:
-                print(f"updating {property} with new CMID")
-                replaceProperty(cmid = keepcmid, property = property, old = deletecmid, new = keepcmid, driver = driver)    
-        return "Completed"
-    except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
-        return str(e)
-
 def replaceProperty(cmid, property, old, new, driver):
     try:
         query = f"""
@@ -1368,7 +1359,7 @@ def getAdminEdit():
         if fun == "getUSESrels":
             result = getUSESrels(request,driver)
         if fun == "mergeNodes":
-            result = mergeNodes(request,driver)
+            result = CM.mergeNodes(request,driver)
         else:
             raise Exception("Function does not exist")
         return result

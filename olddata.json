@@ -1,0 +1,42 @@
+[
+    {
+        "geometry": [
+            "{\"type\":\"Point\",\"coordinates\":[4.0,8.0]}"
+        ],
+        "source": "Tishkoff2009_S1S8"
+    },
+    {
+        "geometry": [
+            "{\"type\":\"Point\",\"coordinates\":[4.0,8.0]}"
+        ],
+        "source": "HRAF"
+    },
+    {
+        "geometry": [
+            "{\"type\":\"Point\",\"coordinates\":[3.667,7.983]}"
+        ],
+        "source": "HRAF"
+    },
+    {
+        "geometry": [
+            "{\"type\":\"Point\",\"coordinates\":[4.0,7.0]}"
+        ],
+        "source": "HRAF"
+    },
+    {
+        "geometry": [
+            "{\"type\":\"Point\",\"coordinates\":[4.583,7.833]}"
+        ],
+        "source": "HRAF"
+    },
+    {
+        "geometry": [
+            "{\"type\":\"Point\",\"coordinates\":[3.933,7.383]}"
+        ],
+        "source": "HRAF"
+    },
+    {
+        "geometry": "{\"type\":\"MultiPoint\",\"coordinates\":[[2.57,8.1],[2.76,9.94]]}",
+        "source": "Price1990"
+    }
+]
