@@ -843,6 +843,8 @@ with a, matching, 0 as score
 call {{ with custom.cleanText($term) as term
 call db.index.fulltext.queryNodes('{domain}', replace(term,"'","\\'")) yield node return node
 union with custom.cleanText($term) as term
+call db.index.fulltext.queryNodes('{domain}',replace(replace(term,"'","\\'")," ","\ ") + '~') yield node return node
+union with custom.cleanText($term) as term
 call db.index.fulltext.queryNodes('{domain}',replace(term,"'","\\'") + '~') yield node return node}}
 with node as a
 with a, custom.matchingDist(a.names, $term) as matching
@@ -1206,6 +1208,7 @@ def getnewuser():
         email = data.get("email")
         username = data.get("username")
         password = data.get("password")
+        intendedUse = data.get("intendedUse")
         
         if database == "SocioMap":
             driver = connectionSM()
@@ -1251,11 +1254,12 @@ u.access = "new",
 u.log = toString(datetime()) + ": created user via API",
 u.password = $password,
 u.userID = toString(id),
-u.role = 'user'
+u.role = 'user',
+u.intendedUse = $intendedUse
 return u.userID as userID
 """
         with driver.session() as session:
-            result = session.run(query,firstName = firstName, lastName = lastName, email = email, password = password,username = username)
+            result = session.run(query,firstName = firstName, lastName = lastName, email = email, password = password,username = username,intendedUse = intendedUse)
             data = [dict(record) for record in result]
             driver.close()
         return jsonify(data)

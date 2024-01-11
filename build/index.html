@@ -43,6 +43,19 @@
 </ul>
 <span class="target" id="module-CM.admin"></span><p>admin.py</p>
 <dl class="py function">
+<dt class="sig sig-object py" id="CM.admin.getUSESrels">
+<span class="sig-prename descclassname"><span class="pre">CM.admin.</span></span><span class="sig-name descname"><span class="pre">getUSESrels</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">request</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">driver</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#CM.admin.getUSESrels" title="Permalink to this definition">¶</a></dt>
+<dd><p>Retrieve relationships with the ‘USES’ type for a specified CMID.</p>
+<p>Parameters:
+- request: Flask request object containing ‘cmid’ as a query parameter.
+- driver: Neo4j driver for database interaction.</p>
+<p>Returns:
+- list: A list of dictionaries containing relationship information. Each dictionary includes ‘relID’ (relationship ID) and ‘relationship’ (relationship description).</p>
+<p>Raises:
+- Exception: If an invalid CMID is provided or in case of any unexpected errors.</p>
+</dd></dl>
+
+<dl class="py function">
 <dt class="sig sig-object py" id="CM.admin.mergeNodes">
 <span class="sig-prename descclassname"><span class="pre">CM.admin.</span></span><span class="sig-name descname"><span class="pre">mergeNodes</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">request</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">driver</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#CM.admin.mergeNodes" title="Permalink to this definition">¶</a></dt>
 <dd><p>Merges nodes in a Neo4j database based on specified CMIDs.</p>
@@ -53,6 +66,35 @@
 - str: A completion message indicating the success of the operation.</p>
 <p>Raises:
 - Exception: If invalid CMIDs are provided or in case of any unexpected errors.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="CM.admin.mergeRels">
+<span class="sig-prename descclassname"><span class="pre">CM.admin.</span></span><span class="sig-name descname"><span class="pre">mergeRels</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cmid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">driver</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#CM.admin.mergeRels" title="Permalink to this definition">¶</a></dt>
+<dd><p>Identify and merge relationships for a specified CMID.</p>
+<p>Parameters:
+- cmid: The CMID for which relationship merging should occur.
+- driver: Neo4j driver for database interaction.</p>
+<p>Returns:
+- str: A string indicating the completion of the relationship merging.</p>
+<p>Raises:
+- Exception: In case of any unexpected errors during relationship merging.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="CM.admin.replaceProperty">
+<span class="sig-prename descclassname"><span class="pre">CM.admin.</span></span><span class="sig-name descname"><span class="pre">replaceProperty</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cmid</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">property</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">old</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">new</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">driver</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#CM.admin.replaceProperty" title="Permalink to this definition">¶</a></dt>
+<dd><p>Replace a specified property value in relationships for a given CMID.</p>
+<p>Parameters:
+- cmid: The CMID for which the property replacement should occur.
+- property: The name of the property to be replaced.
+- old: The old value to be replaced.
+- new: The new value to replace the old value.
+- driver: Neo4j driver for database interaction.</p>
+<p>Returns:
+- str: A completion message indicating the success of the property replacement.</p>
+<p>Raises:
+- Exception: In case of any unexpected errors during property replacement.</p>
 </dd></dl>
 
 </section>
