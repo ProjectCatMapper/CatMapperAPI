@@ -325,7 +325,7 @@ labels(a) as Labels, a.parent as Parent, a.DatasetCitation as Citation, a.Datase
 
         with open('data.json', 'w', encoding='utf-8') as f:
                 json.dump(points, f, ensure_ascii=False, indent=4)
-                
+                        
         return jsonify({
         "info": info[0],
         "samples": samples,
@@ -455,22 +455,13 @@ labels(a) as Labels, a.parent as Parent, a.DatasetCitation as Citation, a.Datase
 @app.route("/network",methods=['GET'])
 def net():
     p0 = request.args.get('value')
-    p1 = request.args.get('id')
+    p1 = request.args.get('cmid')
     p2 = request.args.get('relation')
     driver_neo4j =connectionSM()
     session = driver_neo4j.session()
-    def get_properties(self):
-        return self._properties
-    def get_properties(self):
-        return self._properties
     q = "MATCH (n:"+p0+" {CMID:'"+p1+"'})-[r:"+p2+"]-(OtherNodes) RETURN n,r,OtherNodes"
     r = session.run(q)
-    print(r)
     resultnet = r.data()
-
-    for i in resultnet:
-        pass
-
     return resultnet
 
 
@@ -960,26 +951,13 @@ def getTranslate():
     try:
         data = request.get_data()  
         data = json.loads(data)
-        database = data.get("database")
-        if isinstance(database, list):
-            database = database[0]
-        property = data.get("property")
-        if isinstance(property, list):
-            property = property[0]
-        domain = data.get("domain")
-        if isinstance(domain, list):
-            dom = domain[0]
-        else: 
-            dom = domain
-
-        key = data.get("key")
-        if isinstance(key, list):
-            key = key[0]
+        database = CM.unlist(data.get("database"))
+        property = CM.unlist(data.get("property"))
+        domain = CM.unlist(data.get("domain"))
+        key = CM.unlist(data.get("domain"))
         if key != 'true':
             key = None
-        query = data.get("query")
-        if isinstance(query, list):
-            query = query[0]
+        query = CM.unlist(data.get("query"))
         if query != 'true':
             query = 'false'
         rows = data.get("rows")
@@ -998,17 +976,17 @@ def getTranslate():
             qStart = f"""
 with row call db.index.fulltext.queryRelationships('keys',replace(row.term,':','\\:')) yield relationship
 with row, endnode(relationship) as a, relationship.Key as matching, case when row.term contains ":" then row.term else ": " + row.term end as term
-where '{dom}' in labels(a) and matching ends with term
+where '{domain}' in labels(a) and matching ends with term
 with row, a, matching, 0 as score
 """
         elif property == "Name":
     
-            if dom != "DATASET":
+            if domain != "DATASET":
                 qStart = f"""
 with row call {{ with row with row, custom.cleanText(row.term) as term
-call db.index.fulltext.queryNodes('{dom}', replace(term,"'","\\'")) yield node return node
+call db.index.fulltext.queryNodes('{domain}', replace(term,"'","\\'")) yield node return node
 union with row with row, custom.cleanText(row.term) as term
-call db.index.fulltext.queryNodes('{dom}',replace(term,"'","\\'") + '~') yield node return node}}
+call db.index.fulltext.queryNodes('{domain}',replace(term,"'","\\'") + '~') yield node return node}}
 with row, node as a
 with row, a, custom.matchingDist(a.names, row.term) as matching
 with row, a, matching.matching as matching, toInteger(matching.score) as score
@@ -1016,22 +994,22 @@ with row, a, matching.matching as matching, toInteger(matching.score) as score
             else:
                 qStart = f"""
 with row call {{ with row with row, custom.cleanText(row.term) as term
-call db.index.fulltext.queryNodes('{dom}', replace(term,"'","\\'")) yield node return node
+call db.index.fulltext.queryNodes('{domain}', replace(term,"'","\\'")) yield node return node
 union with row with row, custom.cleanText(row.term) as term
-call db.index.fulltext.queryNodes('{dom}',replace(term,"'","\\'") + '~') yield node return node}}
+call db.index.fulltext.queryNodes('{domain}',replace(term,"'","\\'") + '~') yield node return node}}
 with row, node as a
 with row, a, custom.matchingDist([a.CMName, a.shortName, a.DatasetCitation], row.term) as matching
 with row, a, matching.matching as matching, toInteger(matching.score) as score
 """
         else:
             qStart = f""" 
-with row call apoc.cypher.run('match (a:{dom}) where not a.{property} is null and tolower(a.{property}) = tolower(\"' + row.term + '\") return a, a.{property} as matching',{{}}) yield value 
+with row call apoc.cypher.run('match (a:{domain}) where not a.{property} is null and tolower(a.{property}) = tolower(\"' + row.term + '\") return a, a.{property} as matching',{{}}) yield value 
 with row, value.a as a, value.matching as matching, 0 as score
 """
 
     # filter by domain
 
-        qDomain = f" where '{dom}' in labels(a) with row, a, matching, score "
+        qDomain = f" where '{domain}' in labels(a) with row, a, matching, score "
 
     # filter by country
         if 'country' in rows[0]:
@@ -1317,10 +1295,12 @@ def getAdminEdit():
         else:
             raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
         result = "Nothing returned"
-        if fun == "getUSESrels":
-            result = CM.getUSESrels(request,driver)
+        # if fun == "getUSESrels":
+        #     result = CM.getUSESrels(request,driver)
         if fun == "mergeNodes":
             result = CM.mergeNodes(request,driver)
+        elif fun == "addIndexes":
+            result = CM.addIndexes(driver)
         else:
             raise Exception("Function does not exist")
         return result
@@ -1328,6 +1308,38 @@ def getAdminEdit():
     # In case of an error, return an error response with an appropriate HTTP status code
         data = str(e)
         return data, 500
+
+@app.route('/routines', methods=['GET'])
+def routines():
+    # this route will not be documented in swagger
+    # it is intended for automatic routines only
+    try:
+        database = CM.unlist(request.args.get('database'))
+        fun = CM.unlist(request.args.get('fun'))
+        data = CM.unlist(request.args.get('data'))
+        if data is None:
+            data = False
+        elif data.lower() == "true":
+            data = True
+        else:
+            data = False
+        if database == "SocioMap":
+            driver = connectionSM()
+        elif database == "ArchaMap":
+            driver = connectionAM()
+        else:
+            raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
+        result = "Nothing returned"
+        if fun == "addLog":
+            result = CM.addLog(driver)
+        if fun == "checkDomains":
+            result = CM.checkDomains(data,driver)
+        return result
+        return result
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
 
 if __name__== "__main__":
     app.run(debug=True,port=5001)
