@@ -3,3 +3,8 @@ from .admin import getUSESrels
 from .admin import replaceProperty
 from .admin import mergeRels
 from .admin import addCMNametoName
+from .routines import addLog
+from .routines import checkDomains
+from .admin import addIndexes
+from .utils import unlist
+from .users import password_hash

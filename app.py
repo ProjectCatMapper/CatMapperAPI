@@ -11,6 +11,7 @@ import re
 import string
 from flasgger import Swagger, LazyString, LazyJSONEncoder
 import CM
+import pysodium
 # from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
@@ -282,10 +283,12 @@ labels(a) as Labels, a.parent as Parent, a.DatasetCitation as Citation, a.Datase
         polygons = getPolygon(cmid,driver)
         points = getPoints(cmid,driver)
 
+        print(polygons)
+
         with open('poly.json', 'w', encoding='utf-8') as f:
             json.dump(polygons, f, ensure_ascii=False, indent=4)
         
-        if polygons != "":
+        if polygons != "" or polygons != []:
             if len(polygons) > 1:
                 poly = {"type": 'FeatureCollection',"features": []}
                 for i in range(0,len(polygons)):
@@ -974,7 +977,7 @@ def getTranslate():
 
         if property == "Key":
             qStart = f"""
-with row call db.index.fulltext.queryRelationships('keys',replace(row.term,':','\\:')) yield relationship
+with row call db.index.fulltext.queryRelationships('keys','"' + row.term +'"') yield relationship
 with row, endnode(relationship) as a, relationship.Key as matching, case when row.term contains ":" then row.term else ": " + row.term end as term
 where '{domain}' in labels(a) and matching ends with term
 with row, a, matching, 0 as score
@@ -1003,7 +1006,9 @@ with row, a, matching.matching as matching, toInteger(matching.score) as score
 """
         else:
             qStart = f""" 
-with row call apoc.cypher.run('match (a:{domain}) where not a.{property} is null and tolower(a.{property}) = tolower(\"' + row.term + '\") return a, a.{property} as matching',{{}}) yield value 
+with row call apoc.cypher.run('match (a:{domain}) 
+where not a.{property} is null and tolower(a.{property}) = tolower(\"' + row.term + '\") 
+return a, a.{property} as matching',{{}}) yield value 
 with row, value.a as a, value.matching as matching, 0 as score
 """
 
@@ -1047,7 +1052,7 @@ with row, a, matching, score
 
         # filter by year
         if 'yearStart' in rows[0] and 'yearEnd' in rows[0]:
-            if dom == "DATASET":
+            if domain == "DATASET":
                 qYear = """
 call {with row, a with row, a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
 else a.ApplicableYears end as yearMatch, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
@@ -1085,7 +1090,7 @@ with row, a, matching, collect(c.CMName) as country, score, Key
 
         # return results
         qReturn = """
-return distinct row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, [i in labels(a) where not i = 'CATEGORY'] as label, 
+return distinct row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, custom.getLabel(a) as label, 
 matching, score as matchingDistance, country, Key order by matchingDistance
 """
         cypher_query = qLoad + qStart + qDomain + qCountryFilter + qContext + qDataset + qYear + qLimit + qCountry + qReturn
@@ -1128,6 +1133,8 @@ def getQuery():
             driver = connectionAM()
         elif database == "gisdb":
             driver = connectionGIS()
+        else:
+            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
         
         try:
             verified = verifyUser(driver,user,pwd)
@@ -1186,6 +1193,7 @@ def getnewuser():
         email = data.get("email")
         username = data.get("username")
         password = data.get("password")
+        password = CM.password_hash(password)
         intendedUse = data.get("intendedUse")
         
         if database == "SocioMap":
