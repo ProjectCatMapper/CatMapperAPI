@@ -5,4 +5,5 @@ fuzzywuzzy>=0.18.0
 python-dotenv>=1.0.0
 setuptools
 flasgger==0.9.7b2
+pysodium
 # werkzeug>=0.16.1

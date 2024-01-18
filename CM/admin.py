@@ -5,6 +5,34 @@
 import re
 from neo4j import GraphDatabase
 
+def EClanguageMerge(cmid,driver):
+    """
+    Remove EC language from the USES relationship in preparation for merge.
+
+    :param cmid: The CMID (CatMapperID) to identify the CATEGORY node.
+    :type cmid: str
+    :param driver: The Neo4j driver for database interaction.
+    :type driver: neo4j.Driver
+
+    :return: A message indicating the completion status.
+    :rtype: str
+
+    :raises: Exception in case of an error during execution.
+    """
+    try:
+        query = """
+        match (c:CATEGORY {CMID: $cmid})<-[r:USES]-(d:DATASET {CMID: "SD11"})
+        where not r.language is null
+        with r, r.language as lang
+        set r.language = NULL, r.log = apoc.coll.flatten([r.log,toString(date()) + ": removed language " + lang + " from USES relationship in preparation for merge"],true)
+        """
+        with driver.session() as session:
+                session.run(query,cmid = cmid)
+                driver.close()
+        return f"Completed removing EC language from {cmid}"
+    except Exception as e:
+        return str(e), 500
+
 def replaceProperty(cmid, property, old, new, driver):
     """
     Replace a specified property value in relationships for a given CMID.
@@ -38,8 +66,7 @@ set r.{property} = valid
             driver.close()
         return f"Completed {cmid} property {property}"
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
-        return str(e)
+        return str(e), 500
 
 def getUSESrels(request, driver):
     """
@@ -73,7 +100,6 @@ def getUSESrels(request, driver):
             driver.close()
         return data
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
         return str(e), 500
 
 def mergeRels(cmid, driver):
@@ -104,7 +130,7 @@ return id1, id2, type
         return "Completed"
 
     except Exception as e:
-        return str(e)
+        return str(e), 500
 
 # function to add CMName to Name property
 def addCMNametoName(cmid, driver):
@@ -132,7 +158,7 @@ return c,d
         return "Completed"
 
     except Exception as e:
-        return str(e)
+        return str(e), 500
 
 # function to merge nodes
 def mergeNodes(request,driver):
@@ -152,12 +178,16 @@ def mergeNodes(request,driver):
     try:
         keepcmid = request.args.get('keepcmid') 
         deletecmid = request.args.get('deletecmid')
+        # replace below with check to see if CMID is valid in database
         if re.search("^AM|^AD|^SM|^AD", keepcmid) is None:
             raise Exception("Invalid keepcmid")
         if re.search("^AM|^AD|^SM|^AD", deletecmid) is None:
             raise Exception("Invalid deletecmid")
-        CM.addCMNametoName(keepcmid, driver)
-        CM.addCMNametoName(deletecmid, driver)
+        
+        addCMNametoName(keepcmid, driver)
+        addCMNametoName(deletecmid, driver)
+        # just do language discard instead of this EClanguageMerge(deletecmid, driver)
+
         query = """
 match (a) where a.CMID = $keepcmid
 match (b) where b.CMID = $deletecmid 
@@ -169,10 +199,12 @@ CMName:'discard',
 YIELD node
 with node
 unwind node as a
+with a
 MATCH (a)<-[r:USES]-(:DATASET)
 unwind keys(r) as property
 return distinct property
 """
+# add in properties for anything that is a parent type node
         with driver.session() as session:
             result = session.run(query,keepcmid = keepcmid,deletecmid = deletecmid)
             properties = [dict(record) for record in result]
@@ -180,13 +212,31 @@ return distinct property
             contextProps = [dict(record) for record in result]
             contextProps = [item['property'] for item in contextProps]
             driver.close()
+        # make sure the second EC tie is combined
+        # call the updateUSES function
         for prop in properties:
             property = prop['property']
             if property in contextProps:
                 print(f"updating {property} with new CMID")
                 replaceProperty(cmid = keepcmid, property = property, old = deletecmid, new = keepcmid, driver = driver)    
+        # create deleted node and relationship
+        return "Completed"
+    
+    except Exception as e:
+        return str(e), 500
+    
+def addIndexes(driver):
+    try:
+        query = """
+        // create index for each label that has a Name
+        match (d:LABEL)
+        where d.public = true or tolower(toString(d.public)) = "true"
+        with d.label as l
+        call apoc.cypher.runSchema('CREATE FULLTEXT INDEX ' + l + ' IF NOT EXISTS FOR (n:' + l + ') ON EACH [n.names]',{}) yield value return count(*);
+        """
+        with driver.session() as session:
+            session.run(query)
+            driver.close()
         return "Completed"
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
-        return str(e)
-    
+        return str(e), 500
