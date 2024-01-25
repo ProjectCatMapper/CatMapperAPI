@@ -953,7 +953,7 @@ def getTranslate():
         database = CM.unlist(data.get("database"))
         property = CM.unlist(data.get("property"))
         domain = CM.unlist(data.get("domain"))
-        key = CM.unlist(data.get("domain"))
+        key = CM.unlist(data.get("key"))
         if key != 'true':
             key = None
         query = CM.unlist(data.get("query"))
