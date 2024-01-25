@@ -283,8 +283,6 @@ labels(a) as Labels, a.parent as Parent, a.DatasetCitation as Citation, a.Datase
         polygons = getPolygon(cmid,driver)
         points = getPoints(cmid,driver)
 
-        print(polygons)
-
         with open('poly.json', 'w', encoding='utf-8') as f:
             json.dump(polygons, f, ensure_ascii=False, indent=4)
         
@@ -746,8 +744,6 @@ def getSearch():
         limit = request.args.get('limit')
         query = request.args.get('query')
 
-        print("A",country)
-
         if database == "SocioMap":
             driver = connectionSM()
         elif database == "ArchaMap":
@@ -814,7 +810,7 @@ def getSearch():
             raise Exception("limit must be an integer")
 
         if limit is None:
-            limit = 10000
+            limit = 1000
         
         if property is None and term is not None:
             raise Exception("Must specify a property (e.g., Name, CMID, or Key)")
@@ -834,26 +830,26 @@ with a, matching, 0 as score
         elif property == "Name":
             if domain != "DATASET":
                 qStart = f"""
-call {{ with custom.cleanText($term) as term
-call db.index.fulltext.queryNodes('{domain}', replace(term,"'","\\'")) yield node return node
-union with custom.cleanText($term) as term
-call db.index.fulltext.queryNodes('{domain}',replace(replace(term,"'","\\'")," ","\ ") + '~') yield node return node
-union with custom.cleanText($term) as term
-call db.index.fulltext.queryNodes('{domain}',replace(term,"'","\\'") + '~') yield node return node}}
+call {{with $term as term
+call db.index.fulltext.queryNodes('{domain}', '"' + tolower(term) +'"') yield node return node
+union with $term as term
+call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term) + '~') yield node return node}}
 with node as a
 with a, custom.matchingDist(a.names, $term) as matching
 with a, matching.matching as matching, toInteger(matching.score) as score
 """
+                
             else:
                 qStart = f"""
-call {{ with custom.cleanText($term) as term
-call db.index.fulltext.queryNodes('{domain}', replace(term,"'","\\'")) yield node return node
-union with custom.cleanText($term) as term
-call db.index.fulltext.queryNodes('{domain}',replace(term,"'","\\'") + '~') yield node return node}}
+call {{with $term as term
+call db.index.fulltext.queryNodes('{domain}', '"' + tolower(term) +'"') yield node return node
+union with $term as term
+call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term) + '~') yield node return node}}
 with node as a
 with a, custom.matchingDist([a.CMName, a.shortName, a.DatasetCitation], $term) as matching
 with a, matching.matching as matching, toInteger(matching.score) as score
 """
+                
         else:
             qStart = f"""
 match (a) where tolower(a.{property}) = tolower($term)
@@ -872,7 +868,7 @@ unwind scores as score return distinct matching, score order by score limit 1}
 with a, matching, score
 """
 
-        # filter by context
+        # filter by country
         if country is not None:
             qCountryFilter = """
 where (a)<-[:DISTRICT_OF]-(:ADM0 {CMID: $country})
@@ -941,7 +937,7 @@ country order by matchingDistance
                 data = [dict(record) for record in result]
 
                 driver.close()
-            return jsonify(data)
+            return data
         else:
             print(cypher_query)
             # return([qStart,qDomain,qUnique,qContext,qYear,qLimit,qCountry,qReturn])
@@ -977,29 +973,45 @@ def getTranslate():
 
         if property == "Key":
             qStart = f"""
-with row call db.index.fulltext.queryRelationships('keys','"' + row.term +'"') yield relationship
+with row call db.index.fulltext.queryRelationships('keys','"' + tolower(row.term) +'"') yield relationship
 with row, endnode(relationship) as a, relationship.Key as matching, case when row.term contains ":" then row.term else ": " + row.term end as term
 where '{domain}' in labels(a) and matching ends with term
 with row, a, matching, 0 as score
 """
+        elif property in ["glottocode","ISO","CMID"]:
+            if property == "CMID":
+                if domain == "DATASET":
+                    indx = "CMIDDataset"
+                else:
+                    indx = "CMIDCategory"
+            else:
+                indx = property
+
+            qStart = f"""
+with row call db.index.fulltext.queryNodes('{indx}','"' + toupper(row.term) +'"') yield node
+with row, node as a, toupper(node['{property}']) as matching, toupper(row.term) as term
+where '{domain}' in labels(a) and matching = term
+with row, a, matching, 0 as score
+"""
+
         elif property == "Name":
     
             if domain != "DATASET":
                 qStart = f"""
-with row call {{ with row with row, custom.cleanText(row.term) as term
-call db.index.fulltext.queryNodes('{domain}', replace(term,"'","\\'")) yield node return node
-union with row with row, custom.cleanText(row.term) as term
-call db.index.fulltext.queryNodes('{domain}',replace(term,"'","\\'") + '~') yield node return node}}
+with row call {{ with row 
+call db.index.fulltext.queryNodes('{domain}', '"' + custom.cleanText(row.term) + '"') yield node return node
+union with row 
+call db.index.fulltext.queryNodes('{domain}', '"' + custom.cleanText(row.term) + '~"') yield node return node}}
 with row, node as a
 with row, a, custom.matchingDist(a.names, row.term) as matching
 with row, a, matching.matching as matching, toInteger(matching.score) as score
 """
             else:
                 qStart = f"""
-with row call {{ with row with row, custom.cleanText(row.term) as term
-call db.index.fulltext.queryNodes('{domain}', replace(term,"'","\\'")) yield node return node
-union with row with row, custom.cleanText(row.term) as term
-call db.index.fulltext.queryNodes('{domain}',replace(term,"'","\\'") + '~') yield node return node}}
+with row call {{ with row 
+call db.index.fulltext.queryNodes('{domain}', '"' + custom.cleanText(row.term) + '"') yield node return node
+union with row
+call db.index.fulltext.queryNodes('{domain}', '"' + custom.cleanText(row.term) + '~"') yield node return node}}
 with row, node as a
 with row, a, custom.matchingDist([a.CMName, a.shortName, a.DatasetCitation], row.term) as matching
 with row, a, matching.matching as matching, toInteger(matching.score) as score
