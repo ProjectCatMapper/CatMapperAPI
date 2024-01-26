@@ -286,7 +286,10 @@ labels(a) as Labels, a.parent as Parent, a.DatasetCitation as Citation, a.Datase
         with open('poly.json', 'w', encoding='utf-8') as f:
             json.dump(polygons, f, ensure_ascii=False, indent=4)
         
-        if polygons != "" or polygons != []:
+        print(len(polygons))
+        
+        if len(polygons) != 0:
+            # polygons != "" or polygons != [] or 
             if len(polygons) > 1:
                 poly = {"type": 'FeatureCollection',"features": []}
                 for i in range(0,len(polygons)):
