@@ -198,19 +198,29 @@ def catm():
         cmid = request.args.get('cmid')
         database = request.args.get('database')
 
+        if database == "SocioMap":
+            driver = connectionSM()
+        elif database == "ArchaMap":
+            driver = connectionAM()
+        else:
+            pass
+
         relnames= []
         relations = ["USES","CONTAINS","DISTRICT_OF","LANGUOID_OF","RELIGION_OF"]
         q = "match (a) where a.CMID = '"+cmid+"' return id(a) as id,labels(a) as label"
-        driver_neo4j = connectionSM()
-        session = driver_neo4j.session()
+        session = driver.session()
         labels = session.run(q)
-        labels = str(labels.data()[0]['label'][-1])
+        labels = labels.data()
+        if labels:
+            labels = str(labels[0]['label'][-1])
+        else:
+            labels = ""
         q = "MATCH (n:"+labels+" {CMID:'"+cmid+"'})-[r]-(n1) RETURN DISTINCT TYPE(r) as label"
         rel_name = session.run(q).data()
         for i in rel_name:
             if i['label'] in relations:
                 relnames.append(i['label'])
-        driver_neo4j.close()
+        driver.close()
 
         if database == "SocioMap":
             driver = connectionSM()
@@ -286,7 +296,7 @@ labels(a) as Labels, a.parent as Parent, a.DatasetCitation as Citation, a.Datase
         with open('poly.json', 'w', encoding='utf-8') as f:
             json.dump(polygons, f, ensure_ascii=False, indent=4)
         
-        print(len(polygons))
+        polysources = []
         
         if len(polygons) != 0:
             # polygons != "" or polygons != [] or 
@@ -295,17 +305,22 @@ labels(a) as Labels, a.parent as Parent, a.DatasetCitation as Citation, a.Datase
                 for i in range(0,len(polygons)):
                     poly["features"].append(json.loads(polygons[i]['geometry']))
                     poly["features"][i]["source"] = (polygons[i]['source'])
+                    polysources.append(polygons[i]['source'])
                 polygons = poly
                 # polygons = json.loads(polygons)
             else:
                 temp = polygons
                 polygons = [json.loads(polygons[0]['geometry'])]
                 polygons[0]["source"] = (temp[0]['source'])
+                polysources.append(temp[0]['source'])
                 temp = None
 
         with open('new.json', 'w', encoding='utf-8') as f:
             json.dump(polygons, f, ensure_ascii=False, indent=4)
         
+        with open('data.json', 'w', encoding='utf-8') as f:
+                json.dump(points, f, ensure_ascii=False, indent=4)
+                
         if len(points) > 0:
             for i in range(0,len(points)):
                 if json.loads(points[i]['geometry'])["type"] != "MultiPoint":
@@ -326,7 +341,8 @@ labels(a) as Labels, a.parent as Parent, a.DatasetCitation as Citation, a.Datase
         #         else:
         #             for j in range(0,len(json.loads(points[i]['geometry'])["coordinates"])):
         #                 print(points[i])
-
+        
+        
         with open('data.json', 'w', encoding='utf-8') as f:
                 json.dump(points, f, ensure_ascii=False, indent=4)
                         
@@ -336,7 +352,8 @@ labels(a) as Labels, a.parent as Parent, a.DatasetCitation as Citation, a.Datase
         "polygons": polygons,
         "points": points,
         "label":labels,
-        "relnames": relnames
+        "relnames": relnames,
+        "polysource": polysources
     })
 
 #         center = 0
