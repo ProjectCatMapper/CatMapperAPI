@@ -510,16 +510,17 @@ def getExplore():
         qInfo = '''
 unwind $cmid as cmid match (a)<-[r:USES]-(d:DATASET)
 where a.CMID = cmid with a,r,d
-call apoc.when(r.country is not null,'return custom.getName($id) as name','return null as name',{id:r.country}) yield value as country
-call apoc.when(r.language is not null,'return custom.getGlot($id) as name','return null as name',{id:r.language}) yield value as language
-call apoc.when(r.religion is not null,'return custom.getName($id) as name','return null as name',{id:r.religion}) yield value as religion
-with a,r,d, country, language, religion,
+call apoc.when(r.country is not null and not r.country = [],'return custom.getName($id) as name','return null as name',{id:r.country}) yield value as country
+call apoc.when(r.district is not null and not r.district = [],'return custom.getName($id) as name','return null as name',{id:r.district}) yield value as district
+call apoc.when(r.language is not null and not r.language = [],'return custom.getGlot($id) as name','return null as name',{id:r.language}) yield value as language
+call apoc.when(r.religion is not null and not r.religion = [],'return custom.getName($id) as name','return null as name',{id:r.religion}) yield value as religion
+with a,r,d, country, district, language, religion,
 case when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is not null then custom.getMinYear(r.yearStart) + '-' + custom.getMaxYear(r.yearEnd)
 when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is null then custom.getMinYear(r.yearStart) + '-present'
 when custom.getMinYear(r.yearStart) is null and custom.getMaxYear(r.yearEnd) is not null then custom.getMaxYear(r.yearEnd)
 else null
 end as timeSpan
-return a.CMName as CMName, custom.anytoList(collect(split(country.name,', ')),true) as Location, 
+return a.CMName as CMName, apoc.text.join([i in [custom.anytoList(collect(split(country.name,', ')),true),custom.anytoList(collect(split(district.name,', ')),true)] where not i = ''],', ') as Location, 
 a.CMID as CMID, apoc.text.join([i in labels(a) where not i = 'CATEGORY'],', ') as Labels, 
 custom.anytoList(collect(split(language.name,', ')),true) as Languages, custom.anytoList(collect(split(religion.name,', ')),true) as Religions, 
 custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
@@ -528,10 +529,13 @@ custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
 unwind $cmid as cmid
 match (a)<-[r:USES]-(d:DATASET)
 where a.CMID = cmid
-with custom.anytoList(collect(r.Name),true) as Name, r.country as LocationID, d.project as Source, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, 
+with custom.anytoList(collect(r.Name),true) as Name, r.country as countryID, r.district as districtID, d.project as Source, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, 
 toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
-call apoc.when(LocationID is not null,'return custom.getName($id) as Location','return null',{id:LocationID}) yield value
-return Name, custom.anytoList(collect(value.Location),true) as Location, type as Type, 
+call apoc.when(countryID is not null,'return custom.getName($id) as country','return null',{id:countryID}) yield value
+with Name, value as country, districtID, Source, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
+call apoc.when(districtID is not null,'return custom.getName($id) as district','return null',{id:districtID}) yield value
+with Name, country, value as district, Source, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
+return Name, apoc.text.join([i in [custom.anytoList(collect(country.country),true),custom.anytoList(collect(district.district),true)] where not i = ''],', ') as Location, type as Type, 
 apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),
 toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),
 toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Population est.`,  
@@ -1021,7 +1025,7 @@ with row, a, matching, 0 as score
 with row call {{ with row 
 call db.index.fulltext.queryNodes('{domain}', '"' + custom.cleanText(row.term) + '"') yield node return node
 union with row 
-call db.index.fulltext.queryNodes('{domain}', '"' + custom.cleanText(row.term) + '~"') yield node return node}}
+call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term) + '~') yield node return node}}
 with row, node as a
 with row, a, custom.matchingDist(a.names, row.term) as matching
 with row, a, matching.matching as matching, toInteger(matching.score) as score
@@ -1031,7 +1035,7 @@ with row, a, matching.matching as matching, toInteger(matching.score) as score
 with row call {{ with row 
 call db.index.fulltext.queryNodes('{domain}', '"' + custom.cleanText(row.term) + '"') yield node return node
 union with row
-call db.index.fulltext.queryNodes('{domain}', '"' + custom.cleanText(row.term) + '~"') yield node return node}}
+call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term) + '~') yield node return node}}
 with row, node as a
 with row, a, custom.matchingDist([a.CMName, a.shortName, a.DatasetCitation], row.term) as matching
 with row, a, matching.matching as matching, toInteger(matching.score) as score
@@ -1276,6 +1280,7 @@ u.role = 'user',
 u.intendedUse = $intendedUse
 return u.userID as userID
 """
+
         with driver.session() as session:
             result = session.run(query,firstName = firstName, lastName = lastName, email = email, password = password,username = username,intendedUse = intendedUse)
             data = [dict(record) for record in result]

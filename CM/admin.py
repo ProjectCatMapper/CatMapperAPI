@@ -1,37 +1,11 @@
 ''' admin.py '''
 
+from .utils import * 
+
 # This is a module for admin functions in CatMapper
 
 import re
 from neo4j import GraphDatabase
-
-def EClanguageMerge(cmid,driver):
-    """
-    Remove EC language from the USES relationship in preparation for merge.
-
-    :param cmid: The CMID (CatMapperID) to identify the CATEGORY node.
-    :type cmid: str
-    :param driver: The Neo4j driver for database interaction.
-    :type driver: neo4j.Driver
-
-    :return: A message indicating the completion status.
-    :rtype: str
-
-    :raises: Exception in case of an error during execution.
-    """
-    try:
-        query = """
-        match (c:CATEGORY {CMID: $cmid})<-[r:USES]-(d:DATASET {CMID: "SD11"})
-        where not r.language is null
-        with r, r.language as lang
-        set r.language = NULL, r.log = apoc.coll.flatten([r.log,toString(date()) + ": removed language " + lang + " from USES relationship in preparation for merge"],true)
-        """
-        with driver.session() as session:
-                session.run(query,cmid = cmid)
-                driver.close()
-        return f"Completed removing EC language from {cmid}"
-    except Exception as e:
-        return str(e), 500
 
 def replaceProperty(cmid, property, old, new, driver):
     """
@@ -102,36 +76,6 @@ def getUSESrels(request, driver):
     except Exception as e:
         return str(e), 500
 
-def mergeRels(cmid, driver):
-    """
-    Identify and merge relationships for a specified CMID.
-
-    Parameters:
-    - cmid: The CMID for which relationship merging should occur.
-    - driver: Neo4j driver for database interaction.
-
-    Returns:
-    - str: A string indicating the completion of the relationship merging.
-
-    Raises:
-    - Exception: In case of any unexpected errors during relationship merging.
-    """
-    try:
-        query = """
-unwind $cmid as cmid match (a)-[r]-(b) 
-where a.CMID = cmid and not type(r) = 'USES' 
-with id(a) as id1, id(b) as id2, type(r) as type, count(r) as c 
-where c > 1 
-return id1, id2, type
-"""
-        with driver.session() as session:
-            results = session.run(query,cmid = cmid)
-            driver.close()
-        return "Completed"
-
-    except Exception as e:
-        return str(e), 500
-
 # function to add CMName to Name property
 def addCMNametoName(cmid, driver):
     try:
@@ -139,23 +83,27 @@ def addCMNametoName(cmid, driver):
             dataset = "AD941"
         else:
             dataset = "SD11"
+
         query = """
-match (c:CATEGORY)<-[r:USES]-(:DATASET) 
-where c.CMID in $cmid
-with c, collect(r) as rels, apoc.coll.toSet(apoc.coll.flatten(collect(r.Name),true)) as names 
-where not c.CMName in names 
-with c
-match (d:DATASET {CMID: $dataset}) 
-merge (c)<-[r:USES]-(d) 
-on create set r.Key = "Key: " + c.CMID, r.Name = [c.CMName], r.log = [toString(date()) + ": automatically added CMName to USES relationship"]
-on match set r.Name = apoc.coll.flatten([c.CMName,r.Name],true),
-r.log = apoc.coll.flatten([r.log,toString(date()) + ": automatically added CMName to USES relationship"],true)  
-return c,d
- """
+        unwind $cmid as cmid
+        match (c:CATEGORY)<-[r:USES]-(:DATASET) 
+        where c.CMID = cmid
+        with c, collect(r) as rels, apoc.coll.toSet(apoc.coll.flatten(collect(r.Name),true)) as names 
+        where not c.CMName in names 
+        with c
+        match (d:DATASET {CMID: $dataset}) 
+        merge (c)<-[r:USES]-(d) 
+        on create set r.Key = "Key: " + c.CMID, r.Name = [c.CMName], r.log = [toString(date()) + ": automatically added CMName to USES relationship"]
+        on match set r.Name = apoc.coll.flatten([c.CMName,r.Name],true),
+        r.log = apoc.coll.flatten([r.log,toString(date()) + ": automatically added CMName to USES relationship"],true)  
+        return c,d
+        """
+
         with driver.session() as session:
             results = session.run(query,cmid = cmid, dataset = dataset)
             driver.close()
-        return "Completed"
+
+        return f"Completed adding names to {cmid}"
 
     except Exception as e:
         return str(e), 500
@@ -176,51 +124,118 @@ def mergeNodes(request,driver):
     - Exception: If invalid CMIDs are provided or in case of any unexpected errors.
     """
     try:
+
         keepcmid = request.args.get('keepcmid') 
         deletecmid = request.args.get('deletecmid')
-        # replace below with check to see if CMID is valid in database
-        if re.search("^AM|^AD|^SM|^AD", keepcmid) is None:
-            raise Exception("Invalid keepcmid")
-        if re.search("^AM|^AD|^SM|^AD", deletecmid) is None:
-            raise Exception("Invalid deletecmid")
+
+        if keepcmid == deletecmid:
+            raise Exception(f"keepcmid and deletecmid cannot be the same")
+
+        results = [f"Started Combining {deletecmid} into {keepcmid}"]
+
+        session = driver.session()
+
+        validKeep = isValidCMID(keepcmid,driver)
+
+        results = results + ["checking if keepcmid is valid",validKeep]
+
+        if len(validKeep) > 0:
+            if validKeep[0].get("exists") != True:
+                raise Exception(f"{keepcmid} is invalid")
+        else: 
+            raise Exception(f"{keepcmid} is invalid")
         
-        addCMNametoName(keepcmid, driver)
-        addCMNametoName(deletecmid, driver)
-        # just do language discard instead of this EClanguageMerge(deletecmid, driver)
+        deleteKeep = isValidCMID(deletecmid,driver)
+
+        results = results + ["checking if deletecmid is valid",deleteKeep]
+
+        if len(deleteKeep) > 0:
+            if deleteKeep[0].get("exists") != True:
+                raise Exception(f"{deletecmid} is invalid")
+            
+        else: 
+            raise Exception(f"{deletecmid} is invalid")
+        
+        results = results + [addCMNametoName(keepcmid, driver)]
+        results = results + [addCMNametoName(deletecmid, driver)]
+
+        # get EC relID
+        query = """
+        unwind $cmid as cmid match (c {CMID: cmid})<-[r:USES]-(d:DATASET {CMID: "SD11"}) return id(r) as relID
+            """ 
+        
+        result = session.run(query,cmid = keepcmid)
+        relID = [item['relID'] for item in result]
+
+        results = results + ["relID to keep"]
+        results = results + relID
 
         query = """
-match (a) where a.CMID = $keepcmid
-match (b) where b.CMID = $deletecmid 
-WITH collect(a) + collect(b) AS nodes
-CALL apoc.refactor.mergeNodes(nodes,{properties: {
-CMID:'discard',
-CMName:'discard',
-`.*`: 'combine'} })
-YIELD node
-with node
-unwind node as a
-with a
-MATCH (a)<-[r:USES]-(:DATASET)
-unwind keys(r) as property
-return distinct property
-"""
+        match (a) where a.CMID = $keepcmid
+        match (b) where b.CMID = $deletecmid 
+        WITH collect(a) + collect(b) AS nodes
+        CALL apoc.refactor.mergeNodes(nodes,{properties: {
+        CMID:'discard',
+        CMName:'discard',
+        `.*`: 'combine'} })
+        YIELD node
+        with node
+        unwind node as a
+        with a
+        MATCH (a)<-[r:USES]-(:DATASET)
+        unwind keys(r) as property
+        return distinct property
+        """
+
 # add in properties for anything that is a parent type node
-        with driver.session() as session:
-            result = session.run(query,keepcmid = keepcmid,deletecmid = deletecmid)
-            properties = [dict(record) for record in result]
-            result = session.run("match (m:PROPERTY) where m.relationship is not null return m.property as property")
-            contextProps = [dict(record) for record in result]
-            contextProps = [item['property'] for item in contextProps]
-            driver.close()
+        result = session.run(query,keepcmid = keepcmid,deletecmid = deletecmid)
+        properties = [dict(record) for record in result]
+        result = session.run("match (m:PROPERTY) where m.relationship is not null return m.property as property")
+        contextProps = [dict(record) for record in result]
+        contextProps = [item['property'] for item in contextProps]
+
         # make sure the second EC tie is combined
         # call the updateUSES function
         for prop in properties:
             property = prop['property']
             if property in contextProps:
-                print(f"updating {property} with new CMID")
+                results = results + [f"updating {property} with new CMID"]
                 replaceProperty(cmid = keepcmid, property = property, old = deletecmid, new = keepcmid, driver = driver)    
+
         # create deleted node and relationship
-        return "Completed"
+        query = """
+        unwind $keepcmid as keepcmid unwind $deletecmid as deletecmid 
+        match (new {CMID: keepcmid}) 
+        create (del:DELETED {CMID: deletecmid}) set del.log = [toString(date()) + ": merged " + deletecmid + " into " + keepcmid] 
+        with new, del 
+        create (del)-[:IS]->(new)
+        """
+
+        session.run(query,keepcmid = keepcmid,deletecmid = deletecmid)
+
+        
+        # combine EC USES ties
+        
+        if len(relID) > 0:
+            query = """
+            unwind $cmid as cmid 
+            match (:DATASET {CMID: "SD11"})-[r:USES]->({CMID: cmid}) 
+            with collect(r) as rels 
+            call apoc.do.when(id(head(rels)) in $relID,"call apoc.refactor.mergeRelationships(rels,{properties: {Key: 'discard', language: 'discard',`.*`: 'combine'}}) yield rel 
+            return count(*) as first","call apoc.refactor.mergeRelationships(rels,{properties: {Key: 'overwrite', language: 'overwrite',`.*`: 'combine'}}) yield rel 
+            return count(*) as second",{rels:rels}) yield value 
+            return value
+            """
+
+            session.run(query,cmid = keepcmid,relID = relID)
+
+
+        # need to update USES ties
+
+        results = results + [f"Completed combining {deletecmid} into {keepcmid}"]
+
+        return results
+    
     
     except Exception as e:
         return str(e), 500
