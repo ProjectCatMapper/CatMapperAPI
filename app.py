@@ -250,7 +250,7 @@ when custom.getMinYear(r.yearStart) is null and custom.getMaxYear(r.yearEnd) is 
 else null
 end as timeSpan
 return a.CMName as CMName, custom.anytoList(collect(split(country.name,', ')),true) as Location, 
-a.CMID as CMID, apoc.text.join([i in labels(a) where not i = 'CATEGORY'],', ') as Labels, 
+a.CMID as CMID, apoc.text.join([i in labels(a) where not i = 'CATEGORY'],', ') as Domains, 
 custom.anytoList(collect(split(language.name,', ')),true) as Languages, custom.anytoList(collect(split(religion.name,', ')),true) as Religions, 
 custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
 '''        
@@ -281,7 +281,7 @@ where a.CMID = cmid
 with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
 'return null as name',{id:a.District}) yield value as Location 
 return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
-labels(a) as Labels, a.parent as Parent, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
+labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
 '''
             samples = []
         
@@ -521,7 +521,7 @@ when custom.getMinYear(r.yearStart) is null and custom.getMaxYear(r.yearEnd) is 
 else null
 end as timeSpan
 return a.CMName as CMName, apoc.text.join([i in [custom.anytoList(collect(split(country.name,', ')),true),custom.anytoList(collect(split(district.name,', ')),true)] where not i = ''],', ') as Location, 
-a.CMID as CMID, apoc.text.join([i in labels(a) where not i = 'CATEGORY'],', ') as Labels, 
+a.CMID as CMID, apoc.text.join([i in labels(a) where not i = 'CATEGORY'],', ') as Domains, 
 custom.anytoList(collect(split(language.name,', ')),true) as Languages, custom.anytoList(collect(split(religion.name,', ')),true) as Religions, 
 custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
 '''        
@@ -553,7 +553,7 @@ where a.CMID = cmid
 with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
 'return null as name',{id:a.District}) yield value as Location 
 return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
-labels(a) as Labels, a.parent as Parent, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
+labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
 '''
         samples = []
     
@@ -851,6 +851,7 @@ with endnode(relationship) as a, relationship.Key as matching, case when $term c
 where '{domain}' in labels(a) and matching ends with term
 with a, matching, 0 as score
 """
+                
         elif property == "Name":
             if domain != "DATASET":
                 qStart = f"""
@@ -1330,9 +1331,9 @@ def getAdminEdit():
     try:
         database = request.args.get('database')
         fun = request.args.get('fun')
-        apikey = request.args.get('apikey')
+        apikey = CM.unlist(request.args.get('apikey'))
         if apikey != apikeyEnv:
-            raise Exception("Error: apikey is invalid")
+            raise Exception(f"Error: apikey is invalid: {apikey}")
         if database == "SocioMap":
             driver = connectionSM()
         elif database == "ArchaMap":

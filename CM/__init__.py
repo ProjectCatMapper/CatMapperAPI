@@ -8,3 +8,4 @@ from .admin import addIndexes
 from .utils import unlist
 from .users import password_hash
 from .utils import isValidCMID
+from .utils import createLog

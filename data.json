@@ -1,9 +1,16 @@
 [
     {
         "cood": [
-            24.4697,
-            118.3859
+            -16,
+            28
         ],
-        "source": "GeoNames202005"
+        "source": "HRAF"
+    },
+    {
+        "cood": [
+            -16,
+            28
+        ],
+        "source": "EthnographicAtlas"
     }
 ]
