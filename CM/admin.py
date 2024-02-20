@@ -127,6 +127,7 @@ def mergeNodes(request,driver):
 
         keepcmid = request.args.get('keepcmid') 
         deletecmid = request.args.get('deletecmid')
+        user = request.args.get("user")
 
         if keepcmid == deletecmid:
             raise Exception(f"keepcmid and deletecmid cannot be the same")
@@ -198,7 +199,7 @@ def mergeNodes(request,driver):
         # call the updateUSES function
         for prop in properties:
             property = prop['property']
-            if property in contextProps:
+            if property in contextProps or property == "parentContext":
                 results = results + [f"updating {property} with new CMID"]
                 replaceProperty(cmid = keepcmid, property = property, old = deletecmid, new = keepcmid, driver = driver)    
 
@@ -231,6 +232,12 @@ def mergeNodes(request,driver):
 
 
         # need to update USES ties
+            
+        id = session.run("unwind $keepcmid as cmid match (n {CMID: cmid}) return id(n) as id", keepcmid = keepcmid)
+        id = [item['id'] for item in id]
+        id = unlist(id)
+        results = results + ["id is:",id]
+        createLog(id = id, type = "node", log = f"merged {deletecmid} into {keepcmid}", user = user, driver = driver)
 
         results = results + [f"Completed combining {deletecmid} into {keepcmid}"]
 
