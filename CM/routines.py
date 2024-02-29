@@ -7,13 +7,13 @@ from neo4j import GraphDatabase
 def addLog(driver):
     try:
         query = """
-        match ()-[r:USES]-() where r.log is null set r.log = []
+        match ()-[r:USES]-() where r.log is null set r.log = custom.makeLog([],"0","added log property)
         """
         with driver.session() as session:
                 results = session.run(query)
                 driver.close()
         query = """
-        match (c) where c.log is null set c.log = []
+        match (c) where c.log is null set c.log = [custom.makeLog([],"0","added log property)]
         """
         with driver.session() as session:
                 results = session.run(query)
@@ -46,3 +46,7 @@ def checkDomains(data,driver):
          
     except Exception as e:
         return str(e)
+    
+
+# need to create function based off this
+# with "eventType" as prop match (a)-[r]->(b) where not r[prop] is null and r[prop] = [] call apoc.cypher.doIt("with r set r." + prop + " = NULL",{r:r}) yield value return count(*)
