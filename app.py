@@ -991,7 +991,7 @@ def getTranslate():
             driver = connectionAM()
         else:
             raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
-        
+
         # Define the Cypher query
     
         qLoad = "unwind $rows as row with row call {"
