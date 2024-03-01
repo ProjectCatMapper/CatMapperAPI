@@ -12,6 +12,7 @@ import string
 from flasgger import Swagger, LazyString, LazyJSONEncoder
 import CM
 import pysodium
+import pandas as pd
 # from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
@@ -198,9 +199,9 @@ def catm():
         cmid = request.args.get('cmid')
         database = request.args.get('database')
 
-        if database == "SocioMap":
+        if str.lower(database) == "sociomap":
             driver = connectionSM()
-        elif database == "ArchaMap":
+        elif str.lower(database) == "archamap":
             driver = connectionAM()
         else:
             pass
@@ -222,10 +223,10 @@ def catm():
                 relnames.append(i['label'])
         driver.close()
 
-        if database == "SocioMap":
+        if str.lower(database) == "sociomap":
             driver = connectionSM()
             label = re.search("^SM",cmid)
-        elif database == "ArchaMap":
+        elif str.lower(database) == "archamap":
             driver = connectionAM()
             label = re.search("^AM",cmid)
         else:
@@ -492,10 +493,10 @@ def getExplore():
     cmid = request.args.get('cmid')
     database = request.args.get('database')
 
-    if database == "SocioMap":
+    if str.lower(database) == "sociomap":
         driver = connectionSM()
         label = re.search("^SM",cmid)
-    elif database == "ArchaMap":
+    elif str.lower(database) == "archamap":
         driver = connectionAM()
         label = re.search("^AM",cmid)
     else:
@@ -607,9 +608,9 @@ def getNetwork():
             relation = "USES"
         database = request.args.get('database')
 
-        if database == "SocioMap":
+        if str.lower(database) == "sociomap":
             driver = connectionSM()
-        elif database == "ArchaMap":
+        elif str.lower(database) == "archamap":
             driver = connectionAM()
         else:
             raise Exception("must specify database as SocioMap or ArchaMap")
@@ -768,9 +769,9 @@ def getSearch():
         limit = request.args.get('limit')
         query = request.args.get('query')
 
-        if database == "SocioMap":
+        if str.lower(database) == "sociomap":
             driver = connectionSM()
-        elif database == "ArchaMap":
+        elif str.lower(database) == "archamap":
             driver = connectionAM()
         else:
             raise Exception("must specify database as 'SocioMap' or 'ArchaMap'")
@@ -985,9 +986,9 @@ def getTranslate():
         if query != 'true':
             query = 'false'
         rows = data.get("rows")
-        if database == "SocioMap":
+        if str.lower(database) == "sociomap":
             driver = connectionSM()
-        elif database == "ArchaMap":
+        elif str.lower(database) == "archamap":
             driver = connectionAM()
         else:
             raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
@@ -1164,9 +1165,9 @@ def getQuery():
         pwd = rows.get("pwd")
         params = rows.get("params")
         
-        if database == "SocioMap":
+        if str.lower(database) == "sociomap":
             driver = connectionSM()
-        elif database == "ArchaMap":
+        elif str.lower(database) == "archamap":
             driver = connectionAM()
         elif database == "gisdb":
             driver = connectionGIS()
@@ -1208,9 +1209,9 @@ def getGeometry():
     simple = request.args.get('simple')
     if simple is None:
         simple = True
-    if database == "SocioMap":
+    if str.lower(database) == "sociomap":
         driver = connectionSM()
-    elif database == "ArchaMap":
+    elif str.lower(database) == "archamap":
         driver = connectionAM()
     elif database == "gisdb":
         driver = connectionGIS()
@@ -1233,9 +1234,9 @@ def getnewuser():
         password = CM.password_hash(password)
         intendedUse = data.get("intendedUse")
         
-        if database == "SocioMap":
+        if str.lower(database) == "sociomap":
             driver = connectionSM()
-        elif database == "ArchaMap":
+        elif str.lower(database) == "archamap":
             driver = connectionAM()
         elif database == "gisdb":
             driver = connectionGIS()
@@ -1334,9 +1335,9 @@ def getAdminEdit():
         apikey = CM.unlist(request.args.get('apikey'))
         if apikey != apikeyEnv:
             raise Exception(f"Error: apikey is invalid: {apikey}")
-        if database == "SocioMap":
+        if str.lower(database) == "sociomap":
             driver = connectionSM()
-        elif database == "ArchaMap":
+        elif str.lower(database) == "archamap":
             driver = connectionAM()
         else:
             raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
@@ -1355,6 +1356,46 @@ def getAdminEdit():
         data = str(e)
         return data, 500
 
+@app.route('/dataset', methods=['GET'])
+def getDataset():
+    # to do: document
+    try:
+        database = CM.unlist(request.args.get('database'))
+        cmid = CM.unlist(request.args.get('cmid'))
+        domain = CM.unlist(request.args.get('domain'))
+
+        if domain is None:
+            domain = "CATEGORY"
+      
+        if str.lower(database) == "sociomap":
+            driver = connectionSM()
+        elif str.lower(database) == "archamap":
+            driver = connectionAM()
+        else:
+            raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
+        query = """
+ unwind $cmid as cmid
+ match (a:DATASET)-[r:USES]->(b) 
+ where a.CMID = cmid and not isEmpty([i in labels(b) 
+ where i in apoc.coll.flatten([$domain],true)]) 
+ unwind keys(r) as property with a,r,b, property 
+ where not property in ['type','Key','log'] 
+ return distinct a.CMName as datasetName, a.CMID as datasetID, 
+ b.CMID as CMID, b.CMName as CMName, r.type as type, 
+ r.Key as Key, property, r[property] as value
+"""
+        with driver.session() as session:
+            result = session.run(query,cmid = cmid,domain = domain)
+            data = [dict(record) for record in result]
+            driver.close()
+        df = pd.DataFrame(data)
+        df = df.pivot_table(index='CMID', columns='property', values='value', aggfunc='first').reset_index()
+        return jsonify(df.to_json(orient='records'))
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+
 @app.route('/routines', methods=['GET'])
 def routines():
     # this route will not be documented in swagger
@@ -1369,9 +1410,9 @@ def routines():
             data = True
         else:
             data = False
-        if database == "SocioMap":
+        if str.lower(database) == "sociomap":
             driver = connectionSM()
-        elif database == "ArchaMap":
+        elif str.lower(database) == "archamap":
             driver = connectionAM()
         else:
             raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
