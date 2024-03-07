@@ -7,13 +7,13 @@ from neo4j import GraphDatabase
 def addLog(driver):
     try:
         query = """
-        match ()-[r:USES]-() where r.log is null set r.log = custom.makeLog([],"0","added log property)
+        match ()-[r:USES]-() where r.log is null set r.log = custom.makeLog([],"0","added log property")
         """
         with driver.session() as session:
                 results = session.run(query)
                 driver.close()
         query = """
-        match (c) where c.log is null set c.log = [custom.makeLog([],"0","added log property)]
+        match (c) where c.log is null set c.log = [custom.makeLog([],"0","added log property")]
         """
         with driver.session() as session:
                 results = session.run(query)
@@ -39,7 +39,7 @@ def checkDomains(data,driver):
                 results = session.run(query)           
                 result = [dict(record) for record in results]
                 if data is False:
-                     result = str(len(result)) + " invalid domains"
+                     result = result
                 driver.close()
         
         return result

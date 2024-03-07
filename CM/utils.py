@@ -4,6 +4,17 @@
 
 import re
 from datetime import datetime
+from neo4j import GraphDatabase
+
+def getQuery(query,driver, params = None):
+    try:
+        with driver.session() as session:
+            result = session.run(query,params)
+            result = [dict(record) for record in result]
+            driver.close()
+        return result
+    except Exception as e:
+        return str(e), 500
 
 def unlist(l):
     if isinstance(l, list):
@@ -44,3 +55,36 @@ def createLog(id, type, log, user, driver):
         driver.close()
 
     return "Completed"
+
+def getPropertiesMetadata(driver):
+    try:
+
+        query = """
+match (n:METADATA:PROPERTY) 
+return n.property as property, n.type as type, 
+n.relationship as relationship, n.description as description, 
+n.display as display, n.group as group, 
+n.metaType as metaType, n.search as search, 
+n.translation as translation
+"""
+        data = getQuery(query = query, driver = driver)
+        return data
+    
+    except Exception as e:
+        return str(e), 500
+    
+def getLabelsMetadata(driver):
+    try:
+
+        query = """
+match (n:METADATA:LABEL) 
+return n.label as label, n.groupLabel as groupLabel, 
+n.relationship as relationship, n.public as public, 
+n.default as default, n.description as description, 
+n.displayName as displayName, n.remove as remove, n.color as color
+"""
+        data = getQuery(query = query, driver = driver)
+        return data
+    
+    except Exception as e:
+        return str(e), 500
