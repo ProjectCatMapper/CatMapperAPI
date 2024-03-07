@@ -1418,10 +1418,14 @@ def routines():
             raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
         result = "Nothing returned"
         if fun == "addLog":
-            result = CM.addLog(driver)
-        if fun == "checkDomains":
-            result = CM.checkDomains(data,driver)
-        return result
+            result = CM.addLog(driver = driver)
+        elif fun == "checkDomains":
+            result = CM.checkDomains(data = data,driver = driver)
+        elif fun == "updateUses":
+            CMID = request.args.get('CMID') 
+            result = CM.updateUses(driver = driver, CMID = CMID)    
+        else:
+            result = "function not found"
         return result
     except Exception as e:
     # In case of an error, return an error response with an appropriate HTTP status code

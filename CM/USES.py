@@ -1,0 +1,232 @@
+''' USES.py '''
+
+from .utils import *
+
+def mergeDupRelations(driver, CMID = None):
+    try:
+
+        if CMID is not None:
+            qFiltera = "unwind $cmid as cmid"
+            qFilterb = "a.CMID = cmid and"
+        else: 
+            qFiltera = ""
+            qFilterb = ""
+
+        query = qFiltera + """
+match (a)-[r]-(b) 
+where 
+""" + qFilterb + """
+not type(r) = 'USES' 
+with a, b, collect(r) as rels 
+call apoc.refactor.mergeRelationships(rels,{properties: {`.*`: 'combine'}}) yield rel 
+return count(*) as count
+"""
+        result = getQuery(query, driver = driver, params = {"cmid": CMID})
+
+        return result
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+
+def fixUsesRels(driver, property, relationship, CMID = None):
+    try:
+        if property in ["country","district"]:
+            qProp = "collect(distinct r.country) + collect(distinct r.district)"
+        else:
+            qProp = f"collect(distinct r.{property})"
+
+        if CMID is not None:
+            qFiltera = "unwind $cmid as cmid"
+            qFilterb = "a.CMID = cmid and"
+        else: 
+            qFiltera = ""
+            qFilterb = ""
+
+        query1 = qFiltera + """
+      match (a:CATEGORY)<-[r:USES]-(:DATASET)
+      where 
+      """ + qFilterb + f"""
+      not r.{property} is null
+      with a, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.{property}),true)) as cmids 
+      match (n:CATEGORY) where n.CMID in cmids
+      merge (a)<-[:{relationship}]-(n)
+      return count(*) as count
+"""
+        query2 = qFiltera + f"""
+      match (n)-[rel:{relationship}]->(a:CATEGORY {{CMID: id}})<-[r:USES]-(:DATASET)
+      where 
+      """ + qFilterb + f"""
+      not r.{property} is null
+      with a, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.{property}),true)) as current, 
+      apoc.coll.toSet(apoc.coll.flatten(collect(distinct n.CMID),true)) as exists, collect(distinct rel) as rels, collect(n) as nodes
+      with a, rels, nodes, [i in exists where not i in current] as extra
+      unwind nodes as n unwind rels as rel with n,  rel, extra where n.CMID in extra and id(startNode(rel)) = id(n)
+      delete rel
+"""
+        
+        if CMID is not None:
+            qFiltera = "unwind $cmid as cmid"
+            qFilterb = "where a.CMID = cmid"
+        else: 
+            qFiltera = ""
+            qFilterb = ""
+
+        query3 = qFiltera + f"""
+     match (d:DATASET)-[rU:USES]->(a:CATEGORY)<-[rs:{relationship}]-(b:CATEGORY)
+    """ + qFilterb + f"""
+     unwind rU.{property} as prop
+     with d,a,b,rU,rs,prop
+     where b.CMID = prop
+     with distinct b, rs,a, collect(distinct d.shortName + " Key: " + rU.Key) as refKey
+     set rs.referenceKey = refKey
+"""
+        data = getQuery(query = query1, driver = driver, params = {'cmid': CMID})
+        getQuery(query = query2, driver = driver, params = {'cmid': CMID})
+        getQuery(query = query3, driver = driver, params = {'cmid': CMID})
+
+        return data
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+
+def updateLabels(driver, CMID = None):
+    try:
+
+        if CMID is not None:
+            qFiltera = "unwind $cmid as cmid"
+            qFilterb = "a.CMID = cmid and"
+        else: 
+            qFiltera = ""
+            qFilterb = ""
+
+        query = qFiltera + """
+    match (a)<-[r:USES]-(:DATASET)
+where 
+""" + qFilterb + """
+r.label is not null
+with a,r
+match (l:METADATA:LABEL)
+with a, collect(distinct l.label) as l, apoc.coll.flatten(collect(distinct r.label),true) as labels
+with a, [i in labels where i in l] as labels
+with a, labels + ["CATEGORY"] as labels
+call apoc.create.setLabels(a,labels) yield node
+return count(*)
+"""
+        result = getQuery(query = query, driver = driver, params = {"cmid":CMID})
+
+        labels = getLabelsMetadata(driver = driver)
+
+        for label,groupLabel in zip([item['label'] for item in labels if 'label' in item],[item['groupLabel'] for item in labels if 'groupLabel' in item]):
+            query = f"match (a:{label}) set a:{groupLabel}"
+            getQuery(driver = driver, query = query)
+
+        return result
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+
+def updateContains(driver, CMID = None):
+    try:
+
+        if CMID is not None:
+            qFiltera = "unwind $cmid as cmid"
+            qFilterb = "a.CMID = cmid and"
+        else: 
+            qFiltera = ""
+            qFilterb = ""
+
+        query1 = qFiltera + """
+match (:DATASET)-[rU:USES]->(a:CATEGORY)
+where
+""" + qFilterb + """
+  rU.parentContext is not null
+unwind rU.parentContext as propsL
+with a, propsL where apoc.meta.cypher.type(propsL) = "STRING"
+with a, case when propsL contains '[' then apoc.convert.fromJsonList(propsL) when propsL contains '{' then apoc.convert.fromJsonMap(propsL) else NULL end as prop
+unwind prop as p
+with distinct a, p match (a)<-[rC:CONTAINS]-(c:CATEGORY {CMID: p.parent})
+with a,rC,c, apoc.coll.toSet(apoc.coll.flatten(collect(p.eventType),true)) as eventType, apoc.coll.toSet(apoc.coll.flatten(collect(p.eventDate),true)) as eventDate
+set rC.eventType = eventType, rC.eventDate = eventDate return count(*)
+    """
+
+        if CMID is not None:
+            qFiltera = "unwind $cmid as cmid"
+            qFilterb = "where a.CMID = cmid"
+        else: 
+            qFiltera = ""
+            qFilterb = ""
+
+        query2 = qFiltera + """
+match (d:DATASET)-[rU:USES]->(a:CATEGORY)<-[rC:CONTAINS]-(p:CATEGORY) 
+""" + qFilterb + """
+with a,p, apoc.coll.flatten(collect(rU.parentContext),true) as pProps, apoc.coll.flatten(collect(rC.eventDate),true)  as eds, apoc.coll.flatten(collect(rC.eventType),true)  as ets
+with a,p, [i in pProps where not i = ""] as pProps, [i in eds where not i = ""] as eds, [i in ets where not i = ""] as ets
+where isEmpty(pProps) and (not isEmpty(eds) or not isEmpty(ets))
+match (a)<-[r:CONTAINS]-(p) set r.eventDate = NULL, r.eventType = NULL
+    """
+        
+        getQuery(query1,driver, params = {'cmid':CMID})
+        getQuery(query2,driver, params = {'cmid':CMID})
+
+        return "Completed"
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+
+def updateAltNames(driver, CMID = None):
+    try:
+        
+        if CMID is not None:
+            qFiltera = "unwind $cmid as cmid"
+            qFilterb = "where a.CMID = cmid"
+        else: 
+            qFiltera = ""
+            qFilterb = ""
+
+        query = qFiltera + """
+match (a:CATEGORY)<-[r:USES]-(:DATASET)
+""" + qFilterb + """
+with a, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.Name),true)) as names
+set a.names = names
+return count(a)
+"""
+        getQuery(query,driver, params = {'cmid':CMID})
+
+        return ""
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+
+def updateUses(driver, CMID=None, user="0"):
+    try:
+        # Fix duplicate relationships
+        if CMID is not None:
+            mergeDupRelations(CMID=CMID, driver = driver)
+
+        # Update structural properties and referenceKeys
+        properties = getPropertiesMetadata(driver = driver)
+        properties = [item for item in properties if item.get('relationship') is not None] 
+        for property, relationship in zip([item['property'] for item in properties if 'property' in item], [item['relationship'] for item in properties if 'relationship' in item]):
+            # print(f"{property} {relationship} {CMID}")
+            
+            fixUsesRels(CMID=CMID, property=property, relationship=relationship, driver = driver)
+
+        # Update labels
+        updateLabels(CMID=CMID, driver = driver)
+
+        # Update contains relationships
+        updateContains(CMID=CMID, driver = driver)
+
+        # Update alternative names
+        updateAltNames(CMID=CMID, driver = driver)
+        
+        return "Completed"
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500

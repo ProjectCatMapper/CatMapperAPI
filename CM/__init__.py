@@ -9,3 +9,12 @@ from .utils import unlist
 from .users import password_hash
 from .utils import isValidCMID
 from .utils import createLog
+from .utils import getPropertiesMetadata
+from .utils import getQuery
+from .utils import getLabelsMetadata
+from .USES import updateUses
+from .USES import mergeDupRelations
+from .USES import fixUsesRels
+from .USES import updateLabels
+from .USES import updateContains
+from .USES import updateAltNames
