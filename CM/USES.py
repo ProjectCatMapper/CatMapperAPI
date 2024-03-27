@@ -44,17 +44,17 @@ def fixUsesRels(driver, property, relationship, CMID = None):
             qFilterb = ""
 
         query1 = qFiltera + """
-      match (a:CATEGORY)<-[r:USES]-(:DATASET)
-      where 
-      """ + qFilterb + f"""
-      not r.{property} is null
-      with a, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.{property}),true)) as cmids 
-      match (n:CATEGORY) where n.CMID in cmids
-      merge (a)<-[:{relationship}]-(n)
-      return count(*) as count
+match (a:CATEGORY)<-[r:USES]-(:DATASET)
+where 
+""" + qFilterb + f"""
+not r.{property} is null
+with a, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.{property}),true)) as cmids 
+match (n:CATEGORY) where n.CMID in cmids
+merge (a)<-[:{relationship}]-(n)
+return count(*) as count
 """
         query2 = qFiltera + f"""
-      match (n)-[rel:{relationship}]->(a:CATEGORY {{CMID: id}})<-[r:USES]-(:DATASET)
+      match (n)-[rel:{relationship}]->(a:CATEGORY)<-[r:USES]-(:DATASET)
       where 
       """ + qFilterb + f"""
       not r.{property} is null
@@ -149,8 +149,11 @@ with a, case when propsL contains '[' then apoc.convert.fromJsonList(propsL) whe
 unwind prop as p
 with distinct a, p match (a)<-[rC:CONTAINS]-(c:CATEGORY {CMID: p.parent})
 with a,rC,c, apoc.coll.toSet(apoc.coll.flatten(collect(p.eventType),true)) as eventType, apoc.coll.toSet(apoc.coll.flatten(collect(p.eventDate),true)) as eventDate
-set rC.eventType = eventType, rC.eventDate = eventDate return count(*)
-    """
+call apoc.when(size(eventDate) > 0,"set rC.eventDate = eventDate","set rC.eventDate = NULL",{rC:rC,eventDate:eventDate}) yield value
+with rC, eventType
+call apoc.do.when(size(eventType) > 0,"set rC.eventType = eventType","set rC.eventType = NULL",{rC:rC,eventType:eventType}) yield value
+return count(*)
+"""
 
         if CMID is not None:
             qFiltera = "unwind $cmid as cmid"
@@ -166,7 +169,7 @@ with a,p, apoc.coll.flatten(collect(rU.parentContext),true) as pProps, apoc.coll
 with a,p, [i in pProps where not i = ""] as pProps, [i in eds where not i = ""] as eds, [i in ets where not i = ""] as ets
 where isEmpty(pProps) and (not isEmpty(eds) or not isEmpty(ets))
 match (a)<-[r:CONTAINS]-(p) set r.eventDate = NULL, r.eventType = NULL
-    """
+"""
         
         getQuery(query1,driver, params = {'cmid':CMID})
         getQuery(query2,driver, params = {'cmid':CMID})
