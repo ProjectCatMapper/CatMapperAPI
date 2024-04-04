@@ -113,6 +113,17 @@ def flatten_json(json_obj, parent_key='', sep='_'):
             flat_dict[new_key] = value
     return flat_dict
 
+def custom_sort(elem):
+    if elem == 'CONTAINS':
+        return 0
+    elif elem == 'DISTRICT_OF':
+        return 1
+    elif elem == 'USES':
+        return 2
+    else:
+        return 3
+
+
 #app=FastAPI()
 app = Flask(__name__)
 
@@ -276,14 +287,25 @@ apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Sourc
         
         else:
             qInfo = '''
-unwind $cmid as cmid 
-match (a:DATASET) 
-where a.CMID = cmid 
-with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
-'return null as name',{id:a.District}) yield value as Location 
-return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
-labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
-'''
+    unwind $cmid as cmid 
+    match (a:DATASET) 
+    where a.CMID = cmid 
+    with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
+    'return null as name',{id:a.District}) yield value as Location 
+    return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
+    labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
+    '''
+
+
+#             qInfo = '''
+# unwind $cmid as cmid 
+# match (a:DATASET) 
+# where a.CMID = cmid 
+# with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
+# 'return null as name',{id:a.District}) yield value as Location 
+# return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
+# labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
+# '''
             samples = []
         
         with driver.session() as session:
@@ -320,18 +342,21 @@ labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, a.Datas
             json.dump(polygons, f, ensure_ascii=False, indent=4)
         
         with open('data.json', 'w', encoding='utf-8') as f:
-                json.dump(points, f, ensure_ascii=False, indent=4)
+            json.dump(points, f, ensure_ascii=False, indent=4)
                 
         if len(points) > 0:
+            point= []
             for i in range(0,len(points)):
                 if json.loads(points[i]['geometry'])["type"] != "MultiPoint":
                     points[i] = {"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]}
                 else:
                     temp = points[i]
-                    del points[i]
                     source = temp['source']
                     for j in range(0,len(json.loads(temp['geometry'])['coordinates'])):
-                        points.append({'cood' : json.loads(temp['geometry'])['coordinates'][j][::-1], "source" : source })
+                        point.append({'cood' : json.loads(temp['geometry'])['coordinates'][j][::-1], "source" : source })
+            if point:
+                    points= point
+               
 
         # if len(points) > 0:
         #     for i in range(0,len(points)):
@@ -346,7 +371,9 @@ labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, a.Datas
         
         with open('data.json', 'w', encoding='utf-8') as f:
                 json.dump(points, f, ensure_ascii=False, indent=4)
-                        
+        
+        relnames = sorted(relnames, key=custom_sort)
+                                
         return jsonify({
         "info": info[0],
         "samples": samples,
@@ -543,10 +570,13 @@ def getExplore():
     toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Population est.`,  
     apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Source, Version, Link order by `Time span`, Source, Name
     '''
-            with driver.session() as session:
-                samples = session.run(qSamples, cmid = cmid)
-                samples = [dict(record) for record in samples]
-                driver.close()
+            qCategories = """
+unwind $cmid as cmid 
+match (a:ADM0 {CMID: cmid})-[:DISTRICT_OF]-(c:CATEGORY) 
+unwind labels(c) as Domain with Domain, count(*) as Count 
+return distinct Domain, Count order by Domain
+"""
+
         else:
             qInfo = '''
     unwind $cmid as cmid 
@@ -555,13 +585,32 @@ def getExplore():
     with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
     'return null as name',{id:a.District}) yield value as Location 
     return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
-    labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
+    labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, replace("<a href ='http://" + a.DatasetLocation + "' target='_blank' >" + a.DatasetLocation +"</a>","http://http://","http://") as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
     '''
-            samples = []
+            qSamples = None
+            qCategories = """
+unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[:USES]->(c:CATEGORY) 
+unwind labels(c) as Domain with Domain, count(*) as Count 
+return distinct Domain, Count order by Domain
+"""
+
+        # return [{"info": qInfo,
+        #         "samples":qSamples,
+        #         "categories": qCategories}]
         
         with driver.session() as session:
             info = session.run(qInfo, cmid = cmid)
             info = [dict(record) for record in info]
+            if qCategories is None:
+                categories = []
+            else: 
+                categories = session.run(qCategories,cmid = cmid)
+                categories = [dict(record) for record in categories]
+            if qSamples is not None:
+                samples = session.run(qSamples, cmid = cmid)
+                samples = [dict(record) for record in samples]
+            else: 
+                samples = []
             driver.close()
 
         polygons = getPolygon(cmid,driver)
@@ -576,7 +625,8 @@ def getExplore():
             "info": info,
             "samples": samples,
             "polygons": polygons,
-            "points": points
+            "points": points,
+            "categories": categories
         })
     
     except Exception as e:
@@ -632,7 +682,7 @@ optional match (a)-[r]-(e)
 where type(r) = relation and e.CMID = endcmid and
 not isEmpty([label IN labels(e) 
 WHERE label IN apoc.coll.flatten([$domain],true)]) 
-return distinct a,r,e limit 10
+return distinct a,r,e
 """        
         else:
             cypher_query = """
@@ -642,7 +692,7 @@ optional match (a)-[r]-(e)
 where type(r) = relation and
 not isEmpty([label IN labels(e) 
 WHERE label IN apoc.coll.flatten([$domain],true)]) 
-return distinct a,r,e limit 10
+return distinct a,r,e
 """        
         
         with driver.session() as session:
