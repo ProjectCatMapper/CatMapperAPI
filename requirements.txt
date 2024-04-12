@@ -7,4 +7,5 @@ setuptools
 flasgger>=0.9.7b2
 pysodium
 pandas
+beautifulsoup4
 # werkzeug>=0.16.1
