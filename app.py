@@ -592,7 +592,8 @@ def getExplore():
     when custom.getMinYear(r.yearStart) is null and custom.getMaxYear(r.yearEnd) is not null then custom.getMaxYear(r.yearEnd)
     else null
     end as timeSpan
-    return a.CMName as CMName, apoc.text.join([i in [custom.anytoList(collect(split(country.name,', ')),true),custom.anytoList(collect(split(district.name,', ')),true)] where not i = ''],', ') as Location, 
+    return a.CMName as CMName, apoc.text.join([i in [custom.anytoList(collect(split(country.name,', ')),true),
+    custom.anytoList(collect(split(district.name,', ')),true)] where not i = ''],', ') as Location, 
     a.CMID as CMID, apoc.text.join([i in labels(a) where not i = 'CATEGORY'],', ') as Domains, 
     custom.anytoList(collect(split(language.name,', ')),true) as Languages, custom.anytoList(collect(split(religion.name,', ')),true) as Religions, 
     custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
@@ -601,17 +602,19 @@ def getExplore():
     unwind $cmid as cmid
     match (a)<-[r:USES]-(d:DATASET)
     where a.CMID = cmid
-    with custom.anytoList(collect(r.Name),true) as Name, r.country as countryID, r.district as districtID, d.project as Source, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, 
+    with custom.anytoList(collect(r.Name),true) as Name, r.country as countryID,
+    r.district as districtID, d.project as Source, d.CMID as datasetID, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, 
     toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
     call apoc.when(countryID is not null,'return custom.getName($id) as country','return null',{id:countryID}) yield value
-    with Name, value as country, districtID, Source, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
+    with Name, value as country, districtID, Source, datasetID, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
     call apoc.when(districtID is not null,'return custom.getName($id) as district','return null',{id:districtID}) yield value
-    with Name, country, value as district, Source, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
+    with Name, country, value as district, Source, datasetID, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
     return Name, apoc.text.join([i in [custom.anytoList(collect(country.country),true),custom.anytoList(collect(district.district),true)] where not i = ''],', ') as Location, type as Type, 
     apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),
     toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),
     toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Population est.`,  
-    apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Source, Version, Link order by `Time span`, Source, Name
+    apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, '<a href="/app/' + $database + '/?main=view&explore=' + datasetID + '" target="_blank" >' + Source + '</a>' as Source,
+    Version, Link order by `Time span`, Source, Name
     '''
             qCategories = """
 unwind $cmid as cmid 
@@ -650,7 +653,7 @@ return distinct Domain, Count order by Domain
                 categories = session.run(qCategories,cmid = cmid)
                 categories = [dict(record) for record in categories]
             if qSamples is not None:
-                samples = session.run(qSamples, cmid = cmid)
+                samples = session.run(qSamples, cmid = cmid, database = database)
                 samples = [dict(record) for record in samples]
             else: 
                 samples = []

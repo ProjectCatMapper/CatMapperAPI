@@ -33,48 +33,52 @@ def fixUsesRels(driver, property, relationship, CMID = None):
     try:
         if property in ["country","district"]:
             qProp = "collect(distinct r.country) + collect(distinct r.district)"
+            qProp2 = ""
         else:
             qProp = f"collect(distinct r.{property})"
+            qProp2 = f"and not r.{property} is null"
 
         if CMID is not None:
             qFiltera = "unwind $cmid as cmid"
-            qFilterb = "a.CMID = cmid and"
+            qFilterb = "a.CMID = cmid "
         else: 
             qFiltera = ""
             qFilterb = ""
+        
+        if qProp2 == "" and qFiltera == "":
+            qWhere = ""
+        else:
+            qWhere = "where"
 
-        query1 = qFiltera + """
+        query1 = f"""
+        {qFiltera}
 match (a:CATEGORY)<-[r:USES]-(:DATASET)
-where 
-""" + qFilterb + f"""
-not r.{property} is null
-with a, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.{property}),true)) as cmids 
+{qWhere}
+{qFilterb}
+{qProp2}
+with a, apoc.coll.toSet(apoc.coll.flatten({qProp},true)) as cmids 
 match (n:CATEGORY) where n.CMID in cmids
 merge (a)<-[:{relationship}]-(n)
 return count(*) as count
 """
-        query2 = qFiltera + f"""
+        query2 = f"""
+        {qFiltera}
       match (n)-[rel:{relationship}]->(a:CATEGORY)<-[r:USES]-(:DATASET)
-      where 
-      """ + qFilterb + f"""
-      not r.{property} is null
-      with a, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.{property}),true)) as current, 
+      {qWhere} 
+      {qFilterb}
+      {qProp2}
+      with a, apoc.coll.toSet(apoc.coll.flatten({qProp},true)) as current, 
       apoc.coll.toSet(apoc.coll.flatten(collect(distinct n.CMID),true)) as exists, collect(distinct rel) as rels, collect(n) as nodes
       with a, rels, nodes, [i in exists where not i in current] as extra
       unwind nodes as n unwind rels as rel with n,  rel, extra where n.CMID in extra and id(startNode(rel)) = id(n)
       delete rel
 """
-        
-        if CMID is not None:
-            qFiltera = "unwind $cmid as cmid"
-            qFilterb = "where a.CMID = cmid"
-        else: 
-            qFiltera = ""
-            qFilterb = ""
 
-        query3 = qFiltera + f"""
+        query3 = f"""
+        {qFiltera}
      match (d:DATASET)-[rU:USES]->(a:CATEGORY)<-[rs:{relationship}]-(b:CATEGORY)
-    """ + qFilterb + f"""
+    {qWhere}
+    {qFilterb}
      unwind rU.{property} as prop
      with d,a,b,rU,rs,prop
      where b.CMID = prop
