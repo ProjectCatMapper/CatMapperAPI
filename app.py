@@ -6,6 +6,7 @@ import os
 from dotenv import load_dotenv
 from flask_cors import CORS
 from fuzzywuzzy import fuzz
+from bs4 import BeautifulSoup
 import json
 import re
 import string
@@ -250,51 +251,69 @@ def catm():
         
         if label == "CATEGORY":
             qInfo = '''
-unwind $cmid as cmid match (a)<-[r:USES]-(d:DATASET)
-where a.CMID = cmid with a,r,d
-call apoc.when(r.country is not null,'return custom.getName($id) as name','return null as name',{id:r.country}) yield value as country
-call apoc.when(r.language is not null,'return custom.getGlot($id) as name','return null as name',{id:r.language}) yield value as language
-call apoc.when(r.religion is not null,'return custom.getName($id) as name','return null as name',{id:r.religion}) yield value as religion
-with a,r,d, country, language, religion,
-case when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is not null then custom.getMinYear(r.yearStart) + '-' + custom.getMaxYear(r.yearEnd)
-when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is null then custom.getMinYear(r.yearStart) + '-present'
-when custom.getMinYear(r.yearStart) is null and custom.getMaxYear(r.yearEnd) is not null then custom.getMaxYear(r.yearEnd)
-else null
-end as timeSpan
-return a.CMName as CMName, custom.anytoList(collect(split(country.name,', ')),true) as Location, 
-a.CMID as CMID, apoc.text.join([i in labels(a) where not i = 'CATEGORY'],', ') as Domains, 
-custom.anytoList(collect(split(language.name,', ')),true) as Languages, custom.anytoList(collect(split(religion.name,', ')),true) as Religions, 
-custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
-'''        
+    unwind $cmid as cmid match (a)<-[r:USES]-(d:DATASET)
+    where a.CMID = cmid with a,r,d
+    call apoc.when(r.country is not null and not r.country = [],'return custom.getName($id) as name','return null as name',{id:r.country}) yield value as country
+    call apoc.when(r.district is not null and not r.district = [],'return custom.getName($id) as name','return null as name',{id:r.district}) yield value as district
+    call apoc.when(r.language is not null and not r.language = [],'return custom.getGlot($id) as name','return null as name',{id:r.language}) yield value as language
+    call apoc.when(r.religion is not null and not r.religion = [],'return custom.getName($id) as name','return null as name',{id:r.religion}) yield value as religion
+    with a,r,d, country, district, language, religion,
+    case when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is not null then custom.getMinYear(r.yearStart) + '-' + custom.getMaxYear(r.yearEnd)
+    when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is null then custom.getMinYear(r.yearStart) + '-present'
+    when custom.getMinYear(r.yearStart) is null and custom.getMaxYear(r.yearEnd) is not null then custom.getMaxYear(r.yearEnd)
+    else null
+    end as timeSpan
+    return a.CMName as CMName, apoc.text.join([i in [custom.anytoList(collect(split(country.name,', ')),true),custom.anytoList(collect(split(district.name,', ')),true)] where not i = ''],', ') as Location, 
+    a.CMID as CMID, apoc.text.join([i in labels(a) where not i = 'CATEGORY'],', ') as Domains, 
+    custom.anytoList(collect(split(language.name,', ')),true) as Languages, custom.anytoList(collect(split(religion.name,', ')),true) as Religions, 
+    custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
+    '''        
             qSamples = ''' 
-unwind $cmid as cmid
-match (a)<-[r:USES]-(d:DATASET)
-where a.CMID = cmid
-with custom.anytoList(collect(r.Name),true) as Name, r.country as LocationID, d.project as Source, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, 
-toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
-call apoc.when(LocationID is not null,'return custom.getName($id) as Location','return null',{id:LocationID}) yield value
-return Name, custom.anytoList(collect(value.Location),true) as Location, type as Type, 
-apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),
-toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),
-toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Population est.`,  
-apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Source, Version, Link order by `Time span`, Source, Name
-'''
+    unwind $cmid as cmid
+    match (a)<-[r:USES]-(d:DATASET)
+    where a.CMID = cmid
+    with custom.anytoList(collect(r.Name),true) as Name, r.country as countryID, r.district as districtID, d.project as Source, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, 
+    toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
+    call apoc.when(countryID is not null,'return custom.getName($id) as country','return null',{id:countryID}) yield value
+    with Name, value as country, districtID, Source, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
+    call apoc.when(districtID is not null,'return custom.getName($id) as district','return null',{id:districtID}) yield value
+    with Name, country, value as district, Source, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
+    return Name, apoc.text.join([i in [custom.anytoList(collect(country.country),true),custom.anytoList(collect(district.district),true)] where not i = ''],', ') as Location, type as Type, 
+    apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),
+    toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),
+    toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Population est.`,  
+    apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Source, Version, Link order by `Time span`, Source, Name
+    '''
+            qCategories = """
+unwind $cmid as cmid 
+match (a:ADM0 {CMID: cmid})-[:DISTRICT_OF]-(c:CATEGORY) 
+unwind labels(c) as Domain with Domain, count(*) as Count 
+return distinct Domain, Count order by Domain
+"""
+
             
-            with driver.session() as session:
-                samples = session.run(qSamples, cmid = cmid)
-                samples = [dict(record) for record in samples]
-                driver.close()
+            # with driver.session() as session:
+            #     samples = session.run(qSamples, cmid = cmid)
+            #     samples = [dict(record) for record in samples]
+            #     driver.close()
         
         else:
-            qInfo = '''
+             qInfo = '''
     unwind $cmid as cmid 
     match (a:DATASET) 
     where a.CMID = cmid 
     with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
     'return null as name',{id:a.District}) yield value as Location 
     return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
-    labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
+    labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, "<a href ='" + a.DatasetLocation + "' target='_blank' >" + a.DatasetLocation +"</a>" as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
     '''
+             qSamples = None
+        
+             qCategories = """
+unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[:USES]->(c:CATEGORY) 
+unwind labels(c) as Domain with Domain, count(*) as Count 
+return distinct Domain, Count order by Domain
+"""
 
 
 #             qInfo = '''
@@ -306,13 +325,36 @@ apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Sourc
 # return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
 # labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
 # '''
-            samples = []
+        #      samples = []
         
+        # with driver.session() as session:
+        #     info = session.run(qInfo, cmid = cmid)
+        #     info = [dict(record) for record in info]
+        #     driver.close()
+
         with driver.session() as session:
             info = session.run(qInfo, cmid = cmid)
             info = [dict(record) for record in info]
+            if qCategories is None:
+                categories = []
+            else: 
+                categories = session.run(qCategories,cmid = cmid)
+                categories = [dict(record) for record in categories]
+            if qSamples is not None:
+                samples = session.run(qSamples, cmid = cmid)
+                samples = [dict(record) for record in samples]
+            else: 
+                samples = []
             driver.close()
-
+        
+        print(info[0])
+        if "Dataset Location" in info[0]:
+            soup = BeautifulSoup(info[0]["Dataset Location"], 'html.parser')
+            link_tag = soup.find('a')
+            if link_tag:
+                info[0]["Dataset Location"] = link_tag.get('href')  
+              
+        
         polygons = getPolygon(cmid,driver)
         points = getPoints(cmid,driver)
 
@@ -377,6 +419,7 @@ apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Sourc
         return jsonify({
         "info": info[0],
         "samples": samples,
+        "categories": categories,
         "polygons": polygons,
         "points": points,
         "label":labels,
@@ -585,7 +628,7 @@ return distinct Domain, Count order by Domain
     with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
     'return null as name',{id:a.District}) yield value as Location 
     return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
-    labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, replace("<a href ='http://" + a.DatasetLocation + "' target='_blank' >" + a.DatasetLocation +"</a>","http://http://","http://") as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
+    labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, "<a href =" + a.DatasetLocation + "' target='_blank' >" + a.DatasetLocation +"</a>" as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
     '''
             qSamples = None
             qCategories = """
@@ -635,7 +678,7 @@ return distinct Domain, Count order by Domain
 # Function to serialize a Neo4j Node object into a serializable dictionary
 def serialize_node(node):
     return {
-        "id": node.id,
+        "id": node.element_id,
         "labels": list(node.labels),
         "properties": dict(node)
     }
@@ -644,8 +687,8 @@ def serialize_node(node):
 def serialize_relationship(relationship):
     return {
         "type": relationship.type,
-        "start_node_id": relationship.start_node.id,
-        "end_node_id": relationship.end_node.id,
+        "start_node_id": relationship.start_node.element_id,
+        "end_node_id": relationship.end_node.element_id,
         "properties": dict(relationship.items())
     }
 
@@ -682,7 +725,8 @@ optional match (a)-[r]-(e)
 where type(r) = relation and e.CMID = endcmid and
 not isEmpty([label IN labels(e) 
 WHERE label IN apoc.coll.flatten([$domain],true)]) 
-return distinct a,r,e
+with collect(distinct a) as a, r, e
+return a, collect(distinct r) as r, collect(distinct e) as e
 """        
         else:
             cypher_query = """
@@ -692,24 +736,26 @@ optional match (a)-[r]-(e)
 where type(r) = relation and
 not isEmpty([label IN labels(e) 
 WHERE label IN apoc.coll.flatten([$domain],true)]) 
-return distinct a,r,e
+with collect(distinct a) as a, r, e limit 10
+return a, collect(distinct r) as r, collect(distinct e) as e
 """        
         
         with driver.session() as session:
             # Execute the Cypher queries
             result = session.run(cypher_query, cmid = cmid, relation = relation,domain = domain, endcmid = endcmid)
+            result = CM.unlist([dict(record) for record in result])
             node = []
             rel = []
             end = []
-            for record in result:
-                a = record['a']
-                node.append({"node":serialize_node(a)})
-                r = record['r']
-                e = record['e']
-                r = serialize_relationship(r)
-                e = serialize_node(e)
-                rel.append({"relation":r})
-                end.append({"end":e})
+            a = result['a']
+            for record in a:
+                node.append({"node":serialize_node(record)})
+            r = result['r']
+            for record in r:
+                rel.append({"relation":serialize_relationship(record)})
+            e = result['e']
+            for record in e:
+                end.append({"end":serialize_node(record)})
 
         driver.close()
         node = [flatten_json(entry) for entry in node]
