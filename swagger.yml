@@ -1,0 +1,128 @@
+openapi: 3.1.0
+info:
+  title: CatMapper API
+  description: This is the CatMapper API
+  version: 1.0.0
+servers:
+- url: https://catmapper.org/api
+paths:
+  /dataset:
+    get:
+      summary: Download dataset information
+      description: Return all USES relationships for the specified dataset
+  /search:
+    get:
+      summary: Search in the database
+      description: Performs a search across various parameters in the CatMapper database.
+      parameters:
+      - name: database
+        in: query
+        description: Name of the CatMapper database to search
+        required: true
+        style: form
+        explode: true
+        schema:
+          enum:
+          - SocioMap
+          - ArchaMap
+      - name: term
+        in: query
+        description: Search term
+        required: false
+        style: form
+        explode: true
+        schema: {}
+      - name: property
+        in: query
+        description: Property to search by
+        required: false
+        style: form
+        explode: true
+        schema:
+          enum:
+          - Name
+          - CMID
+          - Key
+      - name: domain
+        in: query
+        description: Domain containing the category
+        required: false
+        style: form
+        explode: true
+        schema:
+          default: CATEGORY
+          enum:
+          - DISTRICT
+          - ETHNICITY
+          - STONE
+      - name: yearStart
+        in: query
+        description: Earliest year the category existed or data was collected from
+        required: false
+        style: form
+        explode: true
+        schema: {}
+      - name: yearEnd
+        in: query
+        description: Latest year the category existed or data was collected from
+        required: false
+        style: form
+        explode: true
+        schema: {}
+      - name: country
+        in: query
+        description: CMID of ADM0 node with DISTRICT_OF tie
+        required: false
+        style: form
+        explode: true
+        schema: {}
+      - name: context
+        in: query
+        description: CMID of parent node in network
+        required: false
+        style: form
+        explode: true
+        schema: {}
+      - name: limit
+        in: query
+        description: Number of results to limit search to
+        required: false
+        style: form
+        explode: true
+        schema:
+          default: "10000"
+      - name: query
+        in: query
+        description: Whether to return results or cypher query
+        required: false
+        style: form
+        explode: true
+        schema:
+          enum:
+          - "true"
+          - "false"
+      responses:
+        "200":
+          description: "JSON of search results unless query is true, then a JSON with\
+            \ the cypher query is returned."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/inline_response_200'
+        "500":
+          description: JSON of error
+          content:
+            application/json:
+              schema: {}
+components:
+  schemas:
+    inline_response_200:
+      properties:
+        CMID: {}
+        CMName: {}
+        country:
+          items: {}
+        domain:
+          items: {}
+        matching: {}
+        matchingDistance: {}
