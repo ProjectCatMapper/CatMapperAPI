@@ -18,3 +18,4 @@ from .USES import fixUsesRels
 from .USES import updateLabels
 from .USES import updateContains
 from .USES import updateAltNames
+from .USES import addMatchResults

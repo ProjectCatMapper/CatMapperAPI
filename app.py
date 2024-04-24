@@ -14,6 +14,8 @@ from flasgger import Swagger, LazyString, LazyJSONEncoder
 import CM
 import pysodium
 import pandas as pd
+import numpy as np
+from collections import defaultdict
 # from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
@@ -135,24 +137,15 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 
 # swagger documentation
 # app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)
-app.config['SWAGGER'] = {
-    'title': 'CatMapper API',
-    'version': '0.1', 
-    'basePath': '/api/apidocs',
-    'host': 'catmapper.org',
-    'schemes': ['https']
-}
 app.json_encoder = LazyJSONEncoder
 
-template = dict(swaggerUiPrefix=LazyString(lambda : request.environ.get('HTTP_X_SCRIPT_NAME', '')))
+template = dict(swaggerUiPrefix="/api")
 swagger = Swagger(app, template=template)
 
 @app.route("/")
 def root ():
-    """Home
-    Welcome to the CatMapper API. Please email support@catmapper.org for questions or help.
-    """
-    return {"response":"you are in root"}
+    headers = {'Content-Type': 'text/html'}
+    return make_response(render_template('api.html'),200,headers)
 
 #tvalue = request.json['tvalue']
  
@@ -272,17 +265,19 @@ def catm():
     unwind $cmid as cmid
     match (a)<-[r:USES]-(d:DATASET)
     where a.CMID = cmid
-    with custom.anytoList(collect(r.Name),true) as Name, r.country as countryID, r.district as districtID, d.project as Source, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, 
+    with custom.anytoList(collect(r.Name),true) as Name, r.country as countryID,
+    r.district as districtID, d.project as Source, d.CMID as datasetID, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, 
     toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
     call apoc.when(countryID is not null,'return custom.getName($id) as country','return null',{id:countryID}) yield value
-    with Name, value as country, districtID, Source, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
+    with Name, value as country, districtID, Source, datasetID, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
     call apoc.when(districtID is not null,'return custom.getName($id) as district','return null',{id:districtID}) yield value
-    with Name, country, value as district, Source, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
+    with Name, country, value as district, Source, datasetID, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
     return Name, apoc.text.join([i in [custom.anytoList(collect(country.country),true),custom.anytoList(collect(district.district),true)] where not i = ''],', ') as Location, type as Type, 
     apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),
     toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),
     toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Population est.`,  
-    apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Source, Version, Link order by `Time span`, Source, Name
+    apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`,Source as `Source`, 'https://catmapper.org/js/' + $database + '/' + datasetID  as `link2`,
+    Version, Link order by `Time span`, Source, Name
     '''
             qCategories = """
 unwind $cmid as cmid 
@@ -341,7 +336,7 @@ return distinct Domain, Count order by Domain
                 categories = session.run(qCategories,cmid = cmid)
                 categories = [dict(record) for record in categories]
             if qSamples is not None:
-                samples = session.run(qSamples, cmid = cmid)
+                samples = session.run(qSamples, cmid = cmid,database = database)
                 samples = [dict(record) for record in samples]
             else: 
                 samples = []
@@ -631,7 +626,7 @@ return distinct Domain, Count order by Domain
     with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
     'return null as name',{id:a.District}) yield value as Location 
     return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
-    labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, "<a href =" + a.DatasetLocation + "' target='_blank' >" + a.DatasetLocation +"</a>" as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
+    labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, "<a href ='" + a.DatasetLocation + "' target='_blank' >" + a.DatasetLocation +"</a>" as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
     '''
             qSamples = None
             qCategories = """
@@ -1285,6 +1280,10 @@ def getTranslate2():
         key = CM.unlist(data.get("key"))
         term = CM.unlist(data.get("term"))
         country = CM.unlist(data.get('country'))
+        context = CM.unlist(data.get('context'))
+        dataset = CM.unlist(data.get('dataset'))
+        yearStart = CM.unlist(data.get('yearStart'))
+        yearEnd = CM.unlist(data.get('yearEnd'))
         if key != 'true':
             key = None
         query = CM.unlist(data.get("query"))
@@ -1304,12 +1303,23 @@ def getTranslate2():
         df = pd.DataFrame(table)
         df['CMuniqueRowID'] = df.index
         rows = pd.DataFrame({'term': df[term],'CMuniqueRowID': df["CMuniqueRowID"]})
-        if country in df.columns:
+        if isinstance(country,str) and country in df.columns:
             rows['country'] = df[country]
+        if isinstance(context,str) and context in df.columns:
+            rows['context'] = df[context]
+        if isinstance(dataset,str) and dataset in df.columns:
+            rows['dataset'] = df[dataset]
+        if isinstance(yearStart,str) and yearStart is not None:
+            rows['yearStart'] = yearStart
+        if isinstance(yearEnd,str) and yearEnd is not None:
+            rows['yearEnd'] = yearEnd
+        rows.dropna(subset=['term'], inplace=True)
+        rows = rows[rows['term'] != '']
         columns_to_group_by = rows.columns.difference(['CMuniqueRowID']).tolist()
         rows = rows.groupby(columns_to_group_by)['CMuniqueRowID'].apply(list).reset_index()
         rows = rows.to_dict('records')
 
+        
         # Define the Cypher query
     
         qLoad = "unwind $rows as row with row call {"
@@ -1471,11 +1481,14 @@ matching, score as matchingDistance, country, Key order by matchingDistance
         data = pd.DataFrame(data)
         data = data.replace("", pd.NA)
         data = data.dropna(axis='columns', how='all')
+        # add matching type
+        data = CM.addMatchResults(results = data)
         new_column_names = {col: f"{col}_{term}" for col in data.columns if col != 'CMuniqueRowID'}
         data = data.rename(columns=new_column_names)
         data = data.explode('CMuniqueRowID')
         data = data.drop(f"term_{term}", axis=1)
         data = pd.merge(df,data, on = "CMuniqueRowID")
+        print(data)
                 
         return data.to_dict(orient = "records")
 
@@ -1766,6 +1779,155 @@ def routines():
         else:
             result = "function not found"
         return result
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+
+@app.route('/CMID', methods=['GET'])
+def getCMID():
+    try:
+        database = request.args.get('database')
+        cmid = request.args.get('cmid')
+
+        if str.lower(database) == "sociomap":
+            driver = connectionSM()
+        elif str.lower(database) == "archamap":
+            driver = connectionAM()
+        elif database == "gisdb":
+            driver = connectionGIS()
+        else:
+            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")   
+        
+        query1 = """
+unwind $cmid as cmid 
+match (c {CMID: cmid}) 
+unwind keys(c) as nodeProperties  
+return id(c) as nodeID, nodeProperties, c[nodeProperties] as nodeValues
+"""
+        query2 = """
+unwind $cmid as cmid 
+match (c {CMID: cmid})<-[r:USES]-(d) 
+unwind keys(r) as relProperties 
+return id(r) as relID, relProperties, r[relProperties] as relValues
+"""
+
+        with driver.session() as session:
+            result = session.run(query1,cmid = cmid)
+            node = [dict(record) for record in result]
+            result = session.run(query2,cmid = cmid)
+            relations = [dict(record) for record in result]
+            driver.close()
+
+        grouped_data = defaultdict(dict)
+
+        for entry in relations:
+            rel_id = entry['relID']
+            prop = entry['relProperties']
+            val = entry['relValues']
+            
+
+            if prop in grouped_data[rel_id]:
+
+                if isinstance(grouped_data[rel_id][prop], list):
+                    grouped_data[rel_id][prop].extend(val if isinstance(val, list) else [val])
+                else:
+                    grouped_data[rel_id][prop] = val
+            else:
+                grouped_data[rel_id][prop] = val
+
+
+        relations = dict(grouped_data)
+
+        return {"node": node,"relations":relations}
+
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+
+@app.route('/allDatasets', methods=['GET'])
+def getAllDatasets():
+    try:
+        database = request.args.get('database')
+
+        if str.lower(database) == "sociomap":
+            driver = connectionSM()
+        elif str.lower(database) == "archamap":
+            driver = connectionAM()
+        elif database == "gisdb":
+            driver = connectionGIS()
+        else:
+            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")   
+        
+        query = """
+match (d:DATASET) 
+return id(d) as nodeID, 
+d.CMName as CMName, 
+d.CMID as CMID, 
+d.shortName as shortName, 
+d.project as project, 
+d.Unit as Unit, 
+d.parent as parent, 
+d.ApplicableYears as ApplicableYears, 
+d.DatasetCitation as DatasetCitation, 
+d.District as District, 
+d.DatasetLocation as DatasetLocation, 
+d.SubNational as SubNational, 
+d.DatasetVersion as DatasetVersion, 
+d.DatasetScope as DatasetScope, 
+d.Subdistrict as Subdistrict, 
+d.Note as Note
+"""
+
+        with driver.session() as session:
+            result = session.run(query)
+            data = [dict(record) for record in result]
+            driver.close()
+
+        return data
+
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+
+@app.route('/linkfile', methods=['GET'])
+def getLinkFile():
+    try:
+        database = request.args.get('database')
+        datasets = request.args.get('datasets')
+        intersection = request.args.get('intersection')
+        domain = request.args.get('domain')
+
+        if not isinstance(datasets,list):
+            raise Exception("datasets must be a list")
+
+        if not isinstance(domain,str):
+            raise Exception("domain must be a string")
+        
+        if not isinstance(intersection,bool):
+            raise Exception("intersection must be a boolean")
+
+        if str.lower(database) == "sociomap":
+            driver = connectionSM()
+        elif str.lower(database) == "archamap":
+            driver = connectionAM()
+        else:
+            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")   
+        
+        query = f"""
+match (c:{domain})<-[r:USES]-(d:DATASET) where d.CMID in $datasets
+return distinct d.CMName as DatasetName, r.Key as Key, c.CMName as CMName, c.CMID as CMID, apoc.text.join(r.Name,'; ') as Name order by CMName
+"""
+
+        with driver.session() as session:
+            result = session.run(query, datasets = datasets)
+            data = [dict(record) for record in result]
+            driver.close()
+
+        return data
+
     except Exception as e:
     # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
