@@ -16,6 +16,7 @@ import pysodium
 import pandas as pd
 import numpy as np
 from collections import defaultdict
+import logging
 # from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
@@ -1277,6 +1278,7 @@ def getTranslate2():
         database = CM.unlist(data.get("database"))
         property = CM.unlist(data.get("property"))
         domain = CM.unlist(data.get("domain"))
+
         key = CM.unlist(data.get("key"))
         term = CM.unlist(data.get("term"))
         country = CM.unlist(data.get('country'))
@@ -1296,6 +1298,7 @@ def getTranslate2():
             driver = connectionAM()
         else:
             raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+        
         
         # format data
         # add rowid, 
@@ -1318,7 +1321,6 @@ def getTranslate2():
         columns_to_group_by = rows.columns.difference(['CMuniqueRowID']).tolist()
         rows = rows.groupby(columns_to_group_by)['CMuniqueRowID'].apply(list).reset_index()
         rows = rows.to_dict('records')
-
         
         # Define the Cypher query
     
@@ -1478,6 +1480,7 @@ matching, score as matchingDistance, country, Key order by matchingDistance
                 data = [dict(record) for record in result]
 
                 driver.close()
+
         data = pd.DataFrame(data)
         data = data.replace("", pd.NA)
         data = data.dropna(axis='columns', how='all')
@@ -1487,8 +1490,15 @@ matching, score as matchingDistance, country, Key order by matchingDistance
         data = data.rename(columns=new_column_names)
         data = data.explode('CMuniqueRowID')
         data = data.drop(f"term_{term}", axis=1)
-        data = pd.merge(df,data, on = "CMuniqueRowID")
-        print(data)
+
+        data['CMuniqueRowID'] = data['CMuniqueRowID'].astype(int)
+        df['CMuniqueRowID'] = df['CMuniqueRowID'].astype(int)
+
+        data = pd.merge(df, data, on="CMuniqueRowID", how='outer')
+        data[f'matchType_{term}'] = data[f'matchType_{term}'].fillna('none')
+        data.fillna('', inplace=True)
+
+        # print(data)
                 
         return data.to_dict(orient = "records")
 
