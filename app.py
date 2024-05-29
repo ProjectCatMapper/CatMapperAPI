@@ -631,8 +631,8 @@ return distinct Domain, Count order by Domain
     '''
             qSamples = None
             qCategories = """
-unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[:USES]->(c:CATEGORY) 
-unwind labels(c) as Domain with Domain, count(*) as Count 
+unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY) 
+unwind r.label as Domain with Domain, count(*) as Count 
 return distinct Domain, Count order by Domain
 """
 
@@ -871,6 +871,9 @@ def getSearch():
         country = request.args.get('country')
         limit = request.args.get('limit')
         query = request.args.get('query')
+
+        if domain == "ANY DOMAIN":
+            domain = "CATEGORY"
 
         if str.lower(database) == "sociomap":
             driver = connectionSM()
@@ -1406,19 +1409,22 @@ with row, a, matching, score
 
     # filter by dataset
         if 'dataset' in rows[0]:
-            # get keys
-            if key is not None:
+            if property == "Key":
+                qDataset = """
+    match (a)<-[r:USES]-(d:DATASET {CMID: row.dataset}) 
+    where r.Key ends with row.term
+    with row, a, matching, score, r.Key as Key
+    """
+            else: 
                 qDataset = """
     match (a)<-[r:USES]-(d:DATASET {CMID: row.dataset}) 
     with row, a, matching, score, r.Key as Key
     """
-            else:
-                qDataset = """
-    where (a)<-[:USES]-(:DATASET {CMID: row.dataset})
-    with row, a, matching, score, '' as Key
-    """
         else:
             qDataset = "with row, a, matching, score, '' as Key"
+
+        if key is None:
+            "with row, a, matching, score, '' as Key"
 
         # filter by year
         if 'yearStart' in rows[0] and 'yearEnd' in rows[0]:
@@ -1735,6 +1741,27 @@ def getDataset():
             driver = connectionAM()
         else:
             raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
+
+        # determine if dataset has child datasets
+        query = """
+        unwind $cmid as cmid
+        match (d:DATASET {CMID: cmid})-[:USES]->(c:CATEGORY) return count(c) as n
+        """
+
+        session = driver.session()
+        count = session.run(query,cmid = cmid)
+        count =  [dict(record) for record in count]
+        count = count[0].get("n")
+
+        if count == 0:
+            query = """
+            unwind $cmid as cmid
+            match (:DATASET {CMID: cmid})-[:CONTAINS*..5]->(d:DATASET) return d.CMID as CMID
+            """
+            result = session.run(query,cmid = cmid)
+            result = [record["CMID"] for record in result]
+            if result is not None:
+                cmid = [cmid] + result
         query = """
  unwind $cmid as cmid
  match (a:DATASET)-[r:USES]->(b) 
@@ -1746,12 +1773,21 @@ def getDataset():
  b.CMID as CMID, b.CMName as CMName, r.type as type, 
  r.Key as Key, property, r[property] as value
 """
+
         with driver.session() as session:
             result = session.run(query,cmid = cmid,domain = domain)
             data = [dict(record) for record in result]
             driver.close()
         df = pd.DataFrame(data)
         df = df.pivot_table(index='CMID', columns='property', values='value', aggfunc='first').reset_index()
+        dtypes = df.dtypes.to_dict()
+        cols = []
+        for col_name, typ in dtypes.items():
+            if (typ != 'list'):
+                cols = cols + [col_name]
+        if len(cols) > 0:
+            df = df.set_index(cols).apply(pd.Series.explode).reset_index()
+        df = df.astype(str)
         return jsonify(df.to_json(orient='records'))
     except Exception as e:
     # In case of an error, return an error response with an appropriate HTTP status code
