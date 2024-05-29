@@ -1503,6 +1503,17 @@ matching, score as matchingDistance, country, Key order by matchingDistance
         data = pd.merge(df, data, on="CMuniqueRowID", how='outer')
         data[f'matchType_{term}'] = data[f'matchType_{term}'].fillna('none')
         data.fillna('', inplace=True)
+        dtypes = data.dtypes.to_dict()
+        list_cols = []
+        for col_name, typ in dtypes.items():
+            if typ == 'object' and isinstance(data[col_name].iloc[0], list):
+                list_cols.append(col_name)
+
+        # Explode list-type columns
+        for col in list_cols:
+            data = data.explode(col)
+
+        data = data.astype(str)
 
         # print(data)
                 
@@ -1781,14 +1792,17 @@ def getDataset():
         df = pd.DataFrame(data)
         df = df.pivot_table(index='CMID', columns='property', values='value', aggfunc='first').reset_index()
         dtypes = df.dtypes.to_dict()
-        cols = []
+        list_cols = []
         for col_name, typ in dtypes.items():
-            if (typ != 'list'):
-                cols = cols + [col_name]
-        if len(cols) > 0:
-            df = df.set_index(cols).apply(pd.Series.explode).reset_index()
+            if typ == 'object' and isinstance(df[col_name].iloc[0], list):
+                list_cols.append(col_name)
+
+        # Explode list-type columns
+        for col in list_cols:
+            df = df.explode(col)
         df = df.astype(str)
         return jsonify(df.to_json(orient='records'))
+    
     except Exception as e:
     # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
