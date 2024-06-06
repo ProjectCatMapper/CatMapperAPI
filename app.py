@@ -306,11 +306,10 @@ return distinct Domain, Count order by Domain
              qSamples = None
         
              qCategories = """
-unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[:USES]->(c:CATEGORY) 
-unwind labels(c) as Domain with Domain, count(*) as Count 
+unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY) 
+unwind r.label as Domain with Domain, count(*) as Count 
 return distinct Domain, Count order by Domain
 """
-
 
 #             qInfo = '''
 # unwind $cmid as cmid 
@@ -343,7 +342,6 @@ return distinct Domain, Count order by Domain
                 samples = []
             driver.close()
         
-        print(info[0])
         if "Dataset Location" in info[0]:
             soup = BeautifulSoup(info[0]["Dataset Location"], 'html.parser')
             link_tag = soup.find('a')
@@ -386,7 +384,7 @@ return distinct Domain, Count order by Domain
             point= []
             for i in range(0,len(points)):
                 if json.loads(points[i]['geometry'])["type"] != "MultiPoint":
-                    points[i] = {"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]}
+                    point.append({"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]})
                 else:
                     temp = points[i]
                     source = temp['source']
@@ -405,12 +403,13 @@ return distinct Domain, Count order by Domain
         #         else:
         #             for j in range(0,len(json.loads(points[i]['geometry'])["coordinates"])):
         #                 print(points[i])
-        
-        
+
         with open('data.json', 'w', encoding='utf-8') as f:
                 json.dump(points, f, ensure_ascii=False, indent=4)
         
         relnames = sorted(relnames, key=custom_sort)
+
+        print(points)
                                 
         return jsonify({
         "info": info[0],
@@ -1742,6 +1741,7 @@ def getDataset():
         database = CM.unlist(request.args.get('database'))
         cmid = CM.unlist(request.args.get('cmid'))
         domain = CM.unlist(request.args.get('domain'))
+        children = CM.unlist(request.args.get('children'))
 
         if domain is None:
             domain = "CATEGORY"
@@ -1983,6 +1983,86 @@ return distinct d.CMName as DatasetName, r.Key as Key, c.CMName as CMName, c.CMI
 
         with driver.session() as session:
             result = session.run(query, datasets = datasets)
+            data = [dict(record) for record in result]
+            driver.close()
+
+        return data
+
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+
+@app.route('/networknodes', methods=['POST'])
+def getnetworknodes():
+    try:
+    
+        data = request.get_data()  
+        data = json.loads(data)
+
+        database = CM.unlist(data.get('database'))
+        cmid = CM.unlist(data.get('cmid'))
+        relation = data.get('relation')
+        domains = data.get('domains')
+
+        if str.lower(database) == "sociomap":
+            driver = connectionSM()
+        elif str.lower(database) == "archamap":
+            driver = connectionAM()
+        else:
+            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")  
+        
+        query = """
+        unwind $cmid as cmid 
+        unwind $relation as relation 
+        match (a)-[r]-(b) 
+        where a.CMID = cmid and type(r) = relation and ANY(label IN labels(b) 
+        WHERE label IN apoc.coll.flatten([$domains],true)) 
+        return b.CMID as CMID, b.CMName as Name order by Name limit 1000
+"""
+
+        with driver.session() as session:
+            result = session.run(query, cmid = cmid, relation = relation, domains = domains)
+            data = [dict(record) for record in result]
+            driver.close()
+
+        return data
+
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+
+@app.route('/networkDomains', methods=['POST'])
+def getnetworkDomains():
+    try:
+    
+        data = request.get_data()  
+        data = json.loads(data)
+
+        database = CM.unlist(data.get('database'))
+        cmid = CM.unlist(data.get('cmid'))
+        relation = data.get('relation')
+        domains = data.get('domains')
+
+        if str.lower(database) == "sociomap":
+            driver = connectionSM()
+        elif str.lower(database) == "archamap":
+            driver = connectionAM()
+        else:
+            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")  
+        
+        query = """
+        unwind $cmid as cmid 
+        unwind $relation as relation 
+        match (a)-[r]-(b) 
+        where a.CMID = cmid and type(r) = relation and ANY(label IN labels(b) 
+        WHERE label IN apoc.coll.flatten([$domains],true)) 
+        return b.CMID as CMID, b.CMName as Name order by Name limit 1000
+"""
+
+        with driver.session() as session:
+            result = session.run(query, cmid = cmid, relation = relation, domains = domains)
             data = [dict(record) for record in result]
             driver.close()
 
