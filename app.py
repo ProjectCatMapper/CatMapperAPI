@@ -1753,18 +1753,9 @@ def getDataset():
         else:
             raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
 
-        # determine if dataset has child datasets
-        query = """
-        unwind $cmid as cmid
-        match (d:DATASET {CMID: cmid})-[:USES]->(c:CATEGORY) return count(c) as n
-        """
-
         session = driver.session()
-        count = session.run(query,cmid = cmid)
-        count =  [dict(record) for record in count]
-        count = count[0].get("n")
 
-        if count == 0:
+        if str.lower(children) == "true":
             query = """
             unwind $cmid as cmid
             match (:DATASET {CMID: cmid})-[:CONTAINS*..5]->(d:DATASET) return d.CMID as CMID
@@ -1773,6 +1764,7 @@ def getDataset():
             result = [record["CMID"] for record in result]
             if result is not None:
                 cmid = [cmid] + result
+
         query = """
  unwind $cmid as cmid
  match (a:DATASET)-[r:USES]->(b) 
@@ -2033,8 +2025,8 @@ def getnetworknodes():
         result = str(e)
         return result, 500
 
-@app.route('/networkDomains', methods=['POST'])
-def getnetworkDomains():
+@app.route('/datasetDomains', methods=['POST'])
+def getdatasetDomains():
     try:
     
         data = request.get_data()  
@@ -2042,8 +2034,7 @@ def getnetworkDomains():
 
         database = CM.unlist(data.get('database'))
         cmid = CM.unlist(data.get('cmid'))
-        relation = data.get('relation')
-        domains = data.get('domains')
+        children = CM.unlist(data.get('children'))
 
         if str.lower(database) == "sociomap":
             driver = connectionSM()
@@ -2052,17 +2043,25 @@ def getnetworkDomains():
         else:
             raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")  
         
-        query = """
-        unwind $cmid as cmid 
-        unwind $relation as relation 
-        match (a)-[r]-(b) 
-        where a.CMID = cmid and type(r) = relation and ANY(label IN labels(b) 
-        WHERE label IN apoc.coll.flatten([$domains],true)) 
-        return b.CMID as CMID, b.CMName as Name order by Name limit 1000
+
+        if children == True:
+            query = """
+unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[:CONTAINS*..5]->(:DATASET)-[:USES]->(c) 
+with distinct apoc.coll.toSet(apoc.coll.flatten(collect(labels(c)))) as labels 
+unwind labels as label 
+return label
+"""
+        else:
+            query = """
+unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[:USES]->(c) 
+with distinct apoc.coll.toSet(apoc.coll.flatten(collect(labels(c)))) as labels 
+unwind labels as label 
+return label
 """
 
+
         with driver.session() as session:
-            result = session.run(query, cmid = cmid, relation = relation, domains = domains)
+            result = session.run(query, cmid = cmid)
             data = [dict(record) for record in result]
             driver.close()
 
