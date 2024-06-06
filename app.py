@@ -1773,7 +1773,7 @@ def getDataset():
  unwind keys(r) as property with a,r,b, property 
  where not property in ['type','Key','log'] 
  return distinct a.CMName as datasetName, a.CMID as datasetID, 
- b.CMID as CMID, b.CMName as CMName, r.type as type, 
+ b.CMID as CMID, b.CMName as CMName, r.type as Type, 
  r.Key as Key, property, r[property] as value
 """
 
@@ -1782,7 +1782,9 @@ def getDataset():
             data = [dict(record) for record in result]
             driver.close()
         df = pd.DataFrame(data)
-        df = df.pivot_table(index='CMID', columns='property', values='value', aggfunc='first').reset_index()
+        df = df.dropna(axis=1, how='all')
+        cols = [col for col in df.columns if col not in ['property', 'value']]
+        df = df.pivot_table(index=cols, columns='property', values='value', aggfunc='first').reset_index()
         dtypes = df.dtypes.to_dict()
         list_cols = []
         for col_name, typ in dtypes.items():
