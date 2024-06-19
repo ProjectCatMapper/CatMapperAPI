@@ -215,6 +215,7 @@ def catm():
         relnames= []
         relations = ["USES","CONTAINS","DISTRICT_OF","LANGUOID_OF","RELIGION_OF"]
         q = "match (a) where a.CMID = '"+cmid+"' return id(a) as id,labels(a) as label"
+        # q = '''unwind $cmid as cmid unwind $relation as relation match (a)-[r]-(b) where a.CMID = cmid and type(r) = relation with b unwind labels(b) as l with l where not l = 'CATEGORY' return distinct l as label'''
         session = driver.session()
         labels = session.run(q)
         labels = labels.data()
@@ -224,10 +225,12 @@ def catm():
             labels = ""
         q = "MATCH (n:"+labels+" {CMID:'"+cmid+"'})-[r]-(n1) RETURN DISTINCT TYPE(r) as label"
         rel_name = session.run(q).data()
+        print(rel_name)
         for i in rel_name:
             if i['label'] in relations:
                 relnames.append(i['label'])
         driver.close()
+        print(labels)
 
         if str.lower(database) == "sociomap":
             driver = connectionSM()
@@ -343,10 +346,12 @@ return distinct Domain, Count order by Domain
             driver.close()
         
         if "Dataset Location" in info[0]:
-            soup = BeautifulSoup(info[0]["Dataset Location"], 'html.parser')
-            link_tag = soup.find('a')
-            if link_tag:
-                info[0]["Dataset Location"] = link_tag.get('href')  
+            print(info[0]["Dataset Location"])
+            if info[0]["Dataset Location"]:
+                soup = BeautifulSoup(info[0]["Dataset Location"], 'html.parser')
+                link_tag = soup.find('a')
+                if link_tag:
+                    info[0]["Dataset Location"] = link_tag.get('href')  
               
         
         polygons = getPolygon(cmid,driver)
@@ -409,7 +414,11 @@ return distinct Domain, Count order by Domain
         
         relnames = sorted(relnames, key=custom_sort)
 
-        print(points)
+        if "Languages" in  info[0]:
+            if info[0]['Languages'][:1]    == ",":
+                info[0]['Languages'] = info[0]['Languages'][2:].strip()
+
+
                                 
         return jsonify({
         "info": info[0],
@@ -735,6 +744,80 @@ where type(r) = relation and
 not isEmpty([label IN labels(e) 
 WHERE label IN apoc.coll.flatten([$domain],true)]) 
 with collect(distinct a) as a, r, e limit 10
+return a, collect(distinct r) as r, collect(distinct e) as e
+"""        
+        
+        with driver.session() as session:
+            # Execute the Cypher queries
+            result = session.run(cypher_query, cmid = cmid, relation = relation,domain = domain, endcmid = endcmid)
+            result = CM.unlist([dict(record) for record in result])
+            node = []
+            rel = []
+            end = []
+            a = result['a']
+            for record in a:
+                node.append({"node":serialize_node(record)})
+            r = result['r']
+            for record in r:
+                rel.append({"relation":serialize_relationship(record)})
+            e = result['e']
+            for record in e:
+                end.append({"end":serialize_node(record)})
+
+        driver.close()
+        node = [flatten_json(entry) for entry in node]
+        rel = [flatten_json(entry) for entry in rel]
+        end = [flatten_json(entry) for entry in end]
+
+        return {"node":node,"relations":rel,"relNodes":end,"query":cypher_query,"params":[{"cmid":cmid,"database":database,"domain":domain,"relation":relation,"endcmid":endcmid}]}
+    except Exception as e:
+        return str(e), 500
+
+@app.route('/networksjs', methods=['GET'])
+def getNetworkjs():
+    try:
+        cmid = request.args.get('cmid')
+        cmid = re.split(",",cmid)
+        domain = request.args.get('domain')
+        if domain is not None:
+            domain = re.split(",",domain)
+        else:
+            domain = ["CATEGORY","DATASET"]
+
+        endcmid = request.args.get('endcmid')
+        relation = request.args.get('relation')
+        if relation is None:
+            relation = "USES"
+        database = request.args.get('database')
+
+        if str.lower(database) == "sociomap":
+            driver = connectionSM()
+        elif str.lower(database) == "archamap":
+            driver = connectionAM()
+        else:
+            raise Exception("must specify database as SocioMap or ArchaMap")
+
+        if endcmid is not None:
+            cypher_query = """
+unwind $cmid as cmid unwind $endcmid as endcmid unwind $relation as relation 
+MATCH (a) 
+WHERE a.CMID = cmid
+optional match (a)-[r]-(e) 
+where type(r) = relation and e.CMID = endcmid and
+not isEmpty([label IN labels(e) 
+WHERE label IN apoc.coll.flatten([$domain],true)]) 
+with collect(distinct a) as a, r, e
+return a, collect(distinct r) as r, collect(distinct e) as e
+"""        
+        else:
+            cypher_query = """
+unwind $cmid as cmid unwind $relation as relation MATCH (a) 
+WHERE a.CMID = cmid 
+optional match (a)-[r]-(e) 
+where type(r) = relation and
+not isEmpty([label IN labels(e) 
+WHERE label IN apoc.coll.flatten([$domain],true)]) 
+with collect(distinct a) as a, r, e
 return a, collect(distinct r) as r, collect(distinct e) as e
 """        
         
@@ -1508,15 +1591,18 @@ matching, score as matchingDistance, country, Key order by matchingDistance
             if typ == 'object' and isinstance(data[col_name].iloc[0], list):
                 list_cols.append(col_name)
 
-        # Explode list-type columns
         for col in list_cols:
-            data = data.explode(col)
+            data[col] = data[col].apply(lambda x: '|'.join(map(str, x)))
 
         data = data.astype(str)
 
         # print(data)
                 
-        return data.to_dict(orient = "records")
+        # Convert the DataFrame to a list of dictionaries, preserving column order
+        data_dict = data.to_dict(orient='records')
+
+        # Use jsonify to return the JSON response
+        return jsonify(data_dict)                
 
     except Exception as e:
         return str(e), 500
@@ -1734,14 +1820,24 @@ def getAdminEdit():
         data = str(e)
         return data, 500
 
-@app.route('/dataset', methods=['GET'])
+@app.route('/dataset', methods=['GET','POST'])
 def getDataset():
     # to do: document
     try:
-        database = CM.unlist(request.args.get('database'))
-        cmid = CM.unlist(request.args.get('cmid'))
-        domain = CM.unlist(request.args.get('domain'))
-        children = CM.unlist(request.args.get('children'))
+        if request.method == 'GET':
+            database = CM.unlist(request.args.get('database'))
+            cmid = CM.unlist(request.args.get('cmid'))
+            domain = CM.unlist(request.args.get('domain'))
+            children = CM.unlist(request.args.get('children'))
+        elif request.method == "POST":
+            data = request.get_data()  
+            data = json.loads(data)
+            database = CM.unlist(data.get('database'))
+            cmid = CM.unlist(data.get('cmid'))
+            domain = CM.unlist(data.get('domain'))
+            children = CM.unlist(data.get('children'))
+        else: 
+            raise Exception("invalid request method")
 
         if domain is None:
             domain = "CATEGORY"
@@ -1752,10 +1848,10 @@ def getDataset():
             driver = connectionAM()
         else:
             raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
-
+        
         session = driver.session()
 
-        if str.lower(children) == "true":
+        if children is not None and children == "true":
             query = """
             unwind $cmid as cmid
             match (:DATASET {CMID: cmid})-[:CONTAINS*..5]->(d:DATASET) return d.CMID as CMID
@@ -1764,11 +1860,12 @@ def getDataset():
             result = [record["CMID"] for record in result]
             if result is not None:
                 cmid = [cmid] + result
-
+        
+        
         query = """
  unwind $cmid as cmid
  match (a:DATASET)-[r:USES]->(b) 
- where a.CMID = cmid and not isEmpty([i in labels(b) 
+ where a.CMID = cmid and not isEmpty([i in r.label 
  where i in apoc.coll.flatten([$domain],true)]) 
  unwind keys(r) as property with a,r,b, property 
  where not property in ['type','Key','log'] 
@@ -1778,23 +1875,30 @@ def getDataset():
 """
 
         with driver.session() as session:
-            result = session.run(query,cmid = cmid,domain = domain)
+            result = session.run(query, cmid=cmid, domain=domain)
             data = [dict(record) for record in result]
             driver.close()
+        
         df = pd.DataFrame(data)
-        df = df.dropna(axis=1, how='all')
+
+        df.dropna(axis=1, how='all', inplace=True)
+
         cols = [col for col in df.columns if col not in ['property', 'value']]
         df = df.pivot_table(index=cols, columns='property', values='value', aggfunc='first').reset_index()
         dtypes = df.dtypes.to_dict()
         list_cols = []
-        for col_name, typ in dtypes.items():
-            if typ == 'object' and isinstance(df[col_name].iloc[0], list):
-                list_cols.append(col_name)
 
-        # Explode list-type columns
+        for col_name, typ in dtypes.items():
+            if typ == 'object' and not df[col_name].empty and isinstance(df[col_name].iloc[0], list):
+                list_cols.append(col_name)
+        
+
         for col in list_cols:
-            df = df.explode(col)
+            df[col] = df[col].apply(lambda x: '|'.join(map(str, x)) if isinstance(x, list) else x)
+        
         df = df.astype(str)
+        df.replace([np.nan, None,"nan"], '', inplace=True)
+
         return jsonify(df.to_json(orient='records'))
     
     except Exception as e:
@@ -1927,10 +2031,9 @@ d.ApplicableYears as ApplicableYears,
 d.DatasetCitation as DatasetCitation, 
 d.District as District, 
 d.DatasetLocation as DatasetLocation, 
-d.SubNational as SubNational, 
 d.DatasetVersion as DatasetVersion, 
 d.DatasetScope as DatasetScope, 
-d.Subdistrict as Subdistrict, 
+d.Subnational as Subnational, 
 d.Note as Note
 """
 
@@ -2029,8 +2132,7 @@ def getnetworknodes():
 
 @app.route('/datasetDomains', methods=['POST'])
 def getdatasetDomains():
-    try:
-    
+    try:    
         data = request.get_data()  
         data = json.loads(data)
 
@@ -2045,7 +2147,7 @@ def getdatasetDomains():
         else:
             raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")  
         
-
+# combine queries
         if children == True:
             query = """
 unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[:CONTAINS*..5]->(:DATASET)-[:USES]->(c) 
@@ -2066,7 +2168,7 @@ return label
             result = session.run(query, cmid = cmid)
             data = [dict(record) for record in result]
             driver.close()
-
+        
         return data
 
     except Exception as e:
