@@ -1834,7 +1834,7 @@ def getDataset():
             data = json.loads(data)
             database = CM.unlist(data.get('database'))
             cmid = CM.unlist(data.get('cmid'))
-            domain = CM.unlist(data.get('domain'))
+            domain = data.get('domain')
             children = CM.unlist(data.get('children'))
         else: 
             raise Exception("invalid request method")
@@ -1865,7 +1865,7 @@ def getDataset():
         query = """
  unwind $cmid as cmid
  match (a:DATASET)-[r:USES]->(b) 
- where a.CMID = cmid and not isEmpty([i in r.label 
+ where a.CMID = cmid and not isEmpty([i in r.label
  where i in apoc.coll.flatten([$domain],true)]) 
  unwind keys(r) as property with a,r,b, property 
  where not property in ['type','Key','log'] 
