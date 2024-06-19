@@ -1851,16 +1851,15 @@ def getDataset():
         
         session = driver.session()
 
-        if children is not None and children == "true":
+        if children is not None and str(str.lower(children)) == "true":
             query = """
             unwind $cmid as cmid
-            match (:DATASET {CMID: cmid})-[:CONTAINS*..5]->(d:DATASET) return d.CMID as CMID
+            match (:DATASET {CMID: cmid})-[:CONTAINS*..5]->(d:DATASET) return distinct d.CMID as CMID
             """
             result = session.run(query,cmid = cmid)
             result = [record["CMID"] for record in result]
             if result is not None:
                 cmid = [cmid] + result
-        
         
         query = """
  unwind $cmid as cmid
@@ -2150,15 +2149,15 @@ def getdatasetDomains():
 # combine queries
         if children == True:
             query = """
-unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[:CONTAINS*..5]->(:DATASET)-[:USES]->(c) 
-with distinct apoc.coll.toSet(apoc.coll.flatten(collect(labels(c)))) as labels 
+unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[:CONTAINS*..5]->(:DATASET)-[r:USES]->(c) 
+with distinct apoc.coll.toSet(apoc.coll.flatten(collect(r.label), true)) as labels 
 unwind labels as label 
 return label
 """
         else:
             query = """
-unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[:USES]->(c) 
-with distinct apoc.coll.toSet(apoc.coll.flatten(collect(labels(c)))) as labels 
+unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[r:USES]->(c) 
+with distinct apoc.coll.toSet(apoc.coll.flatten(collect(r.label), true)) as labels 
 unwind labels as label 
 return label
 """
