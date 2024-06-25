@@ -624,7 +624,10 @@ def getExplore():
             qCategories = """
 unwind $cmid as cmid 
 match (a:ADM0 {CMID: cmid})-[:DISTRICT_OF]-(c:CATEGORY) 
-unwind labels(c) as Domain with Domain, count(*) as Count 
+unwind r.label as Domain 
+with distinct c, apoc.coll.toSet(apoc.coll.flatten(collect(Domain),true)) as Domains 
+unwind Domains as Domain 
+with Domain, count(*) as Count 
 return distinct Domain, Count order by Domain
 """
 
@@ -641,7 +644,10 @@ return distinct Domain, Count order by Domain
             qSamples = None
             qCategories = """
 unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY) 
-unwind r.label as Domain with Domain, count(*) as Count 
+unwind r.label as Domain 
+with distinct c, apoc.coll.toSet(apoc.coll.flatten(collect(Domain),true)) as Domains 
+unwind Domains as Domain 
+with Domain, count(*) as Count 
 return distinct Domain, Count order by Domain
 """
 
