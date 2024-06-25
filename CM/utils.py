@@ -127,7 +127,20 @@ def addMatchResults(results):
         results = pd.merge(results, df, on=['CMID', 'term'], how='left')
 
     except Exception as e:
-        print(f"error returning match statistics: {e}")
-        return results
+        print(f"Error returning match statistics: {e}")
+        return e
 
     return results
+
+def validateDatabase(database):
+    try:
+        if str.lower(database) == "sociomap":
+            driver = connectionSM()
+        elif str.lower(database) == "archamap":
+            driver = connectionAM()
+        else:
+            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+        return driver
+    except Exception as e:
+        print(f"Error validating database: {e}")
+        return e
