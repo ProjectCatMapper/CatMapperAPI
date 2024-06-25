@@ -3,7 +3,7 @@ from flask import Flask,request
 from flask import jsonify, render_template, make_response
 from neo4j import GraphDatabase
 import os
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from flask_cors import CORS
 from fuzzywuzzy import fuzz
 from bs4 import BeautifulSoup
@@ -19,7 +19,7 @@ from collections import defaultdict
 import logging
 # from werkzeug.middleware.proxy_fix import ProxyFix
 
-load_dotenv()
+load_dotenv(find_dotenv())
 uri = os.getenv("uri")
 user = os.getenv("user")
 pwd = os.getenv("pwd")
@@ -139,6 +139,7 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 # swagger documentation
 # app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)
 app.json_encoder = LazyJSONEncoder
+app.config['JSON_SORT_KEYS'] = False
 
 template = dict(swaggerUiPrefix="/api")
 swagger = Swagger(app, template=template)
@@ -1161,7 +1162,7 @@ country order by matchingDistance
                 data = [dict(record) for record in result]
 
                 driver.close()
-            return data
+            return jsonify(data)
         else:
             print(cypher_query)
             # return([qStart,qDomain,qUnique,qContext,qYear,qLimit,qCountry,qReturn])
@@ -2167,6 +2168,13 @@ return label
             result = session.run(query, cmid = cmid)
             data = [dict(record) for record in result]
             driver.close()
+
+        # cleaned = {}
+        # for key, value in data.items():
+        #     if ":" in value:
+        #         cleaned[key] = value.split(":")
+        #     else:
+        #         cleaned
         
         return data
 
@@ -2174,6 +2182,27 @@ return label
     # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
         return result, 500
+
+@app.route('/advancedValidate', methods=['POST'])
+def CMadvancedValidate():
+    try:
+        result = CM.advancedValidate(request.get_data())
+        return result
+    except Exception as e:
+    # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+
+@app.route('/test', methods=['GET'])
+def test():
+    data = {
+        'b': [1, 2, 3],
+        'a': [4, 5, 6],
+        'c': [7, 8, 9]
+    }
+
+    return jsonify(data)
+
 
 if __name__== "__main__":
     app.run(debug=True,port=5001)
