@@ -9,4 +9,5 @@ pysodium
 numpy
 pandas
 beautifulsoup4
+Flask-Mail
 # werkzeug>=0.16.1

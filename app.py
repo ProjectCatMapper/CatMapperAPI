@@ -1,6 +1,7 @@
 #from fastapi import FastAPI
 from flask import Flask,request
-from flask import jsonify, render_template, make_response
+from flask import jsonify, render_template, make_response, stream_with_context, Response
+from flask_mail import Mail, Message
 from neo4j import GraphDatabase
 import os
 from dotenv import load_dotenv, find_dotenv
@@ -17,38 +18,35 @@ import pandas as pd
 import numpy as np
 from collections import defaultdict
 import logging
+from itsdangerous import URLSafeTimedSerializer
+from werkzeug.security import generate_password_hash
 # from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv(find_dotenv())
-uri = os.getenv("uri")
+uriSM = os.getenv("uriSM")
 user = os.getenv("user")
-pwd = os.getenv("pwd")
-uri1 = os.getenv("uri1")
-user1 = os.getenv("user1")
-pwd1 = os.getenv("pwd1")
+pwdSM = os.getenv("pwdSM")
+uriG = os.getenv("uriG")
+pwdG = os.getenv("pwdG")
 uriAM = os.getenv("uriAM")
 pwdAM = os.getenv("pwdAM")
 apikeyEnv = os.getenv("apikey")
 
 def connectionSM():
-    driver = GraphDatabase.driver(uri=uri,auth=(user,pwd))
+    driver = GraphDatabase.driver(uri=uriSM,auth=(user,pwdSM))
     return driver
 
 def connectionGIS():
-    driver = GraphDatabase.driver(uri=uri1,auth=(user1,pwd1))
+    driver = GraphDatabase.driver(uri=uriG,auth=(user,pwdG))
     return driver
 
 def connectionAM():
     driver = GraphDatabase.driver(uri=uriAM,auth=(user,pwdAM))
     return driver
 
-def verifyUser(driver,user,pwd):
-    with driver.session() as session:
-        query = "match (u:USER {userID: $user,password: $pwd}) return true as verified"
-        result = session.run(query, user = user, pwd = pwd)
-        result = [dict(record) for record in result]
-        driver.close()
-    return result
+def connectionUsers():
+    driver = GraphDatabase.driver(uri=os.getenv("uriU"),auth=(os.getenv("user"),os.getenv("pwdU")))
+    return driver
 
 def getPolygon(CMID,driver, simple = True):
     try:
@@ -140,6 +138,16 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 # app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)
 app.json_encoder = LazyJSONEncoder
 app.config['JSON_SORT_KEYS'] = False
+
+app.config['MAIL_SERVER'] = os.getenv("mail_server")  # Replace with your mail server
+app.config['MAIL_PORT'] = os.getenv("mail_port")  # Typically 587 for TLS, 465 for SSL
+app.config['MAIL_USE_TLS'] = True  # Use TLS
+app.config['MAIL_USE_SSL'] = False  # Use SSL (False if using TLS)
+app.config['MAIL_USERNAME'] = os.getenv("mail_address")  # Your email
+app.config['MAIL_PASSWORD'] = os.getenv("mail_pwd")  # Your email password
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv("mail_default")  # Default sender
+
+mail = Mail(app)
 
 template = dict(swaggerUiPrefix="/api")
 swagger = Swagger(app, template=template)
@@ -310,8 +318,12 @@ return distinct Domain, Count order by Domain
              qSamples = None
         
              qCategories = """
-unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY) 
-unwind r.label as Domain with Domain, count(*) as Count 
+unwind $cmid as cmid 
+match (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY) 
+unwind r.label as Domain 
+with distinct c, apoc.coll.toSet(apoc.coll.flatten(collect(Domain),true)) as Domains 
+unwind Domains as Domain 
+with Domain, count(*) as Count 
 return distinct Domain, Count order by Domain
 """
 
@@ -418,9 +430,9 @@ return distinct Domain, Count order by Domain
         if "Languages" in  info[0]:
             if info[0]['Languages'][:1]    == ",":
                 info[0]['Languages'] = info[0]['Languages'][2:].strip()
-
-
-                                
+            if info[0]['Languages'][-2:-1]    == ",":
+                info[0]['Languages'] = info[0]['Languages'][:-2].strip()
+                                            
         return jsonify({
         "info": info[0],
         "samples": samples,
@@ -623,8 +635,8 @@ def getExplore():
     '''
             qCategories = """
 unwind $cmid as cmid 
-match (a:ADM0 {CMID: cmid})-[:DISTRICT_OF]-(c:CATEGORY) 
-unwind r.label as Domain 
+match (a:ADM0 {CMID: cmid})-[:DISTRICT_OF]->(c:CATEGORY) 
+unwind labels(c) as Domain 
 with distinct c, apoc.coll.toSet(apoc.coll.flatten(collect(Domain),true)) as Domains 
 unwind Domains as Domain 
 with Domain, count(*) as Count 
@@ -1378,7 +1390,7 @@ def getTranslate2():
         dataset = CM.unlist(data.get('dataset'))
         yearStart = CM.unlist(data.get('yearStart'))
         yearEnd = CM.unlist(data.get('yearEnd'))
-        if key != 'true':
+        if str.lower(key) != 'true':
             key = None
         query = CM.unlist(data.get("query"))
         if query != 'true':
@@ -1603,13 +1615,32 @@ matching, score as matchingDistance, country, Key order by matchingDistance
 
         data = data.astype(str)
 
-        # print(data)
-                
-        # Convert the DataFrame to a list of dictionaries, preserving column order
+        colOrder = [
+            term,
+            f"CMID_{term}",
+            f"CMName_{term}",
+            f"matching_{term}",
+            f"matchingDistance_{term}",
+            f"label_{term}",
+            f"country_{term}",
+            f"Key_{term}",
+            f"matchType_{term}",
+            "CMuniqueRowID"
+        ]
+
+
+        for col in data.columns:
+            if col not in colOrder:
+                colOrder.append(col)
+
+
+        finalColOrder = [col for col in colOrder if col in data.columns]
+
+        data = data[finalColOrder]
+
         data_dict = data.to_dict(orient='records')
 
-        # Use jsonify to return the JSON response
-        return jsonify(data_dict)                
+        return data_dict
 
     except Exception as e:
         return str(e), 500
@@ -1635,16 +1666,9 @@ def getQuery():
         else:
             raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
         
-        try:
-            verified = verifyUser(driver,user,pwd)
-            for item in verified:
-                verified = item
-
-            for item in verified:
-                verified = item
-            
-        except Exception as e:
-            return str(e), 500
+        verified = CM.verifyUser(user,pwd)
+        for item in verified:
+            verified = item
     
         if verified == "verified":
             with driver.session() as session:
@@ -1695,14 +1719,7 @@ def getnewuser():
         password = CM.password_hash(password)
         intendedUse = data.get("intendedUse")
         
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        elif database == "gisdb":
-            driver = connectionGIS()
-        else:
-            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")   
+        driver = CM.getDriver("userdb")  
         
         queryExists = """
 match (u:USER {username: $username}) 
@@ -1729,27 +1746,38 @@ return true as exists
             raise Exception("Account with this email already exists. Please contact admin@catmapper.org to reset password.")
         
         query = """
-match (p:USER) with toInteger(p.userID) + 1 as id order by id desc limit 1
+match (p:USER) with toInteger(p.userid) + 1 as id order by id desc limit 1
 merge (u:USER {username: $username}) 
 on create set u.username = $username,
-u.First = $firstName,
-u.Last = $lastName,
-u.Email = $email,
+u.first = $firstName,
+u.last = $lastName,
+u.email = $email,
 u.access = "new",
-u.log = toString(datetime()) + ": created user via API",
+u.log = [toString(datetime()) + ": created user via API"],
 u.password = $password,
-u.userID = toString(id),
+u.userid = toString(id),
 u.role = 'user',
-u.intendedUse = $intendedUse
-return u.userID as userID
+u.intendedUse = $intendedUse,
+u.database = split($database,"|")
+return u.userid as userid
 """
 
         with driver.session() as session:
-            result = session.run(query,firstName = firstName, lastName = lastName, email = email, password = password,username = username,intendedUse = intendedUse)
+            result = session.run(query,firstName = firstName, lastName = lastName, email = email, password = password,username = username,intendedUse = intendedUse,database = database)
             data = [dict(record) for record in result]
             driver.close()
-        return jsonify(data)
 
+        body = f"""
+Hello,
+A new user has just registered.
+Name: {firstName} {lastName}
+email: {email}
+database: {database}
+description: {intendedUse}
+"""
+        CM.sendEmail(mail, subject = "New registered user", recipients = ["admin@catmapper.org"], body = body, sender = os.getenv("mail_default"))
+
+        return jsonify(data)
 
     except Exception as e:
         # Check for specific error messages
@@ -1905,7 +1933,7 @@ def getDataset():
         df = df.astype(str)
         df.replace([np.nan, None,"nan"], '', inplace=True)
 
-        return jsonify(df.to_json(orient='records'))
+        return df.to_json(orient='records')
     
     except Exception as e:
     # In case of an error, return an error response with an appropriate HTTP status code
@@ -2189,26 +2217,116 @@ return label
         result = str(e)
         return result, 500
 
-@app.route('/advancedValidate', methods=['POST'])
-def CMadvancedValidate():
+@app.route('/foci', methods=['GET'])
+def getFoci():
     try:
-        result = CM.advancedValidate(request.get_data())
-        return result
+        database = request.args.get('database')
+
+        if str.lower(database) == "sociomap":
+            driver = connectionSM()
+        elif str.lower(database) == "archamap":
+            # driver = connectionAM()
+            return "ArchaMap not available"
+        else:
+            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")   
+        
+        query1 = """
+match (d:DATASET) 
+where d.foci is not null  
+unwind d.foci as foci with d, foci 
+return custom.getName(foci) as Focus, count(distinct d) as Datasets order by Focus
+"""
+
+        query2 = """
+match (d:DATASET) 
+where d.foci is not null 
+optional match (d)-[:USES]->(c:CATEGORY) 
+with d, c unwind labels(c) as label 
+with d,c, label 
+where label in ["DISTRICT","LANGUOID","ETHNICITY","RELIGION"]  
+unwind d.foci as foci with foci, label, count(distinct c) as n 
+return custom.getName(foci) as Focus, custom.getDisplayName(label) as domain, n order by Focus, domain
+"""
+
+        with driver.session() as session:
+            result1 = session.run(query1)
+            result2 = session.run(query2)
+            data1 = [dict(record) for record in result1]
+            data2 = [dict(record) for record in result2]
+            driver.close()
+
+        df1 = pd.DataFrame(data1)
+
+        df1.dropna(axis=1, how='all', inplace=True)
+
+        df2 = pd.DataFrame(data2)
+
+        df2.dropna(axis=1, how='all', inplace=True)
+
+        cols = [col for col in df2.columns if col not in ['domain', 'n']]
+        df2 = df2.pivot_table(index=cols, columns='domain', values='n', aggfunc='first').reset_index()
+
+        df = df1.join(df2.set_index('Focus'), on='Focus')
+
+        columns_to_convert = df.columns.difference(['Focus'])
+        df[columns_to_convert] = df[columns_to_convert].fillna(0)
+        df[columns_to_convert] = df[columns_to_convert].astype(int)
+
+        return df.to_json(orient='records')
     except Exception as e:
     # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
+        return result, 500   
+
+@app.route('/advancedUpload', methods=['POST'])
+def advancedUpload():
+    try:
+        
+        data = request.get_json()
+        CM.advancedUpload(data)
+        return Response(stream_with_context(CM.advancedUpload(data)), content_type='text/event-stream')
+
+    except Exception as e:
+        result = str(e)
         return result, 500
+
+@app.route('/login', methods=['POST'])
+def getLogin():
+    try:
+        data =request.get_data()
+        data = json.loads(data)
+        database =  CM.unlist(data.get('database'))
+        user =  CM.unlist(data.get('user'))
+        password =  CM.unlist(data.get('password'))
+
+        credentials = CM.login(database,user,password)
+
+        return credentials
+
+    except Exception as e:
+        result = str(e)
+        return result, 500    
 
 @app.route('/test', methods=['GET'])
 def test():
-    data = {
-        'b': [1, 2, 3],
-        'a': [4, 5, 6],
-        'c': [7, 8, 9]
-    }
+    
+    database = request.args.get('database')
 
-    return jsonify(data)
+    driver = CM.getDriver(database)
+    session = driver.session()
+    data = session.run("match (c) return count(*) as count")
+    data = [dict(record) for record in data]
 
+    return data
+
+
+@app.route('/send-test-email', methods=['GET'])
+def send_test_email():
+    try:
+        msg = CM.sendEmail(mail, "Test Email",["bischrob@gmail.com"],"This is a test email sent from a Flask application. Have fun.","admin@catmapper.org")
+        return msg
+    except Exception as e:
+        return str(e), 500
 
 if __name__== "__main__":
     app.run(debug=True,port=5001)

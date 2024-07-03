@@ -7,6 +7,10 @@ from datetime import datetime
 from neo4j import GraphDatabase
 import pandas as pd
 import numpy as np
+from dotenv import load_dotenv, find_dotenv
+import os
+
+load_dotenv(find_dotenv())
 
 def getQuery(query,driver, params = None):
     try:
@@ -132,15 +136,42 @@ def addMatchResults(results):
 
     return results
 
-def validateDatabase(database):
+def getDriver(database):
     try:
         if str.lower(database) == "sociomap":
-            driver = connectionSM()
+            driver = GraphDatabase.driver(os.getenv("uriSM"), auth=(os.getenv("user"), os.getenv("pwdSM")))
         elif str.lower(database) == "archamap":
-            driver = connectionAM()
+            driver = GraphDatabase.driver(os.getenv("uriAM"), auth=(os.getenv("user"), os.getenv("pwdAM")))
+        elif str.lower(database) == "gisdb":
+            driver = GraphDatabase.driver(os.getenv("uriG"), auth=(os.getenv("user"), os.getenv("pwdG")))
+        elif str.lower(database) == "userdb":
+            driver = GraphDatabase.driver(os.getenv("uriU"), auth=(os.getenv("user"), os.getenv("pwdU")))
         else:
             raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+        
         return driver
+
     except Exception as e:
         print(f"Error validating database: {e}")
+        return e
+    
+def validateCols(df,required):
+    missing = [col for col in df.columns if col not in required]
+
+    if len(missing) > 0:
+        return f"Missing the following required column(s): {missing}\n"
+    else:
+        return True
+    
+def verifyUser(user,pwd):
+    try:
+        driver = connectionUsers()
+        with driver.session() as session:
+            query = "match (u:USER {userid: toInteger($user),password: $pwd}) return true as verified"
+            result = session.run(query, user = user, pwd = pwd)
+            result = [dict(record) for record in result]
+            driver.close()
+        return result
+    except Exception as e:
+        print(f"Error verifying user: {e}")
         return e
