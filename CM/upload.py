@@ -5,7 +5,7 @@ import json
 import pandas as pd
 from flask import jsonify
 
-data = [{"CMID":"test-1","datasetID":"SD11","Key":"test-1","geoCoords":"yep"}]
+data = [{"CMID":"test-1","datasetID":"SD11","Key":"test-1","geoCoords":"yep","yearStart":2011}]
 df = pd.DataFrame(data)
 
 def createNodes(df,driver):
@@ -64,6 +64,8 @@ def modifyUSES(df,driver):
                 keys.append(f"r.{var} = split(row.{var},' || ')")
             else:
                 keys.append(f"r.{var} = row.{var}")
+
+        keys = ", ".join(keys)
 
 
 
