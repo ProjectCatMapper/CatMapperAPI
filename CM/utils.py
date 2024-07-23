@@ -9,14 +9,21 @@ import pandas as pd
 import numpy as np
 from dotenv import load_dotenv, find_dotenv
 import os
+from flask import abort
+import itertools
 
 load_dotenv(find_dotenv())
 
-def getQuery(query,driver, params = None):
+def getQuery(query,driver, params = None, type = "dict"):
     try:
         with driver.session() as session:
             result = session.run(query,params)
-            result = [dict(record) for record in result]
+            if type == "dict":
+                result = [dict(record) for record in result]
+            elif type == "list":
+                result = list(itertools.chain.from_iterable(record.values() for record in result))
+            else: 
+                raise Exception("invalid type")
             driver.close()
         return result
     except Exception as e:
@@ -153,7 +160,7 @@ def getDriver(database):
 
     except Exception as e:
         print(f"Error validating database: {e}")
-        return e
+        abort(500, description = f"An unexpected error occurred: {str(e)}")
     
 def validateCols(df,required):
     missing = [col for col in df.columns if col not in required]
@@ -165,13 +172,12 @@ def validateCols(df,required):
     
 def verifyUser(user,pwd):
     try:
-        driver = connectionUsers()
+        driver = getDriver("userdb")
         with driver.session() as session:
-            query = "match (u:USER {userid: toInteger($user),password: $pwd}) return true as verified"
+            query = "match (u:USER {userid: toString($user),password: $pwd}) return 'verified' as verified"
             result = session.run(query, user = user, pwd = pwd)
             result = [dict(record) for record in result]
             driver.close()
-        return result
+        return result[0].get("verified")
     except Exception as e:
-        print(f"Error verifying user: {e}")
-        return e
+        return f"Error verifying user: {e}", 500

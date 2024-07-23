@@ -313,7 +313,11 @@ return distinct Domain, Count order by Domain
     with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
     'return null as name',{id:a.District}) yield value as Location 
     return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
-    labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, "<a href ='" + a.DatasetLocation + "' target='_blank' >" + a.DatasetLocation +"</a>" as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
+    labels(a) as Domains, a.parent as Parent,
+      a.DatasetCitation as Citation, "<a href ='" + a.DatasetLocation + "' target='_blank' >" + a.DatasetLocation +"</a>" as `Dataset Location`,
+        a.ApplicableYears as `Applicable Years`, 
+        custom.getName(a.foci) as Foci,
+        a.Note as Note
     '''
              qSamples = None
         
@@ -432,7 +436,15 @@ return distinct Domain, Count order by Domain
                 info[0]['Languages'] = info[0]['Languages'][2:].strip()
             if info[0]['Languages'][-2:-1]    == ",":
                 info[0]['Languages'] = info[0]['Languages'][:-2].strip()
-                                            
+        
+        if "Location" in  info[0]:
+            if info[0]['Location'][-2:-1]    == ",":
+                info[0]['Location'] = info[0]['Location'][:-2].strip()
+        
+        if "Date range" in info[0]:
+            if info[0]["Date range"] == "-":
+                del info[0]["Date range"]
+                                                    
         return jsonify({
         "info": info[0],
         "samples": samples,
@@ -651,7 +663,11 @@ return distinct Domain, Count order by Domain
     with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
     'return null as name',{id:a.District}) yield value as Location 
     return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
-    labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, "<a href ='" + a.DatasetLocation + "' target='_blank' >" + a.DatasetLocation +"</a>" as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
+    labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation,
+      "<a href ='" + a.DatasetLocation + "' target='_blank' >" + a.DatasetLocation +"</a>" as `Dataset Location`,
+        a.ApplicableYears as `Applicable Years`, 
+        custom.getName(a.foci) as Foci,
+        a.Note as Note
     '''
             qSamples = None
             qCategories = """
@@ -975,6 +991,8 @@ def getSearch():
 
         if domain == "ANY DOMAIN":
             domain = "CATEGORY"
+        if domain == "AREA":
+            domain = "DISTRICT"
 
         if str.lower(database) == "sociomap":
             driver = connectionSM()
@@ -1382,6 +1400,8 @@ def getTranslate2():
         database = CM.unlist(data.get("database"))
         property = CM.unlist(data.get("property"))
         domain = CM.unlist(data.get("domain"))
+        if domain == "ANY DOMAIN":
+            domain = "CATEGORY"
 
         key = CM.unlist(data.get("key"))
         term = CM.unlist(data.get("term"))
@@ -1667,8 +1687,6 @@ def getQuery():
             raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
         
         verified = CM.verifyUser(user,pwd)
-        for item in verified:
-            verified = item
     
         if verified == "verified":
             with driver.session() as session:
@@ -1677,8 +1695,7 @@ def getQuery():
                 driver.close()
             return jsonify(data)
         else:
-            data = {"error": "User is not verified","verified": verified}
-            return jsonify(data), 500
+            raise Exception(f"error: User is not verified")
 
     except Exception as e:
     # In case of an error, return an error response with an appropriate HTTP status code
@@ -1871,19 +1888,18 @@ def getDataset():
             cmid = CM.unlist(data.get('cmid'))
             domain = data.get('domain')
             children = CM.unlist(data.get('children'))
+            if children == False:
+                children = "false"
+            if children == True:
+                children = "true"
         else: 
             raise Exception("invalid request method")
 
         if domain is None:
             domain = "CATEGORY"
-      
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        else:
-            raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
-        
+
+        driver = CM.getDriver(database)
+
         session = driver.session()
 
         if children is not None and str(str.lower(children)) == "true":
@@ -1891,47 +1907,56 @@ def getDataset():
             unwind $cmid as cmid
             match (:DATASET {CMID: cmid})-[:CONTAINS*..5]->(d:DATASET) return distinct d.CMID as CMID
             """
-            result = session.run(query,cmid = cmid)
-            result = [record["CMID"] for record in result]
+            result = CM.getQuery(query = query, driver = driver, type = "list")
             if result is not None:
                 cmid = [cmid] + result
-        
-        query = """
- unwind $cmid as cmid
- match (a:DATASET)-[r:USES]->(b) 
- where a.CMID = cmid and not isEmpty([i in r.label
- where i in apoc.coll.flatten([$domain],true)]) 
- unwind keys(r) as property with a,r,b, property 
- where not property in ['type','Key','log'] 
- return distinct a.CMName as datasetName, a.CMID as datasetID, 
- b.CMID as CMID, b.CMName as CMName, r.type as Type, 
- r.Key as Key, property, r[property] as value
-"""
 
-        with driver.session() as session:
-            result = session.run(query, cmid=cmid, domain=domain)
-            data = [dict(record) for record in result]
-            driver.close()
-        
+        query = """
+        unwind $cmid as cmid
+        match (a:DATASET)-[r:USES]->(b) 
+        where a.CMID = cmid and not isEmpty([i in r.label
+        where i in apoc.coll.flatten([$domain],true)]) 
+        unwind keys(r) as property with a,r,b, property 
+        where not property in ['type','Key','log'] 
+        return distinct a.CMName as datasetName, a.CMID as datasetID, 
+        b.CMID as CMID, b.CMName as CMName, r.type as Type, 
+        r.Key as Key, property, r[property] as value, custom.getName(r[property]) as property_name
+        """
+
+        data = CM.getQuery(query = query, driver = driver, params = {"cmid":cmid,"domain":domain})
+
         df = pd.DataFrame(data)
 
         df.dropna(axis=1, how='all', inplace=True)
 
+        df_names = df[["datasetID","CMID","property","property_name"]].copy()
+
+        df = df.drop("property_name", axis=1)
+
+        df_names.dropna(subset=["property_name"], how = "all", inplace = True)
+        df_names = df_names[df_names['property_name'] != '']
+        df_names['property'] = df_names['property'].apply(lambda x: f"{x}_name")
+
+        df_names = df_names.pivot_table(index=["datasetID","CMID"], columns='property', values='property_name', aggfunc='first').reset_index()
+
         cols = [col for col in df.columns if col not in ['property', 'value']]
         df = df.pivot_table(index=cols, columns='property', values='value', aggfunc='first').reset_index()
+        df = pd.merge(df, df_names, on=['datasetID', 'CMID'])
         dtypes = df.dtypes.to_dict()
         list_cols = []
 
         for col_name, typ in dtypes.items():
             if typ == 'object' and not df[col_name].empty and isinstance(df[col_name].iloc[0], list):
                 list_cols.append(col_name)
-        
+
 
         for col in list_cols:
             df[col] = df[col].apply(lambda x: '|'.join(map(str, x)) if isinstance(x, list) else x)
-        
+
         df = df.astype(str)
         df.replace([np.nan, None,"nan"], '', inplace=True)
+
+        # print(df)
 
         return df.to_json(orient='records')
     
@@ -2307,6 +2332,106 @@ def getLogin():
         result = str(e)
         return result, 500    
 
+@app.route('/addFoci', methods=['GET'])
+def addFoci():
+    try:
+        database = request.args.get('database')
+        datasetID = request.args.get('datasetID')
+        foci = request.args.get('foci')
+        
+        driver = CM.getDriver(database)
+
+        query = "MATCH (v:VARIABLE {CMID: $foci}) return v.CMID as CMID"
+        verifyFoci = CM.getQuery(query,driver,params = {"foci":foci})
+
+        query = "MATCH (d:DATASET {CMID: $datasetID}) return d.CMID as CMID"
+        verifydb = CM.getQuery(query,driver,params = {"datasetID":datasetID})
+
+        if not datasetID in [item["CMID"] for item in verifydb]:
+            raise Exception("datasetID does not exist - please check the CMID")
+
+        if foci in [item["CMID"] for item in verifyFoci]:
+            query = "MATCH (d:DATASET {CMID: $datasetID}) with d, apoc.coll.toSet(coalesce(d.foci,[]) + $foci) as result set d.foci = result return d.CMID as datasetID, d.foci as foci"
+            result = CM.getQuery(query,driver,params = {"foci":foci,"datasetID":datasetID})
+        else:
+            raise Exception("foci does not exist - please check the CMID")
+
+        return result
+
+    except Exception as e:
+        result = str(e)
+        return result, 500    
+
+@app.route('/progress', methods=['GET'])
+def getProgress():
+    try:
+        database = request.args.get('database')
+
+        driver = CM.getDriver(database)
+
+        query = """
+        match (l:LABEL) 
+        where l.public = 'TRUE' and l.groupLabel = l.label and not l.label = "CATEGORY"
+        return l.label as label, l.displayName as newlabel
+        """
+        domains = CM.getQuery(query = query, driver = driver)
+        domains = pd.DataFrame(domains)
+
+        query = """
+        match (a) 
+        unwind labels(a) as label 
+        with label, count(*) as current 
+        where label in $labels 
+        return label, current, 'nodes' as type 
+        order by label 
+        union match ()-[r]->() 
+        where not type(r) in ["IS","MERGING"]
+        with type(r) as label, count(*) as current 
+        return label, current, 'relations' as type 
+        order by label 
+        union match (a:DATASET)-[r:USES]->(b) 
+        unwind labels(b) as label 
+        with label, count(r) as current 
+        where label in $labels 
+        return distinct label, current, 'encodings' as type
+        order by label
+        """
+
+        data = CM.getQuery(query = query, driver = driver, params={"labels":domains["label"]})
+
+        df = pd.DataFrame(data)
+
+        query = """
+        match (n:TRANSLATION) where n.table = "display" return n.table as table, n.from as label, n.to as newlabel order by label
+        """
+        translations = CM.getQuery(query = query, driver = driver)
+        translations = pd.DataFrame(translations)
+        translations = pd.concat([translations, domains], axis=0, ignore_index=True)
+        translations = translations.drop('table', axis=1)
+
+        df = df.merge(translations, on = "label", how = "inner")
+        df = df.drop('label', axis=1)
+        df = df.rename(columns={'newlabel': 'label'})
+
+
+        nodes = df[df['type'] == 'nodes'].copy()
+        nodes = nodes.drop('type', axis = 1)
+        nodes = nodes.to_dict(orient='records')
+
+        encodings = df[df['type'] == 'encodings'].copy()
+        encodings = encodings.drop('type', axis = 1)
+        encodings = encodings.to_dict(orient='records')
+
+        relations = df[df['type'] == 'relations'].copy()     
+        relations = relations.drop('type', axis = 1)
+        relations = relations.to_dict(orient='records')
+
+        return {"nodes": nodes, "encodings":encodings,"relations":relations}
+
+    except Exception as e:
+        result = str(e)
+        return result, 500    
+    
 @app.route('/test', methods=['GET'])
 def test():
     
@@ -2320,6 +2445,8 @@ def test():
     return data
 
 
+
+
 @app.route('/send-test-email', methods=['GET'])
 def send_test_email():
     try:
@@ -2330,6 +2457,5 @@ def send_test_email():
 
 if __name__== "__main__":
     app.run(debug=True,port=5001)
-
 
 
