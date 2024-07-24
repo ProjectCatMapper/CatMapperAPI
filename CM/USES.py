@@ -66,7 +66,6 @@ return count(*) as count
       match (n)-[rel:{relationship}]->(a:CATEGORY)<-[r:USES]-(:DATASET)
       {qWhere} 
       {qFilterb}
-      {qProp2}
       with a, apoc.coll.toSet(apoc.coll.flatten({qProp},true)) as current, 
       apoc.coll.toSet(apoc.coll.flatten(collect(distinct n.CMID),true)) as exists, collect(distinct rel) as rels, collect(n) as nodes
       with a, rels, nodes, [i in exists where not i in current] as extra
