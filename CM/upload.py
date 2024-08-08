@@ -10,6 +10,7 @@ df = pd.DataFrame(data)
 
 def createNodes(df,driver):
     try:
+        label = df["label"][0]
         required = ["CMID","CMName","label"]
 
         return "unfinished"
@@ -130,3 +131,4 @@ def advancedUpload(data):
         yield result
     except Exception as e:
         yield str(e), 500
+

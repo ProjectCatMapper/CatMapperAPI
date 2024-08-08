@@ -181,3 +181,24 @@ def verifyUser(user,pwd):
         return result[0].get("verified")
     except Exception as e:
         return f"Error verifying user: {e}", 500
+    
+def cleanCMID(cmid):
+    # Define the regex pattern for valid prefixes
+    valid_prefix_pattern = re.compile(r'^(AD|SD|AM|SM)')
+
+    # Function to check if a string has a valid prefix
+    def has_valid_prefix(s):
+        return bool(valid_prefix_pattern.match(s))
+
+    if isinstance(cmid, list):
+        # If cmid is a list, filter out items that don't have a valid prefix
+        cleaned_cmid = [item for item in cmid if has_valid_prefix(item)]
+        # If the cleaned list is empty, return None
+        return cleaned_cmid if cleaned_cmid else None
+    elif isinstance(cmid, str):
+        # If cmid is a string, check if it has a valid prefix
+        return cmid if has_valid_prefix(cmid) else None
+    else:
+        # If cmid is neither a list nor a string, return None
+        return None
+

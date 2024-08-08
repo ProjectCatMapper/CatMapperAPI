@@ -405,6 +405,9 @@ return distinct Domain, Count order by Domain
         if len(points) > 0:
             point= []
             for i in range(0,len(points)):
+                if points[i]['geometry'] == "null":
+                    del points[i]
+                    continue
                 if json.loads(points[i]['geometry'])["type"] != "MultiPoint":
                     point.append({"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]})
                 else:
@@ -413,8 +416,7 @@ return distinct Domain, Count order by Domain
                     for j in range(0,len(json.loads(temp['geometry'])['coordinates'])):
                         point.append({'cood' : json.loads(temp['geometry'])['coordinates'][j][::-1], "source" : source })
             if point:
-                    points= point
-               
+                    points= point              
 
         # if len(points) > 0:
         #     for i in range(0,len(points)):
@@ -1001,6 +1003,8 @@ def getSearch():
         else:
             raise Exception("must specify database as 'SocioMap' or 'ArchaMap'")
         
+        term= term.strip()
+        
         if term == "":
             term = None
 
@@ -1402,7 +1406,9 @@ def getTranslate2():
         domain = CM.unlist(data.get("domain"))
         if domain == "ANY DOMAIN":
             domain = "CATEGORY"
-
+        if domain == "AREA":
+            domain = "DISTRICT"
+        
         key = CM.unlist(data.get("key"))
         term = CM.unlist(data.get("term"))
         country = CM.unlist(data.get('country'))
@@ -1848,12 +1854,7 @@ def getAdminEdit():
         apikey = CM.unlist(data.get('apikey'))
         if apikey != apikeyEnv:
             raise Exception(f"Error: apikey is invalid: {apikey}")
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        else:
-            raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
+        driver = CM.getDriver(database)
         result = "Nothing returned"
         # if fun == "getUSESrels":
         #     result = CM.getUSESrels(request,driver)
@@ -1862,7 +1863,7 @@ def getAdminEdit():
         elif fun == "addIndexes":
             result = CM.addIndexes(driver)
         elif fun == "updateUses":
-            CMID = data.get('CMID') 
+            CMID = CM.cleanCMID(data.get('CMID'))
             result = CM.updateUses(driver = driver, CMID = CMID)    
         else:
             raise Exception("Function does not exist")
