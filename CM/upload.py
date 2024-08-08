@@ -36,7 +36,7 @@ def modifyNodes(df,driver):
     except Exception as e:
         return str(e), 500
 
-def modifyUSES(df,driver):
+def overwriteProperty(df,driver):
     try:
         required = ["CMID","datasetID","Key"]
         check = validateCols(df,required)
