@@ -1945,7 +1945,6 @@ def getDataset():
         df = df.pivot_table(index=cols, columns='property', values='value', aggfunc='first').reset_index()
         if len(df_names) > 0:
             df = pd.merge(df, df_names, on=['datasetID', 'CMID'])
-        df = pd.merge(df, df_names, on=['datasetID', 'CMID'])
         dtypes = df.dtypes.to_dict()
         list_cols = []
 
