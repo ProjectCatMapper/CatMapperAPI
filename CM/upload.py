@@ -4,16 +4,96 @@ from .utils import *
 import json
 import pandas as pd
 from flask import jsonify
+import numpy as np
 
 data = [{"CMID":"test-1","datasetID":"SD11","Key":"test-1","geoCoords":"yep","yearStart":2011}]
 df = pd.DataFrame(data)
 
-def createNodes(df,driver):
+def createNodes(df,database,user):
     try:
-        label = df["label"][0]
-        required = ["CMID","CMName","label"]
 
-        return "unfinished"
+        driver = getDriver(database)
+
+        labels = getQuery("MATCH (l:LABEL) return l.label as label", driver, type = "list")
+
+        if "label" in df.columns:
+            if "DATASET" in df["label"]:
+                isDataset = True
+            else:
+                isDataset = False
+        else: 
+            raise Exception("Error: label column is required.")
+
+        if "CATEGORY" in df["label"].values:
+            raise Exception("Error: label must be more specific than CATEGORY")
+
+        if not all(label in labels for label in df["label"].unique()):
+            raise Exception("Error: label is not valid.")
+
+        if isDataset:
+            required = ["CMName","label","DatasetCitation","shortName"]
+        else:
+            required = ["CMName","label"]
+            df['label'] = df['label'].apply(lambda x: f"CATEGORY:{x}")
+
+        if not all(column in df.columns for column in required):
+            raise Exception("Error: missing required columns.")
+
+        if not 'uniqueID' in df.columns:
+            getQuery("MATCH (c) where not c.uniqueID is null set c.uniqueID = NULL", driver)
+            distinct_nodes = df.drop_duplicates(subset='CMName')
+            if len(distinct_nodes) != len(df):
+                raise Exception("Error: there must be a unique name for each new node.")
+            else:
+                df['uniqueID'] = df.index
+
+        newID = getAvailableID(new_id = "CMID", n = len(df), database = database)
+
+        print(newID)
+
+        df["CMID"] = newID
+
+        df = df.astype(str)
+
+        vars = [col for col in df.columns if 'label' not in col and 'uniqueID' not in col]
+
+        properties = getQuery("MATCH (p:PROPERTY) return p.property as property", driver, type = "list")
+
+        missing_vars = [var for var in vars if var not in properties]
+
+        if missing_vars:
+            raise Exception(f"Error: The following vars are not in properties: {', '.join(missing_vars)}")
+
+        set_clause = ', '.join([f"a.{var} = row.{var}" for var in vars])
+
+        return_clause = ', '.join([f"a.{var} as {var}" for var in vars])
+
+        q = f"""
+        unwind $rows as rows
+        unwind rows as row
+        call apoc.cypher.doIt('
+        MERGE (a:' + row.label + ' {{uniqueID: row.uniqueID}})
+        ON CREATE SET 
+        {set_clause},
+        a.log = toString(datetime()) + " user {user}: created node"
+        return a',
+        {{row: row}}) yield value 
+        with value.a as a 
+        return distinct id(a) as nodeID,
+        {return_clause}
+        """
+
+        rows = df.to_dict(orient='records')
+
+        results = getQuery(query = q, driver = driver, params = {"rows": rows})
+
+        results_df = pd.DataFrame(results)
+
+        for var in vars:
+            if not np.all(np.isin(df[var].values, results_df[var].values)):
+                raise Exception(f"Error: values for {var} were not uploaded correctly. Please check upload")
+            
+        return results
     
     except Exception as e:
         return str(e), 500

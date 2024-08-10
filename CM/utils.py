@@ -202,3 +202,52 @@ def cleanCMID(cmid):
         # If cmid is neither a list nor a string, return None
         return None
 
+def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database = "SocioMap"):
+
+    driver = getDriver(database)
+
+    # Ensure label is either "DATASET", "USER", or "CATEGORY"
+    if label not in ["DATASET", "USER"]:
+        label = "CATEGORY"
+
+    # Define the Cypher query to find the next available ID
+    query = f'''
+    MATCH (a) 
+    WHERE a.{new_id} IS NOT NULL 
+    WITH toInteger(apoc.text.replace(toString(a.{new_id}), "[^0-9]", "")) AS new_id 
+    WHERE NOT apoc.meta.cypher.isType(new_id, "NULL") 
+    WITH new_id 
+    ORDER BY new_id DESC 
+    LIMIT 1 
+    RETURN new_id + 1 as new_id
+    '''
+
+    newID = getQuery(query, driver, type = "list")
+    newID = newID[0]
+
+    # If no ID is found, start from 1
+    if newID is None:
+        newID = 1
+
+    # Generate the range of new IDs
+    newID = list(range(newID, newID + n))
+
+    # Add prefixes based on the database and label
+    if new_id == "CMID":
+        prefix = ''
+        if database == "SocioMap":
+            prefix = "S"
+        elif database == "ArchaMap":
+            prefix = "A"
+        elif database == "gisdb":
+            prefix = "gis"
+        
+        if database == "gisdb":
+            newID = [f"{prefix}{x}" for x in newID]
+        else:
+            if label == "DATASET":
+                newID = [f"{prefix}D{x}" for x in newID]
+            else:
+                newID = [f"{prefix}M{x}" for x in newID]
+
+    return newID
