@@ -1,71 +1,70 @@
 import CM
-property = "religion"
-relationship = "RELIGION_OF"
-CMID = None
-driver = CM.getDriver("SocioMap")
+import pandas as pd
+import numpy as np
 
-if property in ["country","district"]:
-    qProp = "collect(distinct r.country) + collect(distinct r.district)"
-    qProp2 = ""
-else:
-    qProp = f"collect(distinct r.{property})"
-    if CMID is None:
-      qProp2 = f"not r.{property} is null"  
-    else:
-      qProp2 = f"and not r.{property} is null"
+database = "SocioMap"
+cmid = "SD2194"
+domain = "ADM0"
+children = "False"
 
-if CMID is not None:
-    qFiltera = "unwind $cmid as cmid"
-    qFilterb = "a.CMID = cmid "
-else: 
-    qFiltera = ""
-    qFilterb = ""
 
-if qProp2 == "" and qFiltera == "":
-    qWhere = ""
-else:
-    qWhere = "where"
+if domain is None:
+    domain = "CATEGORY"
 
-query1 = f"""
-{qFiltera}
-match (a:CATEGORY)<-[r:USES]-(:DATASET)
-{qWhere}
-{qFilterb}
-{qProp2}
-with a, apoc.coll.toSet(apoc.coll.flatten({qProp},true)) as cmids 
-match (n:CATEGORY) where n.CMID in cmids
-merge (a)<-[:{relationship}]-(n)
-return count(*) as count
+driver = CM.getDriver(database)
+
+if children is not None and str(str.lower(children)) == "true":
+    query = """
+    unwind $cmid as cmid
+    match (:DATASET {CMID: cmid})-[:CONTAINS*..5]->(d:DATASET) return distinct d.CMID as CMID
+    """
+    result = CM.getQuery(query = query, driver = driver, type = "list")
+    if result is not None:
+        cmid = [cmid] + result
+
+query = """
+unwind $cmid as cmid
+match (a:DATASET)-[r:USES]->(b) 
+where a.CMID = cmid and not isEmpty([i in r.label
+where i in apoc.coll.flatten([$domain],true)]) 
+unwind keys(r) as property with a,r,b, property 
+where not property in ['type','Key','log'] 
+return distinct a.CMName as datasetName, a.CMID as datasetID, 
+b.CMID as CMID, b.CMName as CMName, r.type as Type, 
+r.Key as Key, property, r[property] as value, custom.getName(r[property]) as property_name
 """
 
-if qFiltera == "":
-    qWhere = ""
-else:
-    qWhere = "where"
+data = CM.getQuery(query = query, driver = driver, params = {"cmid":cmid,"domain":domain})
 
-query2 = f"""
-{qFiltera}
-match (n)-[rel:{relationship}]->(a:CATEGORY)<-[r:USES]-(:DATASET)
-{qWhere} 
-{qFilterb}
-with a, apoc.coll.toSet(apoc.coll.flatten({qProp},true)) as current, 
-apoc.coll.toSet(apoc.coll.flatten(collect(distinct n.CMID),true)) as exists, collect(distinct rel) as rels, collect(n) as nodes
-with a, rels, nodes, [i in exists where not i in current] as extra
-unwind nodes as n unwind rels as rel with n,  rel, extra where n.CMID in extra and id(startNode(rel)) = id(n)
-delete rel
-"""
+df = pd.DataFrame(data)
 
-query3 = f"""
-{qFiltera}
-match (d:DATASET)-[rU:USES]->(a:CATEGORY)<-[rs:{relationship}]-(b:CATEGORY)
-{qWhere}
-{qFilterb}
-unwind rU.{property} as prop
-with d,a,b,rU,rs,prop
-where b.CMID = prop
-with distinct b, rs,a, collect(distinct d.shortName + " Key: " + rU.Key) as refKey
-set rs.referenceKey = refKey
-"""
-data = CM.getQuery(query = query1, driver = driver, params = {'cmid': CMID}, type = "list")
-CM.getQuery(query = query2, driver = driver, params = {'cmid': CMID})
-CM.getQuery(query = query3, driver = driver, params = {'cmid': CMID})
+df.dropna(axis=1, how='all', inplace=True)
+
+df_names = df[["datasetID","CMID","property","property_name"]].copy()
+
+df = df.drop("property_name", axis=1)
+
+df_names.dropna(subset=["property_name"], how = "all", inplace = True)
+df_names = df_names[df_names['property_name'] != '']
+df_names['property'] = df_names['property'].apply(lambda x: f"{x}_name")
+
+df_names = df_names.pivot_table(index=["datasetID","CMID"], columns='property', values='property_name', aggfunc='first').reset_index()
+
+cols = [col for col in df.columns if col not in ['property', 'value']]
+df = df.pivot_table(index=cols, columns='property', values='value', aggfunc='first').reset_index()
+if len(df_names) > 0:
+    df = pd.merge(df, df_names, on=['datasetID', 'CMID'])
+
+dtypes = df.dtypes.to_dict()
+list_cols = []
+
+for col_name, typ in dtypes.items():
+    if typ == 'object' and not df[col_name].empty and isinstance(df[col_name].iloc[0], list):
+        list_cols.append(col_name)
+
+
+for col in list_cols:
+    df[col] = df[col].apply(lambda x: '|'.join(map(str, x)) if isinstance(x, list) else x)
+
+df = df.astype(str)
+df.replace([np.nan, None,"nan"], '', inplace=True)

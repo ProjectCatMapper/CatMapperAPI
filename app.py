@@ -1003,7 +1003,8 @@ def getSearch():
         else:
             raise Exception("must specify database as 'SocioMap' or 'ArchaMap'")
         
-        term= term.strip()
+        if term:
+            term= term.strip()
         
         if term == "":
             term = None
@@ -1422,6 +1423,7 @@ def getTranslate2():
         if query != 'true':
             query = 'false'
         table = data.get("table")
+        print(table)
         if str.lower(database) == "sociomap":
             driver = connectionSM()
         elif str.lower(database) == "archamap":
@@ -1434,6 +1436,7 @@ def getTranslate2():
         # add rowid, 
         # table = [{'Name':'test1',"key": 1}, {'Name':'test1',"key": 2}, {'Name':'test2',"key": 3}]
         df = pd.DataFrame(table)
+        df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
         df['CMuniqueRowID'] = df.index
         rows = pd.DataFrame({'term': df[term],'CMuniqueRowID': df["CMuniqueRowID"]})
         if isinstance(country,str) and country in df.columns:
@@ -1613,7 +1616,7 @@ matching, score as matchingDistance, country, Key order by matchingDistance
                 data = [dict(record) for record in result]
 
                 driver.close()
-
+        
         data = pd.DataFrame(data)
         data = data.replace("", pd.NA)
         data = data.dropna(axis='columns', how='all')
@@ -1901,8 +1904,6 @@ def getDataset():
 
         driver = CM.getDriver(database)
 
-        session = driver.session()
-
         if children is not None and str(str.lower(children)) == "true":
             query = """
             unwind $cmid as cmid
@@ -1942,6 +1943,8 @@ def getDataset():
 
         cols = [col for col in df.columns if col not in ['property', 'value']]
         df = df.pivot_table(index=cols, columns='property', values='value', aggfunc='first').reset_index()
+        if len(df_names) > 0:
+            df = pd.merge(df, df_names, on=['datasetID', 'CMID'])
         df = pd.merge(df, df_names, on=['datasetID', 'CMID'])
         dtypes = df.dtypes.to_dict()
         list_cols = []
