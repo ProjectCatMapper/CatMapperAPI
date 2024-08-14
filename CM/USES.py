@@ -126,6 +126,7 @@ with a, labels + ["CATEGORY"] as labels
 call apoc.create.setLabels(a,labels) yield node
 return count(*)
 """
+
         result = getQuery(query = query, driver = driver, params = {"cmid":CMID})
 
         labels = getLabelsMetadata(driver = driver)

@@ -212,3 +212,80 @@ def advancedUpload(data):
     except Exception as e:
         yield str(e), 500
 
+def CMoverwriteProperty(links, properties, user, con):
+
+    if isinstance(properties, str):
+        properties = [properties, properties]
+
+    vars = links.columns.difference(['from', 'to', 'Key'])
+    
+    keys = ', '.join([f"r.{var} = apoc.coll.toSet(split(row.{var}, '; '))" for var in vars])
+
+    q = f"""
+    MATCH (a {{{properties[0]}: row.from}})-[r:USES {{Key: row.Key}}]->(b {{{properties[1]}: row.to}}) 
+    SET {keys} 
+    RETURN id(b) as nodeID, b.CMID as CMID
+    """
+    
+    result = CMimportFromS3(con, q, links)
+    
+    return {'q': result, 'links': links}
+
+def CMoverwritePropertyAPI(links, properties, con, user):
+
+    if isinstance(properties, str):
+        properties = [properties, properties]
+
+    vars = links.columns.difference(['from', 'to', 'Key'])
+    
+    keys = ', '.join([f"r.{var} = apoc.coll.toSet(split(row.{var}, '; '))" for var in vars])
+
+    q = f"""
+    UNWIND $rows AS row
+    MATCH (a {{{properties[0]}: row.from}})-[r:USES {{Key: row.Key}}]->(b {{{properties[1]}: row.to}})
+    SET {keys} 
+    RETURN id(b) as nodeID, b.CMID as CMID
+    """
+    
+    result = CMcypherQueryAPI(database=con.database, query=q, user="1", pwd=os.getenv('apipwd'), params={'rows': links.to_dict(orient='records')})
+    
+    return {'q': result, 'links': links}
+
+def CMupdateProperty(links, properties, con, user):
+    requiredCols = ['from', 'to', 'Key']
+
+    for required in requiredCols:
+        if required not in links.columns:
+            raise ValueError(f"missing required column {required}")
+
+    vars = links.columns.difference(requiredCols)
+    
+    keys = ', '.join([f"custom.getNonNullProp(r.{var}, row.{var}) AS {var}" for var in vars])
+    keys2 = ', '.join([f"r.{var} = {var}[0].prop" for var in vars])
+
+    if isinstance(properties, str):
+        properties = [properties, properties]
+
+    q = f"""
+    MATCH (a {{{properties[0]}: row.from}})-[r:USES {{Key: row.Key}}]->(b {{{properties[1]}: row.to}}) 
+    WITH r, b, {keys} 
+    SET {keys2} 
+    RETURN id(b) as nodeID, b.CMID as CMID
+    """
+    
+    result = CMimportFromS3(con, q, links)
+    
+    return {'q': result, 'links': links}
+
+def CMimportFromS3(con, query, links, CQLOnly=False):
+    with con.session() as session:
+        if CQLOnly:
+            return query
+        result = session.run(query, rows=links.to_dict(orient='records'))
+        return pd.DataFrame([record.data() for record in result])
+
+def CMcypherQueryAPI(database, query, user, pwd, params):
+    # This function should implement the logic to interact with the Neo4j API
+    pass  # Replace this with actual implementation
+
+
