@@ -1423,7 +1423,6 @@ def getTranslate2():
         if query != 'true':
             query = 'false'
         table = data.get("table")
-        print(table)
         if str.lower(database) == "sociomap":
             driver = connectionSM()
         elif str.lower(database) == "archamap":
@@ -2306,8 +2305,37 @@ return custom.getName(foci) as Focus, custom.getDisplayName(label) as domain, n 
         result = str(e)
         return result, 500   
 
+@app.route('/createNodes', methods=['POST'])
+def createNodesapi():
+    try:
+
+        data = request.get_data()
+        data = json.loads(data)
+        df = data.get('df')
+        database =  CM.unlist(data.get('database'))
+        user =  CM.unlist(data.get('user'))
+        pwd =  CM.unlist(data.get('password'))
+
+        verify = CM.verifyUser(user,pwd)
+
+        if not verify == "verified":
+            raise Exception("User is not verified.")
+
+        if not df or len(df) == 0:
+            return jsonify({"error": "Data is empty"}), 400    
+
+        df = pd.DataFrame(df)
+
+        results = CM.createNodes(df,database,user)
+
+        return results  
+
+    except Exception as e:
+        result = str(e)
+        return result, 500
+
 @app.route('/advancedUpload', methods=['POST'])
-def advancedUpload():
+def advancedUploadapi():
     try:
         
         data = request.get_json()
@@ -2447,7 +2475,17 @@ def test():
 
     return data
 
+@app.route('/mergeDatasets', methods=['GET'])
+def getMergeDatasets():
+       
+    database = request.args.get('database')
 
+    driver = CM.getDriver(database)
+    session = driver.session()
+    query = "match (d:DATASET) return d.CMID as CMID"
+    data = CM.getQuery(query, driver)
+
+    return data
 
 
 @app.route('/send-test-email', methods=['GET'])
