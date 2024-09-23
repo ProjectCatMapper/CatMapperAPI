@@ -1,10 +1,13 @@
 ''' upload.py '''
 
 from .utils import *
+from .USES import *
 import json
 import pandas as pd
 from flask import jsonify
 import numpy as np
+import time
+import re
 
 data = [{"CMID":"test-1","datasetID":"SD11","Key":"test-1","geoCoords":"yep","yearStart":2011}]
 df = pd.DataFrame(data)
@@ -98,65 +101,107 @@ def createNodes(df,database,user):
     except Exception as e:
         return str(e), 500
 
-def createUSES(df,driver):
+def createUSES(links,database,user, create = "MERGE"):
     try:
-        required = ["CMID","CMName","label"]
+        start_time = time.time()
+        if 'from' not in links.columns or 'to' not in links.columns:
+            raise ValueError("Must have 'from' and 'to' columns")
 
-        return "unfinished"
+        if 'Key' not in links.columns:
+            raise ValueError("Must have 'Key' column")
 
-    except Exception as e:
-        return str(e), 500
+        # Split 'from' and 'to' on "; " and trim whitespace
+        links['from'] = links['from'].apply(lambda x: x.split('; ') if isinstance(x, str) else []).apply(lambda x: [item.strip() for item in x]).apply(lambda x: '; '.join(x))
+        links['to'] = links['to'].apply(lambda x: x.split('; ') if isinstance(x, str) else []).apply(lambda x: [item.strip() for item in x]).apply(lambda x: '; '.join(x))
 
-def modifyNodes(df,driver):
-    try:
-        required = ["CMID","CMName","label"]
 
-        return "unfinished"
-    
-    except Exception as e:
-        return str(e), 500
+        # Database connection assumed via driver
+        driver = getDriver(database)
 
-def overwriteProperty(df,driver):
-    try:
-        required = ["CMID","datasetID","Key"]
-        check = validateCols(df,required)
-        if check is not True:
-            return check
-        
-        properties = getPropertiesMetadata(driver)
-        properties = pd.DataFrame(properties)
+        if 'label' not in links.columns:
+            raise ValueError("Must have 'label' column")
 
-        exclude_columns = ["CMID", "datasetID", "Key"]
-        vars = [col for col in df.columns if col not in exclude_columns]
+        if create.lower() not in ['merge', 'create']:
+            raise ValueError("create must be either 'merge' or 'create'")
 
-        vars = pd.DataFrame(vars,columns = ["property"])
-        vars = pd.merge(vars,properties)
-        vars = vars.to_dict(orient='records')
+        # Remove duplicates
+        links = links.drop_duplicates()
+
+        # Fetch properties from the database
+        db_properties = getQuery("MATCH (p:PROPERTY) RETURN p.property AS property", driver)
+        db_properties_list = [item['property'] for item in db_properties]
+        existing_columns = list(set(db_properties_list) & set(links.columns))
+        links[existing_columns] = links[existing_columns].applymap(lambda x: re.sub(r'\s+', '', str(x)) if pd.notnull(x) else x)
+
+        links['log'] = links.apply(lambda row: f"{time.strftime('%Y-%m-%dT%H:%M:%SZ')} user {user}: created relationship", axis=1)
+
+        # Convert all values to strings and replace NaN with empty strings
+        links = links.fillna("").astype(str)
+
+        # Select the appropriate columns based on the relationship type
+        vars = links.columns.difference(['from', 'to', 'Key'])
+
+        query = """
+match (n:METADATA:PROPERTY) 
+return n.property as property, n.type as type, 
+n.relationship as relationship, n.description as description, 
+n.display as display, n.group as group, n.metaType as metaType, n.search as search, n.translation as translation
+"""
+
+        metaTypes = getQuery(query, driver)
+        metaTypeDict = {item['property']: item['metaType'] for item in metaTypes}
 
         keys = []
-        for row in vars:
-            var = row['property']
-            type = row['type']
-            if type == "string":
-                keys.append(f"r.{var} = row.{var}")
-            elif type == "integer":
-                keys.append(f"r.{var} = toInt(row.{var})")
-            elif type == "list":
-                keys.append(f"r.{var} = split(row.{var},' || ')")
+        for var in vars:
+            metaType = metaTypeDict.get(var)  # Get the metaType for the given property
+            
+            if metaType == "string" or metaType == "JsonMap":
+                # If it's a string or JsonMap, use trim on the property
+                keys.append(f"r.{var} = trim(row.{var})")
             else:
-                keys.append(f"r.{var} = row.{var}")
+                # If it's a list or another type, use Cypher-style list comprehension
+                keys.append(f"r.{var} = apoc.coll.toSet([i IN apoc.coll.flatten(split(row.{var}, ';')) WHERE trim(i) <> ''])")
+                
+        # Combine the keys into a single string for the Cypher query
+        keys_string = ", ".join(keys)
 
-        keys = ", ".join(keys)
+        onCreate = "" if create.lower() == "create" else "ON CREATE "
 
+        # Create Cypher query for adding relationships
+        q = f"""
+        UNWIND $rows AS row
+        MATCH (a) WHERE row.from = a.CMID
+        MATCH (b) WHERE row.to = b.CMID
+        {create} (a)-[r:USES {{Key: row['Key']}}]->(b)
+        {onCreate}SET r.status = 'update', {keys_string}
+        RETURN id(b) AS nodeID, b.CMID AS CMID
+        """
 
+        # Get the number of relationships before adding
+        nRels = getQuery("MATCH ()-[r]->() RETURN count(*) AS count", driver, type="list")
 
+        # Execute the query and return results
+        print("Uploading to database")
+        print(q)
+        links_dict = links.to_dict(orient='records')
+        result = getQuery(q, driver, params={'rows':links_dict})
 
+        # Update alternate names
+        CMIDs = [item['CMID'] for item in result]
+        updateAltNames(driver,CMIDs)
 
-        return "unfinished"
+        # Get the number of relationships after adding
+        nRels2 = getQuery("MATCH ()-[r]->() RETURN count(*) AS count", driver, type="list")
+        new_rels = nRels2[0] - nRels[0]
+        print(f"Number of new relationships in database: {new_rels}")
+
+        end_time = time.time()
+        print(f"Elapsed time: {end_time - start_time} seconds")
+
+        return {"q": result, "links": links_dict}
 
     except Exception as e:
-        return str(e), 500   
-
+        return str(e), 500
     
 def advancedValidate(df,uploadType,domain,driver):
     try:
@@ -212,80 +257,62 @@ def advancedUpload(data):
     except Exception as e:
         yield str(e), 500
 
-def CMoverwriteProperty(links, properties, user, con):
+def updateProperty(links, database, user, updateType):
+    try:
+        if not updateType in ['overwrite','update']:
+            raise Exception("type must be update or overwrite.")
 
-    if isinstance(properties, str):
-        properties = [properties, properties]
+        driver = getDriver(database)
 
-    vars = links.columns.difference(['from', 'to', 'Key'])
-    
-    keys = ', '.join([f"r.{var} = apoc.coll.toSet(split(row.{var}, '; '))" for var in vars])
+        requiredCols = ["from", "to", "Key"]
 
-    q = f"""
-    MATCH (a {{{properties[0]}: row.from}})-[r:USES {{Key: row.Key}}]->(b {{{properties[1]}: row.to}}) 
-    SET {keys} 
-    RETURN id(b) as nodeID, b.CMID as CMID
-    """
-    
-    result = CMimportFromS3(con, q, links)
-    
-    return {'q': result, 'links': links}
+        for required in requiredCols:
+            if required not in links.columns:
+                raise ValueError(f"Missing required column {required}")
+            
+        vars = links.drop(columns=[col for col in requiredCols if col in links.columns]).columns.tolist()
 
-def CMoverwritePropertyAPI(links, properties, con, user):
+        if updateType == "update":
+            links['log'] = links.apply(lambda row: f"{time.strftime('%Y-%m-%dT%H:%M:%SZ')} user {user}: updated properties {', '.join([str(var) for var in vars])}", axis=1)
+        else:
+            links['log'] = links.apply(lambda row: f"{time.strftime('%Y-%m-%dT%H:%M:%SZ')} user {user}: overwrote properties {', '.join([str(var) for var in vars])}", axis=1)
 
-    if isinstance(properties, str):
-        properties = [properties, properties]
+        vars = links.drop(columns=[col for col in requiredCols if col in links.columns]).columns.tolist()
 
-    vars = links.columns.difference(['from', 'to', 'Key'])
-    
-    keys = ', '.join([f"r.{var} = apoc.coll.toSet(split(row.{var}, '; '))" for var in vars])
+        query = """
+match (n:METADATA:PROPERTY) 
+return n.property as property, n.type as type, 
+n.relationship as relationship, n.description as description, 
+n.display as display, n.group as group, n.metaType as metaType, n.search as search, n.translation as translation
+"""
 
-    q = f"""
-    UNWIND $rows AS row
-    MATCH (a {{{properties[0]}: row.from}})-[r:USES {{Key: row.Key}}]->(b {{{properties[1]}: row.to}})
-    SET {keys} 
-    RETURN id(b) as nodeID, b.CMID as CMID
-    """
-    
-    result = CMcypherQueryAPI(database=con.database, query=q, user="1", pwd=os.getenv('apipwd'), params={'rows': links.to_dict(orient='records')})
-    
-    return {'q': result, 'links': links}
+        metaTypes = getQuery(query, driver)
+        metaTypeDict = {item['property']: item['metaType'] for item in metaTypes}
 
-def CMupdateProperty(links, properties, con, user):
-    requiredCols = ['from', 'to', 'Key']
+        keys = []
+        for var in vars:
+            metaType = metaTypeDict.get(var)  # Get the metaType for the given property
+            if updateType == "overwrite" and var != 'log':
+                keys.append(f"r.{var} = custom.combinedProperties('',row.{var},'{metaType}')[0].prop")
+            else:
+                keys.append(f"r.{var} = custom.combinedProperties(r.{var},row.{var},'{metaType}')[0].prop")
 
-    for required in requiredCols:
-        if required not in links.columns:
-            raise ValueError(f"missing required column {required}")
+        keys = ", ".join(keys)
 
-    vars = links.columns.difference(requiredCols)
-    
-    keys = ', '.join([f"custom.getNonNullProp(r.{var}, row.{var}) AS {var}" for var in vars])
-    keys2 = ', '.join([f"r.{var} = {var}[0].prop" for var in vars])
+        q = f"""
+        UNWIND $rows AS row
+        MATCH (a {{CMID: row.from}})-[r:USES {{Key: row.Key}}]->(b {{CMID: row.to}}) 
+        WITH row, r, b
+        SET {keys} 
+        RETURN id(b) as nodeID, b.CMID as CMID
+        """
 
-    if isinstance(properties, str):
-        properties = [properties, properties]
+        links_dict = links.to_dict(orient = "records")
 
-    q = f"""
-    MATCH (a {{{properties[0]}: row.from}})-[r:USES {{Key: row.Key}}]->(b {{{properties[1]}: row.to}}) 
-    WITH r, b, {keys} 
-    SET {keys2} 
-    RETURN id(b) as nodeID, b.CMID as CMID
-    """
-    
-    result = CMimportFromS3(con, q, links)
-    
-    return {'q': result, 'links': links}
-
-def CMimportFromS3(con, query, links, CQLOnly=False):
-    with con.session() as session:
-        if CQLOnly:
-            return query
-        result = session.run(query, rows=links.to_dict(orient='records'))
-        return pd.DataFrame([record.data() for record in result])
-
-def CMcypherQueryAPI(database, query, user, pwd, params):
-    # This function should implement the logic to interact with the Neo4j API
-    pass  # Replace this with actual implementation
-
-
+        print(q)
+        
+        result = getQuery(query = q, driver = driver, params = {"rows": links_dict})
+        
+        return {'result': result, 'links': links_dict}
+    except Exception as e:
+        return f"Error: {str(e)}"

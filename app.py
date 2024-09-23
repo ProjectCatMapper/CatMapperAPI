@@ -137,7 +137,7 @@ app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 # swagger documentation
 # app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)
 app.json_encoder = LazyJSONEncoder
-app.config['JSON_SORT_KEYS'] = False
+app.json.sort_keys = False
 
 app.config['MAIL_SERVER'] = os.getenv("mail_server")  # Replace with your mail server
 app.config['MAIL_PORT'] = os.getenv("mail_port")  # Typically 587 for TLS, 465 for SSL
@@ -401,12 +401,11 @@ return distinct Domain, Count order by Domain
         
         with open('data.json', 'w', encoding='utf-8') as f:
             json.dump(points, f, ensure_ascii=False, indent=4)
-                
+                        
         if len(points) > 0:
             point= []
             for i in range(0,len(points)):
                 if points[i]['geometry'] == "null":
-                    del points[i]
                     continue
                 if json.loads(points[i]['geometry'])["type"] != "MultiPoint":
                     point.append({"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]})
@@ -416,7 +415,7 @@ return distinct Domain, Count order by Domain
                     for j in range(0,len(json.loads(temp['geometry'])['coordinates'])):
                         point.append({'cood' : json.loads(temp['geometry'])['coordinates'][j][::-1], "source" : source })
             if point:
-                    points= point              
+                    points= point
 
         # if len(points) > 0:
         #     for i in range(0,len(points)):
@@ -1891,10 +1890,6 @@ def getDataset():
             cmid = CM.unlist(data.get('cmid'))
             domain = data.get('domain')
             children = CM.unlist(data.get('children'))
-            if children == False:
-                children = "false"
-            if children == True:
-                children = "true"
         else: 
             raise Exception("invalid request method")
 
@@ -1902,6 +1897,11 @@ def getDataset():
             domain = "CATEGORY"
 
         driver = CM.getDriver(database)
+
+        if children == False:   
+            children = "false"
+        if children == True:
+            children = "true"
 
         if children is not None and str(str.lower(children)) == "true":
             query = """
@@ -2466,14 +2466,22 @@ def getProgress():
 @app.route('/test', methods=['GET'])
 def test():
     
-    database = request.args.get('database')
+    # database = request.args.get('database')
 
-    driver = CM.getDriver(database)
-    session = driver.session()
-    data = session.run("match (c) return count(*) as count")
-    data = [dict(record) for record in data]
+    # driver = CM.getDriver(database)
+    # session = driver.session()
+    # data = session.run("match (c) return count(*) as count")
 
-    return data
+    # data = [dict(record) for record in data]
+
+
+    return {
+    'Zebra': ['Row1_Zebra', 'Row2_Zebra', 'Row3_Zebra'],
+    'Apple': ['Row1_Apple', 'Row2_Apple', 'Row3_Apple'],
+    'Mountain': ['Row1_Mountain', 'Row2_Mountain', 'Row3_Mountain'],
+    'Sunflower': ['Row1_Sunflower', 'Row2_Sunflower', 'Row3_Sunflower'],
+    'Kite': ['Row1_Kite', 'Row2_Kite', 'Row3_Kite']
+}
 
 @app.route('/mergeDatasets', methods=['GET'])
 def getMergeDatasets():
@@ -2481,12 +2489,22 @@ def getMergeDatasets():
     database = request.args.get('database')
 
     driver = CM.getDriver(database)
-    session = driver.session()
-    query = "match (d:DATASET) return d.CMID as CMID"
+    query = "match (d:DATASET) return d.CMID as CMID order by CMID"
     data = CM.getQuery(query, driver)
 
     return data
 
+@app.route('/updateWaitingUSES', methods=['GET'])
+def getUpdateWaitingUSES():
+    database = request.args.get('database')
+    driver = CM.getDriver(database)
+    CMID = CM.getQuery("Match (c)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' return c.CMID as CMID", driver, type = 'list')
+    if len(CMID) > 0:
+        result = CM.updateUses(driver = driver, CMID = CMID)    
+        CM.getQuery("Match (c)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' set r.status = NULL", driver)
+    else: 
+        result = "Nothing to update"
+    return result
 
 @app.route('/send-test-email', methods=['GET'])
 def send_test_email():
