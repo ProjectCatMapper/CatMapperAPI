@@ -1898,12 +1898,9 @@ def getDataset():
 
         driver = CM.getDriver(database)
 
-        if children == False:   
-            children = "false"
-        if children == True:
-            children = "true"
+        children = str(children).lower()
 
-        if children is not None and str(str.lower(children)) == "true":
+        if children is not None and children == "true":
             query = """
             unwind $cmid as cmid
             match (:DATASET {CMID: cmid})-[:CONTAINS*..5]->(d:DATASET) return distinct d.CMID as CMID
@@ -1916,12 +1913,10 @@ def getDataset():
         unwind $cmid as cmid
         match (a:DATASET)-[r:USES]->(b) 
         where a.CMID = cmid and not isEmpty([i in r.label
-        where i in apoc.coll.flatten([$domain],true)]) 
-        unwind keys(r) as property with a,r,b, property 
-        where not property in ['type','Key','log'] 
+        where i in apoc.coll.flatten([$domain],true)])
+        unwind keys(r) as property 
         return distinct a.CMName as datasetName, a.CMID as datasetID, 
-        b.CMID as CMID, b.CMName as CMName, r.type as Type, 
-        r.Key as Key, property, r[property] as value, custom.getName(r[property]) as property_name
+        b.CMID as CMID, b.CMName as CMName, property, r[property] as value, custom.getName(r[property]) as property_name
         """
 
         data = CM.getQuery(query = query, driver = driver, params = {"cmid":cmid,"domain":domain})
@@ -1930,7 +1925,15 @@ def getDataset():
 
         df.dropna(axis=1, how='all', inplace=True)
 
-        df_names = df[["datasetID","CMID","property","property_name"]].copy()
+        # result = df.to_json(orient="records")
+        # return result
+
+        required_columns = ["datasetID", "CMID", "property", "property_name"]
+        if not all(column in df.columns for column in required_columns):
+            result = df.to_json(orient="records")
+            return result
+
+        df_names = df[required_columns].copy()
 
         df = df.drop("property_name", axis=1)
 
@@ -1943,7 +1946,7 @@ def getDataset():
         cols = [col for col in df.columns if col not in ['property', 'value']]
         df = df.pivot_table(index=cols, columns='property', values='value', aggfunc='first').reset_index()
         if len(df_names) > 0:
-            df = pd.merge(df, df_names, on=['datasetID', 'CMID'])
+            df = pd.merge(df, df_names, on=['datasetID', 'CMID'], how='left')
         dtypes = df.dtypes.to_dict()
         list_cols = []
 
