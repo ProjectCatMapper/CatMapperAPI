@@ -1,25 +1,193 @@
-import CM
+from CM.utils import *
+from CM.USES import *
+from CM.upload import *
+import json
 import pandas as pd
+from flask import jsonify
+import numpy as np
+import time
+import re
+import warnings
+
+# dataset = pd.read_excel("wikidata.xlsx")
+# dataset = dataset.head(10).copy()
+# dataset.to_excel("test.xlsx", index=False)
+dataset = pd.read_excel("test.xlsx")
+"label" in dataset.columns
+dataset.rename(columns={'Title of Wikidata Page': 'Name'}, inplace=True)
+dataset.columns
+dataset["datasetID"] = "SD2196"
+dataset["label"] = "DISTRICT"
+database = "SocioMap"
+
+CMName=None
+Name="Name"
+CMID="CMID"
+altNames=None
+Key="Key"
+formatKey=False
+datasetID="datasetID"
+label="label"
+uniqueID=None
+uniqueProperty=None 
+nodeContext=None 
+linkContext=None
+user="1"
+checkUnique=False
+overwriteProperty=False
+updateProperty=False
+addDistrict=False
+addRecordYear=False
+geocode=False
+batchSize=100
+
+driver = getDriver(database)
+
+with open(f"log/{user}uploadProgress.txt", 'w') as f:
+    f.write("Starting database upload")
+
+if 'eventType' in dataset.columns and 'eventDate' not in dataset.columns:
+    dataset['eventDate'] = np.nan
+
+if label is None:
+    isDataset = False
+else:
+    isDataset = label == "DATASET" or dataset['label'].iloc[0] == "DATASET"
 
 
-# data = [{"CMName":"test-1","label":"ETHNICITY"}]
-# df = pd.DataFrame(data)
-# df
-# database = "SocioMap"
-# user = "1"
-# CM.createNodes(df,database,user)
+dataset = dataset.dropna(axis=1, how='all')
 
-# data = [{"to":"SM466731","Name":"test-1","from":"SD11","Key":"test-1","geoCoords":"yep","yearStart":2011,"label":"ETHNICITY"}]
-# df = pd.DataFrame(data)
-# df
-# database = "SocioMap"
-# user = "1"
-# CM.createUSES(df,database,user)
+columns_to_select = [CMName, Name, CMID, altNames, Key, datasetID, label, uniqueID, 
+                        "shortName", "DatasetCitation", nodeContext, linkContext]
+dataset = dataset[[col for col in columns_to_select if col in dataset.columns]]
+
+if isDataset:
+    column_names = [CMName, label, uniqueID, nodeContext]
+else:
+    if overwriteProperty or updateProperty:
+        column_names = [CMName, Name, altNames, CMID, Key, datasetID, uniqueID, nodeContext, linkContext]
+    else:
+        column_names = [CMName, Name, altNames, label, Key, datasetID, uniqueID, nodeContext, linkContext]
+
+# Remove None values
+column_names = [col for col in column_names if col is not None]
+
+errors = [f"{col} must be in dataset" for col in column_names if col not in dataset.columns]
+
+if len(errors) > 0:
+    with open(f"log/{user}uploadProgress.txt", 'a') as f:
+        f.write("\n".join(errors))
+    raise ValueError("\n".join(errors))
+
+properties = getPropertiesMetadata(driver)
+properties = pd.DataFrame(properties)
+
+if not "label" in dataset.columns:
+    raise ValueError("Must include label")
+
+if uniqueID is None or uniqueID not in dataset.columns:
+    print("Creating import ID")
+    getQuery("MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL", driver)
+    uniqueID = 'importID'
+    uniqueProperty = 'importID'
+    dataset['importID'] = dataset.index + 1
+
+sq = range(0, len(dataset), batchSize)
+
+try:
+    dataset_match = pd.DataFrame()
+    for s in sq:
+        print(f"Beginning upload of rows {s} to {s + batchSize}")
+        sub_dataset = dataset.iloc[s:s + batchSize]
+        max_row = len(sub_dataset) - 1 + s
+        with open(f"log/{user}uploadProgress.txt", 'a') as f:
+            f.write(f"uploading {s} to {max_row} of {len(dataset)}")
+        
+        if not isDataset:
+            print("Combining paired properties")
+            paired = properties.merge(pd.DataFrame({'property': sub_dataset.columns}), on='property')
+            paired = paired[paired['group'].notna()].groupby('group')
+            
+            for group, pair in paired:
+                if pair['property'].isin(sub_dataset.columns).any():
+                    sub_dataset[group] = sub_dataset[pair['property']].apply(lambda x: x.str.strip()).agg('; '.join, axis=1)
+                    linkContext.append(group)
+        
+        if 'CMID' in sub_dataset.columns:
+            if "datasetID" in sub_dataset.columns and "Key" in sub_dataset.columns:
+                if 'CMID' in sub_dataset.columns:
+                    sub_dataset = combine_properties(sub_dataset, ['CMID', 'datasetID', 'Key'])
+                else:
+                    sub_dataset = combine_properties(sub_dataset, ['datasetID', 'Key'])
+        
+        if addDistrict:
+            print("Adding district")
+            matches = getQuery(params={'rows': sub_dataset[['datasetID']]}, q='DISTRICT QUERY', database=database, user='1')
+            if not matches.empty:
+                sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
+                linkContext.append('country')
+
+        if addRecordYear:
+            print("Adding record year")
+            matches = getQuery(params={'rows': sub_dataset[['datasetID']]}, q='RECORD_YEAR QUERY', con=con)
+            if not matches.empty:
+                sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
+                linkContext.append('recordStart')
+        
+        sub_dataset = sub_dataset.fillna('')
+
+        node_columns = [CMName, uniqueID, nodeContext, 'label']
+        node_columns = [col for col in node_columns if col in sub_dataset.columns]  
 
 
-# data = [{"to":"SM466731","Name":"test-1","from":"SD11","Key":"test-1","geoCoords":"testing again","yearStart":2011,"label":"ETHNICITY"}]
-# df = pd.DataFrame(data)
-# df
-# database = "SocioMap"
-# user = "1"
-# CM.updateProperty(df,database,user,updateType = "update")
+        if isDataset:
+            nodes = sub_dataset[[CMName, "shortName", "DatasetCitation", uniqueID, nodeContext, 'label']].drop_duplicates()
+        else:
+            if Name:
+                nodes = sub_dataset[sub_dataset['CMID'] == ''][node_columns].drop_duplicates()
+            else:
+                nodes = pd.DataFrame()
+        
+        if not nodes.empty:
+            print("Adding nodes")
+            match = createNodes(nodes,driver, uniqueID=uniqueID, uniqueProperty=uniqueProperty, user=user, checkUnique=False)
+            dataset_match = pd.concat([dataset_match, match], ignore_index=True)
+
+        link_columns = ['datasetID', CMName, 'CMID', Name, altNames, Key, uniqueID, label, linkContext]
+        link_columns = [col for col in link_columns if col in sub_dataset.columns]
+        
+        if not isDataset:
+            print("Adding USES relationships")
+            links = sub_dataset[link_columns].drop_duplicates()
+            
+            if Name:
+                links = combine_names_and_altNames(links, Name, altNames)
+            
+            if 'geoCoords' in linkContext:
+                links = handle_geo_coordinates(links, properties)
+            
+            if overwriteProperty:
+                print("Overwriting property")
+                links = overwriteProperty(links[['from', 'to', 'Key'] + linkContext],driver, properties='CMID')
+            elif updateProperty:
+                print("Updating property")
+                links = updateProperty(links[['from', 'to', 'Key'] + linkContext],driver, properties='CMID', user=user)
+            else:
+                print("Adding new USES relationships")
+                links = createUSES(links,driver, properties='CMID', relationship="USES", user=user, cleanup=False)
+
+        updateAltNames(driver, CMID = links['CMID'].unique())
+    
+        if uniqueID == 'importID':
+            getQuery(driver, "MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL")
+
+except Exception as e:
+    warnings.warn(str(e))
+    with open(f"log/{user}uploadProgress.txt", 'a') as f:
+        f.write(f"Error: {e}")
+    # return None
+
+with open(f"log/{user}uploadProgress.txt", 'a') as f:
+    f.write("Completed dataset upload")
+
+# return dataset_match
