@@ -243,6 +243,13 @@ return count(a)
 
 def updateUses(driver, CMID=None, user="0"):
     try:
+
+        # Update alternative names
+        updateAltNamesResults = updateAltNames(CMID=CMID, driver = driver)
+
+        # Update labels
+        updateLabelsResults = updateLabels(CMID=CMID, driver = driver)
+
         # Fix duplicate relationships
         mergeDupRelationsResults = "Not ran"
         if CMID is not None:
@@ -258,14 +265,8 @@ def updateUses(driver, CMID=None, user="0"):
             r = fixUsesRels(CMID=CMID, property=property, relationship=relationship, driver = driver)
             propertiesResults.append(r)
 
-        # Update labels
-        updateLabelsResults = updateLabels(CMID=CMID, driver = driver)
-
         # Update contains relationships
         updateContainsResults = updateContains(CMID=CMID, driver = driver)
-
-        # Update alternative names
-        updateAltNamesResults = updateAltNames(CMID=CMID, driver = driver)
         
         return {"CMID":CMID,"mergeDupRelations":mergeDupRelationsResults,"properties":propertiesResults,"updateLabels":updateLabelsResults,"updateContains":updateContainsResults,"updateAltNames":updateAltNamesResults}
     except Exception as e:

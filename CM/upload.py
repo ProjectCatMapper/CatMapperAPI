@@ -8,6 +8,7 @@ from flask import jsonify
 import numpy as np
 import time
 import re
+import warnings
 
 data = [{"CMID":"test-1","datasetID":"SD11","Key":"test-1","geoCoords":"yep","yearStart":2011}]
 df = pd.DataFrame(data)
@@ -202,6 +203,201 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
     except Exception as e:
         return str(e), 500
+
+def combine_properties(df, group_by_cols):
+    
+    def combine_column(column):
+        if isinstance(column, list):
+            return "; ".join(sorted(set([str(x).strip() for x in column if pd.notna(x)])))
+        return column
+    
+    grouped_df = df.groupby(group_by_cols, as_index=False).agg(lambda x: x.tolist())
+    
+    for col in grouped_df.columns:
+        if col not in group_by_cols:
+            grouped_df[col] = grouped_df[col].apply(combine_column)
+    
+    return grouped_df
+
+def combine_names_and_altNames(df, name_col, alt_name_col):
+
+    df['combinedNames'] = df.apply(
+        lambda row: list(set(filter(None, [row[name_col]] + row[alt_name_col]))), axis=1
+    )
+    return df
+
+def handle_geo_coordinates(df, geo_col):
+  
+    def extract_coordinates(geo):
+        if isinstance(geo, list) and len(geo) >= 2:
+            return geo[1], geo[0]
+        elif isinstance(geo, str):
+            parts = geo.split(',')
+            if len(parts) == 2:
+                return float(parts[0].strip()), float(parts[1].strip())
+        return None, None
+    
+    df['latitude'], df['longitude'] = zip(*df[geo_col].apply(extract_coordinates))
+    
+    return df
+
+def input_Nodes_Uses(dataset,
+                     database,
+                 CMName=None,
+                 Name=None,
+                 CMID=None,
+                 altNames=None,
+                 Key=None,
+                 formatKey=True,
+                 datasetID=None,
+                 label=None,
+                 uniqueID=None,
+                 uniqueProperty=None, 
+                 nodeContext=None, 
+                 linkContext=None,
+                 user=None,
+                 checkUnique=False,
+                 overwriteProperty=False,
+                 updateProperty=False,
+                 addDistrict=False,
+                 addRecordYear=False,
+                 geocode=False,
+                 batchSize=100,
+                 ):
+    
+    driver = getDriver(database)
+    
+    with open(f"{user}uploadProgress.txt", 'w') as f:
+        f.write("Starting database upload")
+    
+    if 'eventType' in dataset.columns and 'eventDate' not in dataset.columns:
+        dataset['eventDate'] = np.nan
+    
+    isDataset = label == "DATASET" or dataset['label'].iloc[0] == "DATASET"
+    
+    dataset = dataset.dropna(axis=1, how='all')
+    
+    columns_to_select = [CMName, Name, CMID, altNames, Key, datasetID, label, uniqueID, 
+                         "shortName", "DatasetCitation", nodeContext, linkContext]
+    dataset = dataset[[col for col in columns_to_select if col in dataset.columns]]
+
+    if isDataset:
+        column_names = [CMName, label, uniqueID, nodeContext]
+    else:
+        if overwriteProperty or updateProperty:
+            column_names = [CMName, Name, altNames, CMID, Key, datasetID, uniqueID, nodeContext, linkContext]
+        else:
+            column_names = [CMName, Name, altNames, label, Key, datasetID, uniqueID, nodeContext, linkContext]
+
+    errors = [f"{col} must be in dataset" for col in column_names if col not in dataset.columns]
+    
+    if errors:
+        with open(f"{user}uploadProgress.txt", 'w') as f:
+            f.write("\n".join(errors))
+        raise ValueError("\n".join(errors))
+    
+    properties = getPropertiesMetadata(driver)
+    if "label" not in dataset.columns:
+        raise ValueError("Must include label")
+    
+    if uniqueID is None or uniqueID not in dataset.columns:
+        print("Creating import ID")
+        getQuery(driver, "MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL")
+        uniqueID = 'importID'
+        uniqueProperty = 'importID'
+        dataset['importID'] = dataset.index + 1
+    
+    sq = range(0, len(dataset), batchSize)
+
+    try:
+        dataset_match = pd.DataFrame()
+        for s in sq:
+            print(f"Beginning upload of rows {s} to {s + batchSize}")
+            sub_dataset = dataset.iloc[s:s + batchSize]
+            max_row = len(sub_dataset) - 1 + s
+            with open(f"{user}uploadProgress.txt", 'w') as f:
+                f.write(f"uploading {s} to {max_row} of {len(dataset)}")
+            
+            if not isDataset:
+                print("Combining paired properties")
+                paired = properties.merge(pd.DataFrame({'property': sub_dataset.columns}), on='property')
+                paired = paired[paired['group'].notna()].groupby('group')
+                
+                for group, pair in paired:
+                    if pair['property'].isin(sub_dataset.columns).any():
+                        sub_dataset[group] = sub_dataset[pair['property']].apply(lambda x: x.str.strip()).agg('; '.join, axis=1)
+                        linkContext.append(group)
+            
+            if 'CMID' in sub_dataset.columns:
+                if "datasetID" in sub_dataset.columns and "Key" in sub_dataset.columns:
+                    if 'CMID' in sub_dataset.columns:
+                        sub_dataset = combine_properties(sub_dataset, ['CMID', 'datasetID', 'Key'])
+                    else:
+                        sub_dataset = combine_properties(sub_dataset, ['datasetID', 'Key'])
+            
+            if addDistrict:
+                print("Adding district")
+                matches = getQuery(params={'rows': sub_dataset[['datasetID']]}, q='DISTRICT QUERY', database=database, user='1')
+                if not matches.empty:
+                    sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
+                    linkContext.append('country')
+
+            if addRecordYear:
+                print("Adding record year")
+                matches = getQuery(params={'rows': sub_dataset[['datasetID']]}, q='RECORD_YEAR QUERY', con=con)
+                if not matches.empty:
+                    sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
+                    linkContext.append('recordStart')
+            
+            sub_dataset = sub_dataset.fillna('')
+
+            if isDataset:
+                nodes = sub_dataset[[CMName, "shortName", "DatasetCitation", uniqueID, nodeContext, 'label']].drop_duplicates()
+            else:
+                if Name:
+                    nodes = sub_dataset[sub_dataset['CMID'] == ''][[CMName, uniqueID, nodeContext, 'label']].drop_duplicates()
+                else:
+                    nodes = pd.DataFrame()
+            
+            if not nodes.empty:
+                print("Adding nodes")
+                match = createNodes(nodes,driver, uniqueID=uniqueID, uniqueProperty=uniqueProperty, user=user, checkUnique=False)
+                dataset_match = pd.concat([dataset_match, match], ignore_index=True)
+            
+            if not isDataset:
+                print("Adding USES relationships")
+                links = sub_dataset[['datasetID', CMName, 'CMID', Name, altNames, Key, uniqueID, label, linkContext]].drop_duplicates()
+                
+                if Name:
+                    links = combine_names_and_altNames(links, Name, altNames)
+                
+                if 'geoCoords' in linkContext:
+                    links = handle_geo_coordinates(links, properties)
+                
+                if overwriteProperty:
+                    print("Overwriting property")
+                    links = overwriteProperty(links[['from', 'to', 'Key'] + linkContext],driver, properties='CMID')
+                elif updateProperty:
+                    print("Updating property")
+                    links = updateProperty(links[['from', 'to', 'Key'] + linkContext],driver, properties='CMID', user=user)
+                else:
+                    print("Adding new USES relationships")
+                    links = createUSES(links,driver, properties='CMID', relationship="USES", user=user, cleanup=False)
+        
+        if uniqueID == 'importID':
+            getQuery(driver, "MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL")
+
+    except Exception as e:
+        warnings.warn(str(e))
+        with open(f"{user}uploadProgress.txt", 'w') as f:
+            f.write(f"Error: {e}")
+        return None
+    
+    with open(f"{user}uploadProgress.txt", 'w') as f:
+        f.write("Completed dataset upload")
+    
+    return dataset_match
+
     
 def advancedValidate(df,uploadType,domain,driver):
     try:
