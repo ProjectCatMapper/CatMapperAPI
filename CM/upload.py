@@ -269,12 +269,12 @@ def input_Nodes_Uses(dataset,
                  nodeContext=None, 
                  linkContext=None,
                  user=None,
-                 overwriteProperty=False,
-                 updateProperty=False,
+                 overwriteProperties=False,
+                 updateProperties=False,
                  addDistrict=False,
                  addRecordYear=False,
                  geocode=False,
-                 batchSize=100,
+                 batchSize=1000,
                  ):
     
     print("starting database upload")
@@ -287,6 +287,7 @@ def input_Nodes_Uses(dataset,
 
     if linkContext is None:
         linkContext = []
+
     driver = getDriver(database)
 
     if formatKey is True:
@@ -294,7 +295,6 @@ def input_Nodes_Uses(dataset,
     
     if geocode is True:
         raise Exception("Error: geocode must be False")
-    
     
     if 'eventType' in dataset.columns and 'eventDate' not in dataset.columns:
         dataset['eventDate'] = np.nan
@@ -322,7 +322,7 @@ def input_Nodes_Uses(dataset,
     if isDataset:
         column_names = [CMName, label, uniqueID] + nodeContext
     else:
-        if overwriteProperty or updateProperty:
+        if overwriteProperties or updateProperties:
             column_names = [Name, altNames, CMID, Key, datasetID, uniqueID] + nodeContext + linkContext
         else:
             column_names = [CMName, Name, altNames, label, Key, datasetID, uniqueID] + nodeContext + linkContext
@@ -336,6 +336,20 @@ def input_Nodes_Uses(dataset,
         with open(f"log/{user}uploadProgress.txt", 'a') as f:
             f.write("\n".join(errors))
         raise ValueError("\n".join(errors))
+
+    # Check for NA or empty strings in the required columns
+
+    # if isDataset:
+    #     required_cols = [CMName, "shortName", "DatasetCitation",label]
+    # else:
+    #     if updateProperties or overwriteProperties:
+    #         required_cols = [datasetID, CMID, Key]
+    #     else:
+    #         required_cols = [datasetID, Name, Key, label]
+    #         if CMID is None:
+    #             required_cols.append(CMName)
+    # if dataset[required_cols].isnull().any().any() or (dataset[required_cols] == '').any().any():
+    #     raise ValueError("The dataset contains NA values or empty strings in the required columns.")
 
     properties = getPropertiesMetadata(driver)
     properties = pd.DataFrame(properties)
@@ -428,16 +442,16 @@ def input_Nodes_Uses(dataset,
 
                 link_cols = ['from', 'to', 'Key'] + linkContext
                 link_cols = [col for col in link_cols if col in links.columns]
-                if overwriteProperty:
+                if overwriteProperties:
                     print("Overwriting property")
                     result = updateProperty(links[link_cols], database = database, user = user, updateType = "overwrite")
-                elif updateProperty:
+                elif updateProperties:
                     print("Updating property")
                     result = updateProperty(links[link_cols], database = database, user = user, updateType = "update")
                 else:
                     print("Adding new USES relationships")
                     link_cols = link_cols + [label]
-                    result = createUSES(links[link_cols],database = database, user = user, create = "CREATE")
+                    result = createUSES(links[link_cols],database = database, user = user, create = "MERGE")
                 print("Completed updating USES relationships")
 
             print("Processing returned CMIDs")
