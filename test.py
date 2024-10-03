@@ -9,17 +9,18 @@ import time
 import re
 import warnings
 
-dataset = pd.read_excel("wikidata.xlsx")
+dataset = pd.read_excel("Wikidata.xlsx")
+# dataset = dataset.iloc[2600:, :].copy()
 # dataset = dataset.head(10).copy()
 # dataset.to_excel("test.xlsx", index=False)
 # dataset = pd.read_excel("test.xlsx")
-"label" in dataset.columns
-dataset.rename(columns={'Title of Wikidata Page': 'Name'}, inplace=True)
-dataset.columns
-dataset["datasetID"] = "SD2196"
+# "label" in dataset.columns
+# dataset.rename(columns={'Title of Wikidata Page': 'Name'}, inplace=True)
+# dataset.columns
+# dataset["datasetID"] = "SD2196"
 dataset["label"] = "DISTRICT"
 
-input_Nodes_Uses(dataset = dataset, database = "SocioMap", Name = "Name", CMID = "CMID", Key = "Key", datasetID = "datasetID", label = "label", user = "1")
+input_Nodes_Uses(dataset = dataset, database = "SocioMap", Name = "Name", CMID = "CMID", Key = "Key", datasetID = "datasetID", label = "label", user = "1", updateProperties=False,linkContext=["url","yearStart","yearEnd","country"])
 
 # database = "SocioMap"
 # CMName=None
@@ -198,3 +199,13 @@ input_Nodes_Uses(dataset = dataset, database = "SocioMap", Name = "Name", CMID =
 #     f.write("Completed dataset upload")
 
 # # return dataset_match
+
+
+from CM.USES import *
+from CM.utils import *
+waitingUSES("SocioMap", BATCH_SIZE = 1000)
+# BATCH_SIZE = 1000
+# database = "SocioMap"
+# driver = getDriver(database)
+# CMID = getQuery("Match (c)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' return c.CMID as CMID", driver, type = 'list')
+

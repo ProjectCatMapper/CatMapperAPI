@@ -241,31 +241,35 @@ return count(a)
         result = str(e)
         return result, 500
 
-def updateUses(driver, CMID=None, user="0"):
+def updateUses(driver, CMID=None, user="0"): # update name to processUSES
     try:
 
         # Update alternative names
+        print("updating alternate names")
         updateAltNamesResults = updateAltNames(CMID=CMID, driver = driver)
 
         # Update labels
-        updateLabelsResults = updateLabels(CMID=CMID, driver = driver)
+        # print("updating labels")
+        updateLabelsResults = "Not ran"
+        # updateLabelsResults = updateLabels(CMID=CMID, driver = driver)
 
         # Fix duplicate relationships
         mergeDupRelationsResults = "Not ran"
-        if CMID is not None:
-            mergeDupRelationsResults = mergeDupRelations(CMID=CMID, driver = driver)
+        # if CMID is not None:
+        #     mergeDupRelationsResults = mergeDupRelations(CMID=CMID, driver = driver)
 
         # Update structural properties and referenceKeys
         properties = getPropertiesMetadata(driver = driver)
         properties = [item for item in properties if item.get('relationship') is not None] 
         propertiesResults = []
         for property, relationship in zip([item['property'] for item in properties if 'property' in item], [item['relationship'] for item in properties if 'relationship' in item]):
-            # print(f"{property} {relationship} {CMID}")
+            print(f"{property} {relationship} {CMID}")
             
             r = fixUsesRels(CMID=CMID, property=property, relationship=relationship, driver = driver)
             propertiesResults.append(r)
 
         # Update contains relationships
+        print("updating contains")
         updateContainsResults = updateContains(CMID=CMID, driver = driver)
         
         return {"CMID":CMID,"mergeDupRelations":mergeDupRelationsResults,"properties":propertiesResults,"updateLabels":updateLabelsResults,"updateContains":updateContainsResults,"updateAltNames":updateAltNamesResults}
@@ -273,3 +277,29 @@ def updateUses(driver, CMID=None, user="0"):
     # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
         return result, 500
+    
+
+def waitingUSES(database, BATCH_SIZE = 1000):
+    try:
+        driver = getDriver(database)
+        CMID = getQuery("Match (c)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' return c.CMID as CMID", driver, type = 'list')
+        if CMID:
+            for i in range(0, len(CMID), BATCH_SIZE):
+                # Slice the CMID list to get the current batch
+                batch = CMID[i:i + BATCH_SIZE]
+                
+                # Perform the update operation for the current batch
+                updateUses(driver=driver, CMID=batch)
+                
+                # Optional: Print progress (useful for debugging or monitoring)
+                print(f"Processed batch {i // BATCH_SIZE + 1} with {len(batch)} CMIDs.")
+            getQuery("Match (c:CATEGORY)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' set r.status = NULL", driver)
+            result = f"Successfully updated {len(CMID)} CMIDs in batches of {BATCH_SIZE}."
+        else: 
+            result = "Nothing to update"
+        return result
+    except Exception as e:
+        try:
+            return str(e), 500
+        except:
+            return "Error", 500

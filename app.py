@@ -20,6 +20,7 @@ from collections import defaultdict
 import logging
 from itsdangerous import URLSafeTimedSerializer
 from werkzeug.security import generate_password_hash
+from CM.upload  import input_Nodes_Uses
 # from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv(find_dotenv())
@@ -734,6 +735,75 @@ def serialize_relationship(relationship):
         "end_node_id": relationship.end_node.element_id,
         "properties": dict(relationship.items())
     }
+
+@app.route("/uploadInputNodes",methods=['GET','POST'])
+def upload_API():
+        data = request.get_data() 
+        data = json.loads(data)
+        df = data.get("df")
+        database = CM.unlist(data.get("database"))
+        formData = CM.unlist(data.get("formData"))
+        label = formData["domain"]
+        if label == "ANY DOMAIN":
+            label = "CATEGORY"
+        if label == "AREA":
+            label = "DISTRICT"
+        datasetID = formData["datasetID"]
+        CMName = formData["cmNameColumn"]
+        Name = formData["categoryNamesColumn"]
+        altNames = formData["alternateCategoryNamesColumn"]
+        CMID = formData["cmidColumn"]
+        Key = formData["keyColumn"]     
+
+        if data.get("so") == "advanced":
+            formatKey = True
+        else:
+            formatKey = False
+        
+        if data.get("ao") == "update_add":
+            updateProperties = True
+        else:
+            updateProperties = False
+
+        if data.get("ao") == "update_replace":
+            overwriteProperties = True
+        else:
+            overwriteProperties = False
+        
+        if data.get("addoptions")["district"] == False:
+            addDistrict = False
+        else:
+            addDistrict = True
+        
+        if data.get("addoptions")["recordyear"] == False:
+            addRecordYear = False
+        else:
+            addRecordYear = True
+
+        input_Nodes_Uses(df,
+                     database,
+                 CMName=CMName,
+                 Name=Name,
+                 CMID=CMID,
+                 altNames=altNames,
+                 Key=Key,
+                 formatKey=formatKey,
+                 datasetID=datasetID,
+                 label=label,
+                 uniqueID=None,
+                 uniqueProperty=None, 
+                 nodeContext=None, 
+                 linkContext=None,
+                 user=None,
+                 overwriteProperties=overwriteProperties,
+                 updateProperties=updateProperties,
+                 addDistrict=addDistrict,
+                 addRecordYear=addRecordYear,
+                 geocode=False,
+                 batchSize=1000,)       
+        
+        return "Yes"
+        
 
 @app.route('/networks', methods=['GET'])
 def getNetwork():
@@ -2500,13 +2570,7 @@ def getMergeDatasets():
 @app.route('/updateWaitingUSES', methods=['GET'])
 def getUpdateWaitingUSES():
     database = request.args.get('database')
-    driver = CM.getDriver(database)
-    CMID = CM.getQuery("Match (c)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' return c.CMID as CMID", driver, type = 'list')
-    if len(CMID) > 0:
-        result = CM.updateUses(driver = driver, CMID = CMID)    
-        CM.getQuery("Match (c)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' set r.status = NULL", driver)
-    else: 
-        result = "Nothing to update"
+    result = CM.waitingUSES(database)
     return result
 
 @app.route('/send-test-email', methods=['GET'])
