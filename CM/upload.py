@@ -277,6 +277,8 @@ def input_Nodes_Uses(dataset,
                  batchSize=1000,
                  ):
     
+    dataset = pd.DataFrame(dataset)
+    
     print("starting database upload")
 
     with open(f"{user}uploadProgress.txt", 'w') as f:
@@ -323,10 +325,10 @@ def input_Nodes_Uses(dataset,
         column_names = [CMName, label, uniqueID] + nodeContext
     else:
         if overwriteProperties or updateProperties:
-            column_names = [Name, altNames, CMID, Key, datasetID, uniqueID] + nodeContext + linkContext
+            column_names = [Name, CMID, Key, datasetID, uniqueID] + nodeContext + linkContext
         else:
-            column_names = [CMName, Name, altNames, label, Key, datasetID, uniqueID] + nodeContext + linkContext
-
+            column_names = [CMName, Name, label, Key, datasetID, uniqueID] + nodeContext + linkContext
+    
     # Remove None values
     column_names = [col for col in column_names if col is not None]
 

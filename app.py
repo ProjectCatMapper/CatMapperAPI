@@ -753,12 +753,15 @@ def upload_API():
         Name = formData["categoryNamesColumn"]
         altNames = formData["alternateCategoryNamesColumn"]
         CMID = formData["cmidColumn"]
-        Key = formData["keyColumn"]     
+        Key = formData["keyColumn"]
 
-        if data.get("so") == "advanced":
-            formatKey = True
-        else:
-            formatKey = False
+        linkContext = data.get("linkContext")
+        if not linkContext:
+            linkContext = None     
+        
+        # if data.get("so") == "advanced":
+        #     formatKey = True
+        # else:
         
         if data.get("ao") == "update_add":
             updateProperties = True
@@ -779,30 +782,61 @@ def upload_API():
             addRecordYear = False
         else:
             addRecordYear = True
+        
+        user = data.get("user")
+        print(CMName)
 
-        input_Nodes_Uses(df,
+        if data.get("so") == "advanced":
+            response = input_Nodes_Uses(df,
+                     database,
+                 CMName="CMName",
+                 Name="Name",
+                 CMID="CMID",
+                 altNames="altNames",
+                 Key="Key",
+                 formatKey=False,
+                 datasetID="datasetID",
+                 label="label",
+                 uniqueID=None,
+                 uniqueProperty=None, 
+                 nodeContext=None, 
+                 linkContext=linkContext,
+                 user=user,
+                 overwriteProperties=overwriteProperties,
+                 updateProperties=updateProperties,
+                 addDistrict=addDistrict,
+                 addRecordYear=addRecordYear,
+                 geocode=False,
+                 batchSize=1000,)
+
+
+
+        response = input_Nodes_Uses(df,
                      database,
                  CMName=CMName,
                  Name=Name,
                  CMID=CMID,
                  altNames=altNames,
                  Key=Key,
-                 formatKey=formatKey,
+                 formatKey=True,
                  datasetID=datasetID,
                  label=label,
                  uniqueID=None,
                  uniqueProperty=None, 
                  nodeContext=None, 
-                 linkContext=None,
-                 user=None,
+                 linkContext=linkContext,
+                 user=user,
                  overwriteProperties=overwriteProperties,
                  updateProperties=updateProperties,
                  addDistrict=addDistrict,
                  addRecordYear=addRecordYear,
                  geocode=False,
-                 batchSize=1000,)       
-        
-        return "Yes"
+                 batchSize=1000,)
+
+        if response == None:
+            return "Error, this is not a drill. Go underground."
+        else:
+            return "We did it!!"
         
 
 @app.route('/networks', methods=['GET'])
