@@ -792,7 +792,7 @@ def upload_API():
                  CMName="CMName",
                  Name="Name",
                  CMID="CMID",
-                 altNames="altNames",
+                 altNames=None,
                  Key="Key",
                  formatKey=False,
                  datasetID="datasetID",
@@ -808,10 +808,8 @@ def upload_API():
                  addRecordYear=addRecordYear,
                  geocode=False,
                  batchSize=1000,)
-
-
-
-        response = input_Nodes_Uses(df,
+        else:
+            response = input_Nodes_Uses(df,
                      database,
                  CMName=CMName,
                  Name=Name,
@@ -833,11 +831,10 @@ def upload_API():
                  geocode=False,
                  batchSize=1000,)
 
-        if response == None:
-            return "Error, this is not a drill. Go underground."
+        if isinstance(response, pd.DataFrame):
+            return "You did it.(Rob and Harsha didn't)"
         else:
-            return "We did it!!"
-        
+            return "Warning!! Your errors caused a system collapse."
 
 @app.route('/networks', methods=['GET'])
 def getNetwork():

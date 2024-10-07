@@ -67,9 +67,12 @@ def createNodes(df,database,user):
 
         missing_vars = [var for var in vars if var not in properties]
 
-        if missing_vars:
-            raise Exception(f"Error: The following vars are not in properties: {', '.join(missing_vars)}")
+        if "importID" in missing_vars:
+            missing_vars.remove("importID")
 
+        if missing_vars:
+                raise Exception(f"Error: The following vars are not in properties: {', '.join(missing_vars)}")
+            
         set_clause = ', '.join([f"a.{var} = row.{var}" for var in vars])
 
         return_clause = ', '.join([f"a.{var} as {var}" for var in vars])
@@ -98,8 +101,8 @@ def createNodes(df,database,user):
         for var in vars:
             if not np.all(np.isin(df[var].values, results_df[var].values)):
                 raise Exception(f"Error: values for {var} were not uploaded correctly. Please check upload")
-            
-        return results
+                    
+        return results_df
     
     except Exception as e:
         return str(e), 500
@@ -228,9 +231,6 @@ def combine_properties(df, group_by_cols):
     return grouped_df
 
 def combine_names_and_altNames(df, name_col, alt_name_col):
-    print(df.head())
-    print(name_col)
-    print(alt_name_col)
     df['combinedNames'] = df.apply(
         lambda row: "; ".join(
             list(filter(None, [row[name_col]] + row[alt_name_col] if pd.notnull(row[alt_name_col]) else []))
@@ -278,6 +278,7 @@ def input_Nodes_Uses(dataset,
                  ):
     
     dataset = pd.DataFrame(dataset)
+    dataset = dataset.astype(str)
     
     print("starting database upload")
 
@@ -376,24 +377,25 @@ def input_Nodes_Uses(dataset,
             max_row = len(sub_dataset) - 1 + s
             with open(f"log/{user}uploadProgress.txt", 'a') as f:
                 f.write(f"uploading {s} to {max_row} of {len(dataset)}")
-
+            
             if not isDataset:
                 print("Combining paired properties")
                 paired = properties.merge(pd.DataFrame({'property': sub_dataset.columns}), on='property')
                 paired = paired[paired['group'].notna()].groupby('group')
+                print(sub_dataset.columns)
                 
                 for group, pair in paired:
                     if pair['property'].isin(sub_dataset.columns).any():
                         sub_dataset[group] = sub_dataset[pair['property']].apply(lambda x: x.str.strip()).agg('; '.join, axis=1)
                         linkContext.append(group)
-
+            
             if 'CMID' in sub_dataset.columns:
                 if "datasetID" in sub_dataset.columns and "Key" in sub_dataset.columns:
                     if 'CMID' in sub_dataset.columns:
                         sub_dataset = combine_properties(sub_dataset, ['CMID', 'datasetID', 'Key'])
                     else:
                         sub_dataset = combine_properties(sub_dataset, ['datasetID', 'Key'])
-
+            
             if addDistrict:
                 print("Adding district")
                 matches = getQuery(params={'rows': sub_dataset[['datasetID']]}, q='DISTRICT QUERY', database=database, user='1')
@@ -411,28 +413,30 @@ def input_Nodes_Uses(dataset,
             sub_dataset = sub_dataset.fillna('')
 
             node_columns = [CMName, uniqueID, 'label'] + nodeContext
-            node_columns = [col for col in node_columns if col in sub_dataset.columns]  
-
+            node_columns = [col for col in node_columns if col in sub_dataset.columns]
 
             if isDataset:
                 nodes = sub_dataset[[CMName, "shortName", "DatasetCitation", uniqueID, 'label'] + nodeContext].drop_duplicates()
             else:
-                if Name:
+                if Name and 'CMID' in sub_dataset.columns:
                     nodes = sub_dataset[sub_dataset['CMID'] == ''][node_columns].drop_duplicates()
+                elif Name in sub_dataset.columns:
+                    nodes = sub_dataset[node_columns]
                 else:
                     nodes = pd.DataFrame()
-
+                        
             if not nodes.empty:
                 print("Adding nodes")
-                match = createNodes(nodes,driver, uniqueID=uniqueID, uniqueProperty=uniqueProperty, user=user, checkUnique=False)
-                dataset_match = pd.concat([dataset_match, match], ignore_index=True)
-
-            link_columns = ['datasetID', CMName, 'CMID', Name, altNames, Key, uniqueID, label] + linkContext
-            link_columns = [col for col in link_columns if col in sub_dataset.columns]
+                match = createNodes(nodes,database, user=user)
+                dataset_match = pd.merge(sub_dataset, match, how = "outer",on="CMName")
+            
+            
+            link_columns = [datasetID, CMName, 'CMID', Name, altNames, Key, uniqueID, label] + linkContext
+            link_columns = [col for col in link_columns if col in dataset_match.columns]
 
             if not isDataset:
                 print("Adding USES relationships")
-                links = sub_dataset[link_columns].drop_duplicates().copy()
+                links = dataset_match[link_columns].drop_duplicates().copy()
 
                 links.rename(columns={'datasetID': 'from', 'CMID': 'to'}, inplace=True)
                 
@@ -441,7 +445,7 @@ def input_Nodes_Uses(dataset,
                 
                 if linkContext is not None and 'geoCoords' in linkContext:
                     links = handle_geo_coordinates(links, properties)
-
+                
                 link_cols = ['from', 'to', 'Key'] + linkContext
                 link_cols = [col for col in link_cols if col in links.columns]
                 if overwriteProperties:
@@ -458,7 +462,6 @@ def input_Nodes_Uses(dataset,
 
             print("Processing returned CMIDs")
             try:
-                # print(result)
                 cmid_values = [link['to'] for link in result['links']]
                 updateAltNames(driver, CMID = cmid_values)
                 print("updated alternate names")
@@ -479,6 +482,7 @@ def input_Nodes_Uses(dataset,
             with open(f"log/{user}uploadProgress.txt", 'a') as f:
                 f.write(f"Error: {error_message}\n")
 
+
             # Return None
         except Exception as internal_error:
             warnings.warn(f"Failed to process the exception: {internal_error}")
@@ -488,7 +492,7 @@ def input_Nodes_Uses(dataset,
 
     with open(f"log/{user}uploadProgress.txt", 'a') as f:
         f.write("Completed dataset upload")
-
+    
     return dataset_match
 
     

@@ -203,6 +203,19 @@ def cleanCMID(cmid):
         return None
 
 def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database = "SocioMap"):
+    print(database)
+
+    if database.lower() == 'sociomap':
+        database = 'SocioMap'
+    elif database.lower() =='archamap':
+        database = 'ArchaMap'
+    elif database.lower() == 'gisdb':
+        database = 'gisdb'
+    elif database.lower() == 'userdb':
+        database = 'userdb'
+    else:
+        raise ValueError(f"Database must be 'SocioMap', 'ArchaMap', 'gisdb', or 'userdb', but database is {database}")
+
 
     driver = getDriver(database)
 
