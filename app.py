@@ -1311,192 +1311,6 @@ country order by matchingDistance
     except Exception as e:
         return str(e), 500
 
-@app.route('/translate', methods=['POST'])
-def getTranslate():
-    try:
-        data = request.get_data()  
-        data = json.loads(data)
-        database = CM.unlist(data.get("database"))
-        property = CM.unlist(data.get("property"))
-        domain = CM.unlist(data.get("domain"))
-        key = CM.unlist(data.get("key"))
-        if key != 'true':
-            key = None
-        query = CM.unlist(data.get("query"))
-        if query != 'true':
-            query = 'false'
-        rows = data.get("rows")
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        else:
-            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
-
-        # Define the Cypher query
-    
-        qLoad = "unwind $rows as row with row call {"
-
-        if property == "Key":
-            qStart = f"""
-with row call db.index.fulltext.queryRelationships('keys','"' + tolower(row.term) +'"') yield relationship
-with row, endnode(relationship) as a, relationship.Key as matching, case when row.term contains ":" then row.term else ": " + row.term end as term
-where '{domain}' in labels(a) and matching ends with term
-with row, a, matching, 0 as score
-"""
-        elif property in ["glottocode","ISO","CMID"]:
-            if property == "CMID":
-                indx = "CMIDindex"
-            else:
-                indx = property
-
-            qStart = f"""
-with row call db.index.fulltext.queryNodes('{indx}','"' + toupper(row.term) +'"') yield node
-with row, node as a, toupper(node['{property}']) as matching, toupper(row.term) as term
-where matching = term
-with row, a call apoc.when("DELETED" in labels(a),"match (a)-[:IS]->(b) return b as node, a.CMID as matching","return a as node, a.CMID as matching",{{a:a}}) yield value
-with row, value.node as a, value.matching as matching, 0 as score
-"""
-
-        elif property == "Name":
-    
-            if domain != "DATASET":
-                qStart = f"""
-with row call {{ with row 
-call db.index.fulltext.queryNodes('{domain}', '"' + row.term + '"') yield node return node
-union with row 
-call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term)) yield node return node
-union with row 
-call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term) + '~') yield node return node}}
-with row, node as a
-with row, a, custom.matchingDist(a.names, row.term) as matching
-with row, a, matching.matching as matching, toInteger(matching.score) as score
-"""
-            else:
-                qStart = f"""
-with row call {{ with row 
-call db.index.fulltext.queryNodes('{domain}', '"' + row.term + '"') yield node return node
-union with row 
-call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term)) yield node return node
-union with row 
-call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term) + '~') yield node return node}}
-with row, node as a
-with row, a, custom.matchingDist([a.CMName, a.shortName, a.DatasetCitation], row.term) as matching
-with row, a, matching.matching as matching, toInteger(matching.score) as score
-"""
-
-        else:
-            qStart = f""" 
-with row call apoc.cypher.run('match (a:{domain}) 
-where not a.{property} is null and tolower(a.{property}) = tolower(\"' + row.term + '\") 
-return a, a.{property} as matching',{{}}) yield value 
-with row, value.a as a, value.matching as matching, 0 as score
-"""
-
-    # filter by domain
-
-        qDomain = f" where '{domain}' in labels(a) with row, a, matching, score "
-
-    # filter by country
-        if 'country' in rows[0]:
-            qCountryFilter = """
-where (a)<-[:DISTRICT_OF]-(:ADM0 {CMID: row.country})
-with row, a, matching, score
-"""
-        else:
-            qCountryFilter = " "
-
-    # filter by context
-        if 'context' in rows[0]:
-            qContext = """
-where (a)<-[]-({CMID: row.context})
-with row, a, matching, score
-"""
-        else:
-            qContext = " "
-
-    # filter by dataset
-        if 'dataset' in rows[0]:
-            # get keys
-            if key is not None:
-                qDataset = """
-    match (a)<-[r:USES]-(d:DATASET {CMID: row.dataset}) 
-    with row, a, matching, score, r.Key as Key
-    """
-            else:
-                qDataset = """
-    where (a)<-[:USES]-(:DATASET {CMID: row.dataset})
-    with row, a, matching, score, '' as Key
-    """
-        else:
-            qDataset = "with row, a, matching, score, '' as Key"
-
-        # filter by year
-        if 'yearStart' in rows[0] and 'yearEnd' in rows[0]:
-            if domain == "DATASET":
-                qYear = """
-call {with row, a with row, a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
-else a.ApplicableYears end as yearMatch, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
-with a, years, apoc.convert.toIntList(apoc.coll.toSet(apoc.coll.flatten(collect(yearMatch),true))) as yearMatch 
-where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}
-with node as a, matching, score, Key
-"""
-            else:
-                qYear = f"""
-call {{with row, a with row, a, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years 
-match (a)<-[r:USES]-(:DATASET) unwind r.yearStart as yearStart 
-unwind r.yearEnd as yearEnd with years, a, r, apoc.coll.toSet(collect(yearStart) + collect(yearEnd)) as yearMatch 
-where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}}
-with row, node as a, matching, score, Key order by score desc
-"""   
-        else: 
-            qYear = " "
-    
-        # limit results
-        qLimit = """
-with row, collect(a{a, matching, score}) as nodes, collect(score) as scores, Key
-with row, nodes, apoc.coll.min(scores) as minScore, Key
-unwind nodes as node
-with row, node.a as a, node.matching as matching, node.score as score, minScore, Key
-where score = minScore
-return distinct a, matching, score, Key}
-with row, a, matching, score, Key
-"""
-
-        # get country
-        qCountry = """
-optional match (a)<-[:DISTRICT_OF]-(c:ADM0)
-with row, a, matching, collect(c.CMName) as country, score, Key
-"""
-
-        # return results
-        qReturn = """
-return distinct row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, custom.getLabel(a) as label, 
-matching, score as matchingDistance, country, Key order by matchingDistance
-"""
-        cypher_query = qLoad + qStart + qDomain + qCountryFilter + qContext + qDataset + qYear + qLimit + qCountry + qReturn
-        if query == "true":
-            with driver.session() as session:
-                result = session.run("unwind $rows as rows unwind rows as row return row.term as term, row.CMuniqueRowID as CMuniqueRowID", rows = rows)
-                qResult = [dict(record) for record in result]
-                print("printing rows")
-                print(rows)
-            return [{"query": cypher_query.replace("\n"," "),"params":qResult,"rows":rows}]
-        else:
-        # Execute the Cypher queries
-            with driver.session() as session:
-                result = session.run(cypher_query, rows = rows)
-        
-            # Process the query results and generate the dynamic JSON
-                data = [dict(record) for record in result]
-
-                driver.close()
-                
-        return data
-
-    except Exception as e:
-        return str(e), 500
-
 @app.route('/translate2', methods=['POST'])
 def getTranslate2():
     try:
@@ -1514,23 +1328,18 @@ def getTranslate2():
         yearEnd = CM.unlist(data.get('yearEnd'))
         query = CM.unlist(data.get("query"))
         table = data.get("table")
-        if query != 'true':
+
+        if query.lower() != 'true':
             query = 'false'
-        
+
         if domain == "ANY DOMAIN":
             domain = "CATEGORY"
         if domain == "AREA":
             domain = "DISTRICT"
         if str.lower(key) != 'true':
             key = None
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        else:
-            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
-        
-        
+        driver = CM.getDriver(database)
+
         # format data
         # add rowid, 
         # table = [{'Name':'test1',"key": 1}, {'Name':'test1',"key": 2}, {'Name':'test2',"key": 3}]
@@ -1553,18 +1362,18 @@ def getTranslate2():
         columns_to_group_by = rows.columns.difference(['CMuniqueRowID']).tolist()
         rows = rows.groupby(columns_to_group_by)['CMuniqueRowID'].apply(list).reset_index()
         rows = rows.to_dict('records')
-        
+
         # Define the Cypher query
-    
+
         qLoad = "unwind $rows as row with row call {"
 
         if property == "Key":
             qStart = f"""
-with row call db.index.fulltext.queryRelationships('keys','"' + tolower(row.term) +'"') yield relationship
-with row, endnode(relationship) as a, relationship.Key as matching, case when row.term contains ":" then row.term else ": " + row.term end as term
-where '{domain}' in labels(a) and matching ends with term
-with row, a, matching, 0 as score
-"""
+        with row call db.index.fulltext.queryRelationships('keys','"' + tolower(row.term) +'"') yield relationship
+        with row, endnode(relationship) as a, relationship.Key as matching, case when row.term contains ":" then row.term else ": " + row.term end as term
+        where '{domain}' in labels(a) and matching ends with term
+        with row, a, matching, 0 as score
+        """
         elif property in ["glottocode","ISO","CMID"]:
             if property == "CMID":
                 indx = "CMIDindex"
@@ -1572,83 +1381,83 @@ with row, a, matching, 0 as score
                 indx = property
 
             qStart = f"""
-with row call db.index.fulltext.queryNodes('{indx}','"' + toupper(row.term) +'"') yield node
-with row, node as a, toupper(node['{property}']) as matching, toupper(row.term) as term
-where matching = term
-with row, a call apoc.when("DELETED" in labels(a),"match (a)-[:IS]->(b) return b as node, a.CMID as matching","return a as node, a.CMID as matching",{{a:a}}) yield value
-with row, value.node as a, value.matching as matching, 0 as score
-"""
+        with row call db.index.fulltext.queryNodes('{indx}','"' + toupper(row.term) +'"') yield node
+        with row, node as a, toupper(node['{property}']) as matching, toupper(row.term) as term
+        where matching = term
+        with row, a call apoc.when("DELETED" in labels(a),"match (a)-[:IS]->(b) return b as node, a.CMID as matching","return a as node, a.CMID as matching",{{a:a}}) yield value
+        with row, value.node as a, value.matching as matching, 0 as score
+        """
 
         elif property == "Name":
-    
+
             if domain != "DATASET":
                 qStart = f"""
-with row call {{ with row 
-call db.index.fulltext.queryNodes('{domain}', '"' + row.term + '"') yield node return node
-union with row 
-call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term)) yield node return node
-union with row 
-call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term) + '~') yield node return node}}
-with row, node as a
-with row, a, custom.matchingDist(a.names, row.term) as matching
-with row, a, matching.matching as matching, toInteger(matching.score) as score
-"""
+        with row call {{ with row 
+        call db.index.fulltext.queryNodes('{domain}', '"' + row.term + '"') yield node return node
+        union with row 
+        call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term)) yield node return node
+        union with row 
+        call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term) + '~') yield node return node}}
+        with row, node as a
+        with row, a, custom.matchingDist(a.names, row.term) as matching
+        with row, a, matching.matching as matching, toInteger(matching.score) as score
+        """
             else:
                 qStart = f"""
-with row call {{ with row 
-call db.index.fulltext.queryNodes('{domain}', '"' + row.term + '"') yield node return node
-union with row 
-call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term)) yield node return node
-union with row 
-call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term) + '~') yield node return node}}
-with row, node as a
-with row, a, custom.matchingDist([a.CMName, a.shortName, a.DatasetCitation], row.term) as matching
-with row, a, matching.matching as matching, toInteger(matching.score) as score
-"""
+        with row call {{ with row 
+        call db.index.fulltext.queryNodes('{domain}', '"' + row.term + '"') yield node return node
+        union with row 
+        call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term)) yield node return node
+        union with row 
+        call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term) + '~') yield node return node}}
+        with row, node as a
+        with row, a, custom.matchingDist([a.CMName, a.shortName, a.DatasetCitation], row.term) as matching
+        with row, a, matching.matching as matching, toInteger(matching.score) as score
+        """
 
         else:
             qStart = f""" 
-with row call apoc.cypher.run('match (a:{domain}) 
-where not a.{property} is null and tolower(a.{property}) = tolower(\"' + row.term + '\") 
-return a, a.{property} as matching',{{}}) yield value 
-with row, value.a as a, value.matching as matching, 0 as score
-"""
+        with row call apoc.cypher.run('match (a:{domain}) 
+        where not a.{property} is null and tolower(a.{property}) = tolower(\"' + row.term + '\") 
+        return a, a.{property} as matching',{{}}) yield value 
+        with row, value.a as a, value.matching as matching, 0 as score
+        """
 
-    # filter by domain
+        # filter by domain
 
         qDomain = f" where '{domain}' in labels(a) with row, a, matching, score "
 
-    # filter by country
+        # filter by country
         if 'country' in rows[0]:
             qCountryFilter = """
-where (a)<-[:DISTRICT_OF]-(:ADM0 {CMID: row.country})
-with row, a, matching, score
-"""
+        where (a)<-[:DISTRICT_OF]-(:ADM0 {CMID: row.country})
+        with row, a, matching, score
+        """
         else:
             qCountryFilter = " "
 
-    # filter by context
+        # filter by context
         if 'context' in rows[0]:
             qContext = """
-where (a)<-[]-({CMID: row.context})
-with row, a, matching, score
-"""
+        where (a)<-[]-({CMID: row.context})
+        with row, a, matching, score
+        """
         else:
             qContext = " "
 
-    # filter by dataset
+        # filter by dataset
         if 'dataset' in rows[0]:
             if property == "Key":
                 qDataset = """
-    match (a)<-[r:USES]-(d:DATASET {CMID: row.dataset}) 
-    where r.Key ends with row.term
-    with row, a, matching, score, r.Key as Key
-    """
+        match (a)<-[r:USES]-(d:DATASET {CMID: row.dataset}) 
+        where r.Key ends with row.term
+        with row, a, matching, score, r.Key as Key
+        """
             else: 
                 qDataset = """
-    match (a)<-[r:USES]-(d:DATASET {CMID: row.dataset}) 
-    with row, a, matching, score, r.Key as Key
-    """
+        match (a)<-[r:USES]-(d:DATASET {CMID: row.dataset}) 
+        with row, a, matching, score, r.Key as Key
+        """
         else:
             qDataset = "with row, a, matching, score, '' as Key"
 
@@ -1659,63 +1468,52 @@ with row, a, matching, score
         if 'yearStart' in rows[0] and 'yearEnd' in rows[0]:
             if domain == "DATASET":
                 qYear = """
-call {with row, a with row, a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
-else a.ApplicableYears end as yearMatch, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
-with a, years, apoc.convert.toIntList(apoc.coll.toSet(apoc.coll.flatten(collect(yearMatch),true))) as yearMatch 
-where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}
-with node as a, matching, score, Key
-"""
+        call {with row, a with row, a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
+        else a.ApplicableYears end as yearMatch, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
+        with a, years, apoc.convert.toIntList(apoc.coll.toSet(apoc.coll.flatten(collect(yearMatch),true))) as yearMatch 
+        where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}
+        with node as a, matching, score, Key
+        """
             else:
                 qYear = f"""
-call {{with row, a with row, a, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years 
-match (a)<-[r:USES]-(:DATASET) unwind r.yearStart as yearStart 
-unwind r.yearEnd as yearEnd with years, a, r, apoc.coll.toSet(collect(yearStart) + collect(yearEnd)) as yearMatch 
-where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}}
-with row, node as a, matching, score, Key order by score desc
-"""   
+        call {{with row, a with row, a, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years 
+        match (a)<-[r:USES]-(:DATASET) unwind r.yearStart as yearStart 
+        unwind r.yearEnd as yearEnd with years, a, r, apoc.coll.toSet(collect(yearStart) + collect(yearEnd)) as yearMatch 
+        where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}}
+        with row, node as a, matching, score, Key order by score desc
+        """   
         else: 
             qYear = " "
-    
+
         # limit results
         qLimit = """
-with row, collect(a{a, matching, score}) as nodes, collect(score) as scores, Key
-with row, nodes, apoc.coll.min(scores) as minScore, Key
-unwind nodes as node
-with row, node.a as a, node.matching as matching, node.score as score, minScore, Key
-where score = minScore
-return distinct a, matching, score, Key}
-with row, a, matching, score, Key
-"""
+        with row, collect(a{a, matching, score}) as nodes, collect(score) as scores, collect(Key) as Keys
+        with row, nodes, apoc.coll.min(scores) as minScore, Keys
+        unwind nodes as node
+        with row, node.a as a, node.matching as matching, node.score as score, minScore, Keys
+        where score = minScore
+        return distinct a, matching, score, Keys}
+        with row, a, matching, score, Keys
+        """
 
         # get country
         qCountry = """
-optional match (a)<-[:DISTRICT_OF]-(c:ADM0)
-with row, a, matching, collect(c.CMName) as country, score, Key
-"""
+        optional match (a)<-[:DISTRICT_OF]-(c:ADM0)
+        with row, a, matching, collect(c.CMName) as country, score, Keys
+        """
 
         # return results
         qReturn = """
-return distinct row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, custom.getLabel(a) as label, 
-matching, score as matchingDistance, country, Key order by matchingDistance
-"""
+        return distinct row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, custom.getLabel(a) as label, 
+        matching, score as matchingDistance, country, apoc.text.join(Keys,'; ') order by matchingDistance
+        """
         cypher_query = qLoad + qStart + qDomain + qCountryFilter + qContext + qDataset + qYear + qLimit + qCountry + qReturn
         if query == "true":
-            with driver.session() as session:
-                result = session.run("unwind $rows as rows unwind rows as row return row.term as term", rows = rows)
-                qResult = [dict(record) for record in result]
-                print("printing rows")
-                print(rows)
+            qResult = CM.getQuery(cypher_query, driver, params = {'rows': rows})
             return [{"query": cypher_query.replace("\n"," "),"params":qResult,"rows":rows}]
         else:
-        # Execute the Cypher queries
-            with driver.session() as session:
-                result = session.run(cypher_query, rows = rows)
-        
-            # Process the query results and generate the dynamic JSON
-                data = [dict(record) for record in result]
+            data = CM.getQuery(cypher_query, driver, params = {'rows': rows})
 
-                driver.close()
-        
         data = pd.DataFrame(data)
         data = data.replace("", pd.NA)
         data = data.dropna(axis='columns', how='all')

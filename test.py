@@ -1,32 +1,18 @@
-from CM.utils import *
-from CM.USES import *
-from CM.upload import *
-import json
-import pandas as pd
-from flask import jsonify
-import numpy as np
-import time
-import re
-import warnings
+# from CM.utils import *
+# from CM.USES import *
+# from CM.upload import *
+# import json
+# import pandas as pd
+# from flask import jsonify
+# import numpy as np
+# import time
+# import re
+# import warnings
 
-dataset = pd.read_excel("Test1.xlsx")
+# dataset = pd.read_excel("Test1.xlsx")
 
-result = input_Nodes_Uses(dataset = dataset, database = "SocioMap", CMName = "CMName",Name = "Name", CMID = None, Key = "Key", datasetID = "datasetID", label = "label", user = "1", updateProperties=False,linkContext=["parent","eventType","eventDate","religion", 'language', 'country', 'latitude','longitude'])
+# result = input_Nodes_Uses(dataset = dataset, database = "SocioMap", CMName = "CMName",Name = "Name", CMID = None, Key = "Key", datasetID = "datasetID", label = "label", user = "1", updateProperties=False,linkContext=["parent","eventType","eventDate","religion", 'language', 'country', 'latitude','longitude'])
 
-def contains_lists(df):
-    columns_with_lists = []
-    for col in df.columns:
-        if df[col].apply(lambda x: isinstance(x, dict)).any():
-            columns_with_lists.append(col)
-    return columns_with_lists
-
-# Check the DataFrame for columns containing lists
-columns_with_lists = contains_lists(result)
-
-if columns_with_lists:
-    print(f"The following columns contain lists: {columns_with_lists}")
-else:
-    print("No columns contain lists.")
 
 # createUSES(result,'SocioMap','1', create = "MERGE")
 # database = "SocioMap"
@@ -208,10 +194,10 @@ else:
 # # return dataset_match
 
 
-from CM.USES import *
-from CM.utils import *
-from CM.upload import *
-getAvailableID(new_id = "CMID", n = 1, database = 'sociomap')
+# from CM.USES import *
+# from CM.utils import *
+# from CM.upload import *
+# getAvailableID(new_id = "CMID", n = 1, database = 'sociomap')
 
 # waitingUSES("SocioMap", BATCH_SIZE = 1000)
 # BATCH_SIZE = 1000
@@ -220,7 +206,7 @@ getAvailableID(new_id = "CMID", n = 1, database = 'sociomap')
 # CMID = getQuery("Match (c)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' return c.CMID as CMID", driver, type = 'list')
 
 
-from CM.utils import *
+import CM.utils as CM
 import pandas as pd
 
 query = 'false'
@@ -245,13 +231,7 @@ if domain == "AREA":
     domain = "DISTRICT"
 if str.lower(key) != 'true':
     key = None
-if str.lower(database) == "sociomap":
-    driver = connectionSM()
-elif str.lower(database) == "archamap":
-    driver = connectionAM()
-else:
-    raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
-
+driver = CM.getDriver(database)
 
 # format data
 # add rowid, 
@@ -400,43 +380,32 @@ else:
 
 # limit results
 qLimit = """
-with row, collect(a{a, matching, score}) as nodes, collect(score) as scores, Key
-with row, nodes, apoc.coll.min(scores) as minScore, Key
+with row, collect(a{a, matching, score}) as nodes, collect(score) as scores, collect(Key) as Keys
+with row, nodes, apoc.coll.min(scores) as minScore, Keys
 unwind nodes as node
-with row, node.a as a, node.matching as matching, node.score as score, minScore, Key
+with row, node.a as a, node.matching as matching, node.score as score, minScore, Keys
 where score = minScore
-return distinct a, matching, score, Key}
-with row, a, matching, score, Key
+return distinct a, matching, score, Keys}
+with row, a, matching, score, Keys
 """
 
 # get country
 qCountry = """
 optional match (a)<-[:DISTRICT_OF]-(c:ADM0)
-with row, a, matching, collect(c.CMName) as country, score, Key
+with row, a, matching, collect(c.CMName) as country, score, Keys
 """
 
 # return results
 qReturn = """
 return distinct row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, custom.getLabel(a) as label, 
-matching, score as matchingDistance, country, Key order by matchingDistance
+matching, score as matchingDistance, country, apoc.text.join(Keys,'; ') order by matchingDistance
 """
 cypher_query = qLoad + qStart + qDomain + qCountryFilter + qContext + qDataset + qYear + qLimit + qCountry + qReturn
 if query == "true":
-    with driver.session() as session:
-        result = session.run("unwind $rows as rows unwind rows as row return row.term as term", rows = rows)
-        qResult = [dict(record) for record in result]
-        print("printing rows")
-        print(rows)
-    return [{"query": cypher_query.replace("\n"," "),"params":qResult,"rows":rows}]
+    qResult = CM.getQuery(cypher_query, driver, params = {'rows': rows})
+    # return [{"query": cypher_query.replace("\n"," "),"params":qResult,"rows":rows}]
 else:
-# Execute the Cypher queries
-    with driver.session() as session:
-        result = session.run(cypher_query, rows = rows)
-
-    # Process the query results and generate the dynamic JSON
-        data = [dict(record) for record in result]
-
-        driver.close()
+    data = CM.getQuery(cypher_query, driver, params = {'rows': rows})
 
 data = pd.DataFrame(data)
 data = data.replace("", pd.NA)
