@@ -264,3 +264,14 @@ def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database = "SocioMap"):
                 newID = [f"{prefix}M{x}" for x in newID]
 
     return newID
+
+def list2character(col):
+    # If col is a list, join the items into a single string
+    if isinstance(col, list):
+        return ','.join(map(str, col))
+    # If col is a string, return it as is
+    elif isinstance(col, str):
+        return col
+    # Otherwise, convert it to a string
+    else:
+        return str(col)
