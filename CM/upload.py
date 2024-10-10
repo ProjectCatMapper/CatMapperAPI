@@ -9,6 +9,9 @@ import numpy as np
 import time
 import re
 import warnings
+import math
+import warnings
+warnings.simplefilter('error', UserWarning)
 
 data = [{"CMID":"test-1","datasetID":"SD11","Key":"test-1","geoCoords":"yep","yearStart":2011}]
 df = pd.DataFrame(data)
@@ -40,6 +43,7 @@ def createNodes(df,database,user):
             required = ["CMName","label","DatasetCitation","shortName"]
         else:
             required = ["CMName","label"]
+            print("adding category")
             df['label'] = df['label'].apply(lambda x: f"CATEGORY:{x}")
 
         if not all(column in df.columns for column in required):
@@ -163,12 +167,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         for var in vars:
             metaType = metaTypeDict.get(var)  # Get the metaType for the given property
             
-            if metaType == "string" or metaType == "JsonMap":
-                # If it's a string or JsonMap, use trim on the property
-                keys.append(f"r.{var} = trim(row.{var})")
-            else:
-                # If it's a list or another type, use Cypher-style list comprehension
-                keys.append(f"r.{var} = apoc.coll.toSet([i IN apoc.coll.flatten(split(row.{var}, ';')) WHERE trim(i) <> ''])")
+            keys.append(f"r.{var} = custom.combinedProperties('',row.{var},'{metaType}')[0].prop")
                 
         # Combine the keys into a single string for the Cypher query
         keys_string = ", ".join(keys)
@@ -238,22 +237,90 @@ def combine_names_and_altNames(df, name_col, alt_name_col):
     )
     return df
 
+def to_geojson_point(row):
+    if math.isnan(row['latitude']) or math.isnan(row['longitude']):
+        return None  # Or some other fallback value
+    
+    # Create the GeoJSON dictionary
+    geojson_dict = {
+        "type": "Point",
+        "coordinates": [row['longitude'], row['latitude']]
+    }
+    
+    # Convert the dictionary to a GeoJSON string
+    return json.dumps(geojson_dict)
 
-def handle_geo_coordinates(df, geo_col):
-  
-    def extract_coordinates(geo):
-        if isinstance(geo, list) and len(geo) >= 2:
-            return geo[1], geo[0]
-        elif isinstance(geo, str):
-            parts = geo.split(',')
-            if len(parts) == 2:
-                return float(parts[0].strip()), float(parts[1].strip())
-        return None, None
+def extract_coordinates(geo):
+    # Check if geo is a JSON string and try to parse it
+    if isinstance(geo, str):
+        try:
+            geo = json.loads(geo)
+        except json.JSONDecodeError:
+            return None, None
+    
+    # Check if geo is a dictionary with 'latitude' and 'longitude' keys
+    if isinstance(geo, dict):
+        lat = geo.get('latitude')
+        lon = geo.get('longitude')
+        
+        if lat is not None and lon is not None:
+            try:
+                return float(lat), float(lon)
+            except ValueError:
+                return None, None
+    
+    # Handle list input case (if you expect lists of coordinates)
+    elif isinstance(geo, list) and len(geo) >= 2:
+        try:
+            return float(geo[1]), float(geo[0])  # Assume [longitude, latitude]
+        except ValueError:
+            return None, None
+    
+    return None, None
+
+
+def make_geo_coordinates(df, geo_col):
     
     df['latitude'], df['longitude'] = zip(*df[geo_col].apply(extract_coordinates))
+    df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
+    df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
+
+    df['geoCoords'] = df.apply(to_geojson_point, axis=1)
     
     return df
 
+def create_grouped_columns(row, grouped_columns):
+    grouped_data = {}
+    
+    # Iterate over each unique group (e.g., 'parentContext', 'geoCoords')
+    for group in grouped_columns['group'].unique():
+        # Find the columns that belong to this group
+        group_cols = grouped_columns[grouped_columns['group'] == group]['property']
+        
+        # Collect the non-null values from these columns into a dictionary
+        group_data = {col: row[col] for col in group_cols if pd.notna(row[col])}
+        
+        # Store this as a separate column for each group
+        if group_data:  # Only add if there are valid entries
+            grouped_data[group] = json.dumps(group_data)  # Store as a JSON string
+    
+    return grouped_data
+
+def process_parent_context_element(element):
+    try:
+        # If element is a list, process the list and return a semicolon-separated string
+        if isinstance(element, list):
+            return '; '.join(list2character(item) for item in element)
+        # If element is a string, return the string itself
+        elif isinstance(element, str):
+            return element
+        # If element is None or any other type, return None
+        else:
+            return None
+        
+    except ValueError:
+        return None
+    
 def input_Nodes_Uses(dataset,
                      database,
                  CMName=None,
@@ -278,7 +345,12 @@ def input_Nodes_Uses(dataset,
                  ):
     
     dataset = pd.DataFrame(dataset)
+    if 'eventDate' in dataset.columns:
+        dataset['eventDate'] = pd.to_numeric(dataset['eventDate'], errors='coerce').astype('Int64')  # Use 'Int64' to support NaNs
+    dataset = dataset.replace({np.nan: None, pd.NA: None})
     dataset = dataset.astype(str)
+    dataset = dataset.replace({None,""})
+    dataset = dataset.replace({"nan": "", "<NA>": "","None":""})
     
     print("starting database upload")
 
@@ -373,7 +445,7 @@ def input_Nodes_Uses(dataset,
         dataset_match = pd.DataFrame()
         for s in sq:
             print(f"Beginning upload of rows {s} to {s + batchSize}")
-            sub_dataset = dataset.iloc[s:s + batchSize]
+            sub_dataset = dataset.iloc[s:s + batchSize].copy()
             max_row = len(sub_dataset) - 1 + s
             with open(f"log/{user}uploadProgress.txt", 'a') as f:
                 f.write(f"uploading {s} to {max_row} of {len(dataset)}")
@@ -381,14 +453,16 @@ def input_Nodes_Uses(dataset,
             if not isDataset:
                 print("Combining paired properties")
                 paired = properties.merge(pd.DataFrame({'property': sub_dataset.columns}), on='property')
-                paired = paired[paired['group'].notna()].groupby('group')
-                print(sub_dataset.columns)
-                
-                for group, pair in paired:
-                    if pair['property'].isin(sub_dataset.columns).any():
-                        sub_dataset[group] = sub_dataset[pair['property']].apply(lambda x: x.str.strip()).agg('; '.join, axis=1)
-                        linkContext.append(group)
-            
+                grouped_columns = paired[paired['group'].notna()][['property', 'group']]
+                grouped_dict = sub_dataset.apply(lambda row: create_grouped_columns(row, grouped_columns), axis=1)
+                grouped_df = pd.DataFrame(grouped_dict.tolist())
+                sub_dataset = pd.concat([sub_dataset, grouped_df], axis=1)
+                columns_to_drop = grouped_columns[grouped_columns['property'] != 'parent']['property'].tolist()
+                # Drop the columns from sub_dataset, keeping the 'parent' column
+                sub_dataset = sub_dataset.drop(columns=columns_to_drop).copy()
+                for group in grouped_columns['group'].unique():
+                    linkContext.append(group)
+
             if 'CMID' in sub_dataset.columns:
                 if "datasetID" in sub_dataset.columns and "Key" in sub_dataset.columns:
                     if 'CMID' in sub_dataset.columns:
@@ -441,10 +515,82 @@ def input_Nodes_Uses(dataset,
                 links.rename(columns={'datasetID': 'from', 'CMID': 'to'}, inplace=True)
                 
                 if Name and altNames is not None:
+                    print("Combining names and alternate names")
                     links = combine_names_and_altNames(links, Name, altNames)
                 
                 if linkContext is not None and 'geoCoords' in linkContext:
-                    links = handle_geo_coordinates(links, properties)
+                    print("updating geo coordinates")
+                    links = make_geo_coordinates(links, 'geoCoords')
+                    links = links.drop(columns=['longitude', 'latitude']).copy()
+
+                print(links)
+
+                if "parentContext" in linkContext:
+                    print("updating parentContext")
+                    # return links
+
+                    def filter_dict(d):
+                        filtered_dict = ""
+                        try:
+                            d = json.loads(d)
+                            filtered_dict = {k: v for k, v in d.items() if pd.notna(v) and v != ""}
+                            # If 'parent' is the only key remaining, return an empty string
+                            if list(filtered_dict.keys()) == ['parent']:
+                                filtered_dict = ""
+                        except json.JSONDecodeError:
+                            return ""                          
+                        
+                        return filtered_dict
+
+                    sub_links = links.copy()
+
+                    # sub_links['parentContext'] = sub_links['parentContext'].apply(lambda x: json.loads(x))
+
+                    sub_links['parentContext'] = sub_links['parentContext'].apply(filter_dict)
+
+                    # Step 1: Convert parentContext dictionary to a JSON string
+                    # print("step 1")
+                    # Apply json.dumps to convert dictionaries to JSON strings
+                    sub_links['parentContext'] = sub_links['parentContext'].apply(lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, dict) else x)
+
+                    # Step 2: Remove square brackets if present in strings
+                    # print("step 2")
+                    sub_links['parentContext'] = sub_links['parentContext'].apply(lambda x: re.sub(r'\[|\]', '', x) if isinstance(x, str) else x)
+
+                    # Step 3: Unnest data (apply to each row)
+                    # print("step 3")
+                    sub_links = sub_links.explode('parentContext').reset_index(drop=True)
+
+                    # Step 4: Handle missing parent values by setting parentContext to None where parent is NaN
+                    # print("step 4")
+                    sub_links['parentContext'] = sub_links.apply(lambda row: None if pd.isna(row['parent']) else row['parentContext'], axis=1)
+
+                    # Step 5: Drop 'eventDate' and 'eventType' columns if they exist
+                    # print("step 5")
+                    sub_links = sub_links.drop(columns=[col for col in ['eventDate', 'eventType'] if col in sub_links.columns])
+
+                    # Step 6: Group by 'from', 'to', and 'Key'
+                    # print("step 6")
+                    grouped_links = sub_links.groupby(['from', 'to', 'Key'])
+
+                    # Step 7: Combine lists of parentContext and parent, keeping their JSON representations intact
+                    # print("step 7")
+                    sub_links = grouped_links.agg({
+                        'parentContext': lambda x: list(x),
+                        'parent': lambda x: list(x)
+                    }).reset_index()
+
+                    # Step 8: Convert lists of JSON strings to a semicolon-separated string
+                    print("step 8")
+                    for index, row in sub_links.iterrows():
+                        sub_links.at[index, 'parentContext'] = process_parent_context_element(row['parentContext'])
+                        sub_links.at[index, 'parent'] = process_parent_context_element(row['parent'])
+
+
+                    # Step 9: Merge the grouped data back into the original DataFrame
+                    # print("step 9")
+                    links = links.drop(columns=['parentContext', 'parent']).copy()
+                    links = pd.merge(links, sub_links, on=['from', 'to', 'Key'], how='left')
                 
                 link_cols = ['from', 'to', 'Key'] + linkContext
                 link_cols = [col for col in link_cols if col in links.columns]
@@ -456,12 +602,15 @@ def input_Nodes_Uses(dataset,
                     result = updateProperty(links[link_cols], database = database, user = user, updateType = "update")
                 else:
                     print("Adding new USES relationships")
-                    link_cols = link_cols + [label]
-                    result = createUSES(links[link_cols],database = database, user = user, create = "MERGE")
+                    link_cols.append(label)
+                    links = links[link_cols]
+                    # return links
+                    result = createUSES(links = links,database = database, user = user, create = "MERGE")
                 print("Completed updating USES relationships")
 
             print("Processing returned CMIDs")
             try:
+                print(result)
                 cmid_values = [link['to'] for link in result['links']]
                 updateAltNames(driver, CMID = cmid_values)
                 print("updated alternate names")

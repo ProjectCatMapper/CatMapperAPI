@@ -834,7 +834,7 @@ def upload_API():
         if isinstance(response, pd.DataFrame):
             return "You did it.(Rob and Harsha didn't)"
         else:
-            return "Warning!! Your errors caused a system collapse."
+            return "Error!! Check your file."
 
 @app.route('/networks', methods=['GET'])
 def getNetwork():
@@ -1504,12 +1504,7 @@ def getTranslate2():
         data = json.loads(data)
         database = CM.unlist(data.get("database"))
         property = CM.unlist(data.get("property"))
-        domain = CM.unlist(data.get("domain"))
-        if domain == "ANY DOMAIN":
-            domain = "CATEGORY"
-        if domain == "AREA":
-            domain = "DISTRICT"
-        
+        domain = CM.unlist(data.get("domain"))        
         key = CM.unlist(data.get("key"))
         term = CM.unlist(data.get("term"))
         country = CM.unlist(data.get('country'))
@@ -1517,12 +1512,17 @@ def getTranslate2():
         dataset = CM.unlist(data.get('dataset'))
         yearStart = CM.unlist(data.get('yearStart'))
         yearEnd = CM.unlist(data.get('yearEnd'))
-        if str.lower(key) != 'true':
-            key = None
         query = CM.unlist(data.get("query"))
+        table = data.get("table")
         if query != 'true':
             query = 'false'
-        table = data.get("table")
+        
+        if domain == "ANY DOMAIN":
+            domain = "CATEGORY"
+        if domain == "AREA":
+            domain = "DISTRICT"
+        if str.lower(key) != 'true':
+            key = None
         if str.lower(database) == "sociomap":
             driver = connectionSM()
         elif str.lower(database) == "archamap":
