@@ -237,5 +237,6 @@ data = translate(
         query = query,
         table = table)
 
+data
 
 print(data[0].get('query'))
