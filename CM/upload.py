@@ -143,7 +143,7 @@ def createUSES(links,database,user, create = "MERGE"):
         db_properties = getQuery("MATCH (p:PROPERTY) RETURN p.property AS property", driver)
         db_properties_list = [item['property'] for item in db_properties]
         existing_columns = list(set(db_properties_list) & set(links.columns))
-        links[existing_columns] = links[existing_columns].applymap(lambda x: re.sub(r'\s+', '', str(x)) if pd.notnull(x) else x)
+        links[existing_columns] = links[existing_columns].applymap(lambda x: re.sub(r'[\t\n\r\f\v]', '', x).strip() if isinstance(x, str) else x)
 
         links['log'] = links.apply(lambda row: f"{time.strftime('%Y-%m-%dT%H:%M:%SZ')} user {user}: created relationship", axis=1)
 
@@ -345,6 +345,7 @@ def input_Nodes_Uses(dataset,
                  ):
     
     dataset = pd.DataFrame(dataset)
+
     if 'eventDate' in dataset.columns:
         dataset['eventDate'] = pd.to_numeric(dataset['eventDate'], errors='coerce').astype('Int64')  # Use 'Int64' to support NaNs
     dataset = dataset.replace({np.nan: None, pd.NA: None})
@@ -508,6 +509,8 @@ def input_Nodes_Uses(dataset,
             link_columns = [datasetID, CMName, 'CMID', Name, altNames, Key, uniqueID, label] + linkContext
             link_columns = [col for col in link_columns if col in dataset_match.columns]
 
+            print(dataset_match)
+
             if not isDataset:
                 print("Adding USES relationships")
                 links = dataset_match[link_columns].drop_duplicates().copy()
@@ -522,8 +525,6 @@ def input_Nodes_Uses(dataset,
                     print("updating geo coordinates")
                     links = make_geo_coordinates(links, 'geoCoords')
                     links = links.drop(columns=['longitude', 'latitude']).copy()
-
-                print(links)
 
                 if "parentContext" in linkContext:
                     print("updating parentContext")
@@ -604,7 +605,6 @@ def input_Nodes_Uses(dataset,
                     print("Adding new USES relationships")
                     link_cols.append(label)
                     links = links[link_cols]
-                    # return links
                     result = createUSES(links = links,database = database, user = user, create = "MERGE")
                 print("Completed updating USES relationships")
 
