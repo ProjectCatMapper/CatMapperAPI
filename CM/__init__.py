@@ -6,3 +6,4 @@ from .users import *
 from .USES import *
 from .utils import *
 from .email import *
+from .translate import *
