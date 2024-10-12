@@ -595,6 +595,8 @@ def input_Nodes_Uses(dataset,
                 
                 link_cols = ['from', 'to', 'Key'] + linkContext
                 link_cols = [col for col in link_cols if col in links.columns]
+                if Name:
+                    link_cols.append(Name)
                 if overwriteProperties:
                     print("Overwriting property")
                     result = updateProperty(links[link_cols], database = database, user = user, updateType = "overwrite")
