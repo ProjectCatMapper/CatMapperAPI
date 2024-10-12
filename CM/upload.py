@@ -450,7 +450,7 @@ def input_Nodes_Uses(dataset,
             max_row = len(sub_dataset) - 1 + s
             with open(f"log/{user}uploadProgress.txt", 'a') as f:
                 f.write(f"uploading {s} to {max_row} of {len(dataset)}")
-            
+
             if not isDataset:
                 print("Combining paired properties")
                 paired = properties.merge(pd.DataFrame({'property': sub_dataset.columns}), on='property')
@@ -464,49 +464,55 @@ def input_Nodes_Uses(dataset,
                 for group in grouped_columns['group'].unique():
                     linkContext.append(group)
 
-            if 'CMID' in sub_dataset.columns:
-                if "datasetID" in sub_dataset.columns and "Key" in sub_dataset.columns:
-                    if 'CMID' in sub_dataset.columns:
-                        sub_dataset = combine_properties(sub_dataset, ['CMID', 'datasetID', 'Key'])
+            if CMID in sub_dataset.columns:
+                if datasetID in sub_dataset.columns and Key in sub_dataset.columns:
+                    if CMID in sub_dataset.columns:
+                        sub_dataset = combine_properties(sub_dataset, [CMID, datasetID, Key])
                     else:
-                        sub_dataset = combine_properties(sub_dataset, ['datasetID', 'Key'])
+                        sub_dataset = combine_properties(sub_dataset, [datasetID, Key])
             
             if addDistrict:
                 print("Adding district")
-                matches = getQuery(params={'rows': sub_dataset[['datasetID']]}, q='DISTRICT QUERY', database=database, user='1')
+                matches = getQuery(params={'rows': sub_dataset[[datasetID]]}, q='DISTRICT QUERY', database=database, user='1')
                 if not matches.empty:
-                    sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
+                    sub_dataset = sub_dataset.merge(matches, on=datasetID, how="left")
                     linkContext.append('country')
 
             if addRecordYear:
                 print("Adding record year")
-                matches = getQuery(params={'rows': sub_dataset[['datasetID']]}, q='RECORD_YEAR QUERY', driver = driver)
+                matches = getQuery(params={'rows': sub_dataset[[datasetID]]}, q='RECORD_YEAR QUERY', driver = driver)
                 if not matches.empty:
-                    sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
+                    sub_dataset = sub_dataset.merge(matches, on=datasetID, how="left")
                     linkContext.append('recordStart')
 
             sub_dataset = sub_dataset.fillna('')
 
-            node_columns = [CMName, uniqueID, 'label'] + nodeContext
+            node_columns = [CMName, uniqueID, label] + nodeContext
             node_columns = [col for col in node_columns if col in sub_dataset.columns]
 
             if isDataset:
                 nodes = sub_dataset[[CMName, "shortName", "DatasetCitation", uniqueID, 'label'] + nodeContext].drop_duplicates()
             else:
-                if Name and 'CMID' in sub_dataset.columns:
-                    nodes = sub_dataset[sub_dataset['CMID'] == ''][node_columns].drop_duplicates()
+                if Name and CMID in sub_dataset.columns:
+                    nodes = sub_dataset[sub_dataset[CMID] == ''][node_columns].drop_duplicates()
                 elif Name in sub_dataset.columns:
                     nodes = sub_dataset[node_columns]
+                    CMID = 'CMID'
                 else:
                     nodes = pd.DataFrame()
                         
             if not nodes.empty:
                 print("Adding nodes")
                 match = createNodes(nodes,database, user=user)
-                dataset_match = pd.merge(sub_dataset, match, how = "outer",on="CMName")
+                match = pd.DataFrame(match)
+                match = match.astype(str)
+                sub_dataset = sub_dataset.astype(str)
+                dataset_match = pd.merge(sub_dataset, match, how = "outer",on=[CMName,uniqueID])
+            else: 
+                dataset_match = sub_dataset.copy()
             
             
-            link_columns = [datasetID, CMName, 'CMID', Name, altNames, Key, uniqueID, label] + linkContext
+            link_columns = [datasetID, CMName, CMID, Name, altNames, Key, uniqueID, label] + linkContext
             link_columns = [col for col in link_columns if col in dataset_match.columns]
 
             print(dataset_match)
@@ -515,7 +521,7 @@ def input_Nodes_Uses(dataset,
                 print("Adding USES relationships")
                 links = dataset_match[link_columns].drop_duplicates().copy()
 
-                links.rename(columns={'datasetID': 'from', 'CMID': 'to'}, inplace=True)
+                links.rename(columns={datasetID: 'from', CMID: 'to'}, inplace=True)
                 
                 if Name and altNames is not None:
                     print("Combining names and alternate names")
