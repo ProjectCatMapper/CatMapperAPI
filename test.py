@@ -9,13 +9,16 @@ import time
 import re
 import warnings
 
-dataset = pd.read_excel("Test_ReviseExistingUsesTies_Multiple.xlsx")
-result = input_Nodes_Uses(dataset = dataset, database = "SocioMap", CMName = None,Name = None, CMID = "CMID", Key = "Key", datasetID = "datasetID", label = "label", user = "1", updateProperties=False,linkContext=["parent","eventType","eventDate", 'latitude','longitude'])
+dataset = pd.read_excel("merged_Wikidata.xlsx")
+dataset.columns
+result = input_Nodes_Uses(dataset = dataset, database = "SocioMap", CMName = None,Name = 'Name', CMID = "CMID", Key = "Key", datasetID = "datasetID", label = None, user = "1", updateProperties=False,linkContext=['latitude','longitude','url','yearStart','yearEnd','country'],overwriteProperties = True)
 
 # dataset = pd.read_excel("Test1.xlsx")
 # result = input_Nodes_Uses(dataset = dataset, database = "SocioMap", CMName = 'CMName',Name = "Name", CMID = None, Key = "Key", datasetID = "datasetID", label = "label", user = "1", updateProperties=False,linkContext=["parent","eventType","eventDate","religion", 'language', 'country', 'latitude','longitude'])
 
-from CM.users import *
+import CM
+credentials = CM.login('sociomap','rbischoff','archa')
+credentials
 
 # createUSES(result,'SocioMap','1', create = "MERGE")
 # database = "SocioMap"
