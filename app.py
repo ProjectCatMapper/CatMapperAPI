@@ -738,6 +738,7 @@ def serialize_relationship(relationship):
 
 @app.route("/uploadInputNodes",methods=['GET','POST'])
 def upload_API():
+    try:
         data = request.get_data() 
         data = json.loads(data)
         df = data.get("df")
@@ -753,14 +754,14 @@ def upload_API():
         Name = formData["categoryNamesColumn"]
         altNames = formData["alternateCategoryNamesColumn"]
         CMID = formData["cmidColumn"]
-        Key = formData["keyColumn"]
+        Key = formData["keyColumn"]        
 
         linkContext = data.get("linkContext")
         if not linkContext:
             linkContext = None     
         
         # if data.get("so") == "advanced":
-        #     formatKey = True
+        #     formatKey = False
         # else:
         
         if data.get("ao") == "update_add":
@@ -784,19 +785,29 @@ def upload_API():
             addRecordYear = True
         
         user = data.get("user")
-        print(CMName)
 
         if data.get("so") == "advanced":
-            response = input_Nodes_Uses(df,
-                     database,
-                 CMName="CMName",
-                 Name="Name",
-                 CMID="CMID",
-                 altNames=None,
-                 Key="Key",
+
+            dfpd = pd.DataFrame(df)
+            required = ["CMName","Name","CMID", "label", "altNames", "Key", "datasetID"]
+            key_cols = {}
+            for key in required:
+                if key in dfpd.columns.to_list():
+                    key_cols[key] = key
+                else: 
+                    key_cols[key] = None
+            
+            response = input_Nodes_Uses(
+                 dataset=df,
+                 database=database,
+                 CMName=key_cols["CMName"],
+                 Name=key_cols["Name"],
+                 CMID=key_cols["CMID"],
+                 altNames=key_cols["altNames"],
+                 Key=key_cols["Key"],
                  formatKey=False,
-                 datasetID="datasetID",
-                 label="label",
+                 datasetID=key_cols["datasetID"],
+                 label=key_cols["label"],
                  uniqueID=None,
                  uniqueProperty=None, 
                  nodeContext=None, 
@@ -807,7 +818,7 @@ def upload_API():
                  addDistrict=addDistrict,
                  addRecordYear=addRecordYear,
                  geocode=False,
-                 batchSize=1000,)
+                 batchSize=1000)
         else:
             response = input_Nodes_Uses(df,
                      database,
@@ -830,11 +841,14 @@ def upload_API():
                  addRecordYear=addRecordYear,
                  geocode=False,
                  batchSize=1000,)
-
+            
         if isinstance(response, pd.DataFrame):
-            return "You successfully uploaded without any intrinsic errors."
+            return f"Upload completed for {len(response)} rows: {response.to_json()}"
         else:
             return "Error!! Check your file."
+        
+    except Exception as e:
+        return f"Error: {str(e)}", 500
 
 @app.route('/networks', methods=['GET'])
 def getNetwork():

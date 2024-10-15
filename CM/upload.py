@@ -377,6 +377,13 @@ def input_Nodes_Uses(dataset,
     
     dataset = pd.DataFrame(dataset)
 
+    if database.lower() == "sociomap":
+        database = "SocioMap"
+    elif database.lower() == "archamap":
+        database = "ArchaMap"
+    else:
+        raise ValueError(f"database must be either 'SocioMap' or 'ArchaMap', but value was '{database}'")
+
     if 'eventDate' in dataset.columns:
         dataset['eventDate'] = pd.to_numeric(dataset['eventDate'], errors='coerce').astype('Int64')  # Use 'Int64' to support NaNs
     dataset = dataset.replace({np.nan: None, pd.NA: None})
@@ -467,6 +474,19 @@ def input_Nodes_Uses(dataset,
         uniqueID = 'importID'
         uniqueProperty = 'importID'
         dataset['importID'] = dataset.index + 1
+
+    if not isDataset:
+        print("Combining paired properties")
+        paired = properties.merge(pd.DataFrame({'property': dataset.columns}), on='property')
+        grouped_columns = paired[paired['group'].notna()][['property', 'group']]
+        grouped_dict = dataset.apply(lambda row: create_grouped_columns(row, grouped_columns), axis=1)
+        grouped_df = pd.DataFrame(grouped_dict.tolist())
+        dataset = pd.concat([dataset, grouped_df], axis=1)
+        columns_to_drop = grouped_columns[grouped_columns['property'] != 'parent']['property'].tolist()
+        # Drop the columns from dataset, keeping the 'parent' column
+        dataset = dataset.drop(columns=columns_to_drop).copy()
+        for group in grouped_columns['group'].unique():
+            linkContext.append(group)
 
     sq = range(0, len(dataset), batchSize)
 
@@ -603,7 +623,7 @@ def input_Nodes_Uses(dataset,
                     }).reset_index()
 
                     # Step 8: Convert lists of JSON strings to a semicolon-separated string
-                    print("step 8")
+                    # print("step 8")
                     for index, row in sub_links.iterrows():
                         sub_links.at[index, 'parentContext'] = process_parent_context_element(row['parentContext'])
                         sub_links.at[index, 'parent'] = process_parent_context_element(row['parent'])
