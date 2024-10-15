@@ -756,13 +756,9 @@ def upload_API():
         CMID = formData["cmidColumn"]
         Key = formData["keyColumn"]        
 
-        linkContext = data.get("linkContext")
+        linkContext = CM.unlist(data.get("linkContext"))
         if not linkContext:
             linkContext = None     
-        
-        # if data.get("so") == "advanced":
-        #     formatKey = False
-        # else:
         
         if data.get("ao") == "update_add":
             updateProperties = True
@@ -820,6 +816,7 @@ def upload_API():
                  geocode=False,
                  batchSize=1000)
         else:
+            df['label'] = label
             response = input_Nodes_Uses(df,
                      database,
                  CMName=CMName,
@@ -829,7 +826,7 @@ def upload_API():
                  Key=Key,
                  formatKey=True,
                  datasetID=datasetID,
-                 label=label,
+                 label='label',
                  uniqueID=None,
                  uniqueProperty=None, 
                  nodeContext=None, 
@@ -840,7 +837,7 @@ def upload_API():
                  addDistrict=addDistrict,
                  addRecordYear=addRecordYear,
                  geocode=False,
-                 batchSize=1000,)
+                 batchSize=1000)
             
         if isinstance(response, pd.DataFrame):
             return f"Upload completed for {len(response)} rows"
