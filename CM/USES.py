@@ -107,6 +107,11 @@ def updateLabels(driver, CMID = None):
     try:
 
         if CMID is not None:
+            getQuery("unwind $CMID as cmid match (a {CMID: cmid})<-[:USES]-(:DATASET) set a:CATEGORY",driver, params = {"CMID":CMID})
+        else:
+            getQuery("match (a)<-[:USES]-(:DATASET) set a:CATEGORY",driver)
+
+        if CMID is not None:
             qFiltera = "unwind $cmid as cmid"
             qFilterb = "a.CMID = cmid and"
             qFilterC = "with l, cmid"
