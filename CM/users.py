@@ -70,7 +70,7 @@ def login(database,user,password):
         return result
 
     except Exception as e:
-        return f"verification failed: {str(e)}"
+        return f"verification failed: {str(e)}", 500
     
 
 def verifyUser(user,pwd):
