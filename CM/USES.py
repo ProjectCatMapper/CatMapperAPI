@@ -129,7 +129,7 @@ where
 {qFilterb}
 r.label is not null
 with a, r, l
-with a, collect(distinct l.label) as l, apoc.coll.flatten(collect(distinct r.label),true) as labels
+with a, collect(distinct l.label) + "CATEGORY" as l, apoc.coll.flatten(collect(distinct r.label),true) as labels
 with a, [i in labels where i in l] as labels
 with a, labels as labels
 call apoc.create.setLabels(a,labels) yield node

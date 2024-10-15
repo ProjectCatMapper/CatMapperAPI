@@ -843,7 +843,7 @@ def upload_API():
                  batchSize=1000,)
             
         if isinstance(response, pd.DataFrame):
-            return f"Upload completed for {len(response)} rows: {response.to_json()}"
+            return f"Upload completed for {len(response)} rows}"
         else:
             return "Error!! Check your file."
         
