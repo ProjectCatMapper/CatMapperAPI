@@ -1,9 +1,16 @@
 [
     {
         "cood": [
-            -20.0,
-            -20.0
+            52.05,
+            29.2333
         ],
-        "source": "EC"
+        "source": "Wikidata"
+    },
+    {
+        "cood": [
+            52,
+            29
+        ],
+        "source": "GeoNames202005"
     }
 ]

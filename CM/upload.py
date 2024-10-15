@@ -250,33 +250,43 @@ def to_geojson_point(row):
     # Convert the dictionary to a GeoJSON string
     return json.dumps(geojson_dict)
 
+import json
+
 def extract_coordinates(geo):
-    # Check if geo is a JSON string and try to parse it
+    # Check if geo is a string and contains multiple coordinate entries
     if isinstance(geo, str):
-        try:
-            geo = json.loads(geo)
-        except json.JSONDecodeError:
-            return None, None
-    
-    # Check if geo is a dictionary with 'latitude' and 'longitude' keys
-    if isinstance(geo, dict):
-        lat = geo.get('latitude')
-        lon = geo.get('longitude')
+        # Split the string by semicolons to handle multiple JSON objects
+        geo_entries = geo.split(';')
+        coordinates = []
         
-        if lat is not None and lon is not None:
+        for entry in geo_entries:
+            entry = entry.strip()  # Remove any leading/trailing spaces
             try:
-                return float(lat), float(lon)
-            except ValueError:
-                return None, None
+                # Parse each JSON string to a dictionary
+                geo_dict = json.loads(entry)
+                
+                lat = geo_dict.get('latitude')
+                lon = geo_dict.get('longitude')
+                
+                if lat is not None and lon is not None:
+                    try:
+                        coordinates.append((float(lat), float(lon)))
+                    except ValueError:
+                        continue  # Skip invalid coordinate pairs
+            except json.JSONDecodeError:
+                continue  # Skip invalid JSON entries
+        
+        if coordinates:
+            return coordinates
     
-    # Handle list input case (if you expect lists of coordinates)
+    # Handle other cases like list input, as in the original code
     elif isinstance(geo, list) and len(geo) >= 2:
         try:
-            return float(geo[1]), float(geo[0])  # Assume [longitude, latitude]
+            return [(float(geo[1]), float(geo[0]))]  # Assume [longitude, latitude]
         except ValueError:
-            return None, None
+            return None
     
-    return None, None
+    return None
 
 
 def make_geo_coordinates(df, geo_col):
@@ -529,6 +539,7 @@ def input_Nodes_Uses(dataset,
                 
                 if linkContext is not None and 'geoCoords' in linkContext:
                     print("updating geo coordinates")
+                    # return links
                     links = make_geo_coordinates(links, 'geoCoords')
                     links = links.drop(columns=['longitude', 'latitude']).copy()
 

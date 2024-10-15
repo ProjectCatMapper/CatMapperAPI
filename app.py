@@ -2017,18 +2017,6 @@ def createNodesapi():
         result = str(e)
         return result, 500
 
-@app.route('/advancedUpload', methods=['POST'])
-def advancedUploadapi():
-    try:
-        
-        data = request.get_json()
-        CM.advancedUpload(data)
-        return Response(stream_with_context(CM.advancedUpload(data)), content_type='text/event-stream')
-
-    except Exception as e:
-        result = str(e)
-        return result, 500
-
 @app.route('/login', methods=['POST'])
 def getLogin():
     try:
@@ -2182,6 +2170,61 @@ def getUpdateWaitingUSES():
     database = request.args.get('database')
     result = CM.waitingUSES(database)
     return result
+
+@app.route('/updateNewUsers', methods=['POST'])
+def updateNewUsers():
+    try:
+        data = request.get_data() 
+        data = json.loads(data)
+        database = CM.unlist(data.get('database'))
+        credentials = CM.unlist(data.get('credentials'))
+        process = CM.unlist(data.get('process'))
+        userid = data.get('userid')
+        approver = CM.unlist(data.get('approver'))
+        if database.lower() == "sociomap":
+            database = "SocioMap"
+        elif database.lower() == "archamap":
+            database = "ArchaMap"
+        else:
+            raise Exception("database must be 'SocioMap' or 'ArchaMap'")
+        
+        if CM.unlist(credentials.get("role")) != "admin":
+            raise Exception("Error: User is not an admin")
+        
+        verified = CM.verifyUser(CM.unlist(credentials.get("userid")),CM.unlist(credentials.get("key")))
+
+        if verified != "verified":
+            raise Exception("Error: User is not verified")
+
+        driver = CM.getDriver('userdb')
+
+        if process == "approve":
+            if approver is None:
+                raise Exception("Error: approver must be specified")
+            if userid is None:
+                raise Exception("Error: userid must be specified")
+         
+            userid = CM.flattenList(userid)
+
+            query = f"""
+unwind $userids as id
+with toString(id) as id
+match (u {{access: 'new', userid: id}}) where '{database}' in u.database 
+set u.access = 'enabled', u.log = u.log + [toString(datetime()) + ": access approved by {approver}"]
+return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
+"""
+            result = CM.getQuery(query, driver, params = {"userids": userid})
+        else:
+            query = f"""
+match (u {{access: 'new'}}) where '{database}' in u.database
+return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
+"""
+            result = CM.getQuery(query, driver)
+        
+        return result
+    except Exception as e:
+        result = str(e)
+        return result, 500
 
 @app.route('/send-test-email', methods=['GET'])
 def send_test_email():

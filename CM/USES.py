@@ -109,20 +109,24 @@ def updateLabels(driver, CMID = None):
         if CMID is not None:
             qFiltera = "unwind $cmid as cmid"
             qFilterb = "a.CMID = cmid and"
+            qFilterC = "with l, cmid"
         else: 
             qFiltera = ""
             qFilterb = ""
+            qFilterC = "with l"
 
-        query = qFiltera + """
-    match (a)<-[r:USES]-(:DATASET)
-where 
-""" + qFilterb + """
-r.label is not null
-with a,r
+        query = f"""
 match (l:METADATA:LABEL)
+{qFiltera}
+{qFilterC}
+match (a:CATEGORY)<-[r:USES]-(:DATASET)
+where 
+{qFilterb}
+r.label is not null
+with a, r, l
 with a, collect(distinct l.label) as l, apoc.coll.flatten(collect(distinct r.label),true) as labels
 with a, [i in labels where i in l] as labels
-with a, labels + ["CATEGORY"] as labels
+with a, labels as labels
 call apoc.create.setLabels(a,labels) yield node
 return count(*)
 """
@@ -251,7 +255,7 @@ def updateUses(driver, CMID=None, user="0"): # update name to processUSES
         # Update labels
         # print("updating labels")
         updateLabelsResults = "Not ran"
-        # updateLabelsResults = updateLabels(CMID=CMID, driver = driver)
+        updateLabelsResults = updateLabels(CMID=CMID, driver = driver)
 
         # Fix duplicate relationships
         mergeDupRelationsResults = "Not ran"
