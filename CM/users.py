@@ -51,20 +51,19 @@ def login(database,user,password):
 
         query = """
         match (u:USER) 
-        where toLower(u.username) = toLower($username) and $database in u.database 
-        return u.username as username, u.userid as userid, u.password as password, u.access as access, u.role as role
+        where toLower(u.username) = toLower($username) and $database in u.database and u.access = "enabled"
+        return u.username as username, u.userid as userid, u.password as key, u.access as access, u.role as role
 """
         result = getQuery(query,driver, params = {'username': user, 'database': database})
 
         if len(result) == 0:
             raise Exception("User not found")
 
-        pwd = result[0].get("password")
+        pwd = result[0].get("key")
         valid = verifyPassword(pwd,password)
 
         if valid:
-            result = result[0]
-            del result["password"]        
+            result = result[0]  
         else:
             raise Exception("invalid password")
 
@@ -72,3 +71,13 @@ def login(database,user,password):
 
     except Exception as e:
         return f"verification failed: {str(e)}"
+    
+
+def verifyUser(user,pwd):
+    try:
+        driver = getDriver("userdb")
+        query = "match (u:USER {userid: toString($user),password: $pwd, access: 'enabled'}) return 'verified' as verified"
+        result = getQuery(query, driver, params = {'user': user, 'pwd': pwd}, type = 'list')
+        return result[0]
+    except Exception as e:
+        return f"Error verifying user: {e}", 500

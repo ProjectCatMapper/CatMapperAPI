@@ -11,6 +11,7 @@ from dotenv import load_dotenv, find_dotenv
 import os
 from flask import abort
 import itertools
+from collections.abc import Iterable
 
 load_dotenv(find_dotenv())
 
@@ -169,19 +170,7 @@ def validateCols(df,required):
         return f"Missing the following required column(s): {missing}\n"
     else:
         return True
-    
-def verifyUser(user,pwd):
-    try:
-        driver = getDriver("userdb")
-        with driver.session() as session:
-            query = "match (u:USER {userid: toString($user),password: $pwd}) return 'verified' as verified"
-            result = session.run(query, user = user, pwd = pwd)
-            result = [dict(record) for record in result]
-            driver.close()
-        return result[0].get("verified")
-    except Exception as e:
-        return f"Error verifying user: {e}", 500
-    
+      
 def cleanCMID(cmid):
     # Define the regex pattern for valid prefixes
     valid_prefix_pattern = re.compile(r'^(AD|SD|AM|SM)')
@@ -275,3 +264,17 @@ def list2character(col):
     # Otherwise, convert it to a string
     else:
         return str(col)
+
+def flattenList(input_data):
+    if isinstance(input_data, str):
+        return [input_data]
+    elif isinstance(input_data, dict):
+        input_data = input_data.keys()
+
+    if isinstance(input_data, Iterable):
+        flat_list = []
+        for item in input_data:
+            flat_list.extend(flattenList(item))
+        return flat_list
+    else:
+        return [input_data]

@@ -9,12 +9,13 @@ import time
 import re
 import warnings
 
-# dataset = pd.read_excel("Test_New_UsesTies_Multiple.xlsx")
-dataset = pd.read_excel("Test1.xlsx")
-result = input_Nodes_Uses(dataset = dataset, database = "SocioMap", CMName = 'CMName',Name = "Name", CMID = None, Key = "Key", datasetID = "datasetID", label = "label", user = "1", updateProperties=False,linkContext=["parent","eventType","eventDate","religion", 'language', 'country', 'latitude','longitude'])
+dataset = pd.read_excel("Test_ReviseExistingUsesTies_Multiple.xlsx")
+result = input_Nodes_Uses(dataset = dataset, database = "SocioMap", CMName = None,Name = None, CMID = "CMID", Key = "Key", datasetID = "datasetID", label = "label", user = "1", updateProperties=False,linkContext=["parent","eventType","eventDate", 'latitude','longitude'])
 
-# result = input_Nodes_Uses(dataset = dataset, database = "SocioMap", CMName = None,Name = "Name", CMID = "CMID", Key = "Key", datasetID = "datasetID", label = "label", user = "1", updateProperties=False,linkContext=["parent","eventType","eventDate","religion", 'language', 'country', 'latitude','longitude'])
+# dataset = pd.read_excel("Test1.xlsx")
+# result = input_Nodes_Uses(dataset = dataset, database = "SocioMap", CMName = 'CMName',Name = "Name", CMID = None, Key = "Key", datasetID = "datasetID", label = "label", user = "1", updateProperties=False,linkContext=["parent","eventType","eventDate","religion", 'language', 'country', 'latitude','longitude'])
 
+from CM.users import *
 
 # createUSES(result,'SocioMap','1', create = "MERGE")
 # database = "SocioMap"
