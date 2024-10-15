@@ -1420,6 +1420,13 @@ def getnewuser():
         password = data.get("password")
         password = CM.password_hash(password)
         intendedUse = data.get("intendedUse")
+
+        if database.lower() == "sociomap":
+            database = "SocioMap"
+        elif database.lower() == "archamap":
+            database = "ArchaMap"
+        else:
+            raise Exception("database must be 'SocioMap' or 'ArchaMap'")
         
         driver = CM.getDriver("userdb")  
         
@@ -2180,7 +2187,6 @@ def updateNewUsers():
         credentials = CM.unlist(data.get('credentials'))
         process = CM.unlist(data.get('process'))
         userid = data.get('userid')
-        approver = CM.unlist(data.get('approver'))
         if database.lower() == "sociomap":
             database = "SocioMap"
         elif database.lower() == "archamap":
@@ -2199,8 +2205,6 @@ def updateNewUsers():
         driver = CM.getDriver('userdb')
 
         if process == "approve":
-            if approver is None:
-                raise Exception("Error: approver must be specified")
             if userid is None:
                 raise Exception("Error: userid must be specified")
          
@@ -2210,7 +2214,7 @@ def updateNewUsers():
 unwind $userids as id
 with toString(id) as id
 match (u {{access: 'new', userid: id}}) where '{database}' in u.database 
-set u.access = 'enabled', u.log = u.log + [toString(datetime()) + ": access approved by {approver}"]
+set u.access = 'enabled', u.log = u.log + [toString(datetime()) + ": access approved by {CM.unlist(credentials.get("userid"))}"]
 return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
 """
             result = CM.getQuery(query, driver, params = {"userids": userid})

@@ -237,67 +237,88 @@ def combine_names_and_altNames(df, name_col, alt_name_col):
     )
     return df
 
-def to_geojson_point(row):
-    if math.isnan(row['latitude']) or math.isnan(row['longitude']):
-        return None  # Or some other fallback value
-    
-    # Create the GeoJSON dictionary
-    geojson_dict = {
-        "type": "Point",
-        "coordinates": [row['longitude'], row['latitude']]
-    }
-    
+def to_geojson_point(coordinates):
+
+    if len(coordinates) == 1:
+        coordinates = coordinates[0]
+        latitude = coordinates[0]
+        longitude = coordinates[1]
+        if math.isnan(latitude) or math.isnan(longitude):
+            return None  # Or some other fallback value
+        
+        # round
+        latitude = round(latitude, 4)
+        longitude = round(longitude, 4)
+        
+        # Create the GeoJSON dictionary
+        geojson_dict = {
+            "type": "Point",
+            "coordinates": [longitude,latitude]
+        }
+    elif len(coordinates) > 1:
+        lats = []
+        longs = []
+        for coord in coordinates:
+            latitude = coord[0]
+            longitude = coord[1]
+            if math.isnan(latitude) or math.isnan(longitude):
+                return None 
+            
+            # round
+            latitude = round(latitude, 4)
+            longitude = round(longitude, 4)
+            lats.append(latitude)
+            longs.append(longitude)
+        
+        geojson_dict = {
+            "type": "MultiPoint",
+            "coordinates": [[longs[i], lats[i]] for i in range(len(lats))]
+        }
+    else:
+        return ""
+        
     # Convert the dictionary to a GeoJSON string
     return json.dumps(geojson_dict)
 
-import json
-
-def extract_coordinates(geo):
-    # Check if geo is a string and contains multiple coordinate entries
-    if isinstance(geo, str):
-        # Split the string by semicolons to handle multiple JSON objects
-        geo_entries = geo.split(';')
-        coordinates = []
+def convert_coordinates(geo):
+    # Return "NA" if geo is None or the string "NA"
+    if geo in (None, ''):
+        return ''
+    
+    try:
+        # Check if geo is a string and contains multiple coordinate entries
+        if isinstance(geo, str):
+            # Split the string by semicolons to handle multiple JSON objects
+            geo_entries = geo.split(';')
+            coordinates = []
+            
+            for entry in geo_entries:
+                entry = entry.strip()  # Remove any leading/trailing spaces
+                try:
+                    # Parse each JSON string to a dictionary
+                    geo_dict = json.loads(entry)
+                    
+                    lat = geo_dict.get('latitude')
+                    lon = geo_dict.get('longitude')
+                    
+                    if lat is not None and lon is not None:
+                        try:
+                            coordinates.append((float(lat), float(lon)))
+                        except ValueError:
+                            continue  # Skip invalid coordinate pairs
+                except json.JSONDecodeError:
+                    continue  # Skip invalid JSON entries
+            
+            if coordinates:
+                coordinates = to_geojson_point(coordinates)
+                return coordinates
         
-        for entry in geo_entries:
-            entry = entry.strip()  # Remove any leading/trailing spaces
-            try:
-                # Parse each JSON string to a dictionary
-                geo_dict = json.loads(entry)
-                
-                lat = geo_dict.get('latitude')
-                lon = geo_dict.get('longitude')
-                
-                if lat is not None and lon is not None:
-                    try:
-                        coordinates.append((float(lat), float(lon)))
-                    except ValueError:
-                        continue  # Skip invalid coordinate pairs
-            except json.JSONDecodeError:
-                continue  # Skip invalid JSON entries
-        
-        if coordinates:
-            return coordinates
+        # If geo is not a string or no valid coordinates found, return "NA"
+        return ''
     
-    # Handle other cases like list input, as in the original code
-    elif isinstance(geo, list) and len(geo) >= 2:
-        try:
-            return [(float(geo[1]), float(geo[0]))]  # Assume [longitude, latitude]
-        except ValueError:
-            return None
-    
-    return None
-
-
-def make_geo_coordinates(df, geo_col):
-    
-    df['latitude'], df['longitude'] = zip(*df[geo_col].apply(extract_coordinates))
-    df['latitude'] = pd.to_numeric(df['latitude'], errors='coerce')
-    df['longitude'] = pd.to_numeric(df['longitude'], errors='coerce')
-
-    df['geoCoords'] = df.apply(to_geojson_point, axis=1)
-    
-    return df
+    except Exception:
+        # Catch any unexpected errors and return "NA"
+        return ''
 
 def create_grouped_columns(row, grouped_columns):
     grouped_data = {}
@@ -440,9 +461,6 @@ def input_Nodes_Uses(dataset,
     properties = getPropertiesMetadata(driver)
     properties = pd.DataFrame(properties)
 
-    if not "label" in dataset.columns:
-        raise ValueError("Must include label")
-
     if uniqueID is None or uniqueID not in dataset.columns:
         print("Creating import ID")
         getQuery("MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL", driver)
@@ -460,19 +478,6 @@ def input_Nodes_Uses(dataset,
             max_row = len(sub_dataset) - 1 + s
             with open(f"log/{user}uploadProgress.txt", 'a') as f:
                 f.write(f"uploading {s} to {max_row} of {len(dataset)}")
-
-            if not isDataset:
-                print("Combining paired properties")
-                paired = properties.merge(pd.DataFrame({'property': sub_dataset.columns}), on='property')
-                grouped_columns = paired[paired['group'].notna()][['property', 'group']]
-                grouped_dict = sub_dataset.apply(lambda row: create_grouped_columns(row, grouped_columns), axis=1)
-                grouped_df = pd.DataFrame(grouped_dict.tolist())
-                sub_dataset = pd.concat([sub_dataset, grouped_df], axis=1)
-                columns_to_drop = grouped_columns[grouped_columns['property'] != 'parent']['property'].tolist()
-                # Drop the columns from sub_dataset, keeping the 'parent' column
-                sub_dataset = sub_dataset.drop(columns=columns_to_drop).copy()
-                for group in grouped_columns['group'].unique():
-                    linkContext.append(group)
 
             if CMID in sub_dataset.columns:
                 if datasetID in sub_dataset.columns and Key in sub_dataset.columns:
@@ -525,7 +530,7 @@ def input_Nodes_Uses(dataset,
             link_columns = [datasetID, CMName, CMID, Name, altNames, Key, uniqueID, label] + linkContext
             link_columns = [col for col in link_columns if col in dataset_match.columns]
 
-            print(dataset_match)
+            # print(dataset_match)
 
             if not isDataset:
                 print("Adding USES relationships")
@@ -540,8 +545,7 @@ def input_Nodes_Uses(dataset,
                 if linkContext is not None and 'geoCoords' in linkContext:
                     print("updating geo coordinates")
                     # return links
-                    links = make_geo_coordinates(links, 'geoCoords')
-                    links = links.drop(columns=['longitude', 'latitude']).copy()
+                    links['geoCoords'] = links['geoCoords'].apply(convert_coordinates)
 
                 if "parentContext" in linkContext:
                     print("updating parentContext")
@@ -629,7 +633,7 @@ def input_Nodes_Uses(dataset,
 
             print("Processing returned CMIDs")
             try:
-                print(result)
+                # print(result)
                 cmid_values = [link['to'] for link in result['links']]
                 updateAltNames(driver, CMID = cmid_values)
                 print("updated alternate names")
@@ -746,7 +750,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
         links_dict = links.to_dict(orient = "records")
 
-        print(q)
+        # print(q)
         
         result = getQuery(query = q, driver = driver, params = {"rows": links_dict})
         
