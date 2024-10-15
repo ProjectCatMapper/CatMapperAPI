@@ -2,6 +2,7 @@
 
 from .utils import *
 from .USES import *
+from .keys import *
 import json
 import pandas as pd
 from flask import jsonify
@@ -405,7 +406,7 @@ def input_Nodes_Uses(dataset,
     driver = getDriver(database)
 
     if formatKey is True:
-        raise Exception("Error: formatKey must be False")
+        dataset = createKey(dataset, Key).copy()
     
     if geocode is True:
         raise Exception("Error: geocode must be False")
