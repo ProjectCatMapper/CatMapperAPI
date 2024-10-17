@@ -756,7 +756,8 @@ def upload_API():
         CMID = formData["cmidColumn"]
         Key = formData["keyColumn"]        
 
-        linkContext = CM.unlist(data.get("linkContext"))
+        linkContext = data.get("linkContext")
+        print(linkContext)
         if not linkContext:
             linkContext = None     
         
@@ -792,7 +793,6 @@ def upload_API():
                     key_cols[key] = key
                 else: 
                     key_cols[key] = None
-            
             response = input_Nodes_Uses(
                  dataset=df,
                  database=database,
@@ -816,36 +816,60 @@ def upload_API():
                  geocode=False,
                  batchSize=1000)
         else:
+            if not label:
+                raise Exception("Must specify a domain")
+            df = pd.DataFrame(df)
             df['label'] = label
-            response = input_Nodes_Uses(df,
-                     database,
-                 CMName=CMName,
-                 Name=Name,
-                 CMID=CMID,
-                 altNames=altNames,
-                 Key=Key,
-                 formatKey=True,
-                 datasetID=datasetID,
-                 label='label',
-                 uniqueID=None,
-                 uniqueProperty=None, 
-                 nodeContext=None, 
-                 linkContext=linkContext,
-                 user=user,
-                 overwriteProperties=overwriteProperties,
-                 updateProperties=updateProperties,
-                 addDistrict=addDistrict,
-                 addRecordYear=addRecordYear,
-                 geocode=False,
-                 batchSize=1000)
+            df['datasetID'] = datasetID
+            if not "CMName" in df.columns:
+                df['CMName'] = df[CMName]
+            if not Name:
+                Name = 'Name'
+                df['Name'] = df[CMName]
+            if not "Name" in df.columns:
+                df['Name'] = df[Name]
+                Name = 'Name'
+            linkContext = None
+            nodeContext = None
+            df = df.to_dict(orient='records')
+            if CMID == "":
+                CMID = None
+            if altNames == "":
+                altNames = None
+            # return jsonify(df)
+            # return {"Name":Name, "CMID":CMID,"altNames":altNames,"Key":Key,"user":user,"overwriteProperties":overwriteProperties,"updateProperties":updateProperties,"addDistrict":addDistrict,"addRecordYear":addRecordYear}
+            response = input_Nodes_Uses(
+                dataset = df,
+                database = database,
+                CMName='CMName',
+                Name=Name,
+                CMID=CMID,
+                altNames=altNames,
+                Key=Key,
+                formatKey=True,
+                datasetID='datasetID',
+                label='label',
+                uniqueID=None,
+                uniqueProperty=None, 
+                nodeContext=None, 
+                linkContext=linkContext,
+                user=user,
+                overwriteProperties=overwriteProperties,
+                updateProperties=updateProperties,
+                addDistrict=addDistrict,
+                addRecordYear=addRecordYear,
+                geocode=False,
+                batchSize=1000)
             
         if isinstance(response, pd.DataFrame):
-            return f"Upload completed for {len(response)} rows"
+            n = len(response)
+            response = response.to_json(orient='records')
+            return f"Upload completed for {n} rows: response {response}"
         else:
             return "Error!! Check your file."
         
     except Exception as e:
-        return f"Error: {str(e)}", 500
+        return f"Upload error -  {str(e)}", 500
 
 @app.route('/networks', methods=['GET'])
 def getNetwork():
@@ -2204,6 +2228,13 @@ def updateNewUsers():
             database = "ArchaMap"
         else:
             raise Exception("database must be 'SocioMap' or 'ArchaMap'")
+        
+        print(credentials)
+        
+        if isinstance(credentials, dict):
+            pass
+        else:
+            credentials = json.loads(credentials)
         
         if CM.unlist(credentials.get("role")) != "admin":
             raise Exception("Error: User is not an admin")
