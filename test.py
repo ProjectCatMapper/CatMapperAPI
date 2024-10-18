@@ -9,10 +9,14 @@ import time
 import re
 import warnings
 
-dataset = pd.read_excel("Test replace property.xlsx")
+dataset = pd.read_excel("UploadDatasetTest.xlsx")
 dataset.columns
-result = input_Nodes_Uses(dataset = dataset, database = "SocioMap", CMName = None,Name = None, CMID = "CMID", Key = "Key", datasetID = "datasetID", label = None, user = "1", updateProperties=False,linkContext=['parent'],overwriteProperties = True)
+result = input_Nodes_Uses(dataset = dataset, database = "SocioMap", CMName = "CMName",
+                          Name = None, CMID = None, Key = None, formatKey = False, datasetID = None, label = "label",
+                            user = "1", updateProperties=False,linkContext=None,
+                            nodeContext = ['shortName','project','DatasetCitation','DatasetLocation','DatasetVersion','parent','District'],overwriteProperties = False)
 
+# result = input_Nodes_Uses(dataset = dataset, database = "SocioMap", CMName = None,Name = None, CMID = "CMID", Key = "Key", datasetID = "datasetID", label = None, user = "1", updateProperties=False,linkContext=['parent'],overwriteProperties = True)
 # dataset = pd.read_excel("Test1.xlsx")
 # result = input_Nodes_Uses(dataset = dataset, database = "SocioMap", CMName = 'CMName',Name = "Name", CMID = None, Key = "Key", datasetID = "datasetID", label = "label", user = "1", updateProperties=False,linkContext=["parent","eventType","eventDate","religion", 'language', 'country', 'latitude','longitude'])
 

@@ -863,8 +863,9 @@ def upload_API():
             
         if isinstance(response, pd.DataFrame):
             n = len(response)
-            response = response.to_json(orient='records')
-            return f"Upload completed for {n} rows: response {response}"
+            return f"Upload completed for {n} rows"
+            # response = response.to_json(orient='records')
+            # return f"Upload completed for {n} rows: response {response}"
         else:
             return "Error!! Check your file."
         
