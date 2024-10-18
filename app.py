@@ -793,6 +793,12 @@ def upload_API():
                     key_cols[key] = key
                 else: 
                     key_cols[key] = None
+
+            if dfpd['label'][0] == "DATASET":
+                nodeContext = linkContext
+                linkContext = None
+            else:
+                nodeContext = None
             response = input_Nodes_Uses(
                  dataset=df,
                  database=database,
@@ -806,7 +812,7 @@ def upload_API():
                  label=key_cols["label"],
                  uniqueID=None,
                  uniqueProperty=None, 
-                 nodeContext=None, 
+                 nodeContext=nodeContext, 
                  linkContext=linkContext,
                  user=user,
                  overwriteProperties=overwriteProperties,
@@ -863,7 +869,7 @@ def upload_API():
             
         if isinstance(response, pd.DataFrame):
             n = len(response)
-            return f"Upload completed for {n} rows"
+            return f"Upload completed for {n} row(s)"
             # response = response.to_json(orient='records')
             # return f"Upload completed for {n} rows: response {response}"
         else:
