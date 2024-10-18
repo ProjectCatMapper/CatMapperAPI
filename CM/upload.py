@@ -435,8 +435,8 @@ def input_Nodes_Uses(dataset,
 
     updateLog(f"log/{user}uploadProgress.txt", "checking column names", write = 'a')
 
-    columns_to_select = [
-    CMName, Name, CMID, altNames, Key, datasetID, label, uniqueID, "shortName", "DatasetCitation"] + nodeContext + linkContext
+    columns_to_select = list(set([
+    CMName, Name, CMID, altNames, Key, datasetID, label, uniqueID, "shortName", "DatasetCitation"] + nodeContext + linkContext))
 
     dataset = dataset[[col for col in columns_to_select if col in dataset.columns]]
 
@@ -531,7 +531,9 @@ def input_Nodes_Uses(dataset,
             node_columns = [col for col in node_columns if col in sub_dataset.columns]
 
             if isDataset:
-                nodes = sub_dataset[["CMName", "shortName", "DatasetCitation", uniqueID, 'label'] + nodeContext].drop_duplicates()
+                required_cols = list(set(["CMName", "shortName", "DatasetCitation", uniqueID, 'label'] + nodeContext))
+                required_cols = [col for col in required_cols if col in sub_dataset.columns]
+                nodes = sub_dataset[required_cols].drop_duplicates()
             else:
                 if Name and CMID in sub_dataset.columns:
                     nodes = sub_dataset[sub_dataset[CMID] == ''][node_columns].drop_duplicates()
@@ -547,7 +549,8 @@ def input_Nodes_Uses(dataset,
                 match = pd.DataFrame(match)
                 match = match.astype(str)
                 sub_dataset = sub_dataset.astype(str)
-                dataset_match = pd.merge(sub_dataset, match, how = "outer",on=[CMName,uniqueID])
+                join_cols = list(set(sub_dataset.columns.intersection(match.columns)))
+                dataset_match = pd.merge(sub_dataset, match, how = "outer",on=join_cols)
             else: 
                 dataset_match = sub_dataset.copy()
             
@@ -668,10 +671,15 @@ def input_Nodes_Uses(dataset,
 
                 result =  pd.DataFrame(result['links'])
                 final_result = pd.concat([final_result,result], axis = 0)
+            
+            else:
+                updateLog(f"log/{user}uploadProgress.txt", "Processing Dataset properties", write = 'a')
+                cmids = dataset_match['CMID'].unique()
+                processDATASETs(database = database, user = user, CMID = cmids)
+                final_result = pd.concat([final_result,dataset_match], axis = 0)
 
             if uniqueID == 'importID':
                 getQuery("MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL", driver = driver)
-            
 
     except Exception as e:
         try:

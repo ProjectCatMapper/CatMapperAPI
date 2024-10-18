@@ -312,3 +312,58 @@ def waitingUSES(database, BATCH_SIZE = 1000):
             return str(e), 500
         except:
             return "Error", 500
+        
+
+def processDATASETs(database, CMID = None, user = "0"):
+    try:
+
+        driver = getDriver(database)
+
+        # update District
+        print("updating District")
+        if CMID:
+            q1 = 'unwind $CMID as cmid'
+            q2 = '{CMID: cmid}'
+        else: 
+            q1 = ""
+            q2 = ""
+        query = f"""
+        {q1}
+        match (d:DATASET {q2}) 
+optional match (d)<-[:DISTRICT_OF]-(c:DISTRICT) 
+unwind d.District as dist
+with d, dist, collect(c.CMID) as districts 
+with d, dist, districts, [i in collect(dist) where not i in districts] as missing,
+[i in districts where not i = dist] as extra
+with d, missing, extra
+call apoc.do.when(size(missing) > 0,'with missing, d match (c:DISTRICT) where c.CMID in missing CREATE (d)<-[:DISTRICT_OF]-(c)','return NULL', {{d:d, missing:missing}}) yield value as v1
+with d, missing, extra, v1
+call apoc.do.when(size(extra) > 0,'match (d)<-[r:DISTRICT_OF]-(c) where c.CMID in extra delete r','RETURN NULL',{{d:d,extra:extra}}) yield value as v2
+return count(*)
+"""
+        getQuery(query, driver = driver, params = {"CMID":CMID})
+
+        # update parent
+        print("updating parent")
+        query = f"""
+        {q1}
+        match (d:DATASET {q2}) 
+optional match (d)<-[:CONTAINS]-(p:DATASET) 
+unwind d.parent as par
+with d, par, collect(p.CMID) as parents 
+with d, par, parents, [i in collect(par) where not i in parents] as missing,
+[i in parents where not i = par] as extra
+with d, missing, extra
+call apoc.do.when(size(missing) > 0,'with missing, d match (p:DATASET) where p.CMID in missing CREATE (d)<-[:CONTAINS]-(p)','return NULL', {{d:d, missing:missing}}) yield value as v1
+with d, missing, extra, v1
+call apoc.do.when(size(extra) > 0,'match (d)<-[r:CONTAINS]-(p) where p.CMID in extra delete r','RETURN NULL',{{d:d,extra:extra}}) yield value as v2
+return count(*)
+"""
+        getQuery(query, driver = driver, params = {"CMID":CMID})
+
+
+    except Exception as e:
+        try:
+            return str(e), 500
+        except:
+            return "Error", 500
