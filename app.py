@@ -869,6 +869,7 @@ def upload_API():
             
         if isinstance(response, pd.DataFrame):
             n = len(response)
+            # return f"Upload completed for {n} row(s): linkContext: {linkContext}"
             return f"Upload completed for {n} row(s)"
             # response = response.to_json(orient='records')
             # return f"Upload completed for {n} rows: response {response}"

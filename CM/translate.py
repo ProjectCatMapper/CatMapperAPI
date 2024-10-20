@@ -14,15 +14,18 @@ def translate(
         yearEnd,
         query,
         table):
-    if query.lower() != 'true':
+    
+    if query is not None:
+        if query.lower() != 'true':
             query = 'false'
 
     if domain == "ANY DOMAIN":
         domain = "CATEGORY"
     if domain == "AREA":
         domain = "DISTRICT"
-    if str.lower(key) != 'true':
-        key = None
+    if not key is None:
+        if str.lower(key) != 'true':
+            key = None
     driver = getDriver(database)
 
     # format data
@@ -197,7 +200,7 @@ def translate(
     # return results
     qReturn = """
     return distinct row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, custom.getLabel(a) as label, 
-    matching, score as matchingDistance, country, apoc.text.join(collect(Key),'; ') as Key order by matchingDistance
+    matching, score as matchingDistance, country, row.country as rcountry, row.context as rcontext, apoc.text.join(collect(Key),'; ') as Key order by matchingDistance
     """
     cypher_query = qLoad + qStart + qDomain + qCountryFilter + qContext + qDataset + qYear + qLimit + qCountry + qKey + qReturn
     if query == "true":
@@ -257,3 +260,44 @@ def translate(
     data = data[finalColOrder]
     
     return data
+
+def addMatchResults(results):
+    try:
+        # Select and distinct the necessary columns
+        df = results[['term', 'CMID', 'matchingDistance']].drop_duplicates(['term', 'CMID'])
+
+        # Group by 'term' and count occurrences
+        df['n'] = df.groupby('term')['term'].transform('count')
+
+        # Determine the match type
+        conditions = [
+            df['CMID'].isna(),
+            (df['n'] > 1) & df['CMID'].notna(),
+            df['matchingDistance'] > 0,
+            True
+        ]
+        choices = [
+            'none',
+            'one-to-many',
+            'fuzzy match',
+            'exact match'
+        ]
+        df['matchType'] = np.select(conditions, choices, default=np.nan)
+
+        # Group by 'CMID' and count occurrences
+        df['n'] = df.groupby('CMID')['CMID'].transform('count')
+
+        # Adjust match type for many-to-one scenarios
+        df.loc[(df['matchType'] == 'one-to-many') & (df['matchType'] != 'none') & (df['n'] > 1), 'matchType'] = 'many-to-one'
+
+        # Drop the 'n' and 'matchingDistance' columns
+        df = df.drop(columns=['n', 'matchingDistance'])
+
+        # Join the original results with the new matchType information
+        results = pd.merge(results, df, on=['CMID', 'term'], how='left')
+
+    except Exception as e:
+        print(f"Error returning match statistics: {e}")
+        return e
+
+    return results

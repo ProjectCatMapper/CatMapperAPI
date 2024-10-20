@@ -32,7 +32,7 @@ def createNodes(df,database,user):
         df = df.copy()
 
         if "label" in df.columns:
-            if "DATASET" in df["label"]:
+            if "DATASET" in df["label"].values:
                 isDataset = True
             else:
                 isDataset = False
@@ -45,10 +45,12 @@ def createNodes(df,database,user):
         if not all(label in labels for label in df["label"].unique()):
             raise Exception("Error: label is not valid.")
 
+        idlabel = 'CATEGORY'
         if isDataset:
             required = ["CMName","label","DatasetCitation","shortName"]
+            idlabel = 'DATASET'
         else:
-            required = ["CMName","label"]
+            required = ["CMName","label"]   
             print("adding category")
             df['label'] = df['label'].apply(lambda x: f"CATEGORY:{x}")
 
@@ -63,7 +65,9 @@ def createNodes(df,database,user):
             else:
                 df['uniqueID'] = df.index
 
-        newID = getAvailableID(new_id = "CMID", n = len(df), database = database)
+        print("getting new ID")
+        print(idlabel)
+        newID = getAvailableID(new_id = "CMID", label=idlabel, n = len(df), database = database)
 
         print(newID)
 

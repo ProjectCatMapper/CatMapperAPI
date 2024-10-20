@@ -103,47 +103,6 @@ n.displayName as displayName, n.remove as remove, n.color as color
     except Exception as e:
         return str(e), 500
     
-def addMatchResults(results):
-    try:
-        # Select and distinct the necessary columns
-        df = results[['term', 'CMID', 'matchingDistance']].drop_duplicates(['term', 'CMID'])
-
-        # Group by 'term' and count occurrences
-        df['n'] = df.groupby('term')['term'].transform('count')
-
-        # Determine the match type
-        conditions = [
-            df['CMID'].isna(),
-            (df['n'] > 1) & df['CMID'].notna(),
-            df['matchingDistance'] > 0,
-            True
-        ]
-        choices = [
-            'none',
-            'one-to-many',
-            'fuzzy match',
-            'exact match'
-        ]
-        df['matchType'] = np.select(conditions, choices, default=np.nan)
-
-        # Group by 'CMID' and count occurrences
-        df['n'] = df.groupby('CMID')['CMID'].transform('count')
-
-        # Adjust match type for many-to-one scenarios
-        df.loc[(df['matchType'] == 'one-to-many') & (df['matchType'] != 'none') & (df['n'] > 1), 'matchType'] = 'many-to-one'
-
-        # Drop the 'n' and 'matchingDistance' columns
-        df = df.drop(columns=['n', 'matchingDistance'])
-
-        # Join the original results with the new matchType information
-        results = pd.merge(results, df, on=['CMID', 'term'], how='left')
-
-    except Exception as e:
-        print(f"Error returning match statistics: {e}")
-        return e
-
-    return results
-
 def getDriver(database):
     try:
         if str.lower(database) == "sociomap":
