@@ -51,7 +51,6 @@ def createNodes(df,database,user):
             idlabel = 'DATASET'
         else:
             required = ["CMName","label"]   
-            print("adding category")
             df['label'] = df['label'].apply(lambda x: f"CATEGORY:{x}")
 
         if not all(column in df.columns for column in required):
@@ -65,11 +64,9 @@ def createNodes(df,database,user):
             else:
                 df['uniqueID'] = df.index
 
-        print("getting new ID")
-        print(idlabel)
+        updateLog(f"log/{user}uploadProgress.txt", "getting new ID", write = 'a')
         newID = getAvailableID(new_id = "CMID", label=idlabel, n = len(df), database = database)
 
-        print(newID)
 
         df["CMID"] = newID
 
@@ -119,7 +116,8 @@ def createNodes(df,database,user):
         return results_df
     
     except Exception as e:
-        return str(e), 500
+        updateLog(f"log/{user}uploadProgress.txt", str(e), write = 'a')
+        raise
 
 def createUSES(links,database,user, create = "MERGE"):
     try:
@@ -198,8 +196,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         nRels = getQuery("MATCH ()-[r]->() RETURN count(*) AS count", driver, type="list")
 
         # Execute the query and return results
-        print("Uploading to database")
-        print(q)
+        updateLog(f"log/{user}uploadProgress.txt", "Uploading new USES ties", write = 'a')
         links_dict = links.to_dict(orient='records')
         result = getQuery(q, driver, params={'rows':links_dict})
 
@@ -210,10 +207,10 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         # Get the number of relationships after adding
         nRels2 = getQuery("MATCH ()-[r]->() RETURN count(*) AS count", driver, type="list")
         new_rels = nRels2[0] - nRels[0]
-        print(f"Number of new relationships in database: {new_rels}")
+        updateLog(f"log/{user}uploadProgress.txt", f"Number of new relationships in database: {new_rels}", write = 'a')
 
         end_time = time.time()
-        print(f"Elapsed time: {int(end_time - start_time)} seconds")
+        updateLog(f"log/{user}uploadProgress.txt", f"Elapsed time: {int(end_time - start_time)} seconds", write = 'a')
 
         return {"q": result, "links": links_dict}
 
@@ -222,7 +219,8 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             error_message = ', '.join(map(str, e))
         else:
             error_message = str(e)
-        return error_message, 500
+            updateLog(f"log/{user}uploadProgress.txt", error_message, write = 'a')
+        raise
 
 def combine_properties(df, group_by_cols):
     
@@ -562,8 +560,6 @@ def input_Nodes_Uses(dataset,
             link_columns = [datasetID, CMName, CMID, Name, altNames, Key, uniqueID, label] + linkContext
             link_columns = [col for col in link_columns if col in dataset_match.columns]
 
-            # print(dataset_match)
-
             if not isDataset:
                 updateLog(f"log/{user}uploadProgress.txt", "Adding USES relationships", write = 'a')
 
@@ -604,46 +600,36 @@ def input_Nodes_Uses(dataset,
                     sub_links['parentContext'] = sub_links['parentContext'].apply(filter_dict)
 
                     # Step 1: Convert parentContext dictionary to a JSON string
-                    # print("step 1")
                     # Apply json.dumps to convert dictionaries to JSON strings
                     sub_links['parentContext'] = sub_links['parentContext'].apply(lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, dict) else x)
 
                     # Step 2: Remove square brackets if present in strings
-                    # print("step 2")
                     sub_links['parentContext'] = sub_links['parentContext'].apply(lambda x: re.sub(r'\[|\]', '', x) if isinstance(x, str) else x)
 
                     # Step 3: Unnest data (apply to each row)
-                    # print("step 3")
                     sub_links = sub_links.explode('parentContext').reset_index(drop=True)
 
                     # Step 4: Handle missing parent values by setting parentContext to None where parent is NaN
-                    # print("step 4")
                     sub_links['parentContext'] = sub_links.apply(lambda row: None if pd.isna(row['parent']) else row['parentContext'], axis=1)
 
                     # Step 5: Drop 'eventDate' and 'eventType' columns if they exist
-                    # print("step 5")
                     sub_links = sub_links.drop(columns=[col for col in ['eventDate', 'eventType'] if col in sub_links.columns])
 
                     # Step 6: Group by 'from', 'to', and 'Key'
-                    # print("step 6")
                     grouped_links = sub_links.groupby(['from', 'to', 'Key'])
 
                     # Step 7: Combine lists of parentContext and parent, keeping their JSON representations intact
-                    # print("step 7")
                     sub_links = grouped_links.agg({
                         'parentContext': lambda x: list(x),
                         'parent': lambda x: list(x)
                     }).reset_index()
 
                     # Step 8: Convert lists of JSON strings to a semicolon-separated string
-                    # print("step 8")
                     for index, row in sub_links.iterrows():
                         sub_links.at[index, 'parentContext'] = process_parent_context_element(row['parentContext'])
                         sub_links.at[index, 'parent'] = process_parent_context_element(row['parent'])
 
-
                     # Step 9: Merge the grouped data back into the original DataFrame
-                    # print("step 9")
                     links = links.drop(columns=['parentContext', 'parent']).copy()
                     links = pd.merge(links, sub_links, on=['from', 'to', 'Key'], how='left')
                 
@@ -705,6 +691,9 @@ def input_Nodes_Uses(dataset,
 
     with open(f"log/{user}uploadProgress.txt", 'a') as f:
         f.write("Completed dataset upload\n")
+
+    if 'from' in final_result.columns and 'to' in final_result.columns:
+        final_result.rename(columns={'from': 'datasetID', 'to': 'CMID'}, inplace=True)
     
     return final_result.drop_duplicates()
 
@@ -790,8 +779,6 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         """
 
         links_dict = links.to_dict(orient = "records")
-
-        # print(q)
         
         result = getQuery(query = q, driver = driver, params = {"rows": links_dict})
         
