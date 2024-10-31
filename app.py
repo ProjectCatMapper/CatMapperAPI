@@ -742,6 +742,7 @@ def upload_API():
         data = request.get_data() 
         data = json.loads(data)
         df = data.get("df")
+        print(data)
         database = CM.unlist(data.get("database"))
         formData = CM.unlist(data.get("formData"))
         label = formData["domain"]
@@ -757,7 +758,6 @@ def upload_API():
         Key = formData["keyColumn"]        
 
         linkContext = data.get("linkContext")
-        print(linkContext)
         if not linkContext:
             linkContext = None     
         
@@ -866,11 +866,12 @@ def upload_API():
                 addRecordYear=addRecordYear,
                 geocode=False,
                 batchSize=1000)
-            
+                    
         if isinstance(response, pd.DataFrame):
             n = len(response)
             # return f"Upload completed for {n} row(s): linkContext: {linkContext}"
-            return f"Upload completed for {n} row(s)"
+            response_dict = response.to_dict(orient='records')
+            return {"message": f"Upload completed for {n} row(s)", "file": response_dict}
             # response = response.to_json(orient='records')
             # return f"Upload completed for {n} rows: response {response}"
         else:
@@ -1684,7 +1685,7 @@ def getDataset():
 
 
         for col in list_cols:
-            df[col] = df[col].apply(lambda x: '|'.join(map(str, x)) if isinstance(x, list) else x)
+            df[col] = df[col].apply(lambda x: '; '.join(map(str, x)) if isinstance(x, list) else x)
 
         df = df.astype(str)
         df.replace([np.nan, None,"nan"], '', inplace=True)
