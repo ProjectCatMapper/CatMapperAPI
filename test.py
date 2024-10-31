@@ -3,6 +3,35 @@ from CM.translate import *
 import pandas as pd
 from CM.upload import *
 
+df = pd.read_excel("nodes.xlsx")
+df
+
+input_Nodes_Uses(dataset = df,
+                  database = "SocioMap",
+                    CMName = "CMName", 
+                    Name = "Name",
+                 CMID=None,
+                 altNames=None,
+                 Key='Key',
+                 formatKey=False,
+                 datasetID='datasetID',
+                 label='label',
+                 uniqueID=None,
+                 uniqueProperty=None, 
+                 nodeContext=None, 
+                 linkContext=None,
+                 user=1,
+                 overwriteProperties=False,
+                 updateProperties=False,
+                 addDistrict=False,
+                 addRecordYear=False,
+                 geocode=False,
+                 batchSize=1000,
+                    )
+
+df = pd.read_excel("UploadDatasetTest.xlsx")
+df
+createNodes(df,"SocioMap","1")
 df = pd.read_excel("translate.xlsx")
 df
 df.columns
