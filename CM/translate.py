@@ -212,6 +212,7 @@ def translate(
     data = pd.DataFrame(data)
     data = data.replace("", pd.NA)
     data = data.dropna(axis='columns', how='all')
+    
     # add matching type
     data = addMatchResults(results = data)
     new_column_names = {col: f"{col}_{term}" for col in data.columns if col != 'CMuniqueRowID'}

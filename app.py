@@ -755,7 +755,7 @@ def upload_API():
         Name = formData["categoryNamesColumn"]
         altNames = formData["alternateCategoryNamesColumn"]
         CMID = formData["cmidColumn"]
-        Key = formData["keyColumn"]        
+        Key = formData["keyColumn"]      
 
         linkContext = data.get("linkContext")
         if not linkContext:
@@ -842,7 +842,6 @@ def upload_API():
                 CMID = None
             if altNames == "":
                 altNames = None
-            # return jsonify(df)
             # return {"Name":Name, "CMID":CMID,"altNames":altNames,"Key":Key,"user":user,"overwriteProperties":overwriteProperties,"updateProperties":updateProperties,"addDistrict":addDistrict,"addRecordYear":addRecordYear}
             response = input_Nodes_Uses(
                 dataset = df,
@@ -869,16 +868,20 @@ def upload_API():
                     
         if isinstance(response, pd.DataFrame):
             n = len(response)
-            # return f"Upload completed for {n} row(s): linkContext: {linkContext}"
             response_dict = response.to_dict(orient='records')
             return {"message": f"Upload completed for {n} row(s)", "file": response_dict}
-            # response = response.to_json(orient='records')
-            # return f"Upload completed for {n} rows: response {response}"
         else:
             return "Error!! Check your file."
         
     except Exception as e:
-        return f"Upload error -  {str(e)}", 500
+        with open(f'log/{user}uploadProgress.txt', 'r') as file:
+            full_log = file.readlines()
+        response_data = {
+            "error": f"Upload error - {str(e)}",
+            "full_log": full_log
+        }
+
+        return json.dumps(response_data), 500
 
 @app.route('/networks', methods=['GET'])
 def getNetwork():
