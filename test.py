@@ -3,14 +3,14 @@ from CM.translate import *
 import pandas as pd
 from CM.upload import *
 
-df = pd.read_excel("nodes.xlsx")
-df
+df = pd.read_excel("AF2LanguagesPopEst.xlsx")
+df.columns
 
 input_Nodes_Uses(dataset = df,
                   database = "SocioMap",
-                    CMName = "CMName", 
+                    CMName = None, 
                     Name = "Name",
-                 CMID=None,
+                 CMID="CMID",
                  altNames=None,
                  Key='Key',
                  formatKey=False,
@@ -19,7 +19,7 @@ input_Nodes_Uses(dataset = df,
                  uniqueID=None,
                  uniqueProperty=None, 
                  nodeContext=None, 
-                 linkContext=None,
+                 linkContext=['sampleSize','recordStart', 'recordEnd', 'populationEstimate'],
                  user=1,
                  overwriteProperties=False,
                  updateProperties=False,
