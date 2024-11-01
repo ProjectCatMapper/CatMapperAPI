@@ -385,8 +385,10 @@ def input_Nodes_Uses(dataset,
     
     updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write = 'w')
     dataset = pd.DataFrame(dataset)
+    
+    dataset = dataset.drop('key', axis = 1).copy()
 
-    dataset = dataset.dropna(how='all').copy()
+    dataset = dataset.dropna(how='all').reset_index(drop=True).copy()
 
     if nodeContext is None:
         nodeContext = []
