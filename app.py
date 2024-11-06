@@ -1212,7 +1212,7 @@ def getSearch():
             raise Exception("limit must be an integer")
 
         if limit is None:
-            limit = 1000
+            limit = 10000
         
         if property is None and term is not None:
             raise Exception("Must specify a property (e.g., Name, CMID, or Key)")
@@ -1224,7 +1224,7 @@ def getSearch():
             qStart = f"match (a:{domain}) with a, '' as matching, 0 as score" 
         elif property == "Key":
                 qStart = f"""
-call db.index.fulltext.queryRelationships('keys',replace($term,':','\\:')) yield relationship
+call db.index.fulltext.queryRelationships('keys',custom.escapeText($term)) yield relationship
 with endnode(relationship) as a, relationship.Key as matching, case when $term contains ":" then $term else ": " + $term end as term
 where '{domain}' in labels(a) and matching ends with term
 with a, matching, 0 as score
