@@ -49,6 +49,8 @@ def translate(
     rows = rows[rows['term'] != '']
     columns_to_group_by = rows.columns.difference(['CMuniqueRowID']).tolist()
     rows = rows.groupby(columns_to_group_by)['CMuniqueRowID'].apply(list).reset_index()
+    rows['CMuniqueCategoryID'] = rows.index
+
     rows = rows.to_dict('records')
 
     # Define the Cypher query
@@ -199,7 +201,7 @@ def translate(
 
     # return results
     qReturn = """
-    return distinct row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, custom.getLabel(a) as label, 
+    return distinct row.CMuniqueCategoryID as CMuniqueCategoryID, row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, custom.getLabel(a) as label, 
     matching, score as matchingDistance, country, apoc.text.join(collect(Key),'; ') as Key order by matchingDistance
     """
     cypher_query = qLoad + qStart + qDomain + qCountryFilter + qContext + qDataset + qYear + qLimit + qCountry + qKey + qReturn
@@ -209,18 +211,25 @@ def translate(
     else:
         data = getQuery(cypher_query, driver, params = {'rows': rows})
 
+    if not data:
+        data = df
+        data[f'matchType_{term}'] = "None"
+        return data
+
     data = pd.DataFrame(data)
     data = data.replace("", pd.NA)
     data = data.dropna(axis='columns', how='all')
-    # return data
-    
+  
+  
     # add matching type
     data = addMatchResults(df = data)
+    data = data.drop('CMuniqueCategoryID', axis=1).copy()
     new_column_names = {col: f"{col}_{term}" for col in data.columns if col != 'CMuniqueRowID'}
     data = data.rename(columns=new_column_names)
-    data = data.explode('CMuniqueRowID')
     data = data.drop(f"term_{term}", axis=1)
 
+    data = data.explode('CMuniqueRowID')
+    df = df.explode('CMuniqueRowID')
     data['CMuniqueRowID'] = data['CMuniqueRowID'].astype(int)
     df['CMuniqueRowID'] = df['CMuniqueRowID'].astype(int)
 
@@ -270,13 +279,13 @@ def addMatchResults(df):
 
         # Count occurrences of CMID and CMuniqueRowID for each row
         cmid_counts = df['CMID'].value_counts()
-        df['CMuniqueRowID'] = df['CMuniqueRowID'].astype(str)
-        cmunique_counts = df['CMuniqueRowID'].apply(lambda x: tuple(x)).value_counts()
+        df['CMuniqueCategoryID'] = df['CMuniqueCategoryID'].astype(str)
+        cmunique_counts = df['CMuniqueCategoryID'].apply(lambda x: tuple(x)).value_counts()
 
         # Helper to assign match types
         def determine_match_type(row):
             cmid = row['CMID']
-            cmunique = tuple(row['CMuniqueRowID'])
+            cmunique = tuple(row['CMuniqueCategoryID'])
             matching_distance = row['matchingDistance']
             
             # Check conditions for match type
@@ -288,7 +297,7 @@ def addMatchResults(df):
                 return 'many-to-one'
             elif cmunique_counts[cmunique] > 1:
                 return 'one-to-many'
-            return None
+            return 'None'
 
         # Apply the function to each row
         df['matchType'] = df.apply(determine_match_type, axis=1)

@@ -37,18 +37,18 @@ from CM.utils import *
 from CM.translate import *
 import pandas as pd
 
-df = pd.read_excel("translate.xlsx")
+df = pd.read_excel("translate2.xlsx")
 df
 df.columns
 
 database = "SocioMap"
-property = "Name"
+property = "CMID"
 domain = "CATEGORY"
 key = None
-term = "Name"
+term = "language"
 country = None
 context = None
-dataset = "datasetID"
+dataset = None
 yearStart = None
 yearEnd = None
 query = None
