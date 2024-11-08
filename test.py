@@ -32,6 +32,11 @@ input_Nodes_Uses(dataset = df,
 df = pd.read_excel("UploadDatasetTest.xlsx")
 df
 createNodes(df,"SocioMap","1")
+
+from CM.utils import *
+from CM.translate import *
+import pandas as pd
+
 df = pd.read_excel("translate.xlsx")
 df
 df.columns
@@ -62,39 +67,41 @@ result = translate(
         yearEnd = yearEnd,
         query = query,
         table = table)
+print(result)
+df = result
 
-results = result
+# Initialize matchType column with None
+df['matchType'] = None
 
-cols = ['term', 'CMID', 'matchingDistance', 'rcountry','rcontext']
-cols = [col for col in cols if col in results.columns]
-df = results[cols].drop_duplicates()
+# Count occurrences of CMID and CMuniqueRowID for each row
+cmid_counts = df['CMID'].value_counts()
+df['CMuniqueRowID'] = df['CMuniqueRowID'].astype(str)
+cmunique_counts = df['CMuniqueRowID'].apply(lambda x: tuple(x)).value_counts()
 
-# Group by 'term' and count occurrences
-df['n'] = df.groupby('term')['term'].transform('count')
+# Helper to assign match types
+def determine_match_type(row):
+        cmid = row['CMID']
+        cmunique = tuple(row['CMuniqueRowID'])
+        matching_distance = row['matchingDistance']
 
-# Determine the match type
-conditions = [
-        df['CMID'].isna(),
-        (df['n'] > 1) & df['CMID'].notna(),
-        df['matchingDistance'] > 0,
-        True
-]
-choices = [
-        'none',
-        'one-to-many',
-        'fuzzy match',
-        'exact match'
-]
-df['matchType'] = np.select(conditions, choices, default=np.nan)
+        # Check conditions for match type
+        if matching_distance == 0 and cmid_counts[cmid] == 1 and cmunique_counts[cmunique] == 1:
+                return 'exact match'
+        elif matching_distance > 0 and cmid_counts[cmid] == 1 and cmunique_counts[cmunique] == 1:
+                return 'fuzzy match'
+        elif cmunique_counts[cmunique] > 1:
+                return 'one-to-many'
+        elif cmid_counts[cmid] > 1:
+                return 'many-to-one'
 
-# Group by 'CMID' and count occurrences
-df['n'] = df.groupby('CMID')['CMID'].transform('count')
 
-# Adjust match type for many-to-one scenarios
-df.loc[(df['matchType'] == 'one-to-many') & (df['matchType'] != 'none') & (df['n'] > 1), 'matchType'] = 'many-to-one'
+# Apply the function to each row
+df['matchType'] = df.apply(determine_match_type, axis=1)
 
-# Drop the 'n' and 'matchingDistance' columns
-df = df.drop(columns=['n', 'matchingDistance'])
-
-# Join the original results with the new matchType information
-results = pd.merge(results, df, on=['CMID', 'term'], how='left')
+df
+from CM.utils import *
+from CM.translate import *
+import pandas as pd
+df = pd.read_excel("_Matched_2024-11-08.xlsx")
+df = addMatchResults(df)
+df

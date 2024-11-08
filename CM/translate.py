@@ -19,7 +19,7 @@ def translate(
         if query.lower() != 'true':
             query = 'false'
 
-    if domain == "ANY DOMAIN":
+    if domain in ["ANY DOMAIN", "GENERIC"]:
         domain = "CATEGORY"
     if domain == "AREA":
         domain = "DISTRICT"
@@ -200,7 +200,7 @@ def translate(
     # return results
     qReturn = """
     return distinct row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, custom.getLabel(a) as label, 
-    matching, score as matchingDistance, country, row.country as rcountry, row.context as rcontext, apoc.text.join(collect(Key),'; ') as Key order by matchingDistance
+    matching, score as matchingDistance, country, apoc.text.join(collect(Key),'; ') as Key order by matchingDistance
     """
     cypher_query = qLoad + qStart + qDomain + qCountryFilter + qContext + qDataset + qYear + qLimit + qCountry + qKey + qReturn
     if query == "true":
@@ -212,9 +212,10 @@ def translate(
     data = pd.DataFrame(data)
     data = data.replace("", pd.NA)
     data = data.dropna(axis='columns', how='all')
+    # return data
     
     # add matching type
-    data = addMatchResults(results = data)
+    data = addMatchResults(df = data)
     new_column_names = {col: f"{col}_{term}" for col in data.columns if col != 'CMuniqueRowID'}
     data = data.rename(columns=new_column_names)
     data = data.explode('CMuniqueRowID')
@@ -262,43 +263,38 @@ def translate(
     
     return data
 
-def addMatchResults(results):
+def addMatchResults(df):
     try:
-        # Select and distinct the necessary columns
-        df = results[['term', 'CMID', 'matchingDistance']].drop_duplicates(['term', 'CMID'])
+        # Initialize matchType column with None
+        df['matchType'] = None
 
-        # Group by 'term' and count occurrences
-        df['n'] = df.groupby('term')['term'].transform('count')
+        # Count occurrences of CMID and CMuniqueRowID for each row
+        cmid_counts = df['CMID'].value_counts()
+        df['CMuniqueRowID'] = df['CMuniqueRowID'].astype(str)
+        cmunique_counts = df['CMuniqueRowID'].apply(lambda x: tuple(x)).value_counts()
 
-        # Determine the match type
-        conditions = [
-            df['CMID'].isna(),
-            (df['n'] > 1) & df['CMID'].notna(),
-            df['matchingDistance'] > 0,
-            True
-        ]
-        choices = [
-            'none',
-            'one-to-many',
-            'fuzzy match',
-            'exact match'
-        ]
-        df['matchType'] = np.select(conditions, choices, default=np.nan)
+        # Helper to assign match types
+        def determine_match_type(row):
+            cmid = row['CMID']
+            cmunique = tuple(row['CMuniqueRowID'])
+            matching_distance = row['matchingDistance']
+            
+            # Check conditions for match type
+            if matching_distance == 0 and cmid_counts[cmid] == 1 and cmunique_counts[cmunique] == 1:
+                return 'exact match'
+            elif matching_distance > 0 and cmid_counts[cmid] == 1 and cmunique_counts[cmunique] == 1:
+                return 'fuzzy match'
+            elif cmid_counts[cmid] > 1:
+                return 'many-to-one'
+            elif cmunique_counts[cmunique] > 1:
+                return 'one-to-many'
+            return None
 
-        # Group by 'CMID' and count occurrences
-        df['n'] = df.groupby('CMID')['CMID'].transform('count')
-
-        # Adjust match type for many-to-one scenarios
-        df.loc[(df['matchType'] == 'one-to-many') & (df['matchType'] != 'none') & (df['n'] > 1), 'matchType'] = 'many-to-one'
-
-        # Drop the 'n' and 'matchingDistance' columns
-        df = df.drop(columns=['n', 'matchingDistance'])
-
-        # Join the original results with the new matchType information
-        results = pd.merge(results, df, on=['CMID', 'term'], how='left')
+        # Apply the function to each row
+        df['matchType'] = df.apply(determine_match_type, axis=1)
+        
+        return df
 
     except Exception as e:
         print(f"Error returning match statistics: {e}")
         return e
-
-    return results
