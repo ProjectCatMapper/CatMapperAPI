@@ -1,5 +1,5 @@
 #from fastapi import FastAPI
-from flask import Flask,request
+from flask import Flask,request,send_file
 from flask import jsonify, render_template, make_response, stream_with_context, Response
 from flask_mail import Mail, Message
 from neo4j import GraphDatabase
@@ -21,6 +21,7 @@ import logging
 from itsdangerous import URLSafeTimedSerializer
 from werkzeug.security import generate_password_hash
 from CM.upload  import input_Nodes_Uses
+from io import BytesIO
 # from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv(find_dotenv())
@@ -32,6 +33,8 @@ pwdG = os.getenv("pwdG")
 uriAM = os.getenv("uriAM")
 pwdAM = os.getenv("pwdAM")
 apikeyEnv = os.getenv("apikey")
+
+rvals = {}
 
 def connectionSM():
     driver = GraphDatabase.driver(uri=uriSM,auth=(user,pwdSM))
@@ -956,6 +959,80 @@ return a, collect(distinct r) as r, collect(distinct e) as e
         return {"node":node,"relations":rel,"relNodes":end,"query":cypher_query,"params":[{"cmid":cmid,"database":database,"domain":domain,"relation":relation,"endcmid":endcmid}]}
     except Exception as e:
         return str(e), 500
+    
+@app.route('/proposeMergeSubmit', methods=['POST'])
+def submit_merge():
+    data = request.get_data() 
+    data = json.loads(data)
+    print(data)
+    dataset_choices = data.get("datasetChoices", [])
+    category_label = data.get("categoryLabel", "")
+    intersection = data.get("intersection", False)
+
+    database = data.get('database')
+
+    driver = CM.getDriver(database)
+
+    if len(dataset_choices) < 1:
+            return jsonify({"message": "Please select more options"}), 400
+
+    query = """
+                    UNWIND $datasets AS dataset
+                    UNWIND $categoryLabel AS categoryLabel
+                    MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET {CMID: dataset}) where categoryLabel in labels(c)
+                    RETURN DISTINCT d.CMID AS datasetID, r.Key AS Key, c.CMName AS CMName, c.CMID AS CMID,
+                                    apoc.text.join(r.Name, '; ') AS Name
+                    ORDER BY CMName
+            """
+
+    merged = CM.getQuery(query, driver = driver,params = {'datasets': dataset_choices,"categoryLabel": category_label})
+
+    merged = pd.DataFrame(merged)
+
+    if not merged.empty:
+            # Pivot wider equivalent
+            merged_df = merged.pivot_table(
+            index=['CMName', 'CMID'],
+            columns='datasetID',
+            values=['Key', 'Name'],
+            aggfunc=lambda x: '; '.join(filter(None, x))
+            )
+            
+            merged_df.columns = [f"{col[0]}{col[1]}" for col in merged_df.columns]
+            merged_df.reset_index(inplace=True)
+
+            # Flatten lists, filter keys if intersection is off
+            if not intersection:
+                    for col in merged_df.columns:
+                        if 'Key' in col:
+                            merged_df = merged_df[merged_df[col].notna()]
+                    
+            merged = merged_df.fillna("")
+            return jsonify({"message": f"Returned {len(merged)} results"})
+    else:
+            return jsonify({"message": "No results"}), 204
+
+@app.route('/proposeMergeDownload', methods=['GET'])
+def download_merge():
+    if 'merged' in rvals and not rvals['merged'].empty:
+        output = BytesIO()
+        rvals['merged'].to_excel(output, index=False)
+        output.seek(0)
+        return send_file(output, as_attachment=True, download_name='merge.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    return jsonify({"message": "No data to download"}), 204
+
+@app.route('/joinDatasets', methods=['POST'])
+def submitjoinDatasets():
+    data = request.get_data() 
+    data = json.loads(data)
+    # print(data)
+    database = CM.unlist(data.get("database", ""))
+    autoLeft = data.get("autoLeft")
+    autoRight = data.get("autoRight")
+    
+    result = CM.joinDatasets(database, autoLeft, autoRight)
+
+    return jsonify(result)
 
 @app.route('/networksjs', methods=['GET'])
 def getNetworkjs():
@@ -1630,7 +1707,8 @@ def getDataset():
 
         driver = CM.getDriver(database)
 
-        children = str(children).lower()
+        if children is not None:
+            children = str(children).lower()
 
         if children is not None and children == "true":
             query = """

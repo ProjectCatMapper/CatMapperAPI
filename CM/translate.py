@@ -61,7 +61,8 @@ def translate(
         qStart = f"""
     with row call db.index.fulltext.queryRelationships('keys','"' + tolower(row.term) +'"') yield relationship
     with row, endnode(relationship) as a, relationship.Key as matching, case when row.term contains ":" then row.term else ": " + row.term end as term
-    where '{domain}' in labels(a) and matching ends with term
+    where '{domain}' in labels(a) and matching ends with term 
+    AND ( (matching CONTAINS ";" AND row.term CONTAINS ";") OR NOT matching CONTAINS ";" )
     with row, a, matching, 0 as score
     """
     elif property in ["glottocode","ISO","CMID"]:
@@ -220,6 +221,7 @@ def translate(
     data = data.replace("", pd.NA)
     data = data.dropna(axis='columns', how='all')
   
+    # return data
   
     # add matching type
     data = addMatchResults(df = data)
@@ -277,27 +279,33 @@ def addMatchResults(df):
         # Initialize matchType column with None
         df['matchType'] = None
 
-        # Count occurrences of CMID and CMuniqueRowID for each row
-        cmid_counts = df['CMID'].value_counts()
-        df['CMuniqueCategoryID'] = df['CMuniqueCategoryID'].astype(str)
-        cmunique_counts = df['CMuniqueCategoryID'].apply(lambda x: tuple(x)).value_counts()
+        # Count occurrences of each CMID within each CMuniqueCategoryID
+        cmid_counts_per_category = df.groupby(['CMuniqueCategoryID', 'CMID']).size()
+
+        # Count occurrences of CMuniqueRowID within each CMuniqueCategoryID
+        cmunique_counts = df.groupby('CMuniqueCategoryID')['CMuniqueRowID'].transform('size')
 
         # Helper to assign match types
         def determine_match_type(row):
             cmid = row['CMID']
-            cmunique = tuple(row['CMuniqueCategoryID'])
+            cmunique = row['CMuniqueRowID']
             matching_distance = row['matchingDistance']
+            category_id = row['CMuniqueCategoryID']
             
-            # Check conditions for match type
-            if matching_distance == 0 and cmid_counts[cmid] == 1 and cmunique_counts[cmunique] == 1:
+            # Check the count of the current CMID within the specific CMuniqueCategoryID
+            cmid_count_in_category = cmid_counts_per_category.get((category_id, cmid), 0)
+            cmunique_count = cmunique_counts.get(category_id, 0)
+            
+            # Determine match type based on conditions
+            if matching_distance == 0 and cmid_count_in_category == 1 and cmunique_count == 1:
                 return 'exact match'
-            elif matching_distance > 0 and cmid_counts[cmid] == 1 and cmunique_counts[cmunique] == 1:
+            elif matching_distance > 0 and cmid_count_in_category == 1 and cmunique_count == 1:
                 return 'fuzzy match'
-            elif cmid_counts[cmid] > 1:
+            elif cmid_count_in_category > 1:
                 return 'many-to-one'
-            elif cmunique_counts[cmunique] > 1:
+            elif cmunique_count > 1:
                 return 'one-to-many'
-            return 'None'
+            return None
 
         # Apply the function to each row
         df['matchType'] = df.apply(determine_match_type, axis=1)
@@ -307,3 +315,4 @@ def addMatchResults(df):
     except Exception as e:
         print(f"Error returning match statistics: {e}")
         return e
+

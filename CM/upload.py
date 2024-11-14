@@ -636,6 +636,14 @@ def input_Nodes_Uses(dataset,
                     # Step 9: Merge the grouped data back into the original DataFrame
                     links = links.drop(columns=['parentContext', 'parent']).copy()
                     links = pd.merge(links, sub_links, on=['from', 'to', 'Key'], how='left')
+
+                if 'yearStart' in links or 'yearEnd' in links or 'recordStart' in links or 'recordEnd' in links:
+                    updateLog(f"log/{user}uploadProgress.txt", "updating date columns", write = 'a')
+                    # return links
+                    date_columns = ['yearStart', 'yearEnd', 'recordStart', 'recordEnd']
+                    for col in date_columns:
+                        if col in links.columns:
+                            links[col] = links[col].apply(lambda x: x if pd.isna(x) or x == '' else int(float(x)))
                 
                 link_cols = ['from', 'to', 'Key'] + linkContext
                 link_cols = [col for col in link_cols if col in links.columns]
@@ -657,6 +665,7 @@ def input_Nodes_Uses(dataset,
                 updateLog(f"log/{user}uploadProgress.txt", "Processing returned CMIDs", write = 'a')
                 try:
                     cmid_values = [link['to'] for link in result['links']]
+                    addCMNameRel(database, CMID = cmid_values)
                     updateAltNames(driver, CMID = cmid_values)
                     updateLog(f"log/{user}uploadProgress.txt", "updated alternate names", write = 'a')
                 except KeyError as e:
