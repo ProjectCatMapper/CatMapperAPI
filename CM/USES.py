@@ -1,6 +1,7 @@
 ''' USES.py '''
 
 from .utils import *
+from datetime import datetime
 
 def mergeDupRelations(driver, CMID = None):
     try:
@@ -97,35 +98,32 @@ def updateLabels(driver, CMID = None):
         if CMID is not None:
             qFiltera = "unwind $cmid as cmid"
             qFilterb = "a.CMID = cmid and"
-            qFilterC = "with l, cmid"
+            qFilterC = "with l, labelGroupMapping, cmid"
         else: 
             qFiltera = ""
             qFilterb = ""
-            qFilterC = "with l"
+            qFilterC = "with l, labelGroupMapping"
 
         query = f"""
+MATCH (l:LABEL)
+WITH l.label AS label, l.groupLabel AS groupLabel
+WITH collect({{label: label, groupLabel: groupLabel}}) AS labelGroupMapping
 match (l:METADATA:LABEL)
+with apoc.coll.toSet(collect(distinct l.label) + 'CATEGORY') as l, labelGroupMapping
 {qFiltera}
 {qFilterC}
 match (a:CATEGORY)<-[r:USES]-(:DATASET)
 where 
 {qFilterb}
 r.label is not null
-with a, r, l
-with a, collect(distinct l.label) + "CATEGORY" as l, apoc.coll.flatten(collect(distinct r.label),true) as labels
-with a, [i in labels where i in l] as labels
-with a, labels as labels
-call apoc.create.setLabels(a,labels) yield node
-return count(*)
+WITH a, r, l, labelGroupMapping
+WITH a, l, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.label + "CATEGORY"), true)) AS labels, labelGroupMapping
+WITH a, [i in labels WHERE i in l] + [d IN labelGroupMapping WHERE d.label IN labels | d.groupLabel] AS labels
+CALL apoc.create.addLabels(a, labels) YIELD node
+RETURN count(*)
 """
 
         result = getQuery(query = query, driver = driver, params = {"cmid":CMID})
-
-        labels = getLabelsMetadata(driver = driver)
-
-        for label,groupLabel in zip([item['label'] for item in labels if 'label' in item],[item['groupLabel'] for item in labels if 'groupLabel' in item]):
-            query = f"match (a:{label}) set a:{groupLabel}"
-            getQuery(driver = driver, query = query)
 
         return result
     except Exception as e:
@@ -241,9 +239,9 @@ def updateUses(driver, CMID=None, user="0"): # update name to processUSES
         updateAltNamesResults = updateAltNames(CMID=CMID, driver = driver)
 
         # Update labels
-        # print("updating labels")
+        print("updating labels")
         updateLabelsResults = "Not ran"
-        # updateLabelsResults = updateLabels(CMID=CMID, driver = driver)
+        updateLabelsResults = updateLabels(CMID=CMID, driver = driver)
 
         # Fix duplicate relationships
         mergeDupRelationsResults = "Not ran"
@@ -296,6 +294,69 @@ def waitingUSES(database, BATCH_SIZE = 1000):
         except:
             return "Error", 500
         
+
+def addCMNameRel(database, CMID=None):
+    """
+    Add CMName to relationship if new node.
+
+    Parameters:
+    - driver: CatMapper connection object
+    - CMID: Optional; the CMID to match (default is None)
+    - user: The user identifier (default is "0")
+
+    Returns:
+    - None
+
+    Example:
+    - addCMNameRel(con=con)
+    """
+    try:
+        if database is None:
+            raise ValueError("Database is not specified")
+        elif database.lower() == "sociomap":
+            database = "SocioMap"
+        elif database.lower() == "archamap":
+            database = "ArchaMap"
+        else:
+            raise ValueError(f"database must be either 'SocioMap' or 'ArchaMap', but value was '{database}'")
+
+        driver = getDriver(database)
+
+        if CMID is None:
+            q = ""
+        else:
+            q = "c.CMID in apoc.coll.flatten($cmids,true) and"
+
+        datasetID = "SD11" if database == "SocioMap" else "AD941"
+
+        query_1 = f'''
+            MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET {{CMID: "{datasetID}"}})
+            WHERE {q} NOT c.CMName IN c.names
+            WITH DISTINCT c, r
+            SET r.Name = r.Name + [c.CMName],
+                r.log = r.log + ["{datetime.now()} auto: added CMName to Names as CMName not in USES ties"]
+        '''
+
+        getQuery(query_1, driver, params={"cmids": [CMID]})
+
+        query_2 = f'''
+            MATCH (c:CATEGORY)
+            WHERE {q} NOT c.CMName IN c.names AND NOT (c)<-[:USES]-(:DATASET {{CMID: "{datasetID}"}})
+            WITH DISTINCT c
+            MATCH (d:DATASET) WHERE d.CMID = "{datasetID}"
+            CREATE (c)<-[r:USES]-(d)
+            SET r.Key = "Key: " + c.CMID,
+                r.log = ["{datetime.now()} auto: added USES tie as CMName not in USES ties"],
+                r.Name = [c.CMName]
+        '''
+
+        getQuery(query=query_2, driver = driver, params={"cmids": [CMID]})
+
+    except Exception as e:
+        try:
+            return str(e), 500
+        except:
+            return "Error", 500
 
 def processDATASETs(database, CMID = None, user = "0"):
     try:
