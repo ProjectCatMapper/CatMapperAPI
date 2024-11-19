@@ -187,3 +187,46 @@ labels = getLabelsMetadata(driver = driver)
 for label,groupLabel in zip([item['label'] for item in labels if 'label' in item],[item['groupLabel'] for item in labels if 'groupLabel' in item]):
         query = f"match (a:{label}) set a:{groupLabel}"
         getQuery(driver = driver, query = query)
+
+
+from CM.USES import *
+from CM.utils import *
+CMID = "SM1"
+driver = getDriver('SocioMap')
+updateUses(driver = driver, CMID = CMID)
+
+
+from CM.utils import *
+from CM.upload import *
+import pandas as pd
+data = {
+    "CMName": ["test",'testy'],
+    "shortName": ["test",'testy'],
+    "DatasetCitation": ["test [test]",'test'],
+    "label": ["DATASET","DATASET"],
+}
+
+data['CMName'][0] == 'test'
+
+input_Nodes_Uses(data,
+                     database = "SocioMap",
+                 CMName="CMName",
+                 Name=None,
+                 CMID=None,
+                 altNames=None,
+                 Key=None,
+                 formatKey=False,
+                 datasetID=None,
+                 label='label',
+                 uniqueID=None,
+                 uniqueProperty=None, 
+                 nodeContext=['shortName', 'DatasetCitation'], 
+                 linkContext=None,
+                 user='0',
+                 overwriteProperties=False,
+                 updateProperties=False,
+                 addDistrict=False,
+                 addRecordYear=False,
+                 geocode=False,
+                 batchSize=1000,
+                 )
