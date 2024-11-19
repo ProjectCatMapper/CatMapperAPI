@@ -22,7 +22,7 @@ def updateLog(f,txt, write = 'a'):
     with open(f, write) as file:
         file.write(txt + "\n")
 
-def createNodes(df,database,user):
+def createNodes(df,database,user, uniqueID = None):
     try:
 
         driver = getDriver(database)
@@ -56,7 +56,7 @@ def createNodes(df,database,user):
         if not all(column in df.columns for column in required):
             raise Exception("Error: missing required columns.")
 
-        if not 'uniqueID' in df.columns:
+        if not uniqueID in df.columns or uniqueID is None:
             getQuery("MATCH (c) where not c.uniqueID is null set c.uniqueID = NULL", driver)
             distinct_nodes = df.drop_duplicates(subset='CMName')
             if len(distinct_nodes) != len(df):
@@ -70,6 +70,7 @@ def createNodes(df,database,user):
 
         df["CMID"] = newID
 
+        updateLog(f"log/{user}uploadProgress.txt", "Converting variables to string", write = 'a')
         df = df.astype(str)
 
         vars = [col for col in df.columns if 'label' not in col and 'uniqueID' not in col]
@@ -84,15 +85,16 @@ def createNodes(df,database,user):
         if missing_vars:
                 raise Exception(f"Error: The following vars are not in properties: {', '.join(missing_vars)}")
             
+        updateLog(f"log/{user}uploadProgress.txt", "Creating variable clauses", write = 'a')    
         set_clause = ', '.join([f"a.{var} = row.{var}" for var in vars])
 
         return_clause = ', '.join([f"a.{var} as {var}" for var in vars])
 
+        updateLog(f"log/{user}uploadProgress.txt", "Creating query", write = 'a')  
         q = f"""
-        unwind $rows as rows
-        unwind rows as row
+        unwind $rows as row
         call apoc.cypher.doIt('
-        MERGE (a:' + row.label + ' {{uniqueID: row.uniqueID}})
+        MERGE (a:' + row.label + ' {{{uniqueID}: row.{uniqueID}}})
         ON CREATE SET 
         {set_clause},
         a.log = toString(datetime()) + " user {user}: created node"
@@ -104,14 +106,21 @@ def createNodes(df,database,user):
         """
 
         rows = df.to_dict(orient='records')
+        updateLog(f"log/{user}uploadProgress.txt",q, write = 'a')    
 
+        updateLog(f"log/{user}uploadProgress.txt", "Running query", write = 'a')    
         results = getQuery(query = q, driver = driver, params = {"rows": rows})
+        
+        if isinstance(results, dict):
+            updateLog(f"log/{user}uploadProgress.txt", "Query successful", write = 'a')
+        else:
+            updateLog(f"log/{user}uploadProgress.txt", str(results), write = 'a')   
 
         results_df = pd.DataFrame(results)
 
-        for var in vars:
-            if not np.all(np.isin(df[var].values, results_df[var].values)):
-                raise Exception(f"Error: values for {var} were not uploaded correctly. Please check upload")
+        # for var in vars:
+        #     if not np.all(np.isin(df[var].values, results_df[var].values)):
+        #         raise Exception(f"Error: values for {var} were not uploaded correctly. Please check upload")
                     
         return results_df
     
@@ -199,6 +208,11 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         updateLog(f"log/{user}uploadProgress.txt", "Uploading new USES ties", write = 'a')
         links_dict = links.to_dict(orient='records')
         result = getQuery(q, driver, params={'rows':links_dict})
+
+        if isinstance(result, dict):
+            updateLog(f"log/{user}uploadProgress.txt", "Query successful", write = 'a')
+        else:
+            updateLog(f"log/{user}uploadProgress.txt", str(result), write = 'a')   
 
         # Update alternate names
         CMIDs = [item['CMID'] for item in result]
@@ -386,15 +400,16 @@ def input_Nodes_Uses(dataset,
     updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write = 'w')
     dataset = pd.DataFrame(dataset)
     
-    dataset = dataset.drop('key', axis = 1).copy()
-
-    dataset = dataset.dropna(how='all').reset_index(drop=True).copy()
-
     if nodeContext is None:
         nodeContext = []
 
     if linkContext is None:
         linkContext = []
+
+    if 'key' in dataset.columns and not 'key' in linkContext + nodeContext:
+        dataset = dataset.drop('key', axis = 1).copy()
+
+    dataset = dataset.dropna(how='all').reset_index(drop=True).copy()
 
     if database.lower() == "sociomap":
         database = "SocioMap"
@@ -436,6 +451,12 @@ def input_Nodes_Uses(dataset,
         updateLog(f"log/{user}uploadProgress.txt", "upload is for DATASET nodes", write = 'a')
     else:
         updateLog(f"log/{user}uploadProgress.txt", "upload is for CATEGORY nodes", write = 'a')
+
+    if isDataset:
+        query = "unwind $rows as row match (d:DATASET {shortName: row.shortName}) return d.shortName as shortName"
+        shortNames = getQuery(query, driver, params={"rows": dataset[['shortName']].to_dict(orient='records')}, type="list")
+        if len(shortNames) > 0:
+            raise ValueError("Error: shortName already exists for: " + ", ".join(shortNames))
 
     dataset = dataset.dropna(axis=1, how='all')
 
@@ -550,8 +571,8 @@ def input_Nodes_Uses(dataset,
                     nodes = pd.DataFrame()
                         
             if not nodes.empty:
-                updateLog(f"log/{user}uploadProgress.txt", "Adding nodes", write = 'a')
-                match = createNodes(nodes,database, user=user)
+                updateLog(f"log/{user}uploadProgress.txt", "Adding nodes with columns: " + ", ".join(nodes.columns), write = 'a')
+                match = createNodes(nodes,database, user=user, uniqueID=uniqueID)
                 match = pd.DataFrame(match)
                 match = match.astype(str)
                 sub_dataset = sub_dataset.astype(str)

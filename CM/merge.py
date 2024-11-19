@@ -6,19 +6,30 @@ from .translate import *
 import pandas as pd
 
 
-def joinDatasets(database, autoLeft, autoRight):
+def joinDatasets(database, joinLeft, joinRight):
     try:
+
+        joinLeft = pd.DataFrame(joinLeft)
+        joinRight = pd.DataFrame(joinRight)
+
+        if 'datasetID' not in joinLeft.columns:
+            raise ValueError("The 'datasetID' column is missing from the joinLeft DataFrame.")
+
+        if 'datasetID' not in joinRight.columns:
+            raise ValueError("The 'datasetID' column is missing from the joinRight DataFrame.")
 
         driver = getDriver(database)
 
-        autoLeft = pd.DataFrame(autoLeft)
-        autoRight = pd.DataFrame(autoRight)
+        joinLeft = pd.DataFrame(joinLeft)
+        joinRight = pd.DataFrame(joinRight)
+                
+        # Drop 'CMID' and 'CMName' only if they exist in the columns
+        joinLeft = joinLeft.drop(columns=[col for col in ['CMID', 'CMName'] if col in joinLeft.columns]).copy()
+        joinRight = joinRight.drop(columns=[col for col in ['CMID', 'CMName'] if col in joinRight.columns]).copy()
+
         
-        autoLeft = autoLeft.drop(columns=['CMID', 'CMName']).copy()
-        autoRight = autoRight.drop(columns=['CMID', 'CMName']).copy()
-        
-        datasetID_left = autoLeft['datasetID'].unique()
-        datasetID_right = autoRight['datasetID'].unique()
+        datasetID_left = joinLeft['datasetID'].unique()
+        datasetID_right = joinRight['datasetID'].unique()
 
         # Query keys for left dataset
         match_left_query = """
@@ -47,28 +58,28 @@ def joinDatasets(database, autoLeft, autoRight):
         right_keys = match_right['Key'].explode().unique() if 'Key' in match_right else []
 
         # Check for available columns
-        found_left_keys = [key for key in autoLeft.columns if key in left_keys]
-        found_right_keys = [key for key in autoRight.columns if key in right_keys]
+        found_left_keys = [key for key in joinLeft.columns if key in left_keys]
+        found_right_keys = [key for key in joinRight.columns if key in right_keys]
 
         # Throw an error only if none of the keys are found
         if not found_left_keys:
-            print({"error": "Cannot continue with merge: no matching required columns found in 'autoLeft'"})
+            print({"error": "Cannot continue with merge: no matching required columns found in 'joinLeft'"})
         if not found_right_keys:
-            print({"error": "Cannot continue with merge: no matching required columns found in 'autoRight'"})
+            print({"error": "Cannot continue with merge: no matching required columns found in 'joinRight'"})
 
 
         # Convert only the found columns to string type
-        autoLeft[found_left_keys] = autoLeft[found_left_keys].astype(str, errors='ignore')
-        autoRight[found_right_keys] = autoRight[found_right_keys].astype(str, errors='ignore')
+        joinLeft[found_left_keys] = joinLeft[found_left_keys].astype(str, errors='ignore')
+        joinRight[found_right_keys] = joinRight[found_right_keys].astype(str, errors='ignore')
 
-        merge_left = autoLeft[['datasetID'] + found_left_keys].copy()
+        merge_left = joinLeft[['datasetID'] + found_left_keys].copy()
         merge_left = createKey(merge_left, cols=found_left_keys).rename(columns={'Key': 'term', 'datasetID': 'dataset'})
         translate_left = translate(database = database, property = "Key", domain = "CATEGORY", term = "term", table = merge_left, key = 'false', country = None, context = None, dataset = 'dataset', yearStart = None, yearEnd = None, query = 'false')
         translate_left = translate_left.rename(columns=lambda x: x.replace('_term', ''))
         merge_left = translate_left[['term', 'CMID', 'CMName', 'dataset']].merge(merge_left, on=['term', 'dataset']).drop(columns='term').rename(columns={'dataset': 'datasetID'}).drop_duplicates()
 
         # merge right
-        merge_right = autoRight[['datasetID'] + found_right_keys].copy()
+        merge_right = joinRight[['datasetID'] + found_right_keys].copy()
         merge_right = createKey(merge_right, cols=found_right_keys).rename(columns={'Key': 'term', 'datasetID': 'dataset'})
         translate_right = translate(
             database=database, 
@@ -109,27 +120,27 @@ def joinDatasets(database, autoLeft, autoRight):
         found_left_keys_with_suffix = [f"{key}_left" if key in overlapping_columns else key for key in found_left_keys]
         found_right_keys_with_suffix = [f"{key}_right" if key in overlapping_columns else key for key in found_right_keys]
 
-        # Step 4: Rename datasetID in autoLeft and autoRight for consistent merging
-        autoLeft = autoLeft.rename(columns={'datasetID': 'datasetID_left'})
-        autoRight = autoRight.rename(columns={'datasetID': 'datasetID_right'})
+        # Step 4: Rename datasetID in joinLeft and joinRight for consistent merging
+        joinLeft = joinLeft.rename(columns={'datasetID': 'datasetID_left'})
+        joinRight = joinRight.rename(columns={'datasetID': 'datasetID_right'})
 
         left_rename_mapping = dict(zip(found_left_keys, found_left_keys_with_suffix))
         right_rename_mapping = dict(zip(found_right_keys, found_right_keys_with_suffix))
-        autoLeft = autoLeft.rename(columns=left_rename_mapping)
-        autoRight = autoRight.rename(columns=right_rename_mapping)
+        joinLeft = joinLeft.rename(columns=left_rename_mapping)
+        joinRight = joinRight.rename(columns=right_rename_mapping)
 
-        # Step 5: Merge link_file with autoLeft without adding further suffixes for overlapping columns
+        # Step 5: Merge link_file with joinLeft without adding further suffixes for overlapping columns
         link_file = link_file.merge(
-            autoLeft, 
+            joinLeft, 
             left_on=['datasetID_left'] + found_left_keys_with_suffix, 
             right_on=['datasetID_left'] + found_left_keys_with_suffix, 
             how='left',
             suffixes=('_left', '_right')  # Prevents adding additional _x suffixes
         )
 
-        # Step 6: Merge link_file with autoRight without adding further suffixes for overlapping columns
+        # Step 6: Merge link_file with joinRight without adding further suffixes for overlapping columns
         link_file = link_file.merge(
-            autoRight, 
+            joinRight, 
             left_on=['datasetID_right'] + found_right_keys_with_suffix, 
             right_on=['datasetID_right'] + found_right_keys_with_suffix, 
             how='left',

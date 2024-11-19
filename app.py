@@ -960,16 +960,16 @@ return a, collect(distinct r) as r, collect(distinct e) as e
     except Exception as e:
         return str(e), 500
     
-@app.route('/proposeMergeSubmit', methods=['POST'])
+@app.route('/proposeMergeSubmit', methods=['POST']) # what about calling this createLinkfile internally?
 def submit_merge():
     data = request.get_data() 
     data = json.loads(data)
     print(data)
     dataset_choices = data.get("datasetChoices", [])
-    category_label = data.get("categoryLabel", "")
-    intersection = data.get("intersection", False)
+    category_label = CM.unlist(data.get("categoryLabel", ""))
+    intersection = CM.unlist(data.get("intersection", False))
 
-    database = data.get('database')
+    database = CM.unlist(data.get('database'))
 
     driver = CM.getDriver(database)
 
@@ -998,7 +998,7 @@ def submit_merge():
             aggfunc=lambda x: '; '.join(filter(None, x))
             )
             
-            merged_df.columns = [f"{col[0]}{col[1]}" for col in merged_df.columns]
+            merged_df.columns = [f"{col[0]}_{col[1]}" for col in merged_df.columns]
             merged_df.reset_index(inplace=True)
 
             # Flatten lists, filter keys if intersection is off
@@ -1008,18 +1008,19 @@ def submit_merge():
                             merged_df = merged_df[merged_df[col].notna()]
                     
             merged = merged_df.fillna("")
-            return jsonify({"message": f"Returned {len(merged)} results"})
+            merged = merged.to_dict(orient='records')
+            return merged
     else:
             return jsonify({"message": "No results"}), 204
 
-@app.route('/proposeMergeDownload', methods=['GET'])
-def download_merge():
-    if 'merged' in rvals and not rvals['merged'].empty:
-        output = BytesIO()
-        rvals['merged'].to_excel(output, index=False)
-        output.seek(0)
-        return send_file(output, as_attachment=True, download_name='merge.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-    return jsonify({"message": "No data to download"}), 204
+# @app.route('/proposeMergeDownload', methods=['GET'])
+# def download_merge():
+#     if 'merged' in rvals and not rvals['merged'].empty:
+#         output = BytesIO()
+#         rvals['merged'].to_excel(output, index=False)
+#         output.seek(0)
+#         return send_file(output, as_attachment=True, download_name='merge.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+#     return jsonify({"message": "No data to download"}), 204
 
 @app.route('/joinDatasets', methods=['POST'])
 def submitjoinDatasets():
@@ -1027,10 +1028,10 @@ def submitjoinDatasets():
     data = json.loads(data)
     # print(data)
     database = CM.unlist(data.get("database", ""))
-    autoLeft = data.get("autoLeft")
-    autoRight = data.get("autoRight")
+    joinLeft = data.get("joinLeft")
+    joinRight = data.get("joinRight")
     
-    result = CM.joinDatasets(database, autoLeft, autoRight)
+    result = CM.joinDatasets(database, joinLeft, joinRight)
 
     return jsonify(result)
 
