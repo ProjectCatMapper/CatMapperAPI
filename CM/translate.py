@@ -285,7 +285,7 @@ def addMatchResults(df):
         cmid_counts_per_category = df.groupby(['CMuniqueCategoryID', 'CMID']).size()
 
         # Count occurrences of CMuniqueRowID within each CMuniqueCategoryID
-        cmunique_counts = df.groupby('CMuniqueCategoryID')['CMuniqueRowID'].transform('size')
+        cmunique_counts = df.groupby('CMuniqueCategoryID')['CMuniqueRowID'].count().to_dict()
 
         # Helper to assign match types
         def determine_match_type(row):
