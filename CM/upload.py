@@ -406,9 +406,6 @@ def input_Nodes_Uses(dataset,
     if linkContext is None:
         linkContext = []
 
-    if 'key' in dataset.columns and not 'key' in linkContext + nodeContext:
-        dataset = dataset.drop('key', axis = 1).copy()
-
     dataset = dataset.dropna(how='all').reset_index(drop=True).copy()
 
     if database.lower() == "sociomap":
@@ -418,8 +415,9 @@ def input_Nodes_Uses(dataset,
     else:
         raise ValueError(f"database must be either 'SocioMap' or 'ArchaMap', but value was '{database}'")
 
-    if "label" in linkContext:
-        linkContext.remove("label")
+    if not label is None:
+        if "label" in linkContext :
+            linkContext.remove("label")
 
     if 'eventDate' in dataset.columns:
         dataset['eventDate'] = pd.to_numeric(dataset['eventDate'], errors='coerce').astype('Int64')  # Use 'Int64' to support NaNs
@@ -809,7 +807,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         MATCH (a:DATASET {{CMID: row.from}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.to}}) 
         WITH row, r, b
         SET {keys} 
-        RETURN id(b) as nodeID, b.CMID as CMID
+        RETURN id(b) as nodeID, b.CMID as CMID, row.Key as Key, row.from as from, row.to as to, row.parent as parent, row.parentContext as parentContext
         """
 
         links_dict = links.to_dict(orient = "records")
