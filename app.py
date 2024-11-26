@@ -873,8 +873,8 @@ def upload_API():
             n = len(response)
             response_dict = response.to_dict(orient='records')
             return {"message": f"Upload completed for {n} row(s)", "file": response_dict}
-        else:
-            return "Error!! Check your file."
+        # else:
+        #     return "Error!! Check your file."
         
     except Exception as e:
         with open(f'log/{user}uploadProgress.txt', 'r') as file:
@@ -1453,6 +1453,7 @@ def getTranslate2():
         yearEnd = CM.unlist(data.get('yearEnd'))
         query = CM.unlist(data.get("query"))
         table = data.get("table")
+        uniqueRows = data.get("uniqueRows")
 
         data = CM.translate(
             database = database,
@@ -1466,7 +1467,8 @@ def getTranslate2():
             yearStart = yearStart, 
             yearEnd = yearEnd,
             query = query,
-            table = table)
+            table = table,
+            uniqueRows = uniqueRows)
 
         data_dict = data.to_dict(orient='records')
 
