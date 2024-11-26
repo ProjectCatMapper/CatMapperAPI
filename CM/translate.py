@@ -13,7 +13,8 @@ def translate(
         yearStart, 
         yearEnd,
         query,
-        table):
+        table,
+        uniqueRows):
     
     if query is not None:
         if query.lower() != 'true':
@@ -48,7 +49,8 @@ def translate(
     rows.dropna(subset=['term'], inplace=True)
     rows = rows[rows['term'] != '']
     columns_to_group_by = rows.columns.difference(['CMuniqueRowID']).tolist()
-    rows = rows.groupby(columns_to_group_by)['CMuniqueRowID'].apply(list).reset_index()
+    if not uniqueRows:
+        rows = rows.groupby(columns_to_group_by)['CMuniqueRowID'].apply(list).reset_index()
     rows['CMuniqueCategoryID'] = rows.index
 
     rows = rows.to_dict('records')
