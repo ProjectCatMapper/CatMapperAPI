@@ -397,6 +397,8 @@ def input_Nodes_Uses(dataset,
                  batchSize=1000,
                  ):
     
+    if user is None:
+        raise ValueError("Error: user must be specified")
     updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write = 'w')
     dataset = pd.DataFrame(dataset)
     
@@ -405,6 +407,9 @@ def input_Nodes_Uses(dataset,
 
     if linkContext is None:
         linkContext = []
+
+    if 'Name' in linkContext:
+        linkContext.remove('Name')
 
     dataset = dataset.dropna(how='all').reset_index(drop=True).copy()
 
@@ -425,6 +430,26 @@ def input_Nodes_Uses(dataset,
     dataset = dataset.astype(str)
     dataset = dataset.replace({None,""})
     dataset = dataset.replace({"nan": "", "<NA>": "","None":""})
+
+    if 'sampleSize' in dataset.columns:
+        def is_valid_sample_size(value):
+            try:
+                # Try to convert the value to a float
+                num = float(value)
+                # Check if it is numerically equivalent to an integer
+                return num.is_integer()
+            except (ValueError, TypeError):
+                # If conversion fails, it's invalid
+                return False
+
+        # Filter rows with invalid sample sizes
+        invalid_sample_sizes = dataset[~dataset['sampleSize'].apply(is_valid_sample_size)]
+        invalid_sample_sizes = invalid_sample_sizes[['sampleSize']].values
+
+        if len(invalid_sample_sizes) > 0:
+            raise ValueError(
+                f"Invalid sampleSize values found:\n{invalid_sample_sizes}"
+            )
     
     driver = getDriver(database)
 
@@ -450,7 +475,7 @@ def input_Nodes_Uses(dataset,
     else:
         updateLog(f"log/{user}uploadProgress.txt", "upload is for CATEGORY nodes", write = 'a')
 
-    if isDataset:
+    if isDataset and not updateProperties and not overwriteProperties:
         query = "unwind $rows as row match (d:DATASET {shortName: row.shortName}) return d.shortName as shortName"
         shortNames = getQuery(query, driver, params={"rows": dataset[['shortName']].to_dict(orient='records')}, type="list")
         if len(shortNames) > 0:
@@ -466,7 +491,10 @@ def input_Nodes_Uses(dataset,
     dataset = dataset[[col for col in columns_to_select if col in dataset.columns]]
 
     if isDataset:
-        column_names = [CMName, label, uniqueID] + nodeContext
+        if overwriteProperties or updateProperties:
+            column_names = ['CMID']
+        else:
+            column_names = [CMName, label, uniqueID] + nodeContext
     else:
         if overwriteProperties or updateProperties:
             column_names = [Name, CMID, Key, datasetID, uniqueID] + nodeContext + linkContext
@@ -481,20 +509,6 @@ def input_Nodes_Uses(dataset,
     if len(errors) > 0:
         updateLog(f"log/{user}uploadProgress.txt", "\n".join(errors), write = 'a')
         raise ValueError("\n".join(errors))
-
-    # Check for NA or empty strings in the required columns
-
-    # if isDataset:
-    #     required_cols = [CMName, "shortName", "DatasetCitation",label]
-    # else:
-    #     if updateProperties or overwriteProperties:
-    #         required_cols = [datasetID, CMID, Key]
-    #     else:
-    #         required_cols = [datasetID, Name, Key, label]
-    #         if CMID is None:
-    #             required_cols.append(CMName)
-    # if dataset[required_cols].isnull().any().any() or (dataset[required_cols] == '').any().any():
-    #     raise ValueError("The dataset contains NA values or empty strings in the required columns.")
 
     properties = getPropertiesMetadata(driver)
     properties = pd.DataFrame(properties)
@@ -555,18 +569,17 @@ def input_Nodes_Uses(dataset,
             node_columns = [CMName, uniqueID, label] + nodeContext
             node_columns = [col for col in node_columns if col in sub_dataset.columns]
 
-            if isDataset:
+            nodes = pd.DataFrame()
+            if isDataset and not 'CMID' in sub_dataset.columns:
                 required_cols = list(set(["CMName", "shortName", "DatasetCitation", uniqueID, 'label'] + nodeContext))
                 required_cols = [col for col in required_cols if col in sub_dataset.columns]
                 nodes = sub_dataset[required_cols].drop_duplicates()
-            else:
+            elif not isDataset:
                 if Name and CMID in sub_dataset.columns:
                     nodes = sub_dataset[sub_dataset[CMID] == ''][node_columns].drop_duplicates()
                 elif Name in sub_dataset.columns:
                     nodes = sub_dataset[node_columns]
-                    CMID = 'CMID'
-                else:
-                    nodes = pd.DataFrame()
+                    CMID = 'CMID'                
                         
             if not nodes.empty:
                 updateLog(f"log/{user}uploadProgress.txt", "Adding nodes with columns: " + ", ".join(nodes.columns), write = 'a')
@@ -656,13 +669,15 @@ def input_Nodes_Uses(dataset,
                     links = links.drop(columns=['parentContext', 'parent']).copy()
                     links = pd.merge(links, sub_links, on=['from', 'to', 'Key'], how='left')
 
-                if 'yearStart' in links or 'yearEnd' in links or 'recordStart' in links or 'recordEnd' in links:
+                if 'yearStart' in links or 'yearEnd' in links or 'recordStart' in links or 'recordEnd' in links or 'sampleSize' in links:
                     updateLog(f"log/{user}uploadProgress.txt", "updating date columns", write = 'a')
                     # return links
-                    date_columns = ['yearStart', 'yearEnd', 'recordStart', 'recordEnd']
+                    date_columns = ['yearStart', 'yearEnd', 'recordStart', 'recordEnd','sampleSize']
                     for col in date_columns:
                         if col in links.columns:
                             links[col] = links[col].apply(lambda x: x if pd.isna(x) or x == '' else int(float(x)))
+
+                updateLog(f"log/{user}uploadProgress.txt", str(links.columns), write = 'a')
                 
                 link_cols = ['from', 'to', 'Key'] + linkContext
                 link_cols = [col for col in link_cols if col in links.columns]
@@ -679,29 +694,52 @@ def input_Nodes_Uses(dataset,
                     link_cols.append(label)
                     links = links[link_cols]
                     result = createUSES(links = links,database = database, user = user, create = "MERGE")
+                if isinstance(result,str):
+                    updateLog(f"log/{user}uploadProgress.txt", result, write = 'a')
+                    raise ValueError(result)
+
                 updateLog(f"log/{user}uploadProgress.txt", "Completed updating USES relationships", write = 'a')
 
                 updateLog(f"log/{user}uploadProgress.txt", "Processing returned CMIDs", write = 'a')
                 try:
                     cmid_values = [link['to'] for link in result['links']]
+                    if len(cmid_values) < len(result['links']):
+                        missing_links = [link for link in result['links'] if 'to' not in link]
+                        raise KeyError(f"Missing 'to' key in {len(missing_links)} link(s): {missing_links}")
+                    updateLog(f"log/{user}uploadProgress.txt", "adding CMName to Name parameter", write = 'a')
                     addCMNameRel(database, CMID = cmid_values)
+                    updateLog(f"log/{user}uploadProgress.txt", "updating alternate names", write = 'a')
                     updateAltNames(driver, CMID = cmid_values)
                     updateLog(f"log/{user}uploadProgress.txt", "updated alternate names", write = 'a')
                 except KeyError as e:
                     updateLog(f"log/{user}uploadProgress.txt", f"Error updating alternate names: {e}", write = 'a')
                     continue
 
+                updateLog(f"log/{user}uploadProgress.txt", "combining results", write = 'a')
                 result =  pd.DataFrame(result['links'])
                 final_result = pd.concat([final_result,result], axis = 0)
+                updateLog(f"log/{user}uploadProgress.txt", "results combined", write = 'a')
             
             else:
-                updateLog(f"log/{user}uploadProgress.txt", "Processing Dataset properties", write = 'a')
+                node_columns = list(set(['CMID','CMName', 'DatasetCitation', 'shortName'] + nodeContext))
+                node_columns = [col for col in node_columns if col in dataset_match.columns]
+                nodes = dataset_match[node_columns].drop_duplicates()
+                if overwriteProperties:
+                    updateLog(f"log/{user}uploadProgress.txt", "overwriting Dataset properties", write = 'a')
+                    updateProperty(nodes, database = database, user = user, updateType = "overwrite", propertyType = "DATASET")
+                elif updateProperties:
+                    updateLog(f"log/{user}uploadProgress.txt", "updating dataset properties", write = 'a')
+                    updateProperty(nodes, database = database, user = user, updateType = "update", propertyType = "DATASET")
+
+                updateLog(f"log/{user}uploadProgress.txt", "processing Dataset properties", write = 'a')
                 cmids = dataset_match['CMID'].unique()
                 processDATASETs(database = database, user = user, CMID = cmids)
                 final_result = pd.concat([final_result,dataset_match], axis = 0)
 
             if uniqueID == 'importID':
                 getQuery("MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL", driver = driver)
+
+            updateLog(f"log/{user}uploadProgress.txt", "End of batch", write = 'a')
 
     except Exception as e:
         try:
@@ -721,13 +759,15 @@ def input_Nodes_Uses(dataset,
                 f.write(f"Failed to process the exception: {internal_error}\n")
         return None
 
+    if 'from' in final_result.columns and 'to' in final_result.columns:
+        final_result.rename(columns={'from': 'datasetID', 'to': 'CMID'}, inplace=True)
+
+    final_result = final_result.drop_duplicates()
+
     with open(f"log/{user}uploadProgress.txt", 'a') as f:
         f.write("Completed dataset upload\n")
 
-    if 'from' in final_result.columns and 'to' in final_result.columns:
-        final_result.rename(columns={'from': 'datasetID', 'to': 'CMID'}, inplace=True)
-    
-    return final_result.drop_duplicates()
+    return final_result
 
     
 # def advancedUpload(data):
@@ -760,14 +800,19 @@ def input_Nodes_Uses(dataset,
 #     except Exception as e:
 #         yield str(e), 500
 
-def updateProperty(links, database, user, updateType):
+def updateProperty(links, database, user, updateType, propertyType = "USES"):
     try:
         if not updateType in ['overwrite','update']:
             raise Exception("type must be update or overwrite.")
 
         driver = getDriver(database)
 
-        requiredCols = ["from", "to", "Key"]
+        if propertyType == "USES":
+            requiredCols = ["from", "to", "Key"]
+        elif propertyType == "DATASET":
+            requiredCols = ["CMID"]
+        else:
+            raise Exception("Invalid propertyType")
 
         for required in requiredCols:
             if required not in links.columns:
@@ -802,13 +847,21 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
         keys = ", ".join(keys)
 
-        q = f"""
-        UNWIND $rows AS row
-        MATCH (a:DATASET {{CMID: row.from}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.to}}) 
-        WITH row, r, b
-        SET {keys} 
-        RETURN id(b) as nodeID, b.CMID as CMID, row.Key as Key, row.from as from, row.to as to, row.parent as parent, row.parentContext as parentContext
-        """
+        if propertyType == "USES":
+            q = f"""
+            UNWIND $rows AS row
+            MATCH (a:DATASET {{CMID: row.from}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.to}}) 
+            WITH row, r, b
+            SET {keys} 
+            RETURN id(b) as nodeID, b.CMID as CMID, row.Key as Key, row.from as from, row.to as to, row.parent as parent, row.parentContext as parentContext
+            """
+        else:
+            q = f"""
+            UNWIND $rows AS row
+            MATCH (r:DATASET {{CMID: row.CMID}})
+            SET {keys}
+            RETURN id(r) as nodeID, r.CMID as CMID
+            """
 
         links_dict = links.to_dict(orient = "records")
         

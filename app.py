@@ -797,11 +797,13 @@ def upload_API():
                 else: 
                     key_cols[key] = None
 
-            if dfpd['label'][0] == "DATASET":
-                nodeContext = linkContext
-                linkContext = None
+            if 'label' in dfpd.columns:
+                if dfpd['label'][0] == "DATASET":
+                    nodeContext = linkContext
+                    linkContext = None
             else:
                 nodeContext = None
+
             response = input_Nodes_Uses(
                  dataset=df,
                  database=database,
@@ -877,8 +879,14 @@ def upload_API():
         #     return "Error!! Check your file."
         
     except Exception as e:
-        with open(f'log/{user}uploadProgress.txt', 'r') as file:
-            full_log = file.readlines()
+        log_file = f'log/{user}uploadProgress.txt'
+        full_log = []
+        if os.path.exists(log_file):
+            with open(log_file, 'r') as file:
+                full_log = file.readlines()
+        else:
+            full_log.append("Log file not found.")
+        
         response_data = {
             "error": f"Upload error - {str(e)}",
             "full_log": full_log
