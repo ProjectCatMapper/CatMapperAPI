@@ -226,7 +226,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         end_time = time.time()
         updateLog(f"log/{user}uploadProgress.txt", f"Elapsed time: {int(end_time - start_time)} seconds", write = 'a')
 
-        return {"q": result, "links": links_dict}
+        return {"result": result, "links": links_dict}
 
     except Exception as e:
         if isinstance(e, tuple):
@@ -399,7 +399,9 @@ def input_Nodes_Uses(dataset,
     
     if user is None:
         raise ValueError("Error: user must be specified")
+    
     updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write = 'w')
+
     dataset = pd.DataFrame(dataset)
     
     if nodeContext is None:
@@ -465,10 +467,13 @@ def input_Nodes_Uses(dataset,
 
     updateLog(f"log/{user}uploadProgress.txt", "checking whether upload is for DATASET nodes", write = 'a')
     
-    if label is None:
-        isDataset = False
-    else:
-        isDataset = label == "DATASET" or dataset['label'].iloc[0] == "DATASET"
+    isDataset = False
+    if label is not None:
+        if label == "DATASET":
+            isDataset = True
+        elif label in dataset.columns:
+            if dataset['label'].iloc[0] == "DATASET":
+                isDataset = True    
     
     if isDataset:
         updateLog(f"log/{user}uploadProgress.txt", "upload is for DATASET nodes", write = 'a')
@@ -702,9 +707,9 @@ def input_Nodes_Uses(dataset,
 
                 updateLog(f"log/{user}uploadProgress.txt", "Processing returned CMIDs", write = 'a')
                 try:
-                    cmid_values = [link['to'] for link in result['links']]
-                    if len(cmid_values) < len(result['links']):
-                        missing_links = [link for link in result['links'] if 'to' not in link]
+                    cmid_values = [link['to'] for link in result['result']]
+                    if len(cmid_values) < len(result['result']):
+                        missing_links = [link for link in result['result'] if 'to' not in link]
                         raise KeyError(f"Missing 'to' key in {len(missing_links)} link(s): {missing_links}")
                     updateLog(f"log/{user}uploadProgress.txt", "adding CMName to Name parameter", write = 'a')
                     addCMNameRel(database, CMID = cmid_values)
@@ -716,7 +721,7 @@ def input_Nodes_Uses(dataset,
                     continue
 
                 updateLog(f"log/{user}uploadProgress.txt", "combining results", write = 'a')
-                result =  pd.DataFrame(result['links'])
+                result = pd.DataFrame(result['result'])
                 final_result = pd.concat([final_result,result], axis = 0)
                 updateLog(f"log/{user}uploadProgress.txt", "results combined", write = 'a')
             
@@ -762,43 +767,19 @@ def input_Nodes_Uses(dataset,
     if 'from' in final_result.columns and 'to' in final_result.columns:
         final_result.rename(columns={'from': 'datasetID', 'to': 'CMID'}, inplace=True)
 
+    final_result = final_result.loc[:, ~final_result.columns.duplicated()]
     final_result = final_result.drop_duplicates()
-
+    final_result = final_result.dropna(axis=1, how='any')
+    final_result = final_result.dropna(how='all').reset_index(drop=True).copy()
+    cols = list({x for x in ['CMID','CMName'] if x in dataset.columns})
+    df = dataset[cols]
+    final_result = pd.merge(df, final_result, how='left', on=cols)
+    final_result = add_error_column(final_result)
+    
     with open(f"log/{user}uploadProgress.txt", 'a') as f:
         f.write("Completed dataset upload\n")
 
     return final_result
-
-    
-# def advancedUpload(data):
-#     try:
-#         database = unlist(data.get('database'))
-#         uploadType = unlist(data.get('uploadType'))
-#         df = data.get('df')
-#         df = pd.DataFrame(df)
-#         if 'label' in df.columns:
-#             domain = df['label']
-#             domain = domain.unique()
-#             if len(domain) > 1:
-#                 if 'DATASET' in domain:
-#                     raise Exception("Cannot upload multiple domains with a DATASET domain")
-#                 else:
-#                     domain = domain[0]    
-#         else:
-#             domain = None
-
-#         driver = getDriver(database)
-#         # check = advancedValidate(df,uploadType,domain,driver)
-#         if check is not True:
-#             yield check
-#         yield "\n"
-#         yield "starting advanced upload\n"
-#         yield f"uploading to {database}\n"
-#         yield "finished advanced upload\n"
-#         result = json.dumps(data)
-#         yield result
-#     except Exception as e:
-#         yield str(e), 500
 
 def updateProperty(links, database, user, updateType, propertyType = "USES"):
     try:
@@ -870,3 +851,12 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         return {'result': result, 'links': links_dict}
     except Exception as e:
         return f"Error: {str(e)}"
+    
+
+def add_error_column(df):
+    if 'nodeID' not in df.columns:
+        raise KeyError("The column 'nodeID' is not present in the DataFrame.")
+
+    # Add the "Error" column based on the condition
+    df['Error'] = df['nodeID'].apply(lambda x: "CMID not found" if pd.isna(x) else "")
+    return df

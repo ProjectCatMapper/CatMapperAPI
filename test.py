@@ -3,21 +3,22 @@ from CM.upload import *
 
 import pandas as pd
 
-df = pd.read_excel('Foci.xlsx')
+df = pd.read_excel('USES_test.xlsx')
+df = df[['Name', 'CMID', 'Key', 'yearStart','datasetID']].copy()
 df
 dataset = df
 database = 'SocioMap'
 CMName=None
-Name=None
+Name='Name'
 CMID='CMID'
 altNames=None
-Key=None
+Key='Key'
 formatKey=False
 datasetID=None
 label='label'
 uniqueID=None
 uniqueProperty=None 
-nodeContext=['foci'] 
+nodeContext=['parent'] 
 linkContext=None
 user='1'
 overwriteProperties=False
@@ -30,16 +31,16 @@ batchSize=1000
 result = input_Nodes_Uses(dataset = df,
                      database = 'SocioMap',
                  CMName=None,
-                 Name=None,
+                 Name='Name',
                  CMID='CMID',
                  altNames=None,
-                 Key=None,
+                 Key='Key',
                  formatKey=False,
-                 datasetID=None,
+                 datasetID='datasetID',
                  label='label',
                  uniqueID=None,
                  uniqueProperty=None, 
-                 nodeContext=['foci'], 
+                 nodeContext=['yearStart'], 
                  linkContext=None,
                  user='1',
                  overwriteProperties=False,
@@ -49,3 +50,12 @@ result = input_Nodes_Uses(dataset = df,
                  geocode=False,
                  batchSize=1000,
                  )
+
+result
+
+# dataset = result['df']
+# final_result  = result['result']
+# cols = list({x for x in ['CMID','CMName'] if x in dataset.columns})
+# df = dataset[cols]
+# df
+# final_result = pd.merge(df, final_result, how='left', on=cols)
