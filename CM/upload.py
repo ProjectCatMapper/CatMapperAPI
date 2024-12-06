@@ -198,7 +198,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         MATCH (b:CATEGORY) WHERE row.to = b.CMID
         {create} (a)-[r:USES {{Key: row['Key']}}]->(b)
         {onCreate}SET r.status = 'update', {keys_string}
-        RETURN id(b) AS nodeID, b.CMID AS CMID
+        RETURN id(b) AS nodeID, b.CMID AS CMID, b.CMName as CMName
         """
 
         # Get the number of relationships before adding
@@ -703,14 +703,12 @@ def input_Nodes_Uses(dataset,
                     updateLog(f"log/{user}uploadProgress.txt", result, write = 'a')
                     raise ValueError(result)
 
-                updateLog(f"log/{user}uploadProgress.txt", "Completed updating USES relationships", write = 'a')
-
                 updateLog(f"log/{user}uploadProgress.txt", "Processing returned CMIDs", write = 'a')
                 try:
-                    cmid_values = [link['to'] for link in result['result']]
+                    cmid_values = [link['CMID'] for link in result['result']]
                     if len(cmid_values) < len(result['result']):
-                        missing_links = [link for link in result['result'] if 'to' not in link]
-                        raise KeyError(f"Missing 'to' key in {len(missing_links)} link(s): {missing_links}")
+                        missing_links = [link for link in result['result'] if 'CMID' not in link]
+                        raise KeyError(f"Missing 'CMID' in {len(missing_links)} link(s): {missing_links}")
                     updateLog(f"log/{user}uploadProgress.txt", "adding CMName to Name parameter", write = 'a')
                     addCMNameRel(database, CMID = cmid_values)
                     updateLog(f"log/{user}uploadProgress.txt", "updating alternate names", write = 'a')
@@ -724,6 +722,8 @@ def input_Nodes_Uses(dataset,
                 result = pd.DataFrame(result['result'])
                 final_result = pd.concat([final_result,result], axis = 0)
                 updateLog(f"log/{user}uploadProgress.txt", "results combined", write = 'a')
+
+                updateLog(f"log/{user}uploadProgress.txt", "Completed updating USES relationships", write = 'a')
             
             else:
                 node_columns = list(set(['CMID','CMName', 'DatasetCitation', 'shortName'] + nodeContext))
@@ -772,6 +772,7 @@ def input_Nodes_Uses(dataset,
     final_result = final_result.dropna(axis=1, how='any')
     final_result = final_result.dropna(how='all').reset_index(drop=True).copy()
     cols = list({x for x in ['CMID','CMName'] if x in dataset.columns})
+    cols = list({x for x in cols if x in final_result.columns})
     df = dataset[cols]
     final_result = pd.merge(df, final_result, how='left', on=cols)
     final_result = add_error_column(final_result)
