@@ -797,12 +797,11 @@ def upload_API():
                 else: 
                     key_cols[key] = None
 
+            nodeContext = None
             if 'label' in dfpd.columns:
                 if dfpd['label'][0] == "DATASET":
                     nodeContext = linkContext
-                    linkContext = None
-            else:
-                nodeContext = None
+                    linkContext = None               
 
             response = input_Nodes_Uses(
                  dataset=df,

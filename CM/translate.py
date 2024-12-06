@@ -301,12 +301,12 @@ def addMatchResults(df):
             # Determine match type based on conditions
             if matching_distance == 0 and cmid_count_in_category == 1 and cmunique_count == 1:
                 return 'exact match'
-            elif matching_distance > 0 and cmid_count_in_category == 1 and cmunique_count == 1:
-                return 'fuzzy match'
             elif cmid_count_in_category > 1:
                 return 'many-to-one'
             elif cmunique_count > 1:
                 return 'one-to-many'
+            elif matching_distance > 0 and cmid_count_in_category == 1 and cmunique_count == 1:
+                return 'fuzzy match'
             return None
 
         # Apply the function to each row
