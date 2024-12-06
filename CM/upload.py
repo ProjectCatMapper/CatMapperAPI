@@ -776,6 +776,8 @@ def input_Nodes_Uses(dataset,
     df = dataset[cols]
     final_result = pd.merge(df, final_result, how='left', on=cols)
     final_result = add_error_column(final_result)
+    final_result = final_result.fillna("")
+
     
     with open(f"log/{user}uploadProgress.txt", 'a') as f:
         f.write("Completed dataset upload\n")
