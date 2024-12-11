@@ -1,0 +1,57 @@
+[
+    {
+        "geometry": [
+            {
+                "type": "Point",
+                "coordinates": [
+                    55.6,
+                    -21.1
+                ]
+            },
+            {
+                "type": "Point",
+                "coordinates": [
+                    55.6,
+                    -21.1
+                ]
+            }
+        ],
+        "source": "GeoNames202005"
+    },
+    {
+        "geometry": [
+            {
+                "type": "Point",
+                "coordinates": [
+                    55.6,
+                    -21.1
+                ]
+            }
+        ],
+        "source": "TGN2021"
+    },
+    {
+        "geometry": [
+            {
+                "type": "Point",
+                "coordinates": [
+                    55.6034,
+                    -21.1008
+                ]
+            }
+        ],
+        "source": "GeoNames202005"
+    },
+    {
+        "geometry": [
+            {
+                "type": "Point",
+                "coordinates": [
+                    55.6021,
+                    -21.1004
+                ]
+            }
+        ],
+        "source": "GeoNames202005"
+    }
+]

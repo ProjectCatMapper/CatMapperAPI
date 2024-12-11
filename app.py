@@ -405,22 +405,65 @@ return distinct Domain, Count order by Domain
         
         with open('data.json', 'w', encoding='utf-8') as f:
             json.dump(points, f, ensure_ascii=False, indent=4)
-                        
-        if len(points) > 0:
+            
+        valid_data = []
+
+        bad_sources = []
+
+        def is_valid_lat_long(lat, long):
+            return -90 <= lat <= 90 and -180 <= long <= 180
+
+        for entry in points:
+            try:
+                geometry = entry['geometry']
+                
+                if isinstance(geometry, list):
+                    if len(geometry) == 1:
+                        geometry = geometry[0]
+                    else:
+                        raise ValueError("Multiple geometries found where one was expected")
+
+                if isinstance(geometry, str):
+                    if geometry.count("{") != geometry.count("}"):
+                        raise ValueError("Missing brackets in geometry JSON")
+                    
+                    geometries = [
+                        json.loads(geo.strip()) for geo in geometry.split(";")
+                    ]
+                    
+                    if len(geometries) != 1:
+                        raise ValueError("Multiple geometries found where one was expected")
+                    
+                    geometry = geometries[0]
+
+                if 'coordinates' not in geometry or len(geometry['coordinates']) != 2:
+                    raise ValueError("Coordinates missing or malformed")
+                
+                lat, long = geometry['coordinates']
+                if not is_valid_lat_long(lat, long):
+                    raise ValueError(f"Out of range latitude/longitude: {lat}, {long}")
+
+                entry['geometry'] = geometry
+                valid_data.append(entry)
+            except (json.JSONDecodeError, KeyError,ValueError) as e:
+                 bad_sources.append({'source': entry.get('source', 'Unknown'), 'error': str(e)})
+                                        
+        if len(valid_data) > 0:
             point= []
-            for i in range(0,len(points)):
-                if points[i]['geometry'] == "null":
+            for i in range(0,len(valid_data)):
+                print(valid_data[i])
+                if valid_data[i]['geometry'] == "null":
                     continue
-                if json.loads(points[i]['geometry'])["type"] != "MultiPoint":
-                    point.append({"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]})
+                if valid_data[i]['geometry']["type"] != "MultiPoint":
+                    point.append({"cood" : valid_data[i]['geometry']["coordinates"][::-1],"source": valid_data[i]["source"]})
                 else:
-                    temp = points[i]
+                    temp = valid_data[i]
                     source = temp['source']
                     for j in range(0,len(json.loads(temp['geometry'])['coordinates'])):
                         point.append({'cood' : json.loads(temp['geometry'])['coordinates'][j][::-1], "source" : source })
             if point:
                     points= point
-
+                      
         # if len(points) > 0:
         #     for i in range(0,len(points)):
         #         if isinstance(json.loads(points[i]['geometry'])["coordinates"][0],int):
@@ -433,6 +476,7 @@ return distinct Domain, Count order by Domain
 
         with open('data.json', 'w', encoding='utf-8') as f:
                 json.dump(points, f, ensure_ascii=False, indent=4)
+        
         
         relnames = sorted(relnames, key=custom_sort)
 
@@ -449,7 +493,7 @@ return distinct Domain, Count order by Domain
         if "Date range" in info[0]:
             if info[0]["Date range"] == "-":
                 del info[0]["Date range"]
-                                                    
+                          
         return jsonify({
         "info": info[0],
         "samples": samples,
@@ -458,7 +502,8 @@ return distinct Domain, Count order by Domain
         "points": points,
         "label":labels,
         "relnames": relnames,
-        "polysource": polysources
+        "polysource": polysources,
+        "badsources": bad_sources
     })
 
 #         center = 0
@@ -536,7 +581,6 @@ return distinct Domain, Count order by Domain
         
 #         if flag == 0:
 #             results1=[]
-
         
 #         poid=[]
 #         for i in range(0,len(resultsm)):
@@ -589,7 +633,6 @@ def net():
     r = session.run(q)
     resultnet = r.data()
     return resultnet
-
 
 @app.route("/explore",methods=['GET'])
 def getExplore():
