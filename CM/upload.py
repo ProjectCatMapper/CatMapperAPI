@@ -777,6 +777,7 @@ def input_Nodes_Uses(dataset,
     final_result = pd.merge(df, final_result, how='left', on=cols)
     final_result = add_error_column(final_result)
     final_result = final_result.fillna("")
+    final_result = final_result.drop_duplicates()
 
     
     with open(f"log/{user}uploadProgress.txt", 'a') as f:
