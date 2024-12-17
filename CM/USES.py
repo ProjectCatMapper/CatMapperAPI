@@ -111,7 +111,7 @@ def updateLabels(driver, CMID = None):
     WITH a, r, l, labelGroupMapping
     WITH a, l, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.label + "CATEGORY"), true)) AS labels, labelGroupMapping
     WITH a, [i in labels WHERE i in l] + [d IN labelGroupMapping WHERE d.label IN labels | d.groupLabel] AS labels
-    CALL apoc.create.addLabels(a, labels) YIELD node
+    CALL apoc.create.setLabels(a, labels) YIELD node
     RETURN count(*)
     """
             result = getQuery(query = query, driver = driver, params = {"cmid":CMID}, type = 'list')
@@ -131,7 +131,7 @@ def updateLabels(driver, CMID = None):
     WITH a, r, l, labelGroupMapping
     WITH a, l, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.label + "CATEGORY"), true)) AS labels, labelGroupMapping
     WITH a, [i in labels WHERE i in l] + [d IN labelGroupMapping WHERE d.label IN labels | d.groupLabel] AS labels
-    CALL apoc.create.addLabels(a, labels) YIELD node
+    CALL apoc.create.setLabels(a, labels) YIELD node
     RETURN count(*)
     """
                 result = getQuery(query = query, driver = driver, params = {"dataset":dataset},type = 'list')
