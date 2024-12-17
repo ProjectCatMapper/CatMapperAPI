@@ -3,6 +3,7 @@
 from .utils import *
 from .USES import *
 from .keys import *
+from .GIS import *
 import json
 import pandas as pd
 from flask import jsonify
@@ -198,7 +199,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         MATCH (b:CATEGORY) WHERE row.to = b.CMID
         {create} (a)-[r:USES {{Key: row['Key']}}]->(b)
         {onCreate}SET r.status = 'update', {keys_string}
-        RETURN id(b) AS nodeID, b.CMID AS CMID, b.CMName as CMName
+        RETURN id(b) AS nodeID, b.CMID AS CMID, b.CMName as CMName, r.Key as Key, a.CMID as datasetID
         """
 
         # Get the number of relationships before adding
@@ -543,6 +544,10 @@ def input_Nodes_Uses(dataset,
     try:
         final_result = pd.DataFrame()
         dataset_match = pd.DataFrame()
+
+        # check CMID, and datasetID, country, district, parent, language, religion, for SocioMap
+        # CMID, datasetID, period, country, district, parent, for ArchaMap
+
         for s in sq:
             sub_dataset = dataset.iloc[s:s + batchSize].copy()
             max_row = len(sub_dataset) - 1 + s
@@ -775,7 +780,7 @@ def input_Nodes_Uses(dataset,
     cols = list({x for x in cols if x in final_result.columns})
     df = dataset[cols]
     final_result = pd.merge(df, final_result, how='left', on=cols)
-    final_result = add_error_column(final_result)
+    final_result = add_error_column(final_result,user)
     final_result = final_result.fillna("")
     final_result = final_result.drop_duplicates()
 
@@ -851,15 +856,21 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         links_dict = links.to_dict(orient = "records")
         
         result = getQuery(query = q, driver = driver, params = {"rows": links_dict})
+
+        if 'geoCoords' in links.columns:
+            updateLog(f"log/{user}uploadProgress.txt", "Updating geo coordinates", write = 'a')
+            CMIDs = links['to'].unique()
+            correct_geojson(CMID = CMIDs, database = database)
         
         return {'result': result, 'links': links_dict}
     except Exception as e:
         return f"Error: {str(e)}"
     
 
-def add_error_column(df):
+def add_error_column(df,user):
     if 'nodeID' not in df.columns:
-        raise KeyError("The column 'nodeID' is not present in the DataFrame.")
+        updateLog(f"log/{user}uploadProgress.txt", "nodeID not found in final_results", write = 'a')
+        return null
 
     # Add the "Error" column based on the condition
     df['Error'] = df['nodeID'].apply(lambda x: "CMID not found" if pd.isna(x) else "")
