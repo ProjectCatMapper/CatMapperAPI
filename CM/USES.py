@@ -96,34 +96,45 @@ def updateLabels(driver, CMID = None):
             getQuery("match (a)<-[:USES]-(:DATASET) set a:CATEGORY",driver)
 
         if CMID is not None:
-            qFiltera = "unwind $cmid as cmid"
-            qFilterb = "a.CMID = cmid and"
-            qFilterC = "with l, labelGroupMapping, cmid"
-        else: 
-            qFiltera = ""
-            qFilterb = ""
-            qFilterC = "with l, labelGroupMapping"
-
-        query = f"""
-MATCH (l:LABEL)
-WITH l.label AS label, l.groupLabel AS groupLabel
-WITH collect({{label: label, groupLabel: groupLabel}}) AS labelGroupMapping
-match (l:METADATA:LABEL)
-with apoc.coll.toSet(collect(distinct l.label) + 'CATEGORY') as l, labelGroupMapping
-{qFiltera}
-{qFilterC}
-match (a:CATEGORY)<-[r:USES]-(:DATASET)
-where 
-{qFilterb}
-r.label is not null
-WITH a, r, l, labelGroupMapping
-WITH a, l, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.label + "CATEGORY"), true)) AS labels, labelGroupMapping
-WITH a, [i in labels WHERE i in l] + [d IN labelGroupMapping WHERE d.label IN labels | d.groupLabel] AS labels
-CALL apoc.create.addLabels(a, labels) YIELD node
-RETURN count(*)
-"""
-
-        result = getQuery(query = query, driver = driver, params = {"cmid":CMID})
+            query = """
+    MATCH (l:LABEL)
+    WITH l.label AS label, l.groupLabel AS groupLabel
+    WITH collect({label: label, groupLabel: groupLabel}) AS labelGroupMapping
+    match (l:METADATA:LABEL)
+    with apoc.coll.toSet(collect(distinct l.label) + 'CATEGORY') as l, labelGroupMapping
+    unwind $cmid as cmid
+    with l, labelGroupMapping, cmid
+    match (a:CATEGORY)<-[r:USES]-(:DATASET)
+    where 
+    a.CMID = cmid and
+    r.label is not null
+    WITH a, r, l, labelGroupMapping
+    WITH a, l, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.label + "CATEGORY"), true)) AS labels, labelGroupMapping
+    WITH a, [i in labels WHERE i in l] + [d IN labelGroupMapping WHERE d.label IN labels | d.groupLabel] AS labels
+    CALL apoc.create.addLabels(a, labels) YIELD node
+    RETURN count(*)
+    """
+            result = getQuery(query = query, driver = driver, params = {"cmid":CMID}, type = 'list')
+        else:
+            datasets = getQuery("match (d:DATASET) return distinct d.CMID as CMID", driver, type = 'list')
+            for dataset in datasets:
+                query = """
+    MATCH (l:LABEL)
+    WITH l.label AS label, l.groupLabel AS groupLabel
+    WITH collect({label: label, groupLabel: groupLabel}) AS labelGroupMapping
+    match (l:METADATA:LABEL)
+    with apoc.coll.toSet(collect(distinct l.label) + 'CATEGORY') as l, labelGroupMapping
+    with l, labelGroupMapping 
+    match (a:CATEGORY)<-[r:USES]-(:DATASET {CMID: $dataset})
+    where 
+    r.label is not null
+    WITH a, r, l, labelGroupMapping
+    WITH a, l, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.label + "CATEGORY"), true)) AS labels, labelGroupMapping
+    WITH a, [i in labels WHERE i in l] + [d IN labelGroupMapping WHERE d.label IN labels | d.groupLabel] AS labels
+    CALL apoc.create.addLabels(a, labels) YIELD node
+    RETURN count(*)
+    """
+                result = getQuery(query = query, driver = driver, params = {"dataset":dataset},type = 'list')
 
         return result
     except Exception as e:
