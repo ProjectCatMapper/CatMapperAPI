@@ -427,31 +427,33 @@ return distinct Domain, Count order by Domain
                     if geometry.count("{") != geometry.count("}"):
                         raise ValueError("Missing brackets in geometry JSON")
                     
-                    geometries = [
-                        json.loads(geo.strip()) for geo in geometry.split(";")
-                    ]
-                    
-                    if len(geometries) != 1:
-                        raise ValueError("Multiple geometries found where one was expected")
-                    
-                    geometry = geometries[0]
+                    geometry = json.loads(geometry)
 
-                if 'coordinates' not in geometry or len(geometry['coordinates']) != 2:
-                    raise ValueError("Coordinates missing or malformed")
+                if 'coordinates' not in geometry:
+                    raise ValueError("Coordinates missing in geometry JSON")
                 
-                lat, long = geometry['coordinates']
-                if not is_valid_lat_long(lat, long):
-                    raise ValueError(f"Out of range latitude/longitude: {lat}, {long}")
+                if geometry['type'] == 'Point':
+                    long, lat = geometry['coordinates']
+                    if not is_valid_lat_long(lat, long):
+                        raise ValueError(f"Out of range latitude/longitude: {lat}, {long}")
+                elif geometry['type'] == 'MultiPoint':
+                    for coord in geometry['coordinates']:
+                        lat, long = coord
+                        if not is_valid_lat_long(lat, long):
+                            raise ValueError(f"Out of range latitude/longitude in MultiPoint: {lat}, {long}")
+                else:
+                    raise ValueError(f"Unsupported geometry type: {geometry['type']}")
+                
+                print(geometry)
 
                 entry['geometry'] = geometry
                 valid_data.append(entry)
             except (json.JSONDecodeError, KeyError,ValueError) as e:
                  bad_sources.append({'source': entry.get('source', 'Unknown'), 'error': str(e)})
-                                        
+                                                
         if len(valid_data) > 0:
             point= []
             for i in range(0,len(valid_data)):
-                print(valid_data[i])
                 if valid_data[i]['geometry'] == "null":
                     continue
                 if valid_data[i]['geometry']["type"] != "MultiPoint":
@@ -459,10 +461,11 @@ return distinct Domain, Count order by Domain
                 else:
                     temp = valid_data[i]
                     source = temp['source']
-                    for j in range(0,len(json.loads(temp['geometry'])['coordinates'])):
-                        point.append({'cood' : json.loads(temp['geometry'])['coordinates'][j][::-1], "source" : source })
+                    for j in range(0,len(temp['geometry']['coordinates'])):
+                        point.append({'cood' : temp['geometry']['coordinates'][j][::-1], "source" : source })
             if point:
                     points= point
+        
                       
         # if len(points) > 0:
         #     for i in range(0,len(points)):
@@ -1505,6 +1508,8 @@ def getTranslate2():
         table = data.get("table")
         uniqueRows = data.get("uniqueRows")
 
+        print(uniqueRows)
+
         data = CM.translate(
             database = database,
             property = property,
@@ -2432,6 +2437,28 @@ def send_test_email():
         return msg
     except Exception as e:
         return str(e), 500
+
+@app.route('/validateJSON', methods=['GET'])
+def validateJSON():
+    try:
+        database = request.args.get('database')
+        
+        fp1 = "tmp/invalid_json_geoCoords.xlsx"
+        results1 = CM.validateJSON(database = database, property = 'geoCoords', path = fp1)
+
+        if results1:
+            CM.sendEmail(mail, subject = "Invalid geoCoords properties", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+
+        fp2 = "tmp/invalid_json_parentContext.xlsx"
+        results2 = CM.validateJSON(database = database, property = 'parentContext', path = fp2)
+
+        if results2:
+            CM.sendEmail(mail, subject = "Invalid parentContext properties", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp2])
+
+        return {"geoCoords": len(results1), "parentContext": len(results2), "geoCoords": results1, "parentContext": results2}
+    except Exception as e:
+        result = str(e)
+        return result, 500  
 
 if __name__== "__main__":
     app.run(debug=True,port=5001)

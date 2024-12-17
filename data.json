@@ -1,23 +1,6 @@
 [
     {
-        "cood": [
-            -21.1,
-            55.6
-        ],
-        "source": "TGN2021"
-    },
-    {
-        "cood": [
-            -21.1008,
-            55.6034
-        ],
-        "source": "GeoNames202005"
-    },
-    {
-        "cood": [
-            -21.1004,
-            55.6021
-        ],
-        "source": "GeoNames202005"
+        "geometry": "{\"type\": \"MultiPoint\", \"coordinates\": [[-20.0, -20.0], [24.0, 24.0], [36.0, 36.0]]]}",
+        "source": "EC"
     }
 ]

@@ -60,3 +60,18 @@ result
 # df
 # final_result = pd.merge(df, final_result, how='left', on=cols)
 
+
+from CM.validation import *
+from CM.utils import *
+from CM.GIS import *
+
+results = validateJSON(database = 'SocioMap', property = 'geoCoords', path ="invalid_json.xlsx" )
+results
+CMID = [x['CMID'] for x in results]
+correct_geojson(CMID, database = 'SocioMap')
+# driver = getDriver(database = 'SocioMap')
+# updateLabels(driver)
+
+from CM.GIS import *
+
+convert_to_multipoint('{"type":"Point","coordinates":[55.6,-21.1]}; {"type":"Point","coordinates":[55.6,-21.1]}')
