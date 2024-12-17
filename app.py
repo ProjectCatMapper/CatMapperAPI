@@ -94,7 +94,7 @@ def getPolygon(CMID,driver, simple = True):
     
 def getPoints(CMID,driver):
     with driver.session() as session:
-        query = "match (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET) where not r.geoCoords is null return distinct r.geoCoords as geometry, d.shortName as source"
+        query = "match (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET) where not r.geoCoords is null return distinct r.geoCoords as geometry, d.shortName as source, r.Key as Key"
         result = session.run(query, CMID = CMID)
         points = [dict(record) for record in result]
         driver.close()
