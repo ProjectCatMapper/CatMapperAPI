@@ -115,26 +115,44 @@ def updateLabels(driver, CMID = None):
     RETURN count(*)
     """
             result = getQuery(query = query, driver = driver, params = {"cmid":CMID}, type = 'list')
+
         else:
-            datasets = getQuery("match (d:DATASET) return distinct d.CMID as CMID", driver, type = 'list')
-            for dataset in datasets:
-                query = """
-    MATCH (l:LABEL)
-    WITH l.label AS label, l.groupLabel AS groupLabel
-    WITH collect({label: label, groupLabel: groupLabel}) AS labelGroupMapping
-    match (l:METADATA:LABEL)
-    with apoc.coll.toSet(collect(distinct l.label) + 'CATEGORY') as l, labelGroupMapping
-    with l, labelGroupMapping 
-    match (a:CATEGORY)<-[r:USES]-(:DATASET {CMID: $dataset})
-    where 
-    r.label is not null
-    WITH a, r, l, labelGroupMapping
-    WITH a, l, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.label + "CATEGORY"), true)) AS labels, labelGroupMapping
-    WITH a, [i in labels WHERE i in l] + [d IN labelGroupMapping WHERE d.label IN labels | d.groupLabel] AS labels
-    CALL apoc.create.setLabels(a, labels) YIELD node
-    RETURN count(*)
-    """
-                result = getQuery(query = query, driver = driver, params = {"dataset":dataset},type = 'list')
+
+            query = """
+    match (a:CATEGORY)<-[r:USES]-(:DATASET)
+where r.label is not null
+WITH a, r
+WITH a, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.label + "CATEGORY"), true)) AS labels
+CALL apoc.create.addLabels(a, labels) YIELD node
+RETURN count(*)
+"""
+            result = getQuery(query = query, driver = driver,type = 'list')
+
+            labels = getQuery('match (l:LABEL) where l.public = "TRUE" and not l.label = "CATEGORY" return distinct l.label as label, l.groupLabel as group', driver)
+            labels = pd.DataFrame(labels)
+                
+            for i in range(len(labels)):
+                label = labels.loc[i,'label']
+                group = labels.loc[i,'group']
+                query = f"""
+                    match (d:DATASET)-[r:USES]->(c:{label}) 
+                    set c:{group}
+                    return count(*)  
+                """
+                result2 = getQuery(query = query, driver = driver,type = 'list')
+
+            groupLabels = getQuery('match (l:LABEL) where l.public = "TRUE" and not l.label = "CATEGORY" return distinct l.groupLabel as label', driver, type = 'list')
+
+            for group in groupLabels:
+                query = f"""
+                    match (d:DATASET)-[r:USES]->(c:{group}) 
+                    with apoc.coll.toSet(apoc.coll.flatten(collect(r.label))) as rlabel, [i in labels(c) 
+                    where not i = "CATEGORY"] as label, c with c, [i in label where not i in rlabel and not i = "{group}"] as extra 
+                    where size(extra) > 0 
+                    call apoc.create.removeLabels(c,extra) yield node
+                    return count(*)  
+                """
+                result3 = getQuery(query = query, driver = driver,type = 'list')
 
         return result
     except Exception as e:

@@ -12,6 +12,7 @@ import os
 from flask import abort
 import itertools
 from collections.abc import Iterable
+import json
 
 load_dotenv(find_dotenv())
 
@@ -28,7 +29,7 @@ def getQuery(query,driver, params = None, type = "dict"):
             driver.close()
         return result
     except Exception as e:
-        return str(e), 500
+        raise RuntimeError(f"An error occurred: {e}")
 
 def unlist(l):
     if isinstance(l, list):
@@ -237,3 +238,10 @@ def flattenList(input_data):
         return flat_list
     else:
         return [input_data]
+    
+def is_valid_json(json_string):
+    try:
+        json.loads(json_string)
+        return True
+    except json.JSONDecodeError:
+        return False
