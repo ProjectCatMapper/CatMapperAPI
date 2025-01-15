@@ -4,7 +4,7 @@ from .utils import *
 from .keys import *
 from .translate import *
 import pandas as pd
-
+from flask import jsonify
 
 def joinDatasets(database, joinLeft, joinRight):
     try:
@@ -151,6 +151,84 @@ def joinDatasets(database, joinLeft, joinRight):
         link_file = link_file.drop_duplicates().sort_values(by=['datasetID_left', 'datasetID_right', 'CMName', 'CMID'])
 
         return link_file.to_dict(orient='records')
+    
+    except Exception as e:
+        try:
+            return {"error": str(e)}, 500
+        except:
+            return {"Error": "Unable to process error"}, 500
+        
+
+def proposeMerge(dataset_choices,category_label,criteria,database,intersection, ncontains = 1):
+
+    try:
+        driver = getDriver(database)
+
+        if len(dataset_choices) < 1:
+            return jsonify({"message": "Please select more options"}), 400
+        
+        if criteria == "standard":
+
+            query = f"""
+                            UNWIND $datasets AS dataset
+                            UNWIND $categoryLabel AS categoryLabel
+                            MATCH (c:{category_label})<-[r:USES]-(d:DATASET {{CMID: dataset}}) 
+                            RETURN DISTINCT d.CMID AS datasetID, r.Key AS Key, c.CMName AS CMName, c.CMID AS CMID,
+                                            apoc.text.join(r.Name, '; ') AS Name
+                            ORDER BY CMName
+                    """
+        elif criteria == "contains":
+            qContains = ""
+            qResult = ""
+            if ncontains > 1:
+                 for i in range(1, ncontains + 1):
+                    qContains = qContains + f"optional match (c)<-[:CONTAINS*{i}]-(p{i}:CATEGORY) " 
+                    qResult = qResult + f", p{i}.CMID as parent{i} "
+
+            query = f"""
+UNWIND ['SD5','SD6'] AS dataset
+MATCH (d:DATASET {{CMID: dataset}})-[r:USES]->(c:{category_label}) 
+optional match (c)<-[:CONTAINS]-(p:CATEGORY) 
+{qContains}
+RETURN DISTINCT d.CMID AS datasetID, r.Key AS Key, c.CMName AS CMName, c.CMID AS CMID,
+                apoc.text.join(r.Name, '; ') AS Name, p.CMID as parent,
+                {qResult}
+ORDER BY CMName
+            """
+
+        else:
+            raise Exception("Invalid criteria")
+
+        merged = getQuery(query, driver = driver,params = {'datasets': dataset_choices})
+
+        if "Neo.ClientError.Statement.SyntaxError" in merged[0]:
+             raise Exception(merged[0])
+
+        merged = pd.DataFrame(merged)
+
+        if not merged.empty:
+                # Pivot wider equivalent
+                merged_df = merged.pivot_table(
+                index=['CMName', 'CMID'],
+                columns='datasetID',
+                values=['Key', 'Name'],
+                aggfunc=lambda x: '; '.join(filter(None, x))
+                )
+                
+                merged_df.columns = [f"{col[0]}_{col[1]}" for col in merged_df.columns]
+                merged_df.reset_index(inplace=True)
+
+                # Flatten lists, filter keys if intersection is off
+                if not intersection:
+                        for col in merged_df.columns:
+                            if 'Key' in col:
+                                merged_df = merged_df[merged_df[col].notna()]
+                        
+                merged = merged_df.fillna("")
+                merged = merged.to_dict(orient='records')
+                return merged
+        else:
+                return jsonify({"message": "No results"}), 204
     
     except Exception as e:
         try:
