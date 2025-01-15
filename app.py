@@ -293,7 +293,7 @@ def catm():
     apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),
     toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),
     toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Population est.`,  
-    apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`,Source as `Source`, 'https://catmapper.org/js/' + $database + '/' + datasetID  as `link2`,
+    apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`,Source as `Source`, 'https://catmapper.org/' + $database + '/' + datasetID  as `link2`,
     Version, Link order by `Time span`, Source, Name
     '''
             qCategories = """
@@ -438,7 +438,7 @@ return distinct Domain, Count order by Domain
                         raise ValueError(f"Out of range latitude/longitude: {lat}, {long}")
                 elif geometry['type'] == 'MultiPoint':
                     for coord in geometry['coordinates']:
-                        lat, long = coord
+                        long, lat = coord
                         if not is_valid_lat_long(lat, long):
                             raise ValueError(f"Out of range latitude/longitude in MultiPoint: {lat}, {long}")
                 else:
@@ -449,7 +449,7 @@ return distinct Domain, Count order by Domain
                 entry['geometry'] = geometry
                 valid_data.append(entry)
             except (json.JSONDecodeError, KeyError,ValueError) as e:
-                 bad_sources.append({'source': entry.get('source', 'Unknown'), 'error': str(e)})
+                 bad_sources.append({'source': entry.get('source', 'Unknown'),'key': entry.get('key', 'Unknown'), 'error': str(e)})
                                                 
         if len(valid_data) > 0:
             point= []
@@ -1021,59 +1021,12 @@ def submit_merge():
     dataset_choices = data.get("datasetChoices", [])
     category_label = CM.unlist(data.get("categoryLabel", ""))
     intersection = CM.unlist(data.get("intersection", False))
-
+    criteria = "standard"
     database = CM.unlist(data.get('database'))
 
-    driver = CM.getDriver(database)
+    result = CM.proposeMerge(dataset_choices,category_label,criteria,database,intersection)
 
-    if len(dataset_choices) < 1:
-            return jsonify({"message": "Please select more options"}), 400
-
-    query = """
-                    UNWIND $datasets AS dataset
-                    UNWIND $categoryLabel AS categoryLabel
-                    MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET {CMID: dataset}) where categoryLabel in labels(c)
-                    RETURN DISTINCT d.CMID AS datasetID, r.Key AS Key, c.CMName AS CMName, c.CMID AS CMID,
-                                    apoc.text.join(r.Name, '; ') AS Name
-                    ORDER BY CMName
-            """
-
-    merged = CM.getQuery(query, driver = driver,params = {'datasets': dataset_choices,"categoryLabel": category_label})
-
-    merged = pd.DataFrame(merged)
-
-    if not merged.empty:
-            # Pivot wider equivalent
-            merged_df = merged.pivot_table(
-            index=['CMName', 'CMID'],
-            columns='datasetID',
-            values=['Key', 'Name'],
-            aggfunc=lambda x: '; '.join(filter(None, x))
-            )
-            
-            merged_df.columns = [f"{col[0]}_{col[1]}" for col in merged_df.columns]
-            merged_df.reset_index(inplace=True)
-
-            # Flatten lists, filter keys if intersection is off
-            if not intersection:
-                    for col in merged_df.columns:
-                        if 'Key' in col:
-                            merged_df = merged_df[merged_df[col].notna()]
-                    
-            merged = merged_df.fillna("")
-            merged = merged.to_dict(orient='records')
-            return merged
-    else:
-            return jsonify({"message": "No results"}), 204
-
-# @app.route('/proposeMergeDownload', methods=['GET'])
-# def download_merge():
-#     if 'merged' in rvals and not rvals['merged'].empty:
-#         output = BytesIO()
-#         rvals['merged'].to_excel(output, index=False)
-#         output.seek(0)
-#         return send_file(output, as_attachment=True, download_name='merge.xlsx', mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-#     return jsonify({"message": "No data to download"}), 204
+    return result
 
 @app.route('/joinDatasets', methods=['POST'])
 def submitjoinDatasets():
@@ -1508,8 +1461,6 @@ def getTranslate2():
         table = data.get("table")
         uniqueRows = data.get("uniqueRows")
 
-        print(uniqueRows)
-
         data = CM.translate(
             database = database,
             property = property,
@@ -1526,6 +1477,8 @@ def getTranslate2():
             uniqueRows = uniqueRows)
 
         data_dict = data.to_dict(orient='records')
+
+        print(data_dict)
 
         return data_dict
 

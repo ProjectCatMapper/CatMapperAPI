@@ -553,7 +553,7 @@ def input_Nodes_Uses(dataset,
             max_row = len(sub_dataset) - 1 + s
             updateLog(f"log/{user}uploadProgress.txt", f"uploading {s} to {max_row} of {len(dataset)}", write = 'a')
 
-            if CMID in sub_dataset.columns:
+            if CMID in sub_dataset.columns and (not 'parentContext' in sub_dataset.columns or 'geoCoords' in sub_dataset.columns):
                 if datasetID in sub_dataset.columns and Key in sub_dataset.columns:
                     if CMID in sub_dataset.columns:
                         sub_dataset = combine_properties(sub_dataset, [CMID, datasetID, Key])
@@ -578,6 +578,7 @@ def input_Nodes_Uses(dataset,
 
             node_columns = [CMName, uniqueID, label] + nodeContext
             node_columns = [col for col in node_columns if col in sub_dataset.columns]
+            node_columns = list(dict.fromkeys(node_columns))
 
             nodes = pd.DataFrame()
             if isDataset and not 'CMID' in sub_dataset.columns:
@@ -603,8 +604,9 @@ def input_Nodes_Uses(dataset,
                 dataset_match = sub_dataset.copy()
             
             
-            link_columns = [datasetID, CMName, CMID, Name, altNames, Key, uniqueID, label] + linkContext
+            link_columns = [datasetID, CMName, CMID, Name, altNames, Key, label] + linkContext
             link_columns = [col for col in link_columns if col in dataset_match.columns]
+            link_columns = list(dict.fromkeys(link_columns))
 
             if not isDataset:
                 updateLog(f"log/{user}uploadProgress.txt", "Adding USES relationships", write = 'a')
@@ -623,61 +625,70 @@ def input_Nodes_Uses(dataset,
                     links['geoCoords'] = links['geoCoords'].apply(convert_coordinates)
 
                 if "parentContext" in linkContext:
+                    updatePC = True
+                    test = links[links['parentContext'].notna()]['parentContext']
+                    if not test.empty:
+                        first_row_value = test.loc[0, 'parentContext']
+                        val = first_row_value.split("; ")[0]
+                        if is_valid_json(val):
+                            updateLog(f"log/{user}uploadProgress.txt", "parentContext is already formatted", write = 'a')
+                            updatePC = False
+
                     updateLog(f"log/{user}uploadProgress.txt", "updating parentContext", write = 'a')
                     # return links
+                    if updatePC:
+                        def filter_dict(d):
+                            filtered_dict = ""
+                            try:
+                                d = json.loads(d)
+                                filtered_dict = {k: v for k, v in d.items() if pd.notna(v) and v != ""}
+                                # If 'parent' is the only key remaining, return an empty string
+                                if list(filtered_dict.keys()) == ['parent']:
+                                    filtered_dict = ""
+                            except json.JSONDecodeError:
+                                return ""                          
+                            
+                            return filtered_dict
 
-                    def filter_dict(d):
-                        filtered_dict = ""
-                        try:
-                            d = json.loads(d)
-                            filtered_dict = {k: v for k, v in d.items() if pd.notna(v) and v != ""}
-                            # If 'parent' is the only key remaining, return an empty string
-                            if list(filtered_dict.keys()) == ['parent']:
-                                filtered_dict = ""
-                        except json.JSONDecodeError:
-                            return ""                          
-                        
-                        return filtered_dict
+                        sub_links = links.copy()
 
-                    sub_links = links.copy()
+                        # sub_links['parentContext'] = sub_links['parentContext'].apply(lambda x: json.loads(x))
 
-                    # sub_links['parentContext'] = sub_links['parentContext'].apply(lambda x: json.loads(x))
+                        sub_links['parentContext'] = sub_links['parentContext'].apply(filter_dict)
 
-                    sub_links['parentContext'] = sub_links['parentContext'].apply(filter_dict)
+                        # Step 1: Convert parentContext dictionary to a JSON string
+                        # Apply json.dumps to convert dictionaries to JSON strings
+                        sub_links['parentContext'] = sub_links['parentContext'].apply(lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, dict) else x)
 
-                    # Step 1: Convert parentContext dictionary to a JSON string
-                    # Apply json.dumps to convert dictionaries to JSON strings
-                    sub_links['parentContext'] = sub_links['parentContext'].apply(lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, dict) else x)
+                        # Step 2: Remove square brackets if present in strings
+                        sub_links['parentContext'] = sub_links['parentContext'].apply(lambda x: re.sub(r'\[|\]', '', x) if isinstance(x, str) else x)
 
-                    # Step 2: Remove square brackets if present in strings
-                    sub_links['parentContext'] = sub_links['parentContext'].apply(lambda x: re.sub(r'\[|\]', '', x) if isinstance(x, str) else x)
+                        # Step 3: Unnest data (apply to each row)
+                        sub_links = sub_links.explode('parentContext').reset_index(drop=True)
 
-                    # Step 3: Unnest data (apply to each row)
-                    sub_links = sub_links.explode('parentContext').reset_index(drop=True)
+                        # Step 4: Handle missing parent values by setting parentContext to None where parent is NaN
+                        sub_links['parentContext'] = sub_links.apply(lambda row: None if pd.isna(row['parent']) else row['parentContext'], axis=1)
 
-                    # Step 4: Handle missing parent values by setting parentContext to None where parent is NaN
-                    sub_links['parentContext'] = sub_links.apply(lambda row: None if pd.isna(row['parent']) else row['parentContext'], axis=1)
+                        # Step 5: Drop 'eventDate' and 'eventType' columns if they exist
+                        sub_links = sub_links.drop(columns=[col for col in ['eventDate', 'eventType'] if col in sub_links.columns])
 
-                    # Step 5: Drop 'eventDate' and 'eventType' columns if they exist
-                    sub_links = sub_links.drop(columns=[col for col in ['eventDate', 'eventType'] if col in sub_links.columns])
+                        # Step 6: Group by 'from', 'to', and 'Key'
+                        grouped_links = sub_links.groupby(['from', 'to', 'Key'])
 
-                    # Step 6: Group by 'from', 'to', and 'Key'
-                    grouped_links = sub_links.groupby(['from', 'to', 'Key'])
+                        # Step 7: Combine lists of parentContext and parent, keeping their JSON representations intact
+                        sub_links = grouped_links.agg({
+                            'parentContext': lambda x: list(x),
+                            'parent': lambda x: list(x)
+                        }).reset_index()
 
-                    # Step 7: Combine lists of parentContext and parent, keeping their JSON representations intact
-                    sub_links = grouped_links.agg({
-                        'parentContext': lambda x: list(x),
-                        'parent': lambda x: list(x)
-                    }).reset_index()
+                        # Step 8: Convert lists of JSON strings to a semicolon-separated string
+                        for index, row in sub_links.iterrows():
+                            sub_links.at[index, 'parentContext'] = process_parent_context_element(row['parentContext'])
+                            sub_links.at[index, 'parent'] = process_parent_context_element(row['parent'])
 
-                    # Step 8: Convert lists of JSON strings to a semicolon-separated string
-                    for index, row in sub_links.iterrows():
-                        sub_links.at[index, 'parentContext'] = process_parent_context_element(row['parentContext'])
-                        sub_links.at[index, 'parent'] = process_parent_context_element(row['parent'])
-
-                    # Step 9: Merge the grouped data back into the original DataFrame
-                    links = links.drop(columns=['parentContext', 'parent']).copy()
-                    links = pd.merge(links, sub_links, on=['from', 'to', 'Key'], how='left')
+                        # Step 9: Merge the grouped data back into the original DataFrame
+                        links = links.drop(columns=['parentContext', 'parent']).copy()
+                        links = pd.merge(links, sub_links, on=['from', 'to', 'Key'], how='left')
 
                 if 'yearStart' in links or 'yearEnd' in links or 'recordStart' in links or 'recordEnd' in links or 'sampleSize' in links:
                     updateLog(f"log/{user}uploadProgress.txt", "updating date columns", write = 'a')
@@ -870,7 +881,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 def add_error_column(df,user):
     if 'nodeID' not in df.columns:
         updateLog(f"log/{user}uploadProgress.txt", "nodeID not found in final_results", write = 'a')
-        return null
+        raise Exception("Error: nodeID not found in final_results")
 
     # Add the "Error" column based on the condition
     df['Error'] = df['nodeID'].apply(lambda x: "CMID not found" if pd.isna(x) else "")
