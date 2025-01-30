@@ -177,9 +177,11 @@ def createUSES(links,database,user, create = "MERGE"):
         db_properties_list = [item['property'] for item in db_properties]
         print("check8")
         existing_columns = list(set(db_properties_list) & set(links.columns.tolist()))
-        print(links.columns.values)
         print("check8a")
         updateLog(f"log/{user}uploadProgress.txt", ", ".join(existing_columns), write = 'a')
+        links = links.loc[:,~links.columns.duplicated()].copy()
+        print(links.info())
+        print(existing_columns)
         links[existing_columns] = links[existing_columns].applymap(lambda x: re.sub(r'[\t\n\r\f\v]', '', x).strip() if isinstance(x, str) else x)
         print("check8b")
         links['log'] = links.apply(lambda row: f"{time.strftime('%Y-%m-%dT%H:%M:%SZ')} user {user}: created relationship", axis=1)
@@ -228,7 +230,10 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
         # Execute the query and return results
         updateLog(f"log/{user}uploadProgress.txt", "Uploading new USES ties", write = 'a')
+        links.to_csv(f"log/{user}uploadProgress.csv")
+        # updateLog(f"log/{user}uploadProgress.txt", ", ".join(links.columns.values), write = 'a')
         links_dict = links.to_dict(orient='records')
+        # updateLog(f"log/{user}uploadProgress.txt", jsonify(links_dict), write = 'a')
         result = getQuery(q, driver, params={'rows':links_dict})
 
         if isinstance(result, dict):
@@ -426,6 +431,9 @@ def input_Nodes_Uses(dataset,
     updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write = 'w')
 
     dataset = pd.DataFrame(dataset)
+
+    # trim whitespace
+    dataset = dataset.applymap(lambda x: x.strip() if isinstance(x, str) else x)
     
     if nodeContext is None:
         nodeContext = []
@@ -839,7 +847,7 @@ def updateProperty(links, database, user, updateType, propertyType = "USES"):
         driver = getDriver(database)
 
         if propertyType == "USES":
-            requiredCols = ["datasetID", "to", "Key"]
+            requiredCols = ["datasetID", "CMID", "Key"]
         elif propertyType == "DATASET":
             requiredCols = ["CMID"]
         else:
@@ -884,7 +892,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}}) 
             WITH row, r, b
             SET {keys} 
-            RETURN id(b) as nodeID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, row.CMID as to, row.parent as parent, row.parentContext as parentContext
+            RETURN id(b) as nodeID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, row.parent as parent, row.parentContext as parentContext
             """
         else:
             q = f"""
