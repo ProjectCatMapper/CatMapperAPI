@@ -791,7 +791,6 @@ def upload_API():
         data = request.get_data() 
         data = json.loads(data)
         df = data.get("df")
-        print(data)
         database = CM.unlist(data.get("database"))
         formData = CM.unlist(data.get("formData"))
         label = formData["domain"]
@@ -807,6 +806,7 @@ def upload_API():
         Key = formData["keyColumn"]      
 
         linkContext = data.get("linkContext")
+        print(linkContext)
         if not linkContext:
             linkContext = None     
         
@@ -915,7 +915,7 @@ def upload_API():
                 addRecordYear=addRecordYear,
                 geocode=False,
                 batchSize=1000)
-                    
+                            
         if isinstance(response, pd.DataFrame):
             n = len(response)
             response_dict = response.to_dict(orient='records')
@@ -1742,6 +1742,7 @@ def getDataset():
 
         data = CM.getQuery(query = query, driver = driver, params = {"cmid":cmid,"domain":domain})
 
+
         df = pd.DataFrame(data)
 
         df.dropna(axis=1, how='all', inplace=True)
@@ -1784,7 +1785,7 @@ def getDataset():
 
         df = df.drop('relID', axis=1).copy()
 
-        # print(df)
+        print(df)
 
         return df.to_json(orient='records')
     
@@ -2308,9 +2309,11 @@ def getMergeDatasets():
 
     return data
 
-@app.route('/updateWaitingUSES', methods=['GET'])
+@app.route('/updateWaitingUSES', methods=['POST'])
 def getUpdateWaitingUSES():
-    database = request.args.get('database')
+    data = request.get_data() 
+    data = json.loads(data)
+    database = data.get("database")
     result = CM.waitingUSES(database)
     return result
 
@@ -2370,7 +2373,7 @@ return u.userid as userid, u.first as first, u.last as last, u.email as email, u
     Best,
     CatMapper Team
                 """
-                CM.sendEmail(mail, subject = "CatMapper Registration Approved", recipients = [user.get("email")], body = body, sender = os.getenv("mail_default"))
+                CM.sendEmail(mail, subject = "CatMapper Registration Approved", recipients = [user.get("email"),'admin@catmapper.org'], body = body, sender = os.getenv("mail_default"))
         else:
             query = f"""
 match (u {{access: 'new'}}) where '{database}' in u.database

@@ -276,6 +276,7 @@ def updateUses(driver, CMID=None, user="0"): # update name to processUSES
         mergeDupRelationsResults = "Not ran"
         # if CMID is not None:
         #     mergeDupRelationsResults = mergeDupRelations(CMID=CMID, driver = driver)
+        print("dam")
 
         # Update structural properties and referenceKeys
         properties = getPropertiesMetadata(driver = driver)
@@ -300,6 +301,7 @@ def updateUses(driver, CMID=None, user="0"): # update name to processUSES
 
 def waitingUSES(database, BATCH_SIZE = 1000):
     try:
+        print(database)
         driver = getDriver(database)
         CMID = getQuery("Match (c)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' return c.CMID as CMID", driver, type = 'list')
         if CMID:
@@ -316,6 +318,7 @@ def waitingUSES(database, BATCH_SIZE = 1000):
             result = f"Successfully updated {len(CMID)} CMIDs in batches of {BATCH_SIZE}."
         else: 
             result = "Nothing to update"
+        print(result)
         return result
     except Exception as e:
         try:
