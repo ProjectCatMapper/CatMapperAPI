@@ -891,14 +891,14 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             UNWIND $rows AS row
             MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}}) 
             WITH row, r, b
-            SET {keys} 
+            SET {keys}, r.status = "update"
             RETURN id(b) as nodeID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, row.parent as parent, row.parentContext as parentContext
             """
         else:
             q = f"""
             UNWIND $rows AS row
             MATCH (r:DATASET {{CMID: row.CMID}})
-            SET {keys}
+            SET {keys}, r.status = "update"
             RETURN id(r) as nodeID, r.CMID as CMID
             """
 
