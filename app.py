@@ -810,16 +810,6 @@ def upload_API():
         if not linkContext:
             linkContext = None     
         
-        if data.get("ao") == "update_add":
-            updateProperties = True
-        else:
-            updateProperties = False
-
-        if data.get("ao") == "update_replace":
-            overwriteProperties = True
-        else:
-            overwriteProperties = False
-        
         if data.get("addoptions")["district"] == False:
             addDistrict = False
         else:
@@ -833,6 +823,8 @@ def upload_API():
         user = data.get("user")
 
         if data.get("so") == "advanced":
+
+            uploadOption = data.get("ao")
 
             dfpd = pd.DataFrame(df)
             required = ["CMName","Name","CMID", "label", "altNames", "Key", "datasetID"]
@@ -852,67 +844,41 @@ def upload_API():
             response = input_Nodes_Uses(
                  dataset=df,
                  database=database,
-                 CMName=key_cols["CMName"],
-                 Name=key_cols["Name"],
-                 CMID=key_cols["CMID"],
-                 altNames=key_cols["altNames"],
-                 Key=key_cols["Key"],
+                 uploadOption = uploadOption,
                  formatKey=False,
-                 datasetID=key_cols["datasetID"],
-                 label=key_cols["label"],
-                 uniqueID=None,
-                 uniqueProperty=None, 
                  nodeContext=nodeContext, 
                  linkContext=linkContext,
                  user=user,
-                 overwriteProperties=overwriteProperties,
-                 updateProperties=updateProperties,
                  addDistrict=addDistrict,
                  addRecordYear=addRecordYear,
                  geocode=False,
                  batchSize=1000)
         else:
+           
             if not label:
                 raise Exception("Must specify a domain")
             df = pd.DataFrame(df)
             df['label'] = label
             df['datasetID'] = datasetID
-            if not "CMName" in df.columns:
-                df['CMName'] = df[CMName]
-            if not Name:
-                Name = 'Name'
+            if not Name in df.columns:
                 df['Name'] = df[CMName]
-            if not "Name" in df.columns:
-                df['Name'] = df[Name]
-                Name = 'Name'
-            linkContext = None
-            nodeContext = None
+                Name = "Name"
+            if not CMID in df.columns:
+                df['CMID'] = ""
+                CMID = "CMID"
+            df.rename(columns={CMName: "CMName", CMID: "CMID", Name: "Name", Key: "Key", altNames: "altNames"}, inplace=True)
             df = df.to_dict(orient='records')
-            if CMID == "":
-                CMID = None
-            if altNames == "":
-                altNames = None
             # return {"Name":Name, "CMID":CMID,"altNames":altNames,"Key":Key,"user":user,"overwriteProperties":overwriteProperties,"updateProperties":updateProperties,"addDistrict":addDistrict,"addRecordYear":addRecordYear}
             response = input_Nodes_Uses(
                 dataset = df,
                 database = database,
-                CMName='CMName',
-                Name=Name,
-                CMID=CMID,
-                altNames=altNames,
-                Key=Key,
+                uploadOption = "add_uses",
                 formatKey=True,
-                datasetID='datasetID',
-                label='label',
-                uniqueID=None,
-                uniqueProperty=None, 
                 nodeContext=None, 
-                linkContext=linkContext,
+                linkContext=None,
                 user=user,
-                overwriteProperties=overwriteProperties,
-                updateProperties=updateProperties,
-                addDistrict=addDistrict,
-                addRecordYear=addRecordYear,
+                addDistrict=False,
+                addRecordYear=False,
                 geocode=False,
                 batchSize=1000)
                             
