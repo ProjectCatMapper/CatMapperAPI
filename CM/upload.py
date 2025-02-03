@@ -404,18 +404,8 @@ def process_parent_context_element(element):
     
 def input_Nodes_Uses(dataset,
                      database,
-                 CMName=None,
-                 Name=None,
-                 CMID=None,
-                 altNames=None,
-                 Key=None,
+                 uploadOption,
                  formatKey=False,
-                 datasetID=None,
-                 label=None,
-                 uniqueID=None,
-                 uniqueProperty=None, 
-                 overwriteProperties=False,
-                 updateProperties=False,
                  nodeContext=None, 
                  linkContext=None,
                  user=None,
@@ -425,11 +415,16 @@ def input_Nodes_Uses(dataset,
                  batchSize=1000,
                  ):
     
+    updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write = 'w')
+
     if user is None:
         raise ValueError("Error: user must be specified")
     
-    updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write = 'w')
-
+    if uploadOption in ["add_node", "add_uses", "update_add", "update_replace", "node_add", "node_replace"]:
+        updateLog(f"log/{user}uploadProgress.txt",f"upload option is {uploadOption}", write = 'a')
+    else:
+        raise ValueError("Error: invalid upload option'")
+    
     dataset = pd.DataFrame(dataset)
 
     # trim whitespace
@@ -449,47 +444,183 @@ def input_Nodes_Uses(dataset,
         database = "ArchaMap"
     else:
         raise ValueError(f"database must be either 'SocioMap' or 'ArchaMap', but value was '{database}'")
-
-    ## possible not needed? RJB
-    # if not label is None:
-    #     if "label" in linkContext :
-    #         linkContext.remove("label")
+    
+    updateLog(f"log/{user}uploadProgress.txt", f"working on data validation", write = 'a')
     
     if 'eventDate' in dataset.columns:
+        updateLog(f"log/{user}uploadProgress.txt", f"checking eventDate", write = 'a')
         dataset['eventDate'] = pd.to_numeric(dataset['eventDate'], errors='coerce').astype('Int64')  # Use 'Int64' to support NaNs
     dataset = dataset.replace({np.nan: None, pd.NA: None})
     dataset = dataset.astype(str)
     dataset = dataset.replace({None,""})
     dataset = dataset.replace({"nan": "", "<NA>": "","None":""})
     
-    if 'sampleSize' in dataset.columns:
-        def is_valid_sample_size(value):
-            try:
-                # Try to convert the value to a float
-                num = float(value)
-                # Check if it is numerically equivalent to an integer
-                return num.is_integer()
-            except (ValueError, TypeError):
-                # If conversion fails, it's invalid
+    # if 'sampleSize' in dataset.columns:
+    #     def is_valid_sample_size(value):
+    #         try:
+    #             # Try to convert the value to a float
+    #             num = float(value)
+    #             # Check if it is numerically equivalent to an integer
+    #             return num.is_integer()
+    #         except (ValueError, TypeError):
+    #             # If conversion fails, it's invalid
+    #             return False
+
+    #     # Filter rows with invalid sample sizes
+    #     invalid_sample_sizes = dataset[~dataset['sampleSize'].apply(is_valid_sample_size)]
+    #     invalid_sample_sizes = invalid_sample_sizes[['sampleSize']].values
+
+    #     if len(invalid_sample_sizes) > 0:
+    #         raise ValueError(
+    #             f"Invalid sampleSize values found:\n{invalid_sample_sizes}"
+    #         )
+
+    def is_valid_cmid(column,value, database,label = "CATEGORY"):
+        if not isinstance(value, str):
+            return False
+        
+        if column == "datasetID" or (label == "DATASET" and (column == "CMID" or column == "parent")):
+            
+            data_patterns = {
+            "SocioMap": r"SD\d+",
+            "ArchaMap": r"AD\d+" 
+        }
+    
+            data_pattern = data_patterns.get(database)
+            
+            if not data_pattern:
+                return False
+                        
+            if not re.match(data_pattern, value):
+                return False
+        else:
+            patterns = {
+                "SocioMap": r"^SM\d+$",
+                "ArchaMap": r"^AM\d+$" 
+            }
+
+            if column == "parent" and value == "":
+                return True
+        
+            pattern = patterns.get(database)
+            
+            if not pattern:
+                return False
+            
+            if not re.match(pattern, value):
                 return False
 
-        # Filter rows with invalid sample sizes
-        invalid_sample_sizes = dataset[~dataset['sampleSize'].apply(is_valid_sample_size)]
-        invalid_sample_sizes = invalid_sample_sizes[['sampleSize']].values
+            # if "label" == "DATASET":
+            #     if database == "sociomap" and not value.startswith("SD"):
+            #         return False
+            #     if database == "archamap" and not value.startswith("AD"):
+            #         return False
 
-        if len(invalid_sample_sizes) > 0:
-            raise ValueError(
-                f"Invalid sampleSize values found:\n{invalid_sample_sizes}"
-            )
+        return True
+    
+    #columns_to_check = ['parent', 'country', 'district', 'religion', 'CMID', 'datasetID', 'language']
+    columns_to_check =['parent','CMID']
+    invalid_entries = []
+
+    for column in columns_to_check:
+        if column in dataset.columns:
+            updateLog(f"log/{user}uploadProgress.txt", f"checking column {column} for invalid CMID", write = 'a')
+            # if column == "CMID" or column == "PARENT":
+            #     invalid_entries= dataset.loc[
+            #         ~dataset.apply(lambda row: is_valid_cmid(row[column], "sociomap", row['label']), axis=1),
+            #         [column, 'label']
+            #     ]
+            #     for idx, row in invalid_entries.iterrows():
+            #         invalid_entries.append((column, idx, row[column], row['label']))
+            # elif column in ['COUNTRY', 'DISTRICT', 'RELIGION', 'LANGUAGE']:
+            #     invalid_values = dataset.loc[~dataset[column].apply(is_non_empty_string), [column]]
+            #     for idx, row in invalid_values.iterrows():
+            #         invalid_entries.append((column, idx, row[column]))
+            # elif column == "DATASETID":
+            #     invalid_values = dataset.loc[~dataset['DATASETID'].apply(is_valid_integer), ['DATASETID']]
+            #     for idx, row in invalid_values.iterrows():
+            #         invalid_entries.append(('DATASETID', idx, row['DATASETID']))
+            if "label" in dataset.columns:
+                cols = [column, 'label']
+            else:
+                cols = [column]
+            invalid_entries_for_column = dataset.loc[
+                ~dataset.apply(lambda row: is_valid_cmid(column,row[column], database, row.get('label', 'CATEGORY')), axis=1),
+                cols
+            ]
+
+            print(invalid_entries_for_column)
+            
+            for idx, row in invalid_entries_for_column.iterrows():
+                invalid_entries.append((column, idx, row[column]))
+
+
+    if invalid_entries:
+        error_message = "Invalid entries found:\n" + "\n".join(
+            [f"Row {idx}, Column '{col}': {val}" for col, idx, val in invalid_entries]
+        )
+        raise ValueError(error_message)
+
+
+    def is_valid_integer_float(value):
+        try:
+            num = float(value)
+            return num.is_integer()
+        except (ValueError, TypeError):
+            return False
+    
+    def is_valid_float(value):
+        try:
+            float(value)
+            return True
+        except (ValueError, TypeError):
+            return False
+
+    columns_to_check = ['sampleSize', 'yearStart', 'yearEnd', 'recordStart', 'recordEnd']
+
+    columns_to_check = [col for col in columns_to_check if col in dataset.columns]
+
+    invalid_values = {}
+    for col in columns_to_check:
+        invalid_rows = dataset[~dataset[col].apply(is_valid_integer_float)]
+        if not invalid_rows.empty:
+            invalid_values[col] = invalid_rows[[col]].values.flatten()
+    
+    if 'populationEstimate' in dataset.columns:
+        invalid_population = dataset.loc[~dataset['populationEstimate'].apply(is_valid_float), ['populationEstimate']]
+        for idx, row in invalid_population.iterrows():
+            invalid_values.append(('populationEstimate', idx, row['populationEstimate']))    
+
+
+    if invalid_values:
+        error_message = "Invalid values found:\n" + "\n".join(
+            [f"{col}: {vals}" for col, vals in invalid_values.items()]
+        )
+        raise ValueError(error_message)
     
     driver = getDriver(database)
 
     if formatKey is True:
-        dataset = createKey(dataset, Key).copy()
-        Key = 'Key'
+        dataset = createKey(dataset, "Key").copy()
     
     if geocode is True:
         raise Exception("Error: geocode must be False")
+    
+    if 'eventType' in dataset.columns:
+
+        valid_event_types = {"SPLIT", "MERGED", "SPLITMERGE","HIERARCHY",""}
+        
+        invalid_event_types = dataset.loc[~dataset['eventType'].isin(valid_event_types), ['eventType']]
+    
+        invalid_event_entries = []
+        for idx, row in invalid_event_types.iterrows():
+            invalid_event_entries.append(('eventType', idx, row['eventType']))
+    
+        if invalid_event_entries:
+            error_message = "Invalid 'eventType' values found:\n" + "\n".join(
+                [f"Row {idx}, Column '{col}': {val}" for col, idx, val in invalid_event_entries]
+            )
+            raise ValueError(error_message)
     
     if 'eventType' in dataset.columns and 'eventDate' not in dataset.columns:
         dataset['eventDate'] = np.nan
@@ -497,19 +628,16 @@ def input_Nodes_Uses(dataset,
     updateLog(f"log/{user}uploadProgress.txt", "checking whether upload is for DATASET nodes", write = 'a')
     
     isDataset = False
-    if label is not None:
-        if label == "DATASET":
-            isDataset = True
-        elif label in dataset.columns:
-            if dataset['label'].iloc[0] == "DATASET":
-                isDataset = True    
-    
+    if "label" in dataset.columns:
+        if dataset['label'].iloc[0] == "DATASET":
+            isDataset = True    
+
     if isDataset:
         updateLog(f"log/{user}uploadProgress.txt", "upload is for DATASET nodes", write = 'a')
     else:
         updateLog(f"log/{user}uploadProgress.txt", "upload is for CATEGORY nodes", write = 'a')
     
-    if isDataset and not updateProperties and not overwriteProperties:
+    if isDataset and uploadOption == "add_node":
         query = "unwind $rows as row match (d:DATASET {shortName: row.shortName}) return d.shortName as shortName"
         shortNames = getQuery(query, driver, params={"rows": dataset[['shortName']].to_dict(orient='records')}, type="list")
         if len(shortNames) > 0:
@@ -519,23 +647,19 @@ def input_Nodes_Uses(dataset,
 
     updateLog(f"log/{user}uploadProgress.txt", "checking column names", write = 'a')
 
-    columns_to_select = list(set([
-    CMName, Name, CMID, altNames, Key, datasetID, label, uniqueID, "shortName", "DatasetCitation"] + nodeContext + linkContext))
-
-    dataset = dataset[[col for col in columns_to_select if col in dataset.columns]]
-
+    column_names = []
     if isDataset:
-        if overwriteProperties or updateProperties:
-            column_names = ['CMID']
+        if uploadOption == "add_node":
+            column_names = ["CMName", "label"] + nodeContext
         else:
-            column_names = [CMName, label, uniqueID] + nodeContext
+            column_names = ['CMID'] + nodeContext
     else:
-        if overwriteProperties or updateProperties:
-            column_names = [Name, CMID, Key, datasetID, uniqueID] + nodeContext + linkContext
-        elif CMID is not None:
-            column_names = [CMID, Name, label, Key, datasetID, uniqueID] + nodeContext + linkContext
+        if uploadOption == "add_node":
+            column_names = ["CMName", "Name", "label", "Key", "datasetID"] + nodeContext + linkContext
+        elif uploadOption == "add_uses":
+            column_names = ["Name", "CMID", "Key", "datasetID"] + nodeContext + linkContext
         else:
-            column_names = [CMName, Name, label, Key, datasetID, uniqueID] + nodeContext + linkContext
+            column_names = ["CMID", "Key", "datasetID"] + nodeContext + linkContext
     
     # Remove None values
     column_names = [col for col in column_names if col is not None]
@@ -549,12 +673,10 @@ def input_Nodes_Uses(dataset,
     properties = getPropertiesMetadata(driver)
     properties = pd.DataFrame(properties)
 
-    if uniqueID is None or uniqueID not in dataset.columns:
-        updateLog(f"log/{user}uploadProgress.txt", "Creating import ID", write = 'a')
-        getQuery("MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL", driver)
-        uniqueID = 'importID'
-        uniqueProperty = 'importID'
-        dataset['importID'] = dataset.index + 1
+    updateLog(f"log/{user}uploadProgress.txt", "Creating import ID", write = 'a')
+    getQuery("MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL", driver)
+    uniqueID = 'importID'
+    dataset['importID'] = dataset.index + 1
     
 
     if not isDataset:
@@ -585,30 +707,30 @@ def input_Nodes_Uses(dataset,
             max_row = len(sub_dataset) - 1 + s
             updateLog(f"log/{user}uploadProgress.txt", f"uploading {s} to {max_row} of {len(dataset)}", write = 'a')
 
-            if CMID in sub_dataset.columns and (not 'parentContext' in sub_dataset.columns or 'geoCoords' in sub_dataset.columns):
-                if datasetID in sub_dataset.columns and Key in sub_dataset.columns:
-                    if CMID in sub_dataset.columns:
-                        sub_dataset = combine_properties(sub_dataset, [CMID, datasetID, Key])
+            if "CMID" in sub_dataset.columns and (not 'parentContext' in sub_dataset.columns or 'geoCoords' in sub_dataset.columns):
+                if "datasetID" in sub_dataset.columns and "Key" in sub_dataset.columns:
+                    if "CMID" in sub_dataset.columns:
+                        sub_dataset = combine_properties(sub_dataset, ["CMID", "datasetID", "Key"])
                     else:
-                        sub_dataset = combine_properties(sub_dataset, [datasetID, Key])
+                        sub_dataset = combine_properties(sub_dataset, ["datasetID", "Key"])
             
             if addDistrict:
                 updateLog(f"log/{user}uploadProgress.txt", "Adding districts", write = 'a')
-                matches = getQuery(params={'rows': sub_dataset[[datasetID]]}, q='DISTRICT QUERY', database=database, user='1')
+                matches = getQuery(params={'rows': sub_dataset[["datasetID"]]}, q='DISTRICT QUERY', database=database, user='1')
                 if not matches.empty:
-                    sub_dataset = sub_dataset.merge(matches, on=datasetID, how="left")
+                    sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
                     linkContext.append('country')
 
             if addRecordYear:
                 updateLog(f"log/{user}uploadProgress.txt", "Adding record year", write = 'a')
-                matches = getQuery(params={'rows': sub_dataset[[datasetID]]}, q='RECORD_YEAR QUERY', driver = driver)
+                matches = getQuery(params={'rows': sub_dataset[["datasetID"]]}, q='RECORD_YEAR QUERY', driver = driver)
                 if not matches.empty:
-                    sub_dataset = sub_dataset.merge(matches, on=datasetID, how="left")
+                    sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
                     linkContext.append('recordStart')
 
             sub_dataset = sub_dataset.fillna('')
 
-            node_columns = [CMName, uniqueID, label] + nodeContext
+            node_columns = ["CMName", uniqueID, "label"] + nodeContext
             node_columns = [col for col in node_columns if col in sub_dataset.columns]
             node_columns = list(dict.fromkeys(node_columns))
 
@@ -618,11 +740,10 @@ def input_Nodes_Uses(dataset,
                 required_cols = [col for col in required_cols if col in sub_dataset.columns]
                 nodes = sub_dataset[required_cols].drop_duplicates()
             elif not isDataset:
-                if Name and CMID in sub_dataset.columns:
-                    nodes = sub_dataset[sub_dataset[CMID] == ''][node_columns].drop_duplicates()
-                elif Name in sub_dataset.columns:
+                if "Name" and "CMID" in sub_dataset.columns:
+                    nodes = sub_dataset[sub_dataset["CMID"] == ''][node_columns].drop_duplicates()
+                elif "Name" in sub_dataset.columns:
                     nodes = sub_dataset[node_columns]
-                    CMID = 'CMID' 
      
             if not nodes.empty:
                 updateLog(f"log/{user}uploadProgress.txt", "Adding nodes with columns: " + ", ".join(nodes.columns), write = 'a')
@@ -635,7 +756,7 @@ def input_Nodes_Uses(dataset,
             else:
                 dataset_match = sub_dataset.copy()
                                     
-            link_columns = [datasetID, CMName, CMID, Name, altNames, Key, label] + linkContext
+            link_columns = ["datasetID", "CMName", "CMID", "Name", "altNames", "Key", "label"] + linkContext
             link_columns = [col for col in link_columns if col in dataset_match.columns]
             link_columns = list(dict.fromkeys(link_columns))
 
@@ -644,12 +765,12 @@ def input_Nodes_Uses(dataset,
 
                 links = dataset_match[link_columns].drop_duplicates().copy()
                 
-                if Name and altNames is not None:
+                if "Name" in links.columns and "altNames" in links.columns:
                     updateLog(f"log/{user}uploadProgress.txt", "Combining names and alternate names", write = 'a')
-                    links = combine_names_and_altNames(links, Name, altNames)
+                    links = combine_names_and_altNames(links, "Name", "altNames")
                 
                 if linkContext is not None and 'geoCoords' in linkContext:
-                    #updateLog(f"log/{user}uploadProgress.txt", "updating geo coordinates", write = 'a')
+                    updateLog(f"log/{user}uploadProgress.txt", "updating geo coordinates", write = 'a')
                     # return links
                     links['geoCoords'] = links['geoCoords'].apply(convert_coordinates)
                                               
@@ -660,11 +781,11 @@ def input_Nodes_Uses(dataset,
                         #first_row_value = test.loc[0, 'parentContext']
                         first_row_value = test.iloc[0]
                         val = first_row_value.split("; ")[0]
-                        if is_valid_json(val):
-                            #updateLog(f"log/{user}uploadProgress.txt", "parentContext is already formatted", write = 'a')
-                            updatePC = False
+                        # if is_valid_json(val):
+                        #     updateLog(f"log/{user}uploadProgress.txt", "parentContext is already formatted", write = 'a')
+                        #     updatePC = False
                                         
-                    #updateLog(f"log/{user}uploadProgress.txt", "updating parentContext", write = 'a')
+                    updateLog(f"log/{user}uploadProgress.txt", "updating parentContext", write = 'a')
                     # return links
                     if updatePC:
                         def filter_dict(d):
@@ -719,6 +840,11 @@ def input_Nodes_Uses(dataset,
                         # Step 9: Merge the grouped data back into the original DataFrame
                         links = links.drop(columns=['parentContext', 'parent']).copy()
                         links = pd.merge(links, sub_links, on=['datasetID', 'CMID', 'Key'], how='left')
+
+                    # Replace values that do not contain 'eventDate' or 'eventType' with an empty string
+                    links['parentContext'] = links['parentContext'].apply(
+                            lambda x: x if 'eventDate' in x or 'eventType' in x else ""
+                        )
                 
                 if 'yearStart' in links or 'yearEnd' in links or 'recordStart' in links or 'recordEnd' in links or 'sampleSize' in links:
                    # updateLog(f"log/{user}uploadProgress.txt", "updating date columns", write = 'a')
@@ -728,67 +854,66 @@ def input_Nodes_Uses(dataset,
                         if col in links.columns:
                             links[col] = links[col].apply(lambda x: x if pd.isna(x) or x == '' else int(float(x)))
 
-                #updateLog(f"log/{user}uploadProgress.txt", str(links.columns), write = 'a')
+                updateLog(f"log/{user}uploadProgress.txt", str(links.columns), write = 'a')
 
                 print("check3")
                 
                 link_cols = ['datasetID', 'CMID', 'Key'] + linkContext
                 link_cols = list(set(link_cols))
                 link_cols = [col for col in link_cols if col in links.columns]
-                if Name:
-                    link_cols.append(Name)
-                if overwriteProperties:
-                    #updateLog(f"log/{user}uploadProgress.txt", "Overwriting property", write = 'a')
+
+                if uploadOption == "update_replace":
+                    # updateLog(f"log/{user}uploadProgress.txt", "Overwriting property", write = 'a')
                     result = updateProperty(links[link_cols], database = database, user = user, updateType = "overwrite")
-                elif updateProperties:
-                    #updateLog(f"log/{user}uploadProgress.txt", "Updating property", write = 'a')
+                elif uploadOption == "update_add":
+                    updateLog(f"log/{user}uploadProgress.txt", "Updating property", write = 'a')
                     result = updateProperty(links[link_cols], database = database, user = user, updateType = "update")
                 else:
-                    #updateLog(f"log/{user}uploadProgress.txt", "Adding new USES relationships", write = 'a')
-                    link_cols.append(label)
+                    updateLog(f"log/{user}uploadProgress.txt", "Adding new USES relationships", write = 'a')
+                    link_cols.append("label")
                     links = links[link_cols]
                     print("check5")
                     result = createUSES(links = links,database = database, user = user, create = "MERGE")
                 if isinstance(result,str):
-                    #updateLog(f"log/{user}uploadProgress.txt", result, write = 'a')
+                    updateLog(f"log/{user}uploadProgress.txt", result, write = 'a')
                     raise ValueError(result)
                 
                 print("check4")
 
-                #updateLog(f"log/{user}uploadProgress.txt", "Processing returned CMIDs", write = 'a')
+                updateLog(f"log/{user}uploadProgress.txt", "Processing returned CMIDs", write = 'a')
                 try:
                     cmid_values = [link['CMID'] for link in result['result']]
                     if len(cmid_values) < len(result['result']):
                         missing_links = [link for link in result['result'] if 'CMID' not in link]
                         raise KeyError(f"Missing 'CMID' in {len(missing_links)} link(s): {missing_links}")
-                    #updateLog(f"log/{user}uploadProgress.txt", "adding CMName to Name parameter", write = 'a')
+                    updateLog(f"log/{user}uploadProgress.txt", "adding CMName to Name parameter", write = 'a')
                     addCMNameRel(database, CMID = cmid_values)
-                    #updateLog(f"log/{user}uploadProgress.txt", "updating alternate names", write = 'a')
+                    updateLog(f"log/{user}uploadProgress.txt", "updating alternate names", write = 'a')
                     updateAltNames(driver, CMID = cmid_values)
-                    #updateLog(f"log/{user}uploadProgress.txt", "updated alternate names", write = 'a')
+                    updateLog(f"log/{user}uploadProgress.txt", "updated alternate names", write = 'a')
                 except KeyError as e:
-                    #updateLog(f"log/{user}uploadProgress.txt", f"Error updating alternate names: {e}", write = 'a')
+                    updateLog(f"log/{user}uploadProgress.txt", f"Error updating alternate names: {e}", write = 'a')
                     continue
 
-                #updateLog(f"log/{user}uploadProgress.txt", "combining results", write = 'a')
+                updateLog(f"log/{user}uploadProgress.txt", "combining results", write = 'a')
                 result = pd.DataFrame(result['result'])
                 final_result = pd.concat([final_result,result], axis = 0)
-                #updateLog(f"log/{user}uploadProgress.txt", "results combined", write = 'a')
+                updateLog(f"log/{user}uploadProgress.txt", "results combined", write = 'a')
 
-                #updateLog(f"log/{user}uploadProgress.txt", "Completed updating USES relationships", write = 'a')
+                updateLog(f"log/{user}uploadProgress.txt", "Completed updating USES relationships", write = 'a')
             
             else:
                 node_columns = list(set(['CMID','CMName', 'DatasetCitation', 'shortName'] + nodeContext))
                 node_columns = [col for col in node_columns if col in dataset_match.columns]
                 nodes = dataset_match[node_columns].drop_duplicates()
-                if overwriteProperties:
-                    #updateLog(f"log/{user}uploadProgress.txt", "overwriting Dataset properties", write = 'a')
+                if uploadOption == "node_replace":
+                    updateLog(f"log/{user}uploadProgress.txt", "overwriting Dataset properties", write = 'a')
                     updateProperty(nodes, database = database, user = user, updateType = "overwrite", propertyType = "DATASET")
-                elif updateProperties:
-                    #updateLog(f"log/{user}uploadProgress.txt", "updating dataset properties", write = 'a')
+                elif uploadOption == "node_add":
+                    updateLog(f"log/{user}uploadProgress.txt", "updating dataset properties", write = 'a')
                     updateProperty(nodes, database = database, user = user, updateType = "update", propertyType = "DATASET")
 
-                #updateLog(f"log/{user}uploadProgress.txt", "processing Dataset properties", write = 'a')
+                updateLog(f"log/{user}uploadProgress.txt", "processing Dataset properties", write = 'a')
                 cmids = dataset_match['CMID'].unique()
                 processDATASETs(database = database, user = user, CMID = cmids)
                 final_result = pd.concat([final_result,dataset_match], axis = 0)
@@ -796,7 +921,7 @@ def input_Nodes_Uses(dataset,
             if uniqueID == 'importID':
                 getQuery("MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL", driver = driver)
 
-            #updateLog(f"log/{user}uploadProgress.txt", "End of batch", write = 'a')
+            updateLog(f"log/{user}uploadProgress.txt", "End of batch", write = 'a')
 
     except Exception as e:
         try:
@@ -907,7 +1032,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         result = getQuery(query = q, driver = driver, params = {"rows": links_dict})
 
         if 'geoCoords' in links.columns:
-            #updateLog(f"log/{user}uploadProgress.txt", "Updating geo coordinates", write = 'a')
+            updateLog(f"log/{user}uploadProgress.txt", "Updating geo coordinates", write = 'a')
             CMIDs = links['CMID'].unique()
             correct_geojson(CMID = CMIDs, database = database)
         
