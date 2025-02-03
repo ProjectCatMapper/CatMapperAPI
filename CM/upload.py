@@ -406,8 +406,8 @@ def input_Nodes_Uses(dataset,
                      database,
                  uploadOption,
                  formatKey=False,
-                 nodeContext=None, 
-                 linkContext=None,
+                 nodeProperties=None, 
+                 linkProperties=None,
                  user=None,
                  addDistrict=False,
                  addRecordYear=False,
@@ -430,11 +430,11 @@ def input_Nodes_Uses(dataset,
     # trim whitespace
     dataset = dataset.applymap(lambda x: x.strip() if isinstance(x, str) else x)
     
-    if nodeContext is None:
-        nodeContext = []
+    if nodeProperties is None:
+        nodeProperties = []
 
-    if linkContext is None:
-        linkContext = []
+    if linkProperties is None:
+        linkProperties = []
     
     dataset = dataset.dropna(how='all').reset_index(drop=True).copy()
 
@@ -650,16 +650,16 @@ def input_Nodes_Uses(dataset,
     column_names = []
     if isDataset:
         if uploadOption == "add_node":
-            column_names = ["CMName", "label"] + nodeContext
+            column_names = ["CMName", "label"] + nodeProperties
         else:
-            column_names = ['CMID'] + nodeContext
+            column_names = ['CMID'] + nodeProperties
     else:
         if uploadOption == "add_node":
-            column_names = ["CMName", "Name", "label", "Key", "datasetID"] + nodeContext + linkContext
+            column_names = ["CMName", "Name", "label", "Key", "datasetID"] + nodeProperties + linkProperties
         elif uploadOption == "add_uses":
-            column_names = ["Name", "CMID", "Key", "datasetID"] + nodeContext + linkContext
+            column_names = ["Name", "CMID", "Key", "datasetID"] + nodeProperties + linkProperties
         else:
-            column_names = ["CMID", "Key", "datasetID"] + nodeContext + linkContext
+            column_names = ["CMID", "Key", "datasetID"] + nodeProperties + linkProperties
     
     # Remove None values
     column_names = [col for col in column_names if col is not None]
@@ -690,8 +690,8 @@ def input_Nodes_Uses(dataset,
         # Drop the columns from dataset, keeping the 'parent' column
         dataset = dataset.drop(columns=columns_to_drop).copy()
         for group in grouped_columns['group'].unique():
-            linkContext.append(group)
-        linkContext = list(set(linkContext))
+            linkProperties.append(group)
+        linkProperties = list(set(linkProperties))
     
     sq = range(0, len(dataset), batchSize)
 
@@ -719,24 +719,24 @@ def input_Nodes_Uses(dataset,
                 matches = getQuery(params={'rows': sub_dataset[["datasetID"]]}, q='DISTRICT QUERY', database=database, user='1')
                 if not matches.empty:
                     sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
-                    linkContext.append('country')
+                    linkProperties.append('country')
 
             if addRecordYear:
                 updateLog(f"log/{user}uploadProgress.txt", "Adding record year", write = 'a')
                 matches = getQuery(params={'rows': sub_dataset[["datasetID"]]}, q='RECORD_YEAR QUERY', driver = driver)
                 if not matches.empty:
                     sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
-                    linkContext.append('recordStart')
+                    linkProperties.append('recordStart')
 
             sub_dataset = sub_dataset.fillna('')
 
-            node_columns = ["CMName", uniqueID, "label"] + nodeContext
+            node_columns = ["CMName", uniqueID, "label"] + nodeProperties
             node_columns = [col for col in node_columns if col in sub_dataset.columns]
             node_columns = list(dict.fromkeys(node_columns))
 
             nodes = pd.DataFrame()
             if isDataset and not 'CMID' in sub_dataset.columns:
-                required_cols = list(set(["CMName", "shortName", "DatasetCitation", uniqueID, 'label'] + nodeContext))
+                required_cols = list(set(["CMName", "shortName", "DatasetCitation", uniqueID, 'label'] + nodeProperties))
                 required_cols = [col for col in required_cols if col in sub_dataset.columns]
                 nodes = sub_dataset[required_cols].drop_duplicates()
             elif not isDataset:
@@ -756,7 +756,7 @@ def input_Nodes_Uses(dataset,
             else:
                 dataset_match = sub_dataset.copy()
                                     
-            link_columns = ["datasetID", "CMName", "CMID", "Name", "altNames", "Key", "label"] + linkContext
+            link_columns = ["datasetID", "CMName", "CMID", "Name", "altNames", "Key", "label"] + linkProperties
             link_columns = [col for col in link_columns if col in dataset_match.columns]
             link_columns = list(dict.fromkeys(link_columns))
 
@@ -769,12 +769,12 @@ def input_Nodes_Uses(dataset,
                     updateLog(f"log/{user}uploadProgress.txt", "Combining names and alternate names", write = 'a')
                     links = combine_names_and_altNames(links, "Name", "altNames")
                 
-                if linkContext is not None and 'geoCoords' in linkContext:
+                if linkProperties is not None and 'geoCoords' in linkProperties:
                     updateLog(f"log/{user}uploadProgress.txt", "updating geo coordinates", write = 'a')
                     # return links
                     links['geoCoords'] = links['geoCoords'].apply(convert_coordinates)
                                               
-                if "parentContext" in linkContext:
+                if "parentContext" in linkProperties:
                     updatePC = True
                     test = links[links['parentContext'].notna()]['parentContext']
                     if not test.empty:
@@ -858,7 +858,7 @@ def input_Nodes_Uses(dataset,
 
                 print("check3")
                 
-                link_cols = ['datasetID', 'CMID', 'Key'] + linkContext
+                link_cols = ['datasetID', 'CMID', 'Key'] + linkProperties
                 link_cols = list(set(link_cols))
                 link_cols = [col for col in link_cols if col in links.columns]
 
@@ -903,7 +903,7 @@ def input_Nodes_Uses(dataset,
                 updateLog(f"log/{user}uploadProgress.txt", "Completed updating USES relationships", write = 'a')
             
             else:
-                node_columns = list(set(['CMID','CMName', 'DatasetCitation', 'shortName'] + nodeContext))
+                node_columns = list(set(['CMID','CMName', 'DatasetCitation', 'shortName'] + nodeProperties))
                 node_columns = [col for col in node_columns if col in dataset_match.columns]
                 nodes = dataset_match[node_columns].drop_duplicates()
                 if uploadOption == "node_replace":
