@@ -177,7 +177,7 @@ def getBadCMID(database,mail = None):
             if mail is not None:
                 fp1 = "tmp/badCMIDs.xlsx"
                 results.to_excel(fp1, index = False)
-                sendEmail(mail, subject = "Bad CMIDs", recipients = ["rjbischo@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+                sendEmail(mail, subject = "Bad CMIDs", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
 
             return results.to_dict(orient="records")
         else: 
@@ -187,14 +187,27 @@ def getBadCMID(database,mail = None):
         return "Error: " + str(e)
         
 
-def getMultipleLabels(database):
+def getMultipleLabels(database, mail = None):
     try:
         driver = getDriver(database)
         query = """
         match (d:DATASET)-[r:USES]->(c:CATEGORY) where apoc.meta.cypher.type(r.label) = "LIST OF STRING" and size(r.label) > 1 return c.CMID as CMID, c.CMName as CMName, d.CMID as datasetID, r.Key as Key, apoc.text.join(r.label, "; ") as label
         """
         results = getQuery(query, driver)
-        return results
+
+        if len(results) > 0:
+
+            if mail is not None:
+                fp1 = "tmp/multipleLabels.xlsx"
+                data = pd.DataFrame(results)
+                data.to_excel(fp1, index = False)
+                sendEmail(mail, subject = "Multiple Labels", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+
+            return results
+        
+        else:
+            return "No multiple labels found"
+        
     except Exception as e:
         return str(e)
     
@@ -207,11 +220,77 @@ def getBadJSON(database,mail = None):
 
         if mail is not None:
             if results1:
-                sendEmail(mail, subject = "Invalid geoCoords properties", recipients = ["rjbischo@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+                sendEmail(mail, subject = "Invalid geoCoords properties", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
                 mailSent = "True"
 
             if results2:
-                sendEmail(mail, subject = "Invalid parentContext properties", recipients = ["rjbischo@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp2])
+                sendEmail(mail, subject = "Invalid parentContext properties", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp2])
+                mailSent = "True"
+
+        return {"geoCoords": len(results1), "parentContext": len(results2), "geoCoords": results1, "parentContext": results2, "emailSent": mailSent}    
+    except Exception as e:
+        result = str(e)
+        return result, 500  
+    
+def getBadDomains(database,mail = None):
+    try:        
+        driver = getDriver(database)
+        labels = getQuery("match (l:LABEL) return l.label as label, l.groupLabel as groupLabel", driver)
+        labels = pd.DataFrame(labels)
+        groups = list(labels['groupLabel'].unique())
+
+        matches = getQuery("match (c) return distinct [i in  labels(c) where not i = 'CATEGORY'] as label", driver)
+        matches = pd.DataFrame(matches)
+
+        bad_labels = []
+
+        for group in groups:
+            sub_labels = labels[labels['groupLabel'] == group]
+            sub_labels = list(sub_labels['label'].values)
+            for row in matches.iterrows():
+                label = row[1]['label']
+                if group in label:
+                    bad = [x for x in label if not x in sub_labels]
+                    if len(bad) > 0:
+                        print("bad label for " + group + ": " + ", ".join(label))
+                        fmt_label = ":".join(label)
+                        query = f"""
+                        match (c:{fmt_label})
+                        return c.CMID as CMID, c.CMName as CMName, '{fmt_label}' as label
+                        """
+                        result = getQuery(query, driver)
+                        bad_labels.append(result)
+
+
+        bad_labels = pd.concat([pd.DataFrame(item) for item in bad_labels])
+        if len(bad_labels) > 0:
+            if mail is not None:
+                fp1 = "tmp/badLabels.xlsx"
+                bad_labels.to_excel(fp1, index = False)
+                sendEmail(mail, subject = "Bad Labels", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+                
+        missing_category = getQuery("match (c)<-[:USES]-(d:DATASET) where not 'CATEGORY' in labels(c) return c.CMID as CMID, c.CMName as CMName", driver)
+
+        if len(missing_category) > 0:
+            if mail is not None:
+                fp1 = "tmp/badLabels.xlsx"
+                missing_category = pd.DataFrame(missing_category)
+                bad_labels.to_excel(fp1, index = False)
+                sendEmail(mail, subject = "Bad Labels", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+
+
+        missing_dataset = getQuery("match (c)<-[:USES]-(d:DATASET) where not 'DATASET' in labels(d) return d.CMID as CMID, d.CMName as CMName", driver)
+
+        if len(missing_dataset) > 0:
+            missing_dataset = pd.DataFrame(missing_dataset)
+
+        if mail is not None:
+            if results1:
+                sendEmail(mail, subject = "Invalid geoCoords properties", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+                mailSent = "True"
+
+            if results2:
+                sendEmail(mail, subject = "Invalid parentContext properties", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp2])
                 mailSent = "True"
 
         return {"geoCoords": len(results1), "parentContext": len(results2), "geoCoords": results1, "parentContext": results2, "emailSent": mailSent}    

@@ -301,7 +301,7 @@ def waitingUSES(database, BATCH_SIZE = 1000):
                 batch = CMID[i:i + BATCH_SIZE]
                 
                 # Perform the update operation for the current batch
-                processUSES(driver=driver, CMID=batch)
+                processUSES(database = database, CMID=batch)
                 
                 # Optional: Print progress (useful for debugging or monitoring)
                 print(f"Processed batch {i // BATCH_SIZE + 1} with {len(batch)} CMIDs.")
