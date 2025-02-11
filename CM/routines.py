@@ -153,12 +153,13 @@ def getBadCMID(database,mail = None):
             return c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset, '{property}' as propertyType, apoc.text.join(r.{property},"; ") as property, bad as badCMID
             """
             result = getQuery(query, driver)
-            results.append(result)
-
-        results = [pd.DataFrame(item) for item in results]
+            if len(result) > 0:
+                results.append(result)
 
         if len(results) > 0:
+            results = [pd.DataFrame(item) for item in results]
             results = pd.concat(results)
+
             query2 = """
             MATCH (old:DELETED)-[:IS]->(c) 
             where old.CMID in $cmids 
@@ -167,9 +168,11 @@ def getBadCMID(database,mail = None):
 
             deleted = getQuery(query2, driver, {"cmids": list(results["badCMID"].unique())})
 
-            deleted = pd.DataFrame(deleted)
+            if len(deleted) > 0:
 
-            results = results.merge(deleted, on = "badCMID", how = "left")
+                deleted = pd.DataFrame(deleted)
+
+                results = results.merge(deleted, on = "badCMID", how = "left")
 
             if mail is not None:
                 fp1 = "tmp/badCMIDs.xlsx"
@@ -178,10 +181,10 @@ def getBadCMID(database,mail = None):
 
             return results.to_dict(orient="records")
         else: 
-            print("No bad CMIDs found")
+            return "No bad CMIDs found"
 
     except Exception as e:
-        return str(e)
+        return "Error: " + str(e)
         
 
 def getMultipleLabels(database):
@@ -205,11 +208,13 @@ def getBadJSON(database,mail = None):
         if mail is not None:
             if results1:
                 sendEmail(mail, subject = "Invalid geoCoords properties", recipients = ["rjbischo@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+                mailSent = "True"
 
             if results2:
                 sendEmail(mail, subject = "Invalid parentContext properties", recipients = ["rjbischo@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp2])
+                mailSent = "True"
 
-        return {"geoCoords": len(results1), "parentContext": len(results2), "geoCoords": results1, "parentContext": results2}
+        return {"geoCoords": len(results1), "parentContext": len(results2), "geoCoords": results1, "parentContext": results2, "emailSent": mailSent}    
     except Exception as e:
         result = str(e)
         return result, 500  
