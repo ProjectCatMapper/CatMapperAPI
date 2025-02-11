@@ -91,41 +91,32 @@ def updateLabels(driver, CMID = None):
     try:
 
         if CMID is not None:
-            getQuery("unwind $CMID as cmid match (a {CMID: cmid})<-[:USES]-(:DATASET) set a:CATEGORY",driver, params = {"CMID":CMID})
+            print("setting CATEGORY label on CMID")
+            getQuery("unwind $CMID as cmid match (a {CMID: cmid})<-[:USES]-(:DATASET) set a:CATEGORY return count(*)",driver, params = {"CMID":CMID})
         else:
-            getQuery("match (a)<-[:USES]-(:DATASET) set a:CATEGORY",driver)
+            print("setting CATEGORY label for all")
+            getQuery("match (a)<-[:USES]-(:DATASET) set a:CATEGORY return count(*)" ,driver)
 
         if CMID is not None:
-            query = """
-    MATCH (l:LABEL)
-    WITH l.label AS label, l.groupLabel AS groupLabel
-    WITH collect({label: label, groupLabel: groupLabel}) AS labelGroupMapping
-    match (l:METADATA:LABEL)
-    with apoc.coll.toSet(collect(distinct l.label) + 'CATEGORY') as l, labelGroupMapping
-    unwind $cmid as cmid
-    with l, labelGroupMapping, cmid
-    match (a:CATEGORY)<-[r:USES]-(:DATASET)
-    where 
-    a.CMID = cmid and
-    r.label is not null
-    WITH a, r, l, labelGroupMapping
-    WITH a, l, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.label + "CATEGORY"), true)) AS labels, labelGroupMapping
-    WITH a, [i in labels WHERE i in l] + [d IN labelGroupMapping WHERE d.label IN labels | d.groupLabel] AS labels
-    CALL apoc.create.setLabels(a, labels) YIELD node
-    RETURN count(*)
-    """
-            result = getQuery(query = query, driver = driver, params = {"cmid":CMID}, type = 'list')
+                    query = """
+            unwind $cmid as cmid
+            match (a:CATEGORY {CMID: cmid})<-[r:USES]-(:DATASET)
+            where r.label is not null
+            WITH a, apoc.coll.toSet(apoc.coll.flatten(collect(distinct [r.label,"CATEGORY"]), true)) AS labels
+            CALL apoc.create.setLabels(a, labels) YIELD node
+            RETURN count(*)
+            """
+                    result = getQuery(query = query, driver = driver, params = {"cmid":CMID}, type = 'list')
 
         else:
 
             query = """
-    match (a:CATEGORY)<-[r:USES]-(:DATASET)
-where r.label is not null
-WITH a, r
-WITH a, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.label + "CATEGORY"), true)) AS labels
-CALL apoc.create.addLabels(a, labels) YIELD node
-RETURN count(*)
-"""
+            match (a:CATEGORY)<-[r:USES]-(:DATASET)
+            where r.label is not null
+            WITH a, apoc.coll.toSet(apoc.coll.flatten(collect(distinct [r.label,"CATEGORY"]), true)) AS labels
+            CALL apoc.create.setLabels(a, labels) YIELD node
+            RETURN count(*)
+            """
             result = getQuery(query = query, driver = driver,type = 'list')
 
             labels = getQuery('match (l:LABEL) where l.public = "TRUE" and not l.label = "CATEGORY" return distinct l.label as label, l.groupLabel as group', driver)
@@ -260,9 +251,10 @@ return count(a)
         result = str(e)
         return result, 500
 
-def processUSES(driver, CMID=None, user="0"): 
+def processUSES(database, CMID=None, user="0"): 
     try:
 
+        driver = getDriver(database)
         # Update alternative names
         print("updating alternate names")
         updateAltNamesResults = updateAltNames(CMID=CMID, driver = driver)
@@ -276,7 +268,6 @@ def processUSES(driver, CMID=None, user="0"):
         mergeDupRelationsResults = "Not ran"
         # if CMID is not None:
         #     mergeDupRelationsResults = mergeDupRelations(CMID=CMID, driver = driver)
-        print("dam")
 
         # Update structural properties and referenceKeys
         properties = getPropertiesMetadata(driver = driver)

@@ -102,52 +102,7 @@ from CM import *
 # backup2CSV(database = "ArchaMap")
 
 database = "sociomap"
-driver = getDriver(database)
-properties = getPropertiesMetadata(driver)
-properties = pd.DataFrame(properties)
-properties = properties[properties["relationship"].notna()]
 
-results = []
-
-for property in properties["property"]:
-    print("Checking CMIDs for property: ", property)
-
-    queryFix = """
-MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
-WHERE not r.{property} is null and not apoc.meta.cypher.type(r.{property}) = "LIST OF STRING" set r.{property} = [r.{property}]
-"""
-
-    query = f"""
-    MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET) 
-    with apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.{property}),true)) as val
-    call {{with val match (c:CATEGORY) where c.CMID in val return collect(c.CMID) as val2}} 
-    with [i in val where not i in val2] as badlist
-    unwind badlist as bad
-    with bad
-    match (c:CATEGORY)<-[r:USES]-(d:DATASET) where bad in r.{property} 
-    return c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset, '{property}' as propertyType, apoc.text.join(r.{property},"; ") as property, bad as badCMID
-    """
-    result = getQuery(query, driver)
-    results.append(result)
-
-results = [pd.DataFrame(item) for item in results]
-
-if len(results) > 0:
-    results = pd.concat(results)
-    query2 = """
-    MATCH (old:DELETED)-[:IS]->(c) 
-    where old.CMID in $cmids 
-    return old.CMID as badCMID, c.CMID as newCMID
-    """
-
-    deleted = getQuery(query2, driver, {"cmids": list(results["badCMID"].unique())})
-
-    deleted = pd.DataFrame(deleted)
-
-    results = results.merge(deleted, on = "badCMID", how = "left")
-
-    results.to_excel("badCMID.xlsx", index = False)
-else: 
-    print("No bad CMIDs found")
+processUSES(database,CMID = "SM486101", user = "1")
 
 
