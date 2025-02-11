@@ -803,10 +803,9 @@ def upload_API():
         Name = formData["categoryNamesColumn"]
         altNames = formData["alternateCategoryNamesColumn"]
         CMID = formData["cmidColumn"]
-        Key = formData["keyColumn"]      
+        Key = formData["keyColumn"]   
 
         linkProperties = data.get("linkContext")
-        print(linkProperties)
         if not linkProperties:
             linkProperties = None     
         
@@ -987,8 +986,13 @@ def submit_merge():
     dataset_choices = data.get("datasetChoices", [])
     category_label = CM.unlist(data.get("categoryLabel", ""))
     intersection = CM.unlist(data.get("intersection", False))
-    criteria = "standard"
     database = CM.unlist(data.get('database'))
+    criteria = str.lower(CM.unlist(data.get('equivalence')))
+    if category_label == "ANY DOMAIN":
+        category_label = "CATEGORY"
+    elif category_label == "AREA":
+        category_label = "DISTRICT"
+    
 
     result = CM.proposeMerge(dataset_choices,category_label,criteria,database,intersection)
 
@@ -1782,12 +1786,16 @@ def routines():
             raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
         result = "Nothing returned"
         if fun == "addLog":
-            result = CM.addLog(driver = driver)
+            result = CM.addLog(database)
         elif fun == "checkDomains":
             result = CM.checkDomains(data = data,driver = driver)
         elif fun == "updateUses":
             CMID = request.args.get('CMID') 
             result = CM.updateUses(driver = driver, CMID = CMID)    
+        elif fun == "backup2CSV":
+            result = CM.backup2CSV(database)  
+        elif fun == "getBadJSON":
+            result = CM.getBadJSON(database, mail)  
         else:
             result = "function not found"
         return result
@@ -2359,28 +2367,6 @@ def send_test_email():
         return msg
     except Exception as e:
         return str(e), 500
-
-@app.route('/validateJSON', methods=['GET'])
-def validateJSON():
-    try:
-        database = request.args.get('database')
-        
-        fp1 = "tmp/invalid_json_geoCoords.xlsx"
-        results1 = CM.validateJSON(database = database, property = 'geoCoords', path = fp1)
-
-        if results1:
-            CM.sendEmail(mail, subject = "Invalid geoCoords properties", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
-
-        fp2 = "tmp/invalid_json_parentContext.xlsx"
-        results2 = CM.validateJSON(database = database, property = 'parentContext', path = fp2)
-
-        if results2:
-            CM.sendEmail(mail, subject = "Invalid parentContext properties", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp2])
-
-        return {"geoCoords": len(results1), "parentContext": len(results2), "geoCoords": results1, "parentContext": results2}
-    except Exception as e:
-        result = str(e)
-        return result, 500  
 
 if __name__== "__main__":
     app.run(debug=True,port=5001)
