@@ -1682,11 +1682,21 @@ def getDataset():
             children = CM.unlist(data.get('children'))
         else: 
             raise Exception("invalid request method")
+        
+        driver = CM.getDriver(database)
 
         if domain is None:
-            domain = "CATEGORY"
+            domain = ["CATEGORY"]
+        elif isinstance(domain, str):
+            domain = [domain] 
 
-        driver = CM.getDriver(database)
+        if domain != ["CATEGORY"]:
+            labels = CM.getQuery(query="MATCH (l:LABEL) RETURN l.label AS label, l.groupLabel AS groupLabel", driver=driver)
+            labels = pd.DataFrame(labels)
+            # Checking if any item in domain is in the groupLabel list
+            if any(i in labels['groupLabel'].values for i in domain):
+                domain = list(labels[labels['groupLabel'].isin(domain)]['label'].values) + domain
+
 
         if children is not None:
             children = str(children).lower()
@@ -1702,7 +1712,7 @@ def getDataset():
 
         query = """
         unwind $cmid as cmid
-        match (a:DATASET)-[r:USES]->(b) 
+        match (a:DATASET)-[r:USES]->(b:CATEGORY) 
         where a.CMID = cmid and not isEmpty([i in r.label
         where i in apoc.coll.flatten([$domain],true)])
         unwind keys(r) as property 
@@ -1761,7 +1771,7 @@ def getDataset():
     
     except Exception as e:
     # In case of an error, return an error response with an appropriate HTTP status code
-        result = str(e)
+        result = "Error: " + str(e)
         return result, 500
 
 @app.route('/routines', methods=['GET'])
@@ -1786,6 +1796,8 @@ def routines():
             result = CM.getBadJSON(database, mail)  
         elif fun == "getBadCMID":
             result = CM.getBadCMID(database, mail)  
+        elif fun == "getMultipleLabels":
+            result = CM.getMultipleLabels(database, mail)  
         else:
             result = "function not found"
         return result
@@ -1992,41 +2004,26 @@ def getdatasetDomains():
         cmid = CM.unlist(data.get('cmid'))
         children = CM.unlist(data.get('children'))
 
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        else:
-            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")  
+        driver = CM.getDriver(database)
         
-# combine queries
+        # combine queries
         if children == True:
             query = """
-unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[:CONTAINS*..5]->(:DATASET)-[r:USES]->(c) 
+unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[:CONTAINS*..5]->(:DATASET)-[r:USES]->(c:CATEGORY) 
 with distinct apoc.coll.toSet(apoc.coll.flatten(collect(r.label), true)) as labels 
 unwind labels as label 
 return label
 """
         else:
             query = """
-unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[r:USES]->(c) 
+unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY) 
 with distinct apoc.coll.toSet(apoc.coll.flatten(collect(r.label), true)) as labels 
 unwind labels as label 
 return label
 """
 
 
-        with driver.session() as session:
-            result = session.run(query, cmid = cmid)
-            data = [dict(record) for record in result]
-            driver.close()
-
-        # cleaned = {}
-        # for key, value in data.items():
-        #     if ":" in value:
-        #         cleaned[key] = value.split(":")
-        #     else:
-        #         cleaned
+        data = CM.getQuery(query = query, driver = driver, params = {"cmid":cmid})
         
         return data
 
