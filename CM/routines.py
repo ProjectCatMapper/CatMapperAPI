@@ -61,6 +61,12 @@ def addLog(database):
     
 def checkDomains(data,database):
     try:
+        if data is None:
+            data = False
+        elif data.lower() == "true":
+            data = True
+        else:
+            data = False
         driver = getDriver(database)
         query = """
         match (n:CATEGORY)
