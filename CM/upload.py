@@ -18,6 +18,75 @@ warnings.simplefilter('error', UserWarning)
 data = [{"CMID":"test-1","datasetID":"SD11","Key":"test-1","geoCoords":"yep","yearStart":2011}]
 df = pd.DataFrame(data)
 
+def is_valid_integer_float(value):
+        try:
+            if value == "":
+                return True
+            num = float(value)            
+            return num.is_integer()
+        except (ValueError, TypeError):
+            return False
+    
+def is_valid_float(value):
+    try:
+        if value == "":
+            return True
+        float(value)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+def is_valid_cmid(column,value, database,label):
+        if not isinstance(value, str):
+            return False
+        
+        if label == "":
+            error_message = "Missing label value"
+            raise ValueError(error_message)
+                
+        if column == "datasetID" or (label == "DATASET" and (column == "CMID" or column == "parent")):
+            
+            data_patterns = {
+            "SocioMap": r"SD\d+",
+            "ArchaMap": r"AD\d+" 
+        }
+    
+            data_pattern = data_patterns.get(database)
+            
+            if not data_pattern:
+                return False
+                        
+            if not re.match(data_pattern, value):
+                return False
+        else:
+            patterns = {
+                "SocioMap": r"^SM\d+$",
+                "ArchaMap": r"^AM\d+$" 
+            }
+
+            if column == "parent" and value == "":  #future - for all selected columns do this for Link properties.
+                return True
+        
+            pattern = patterns.get(database)
+            
+            if not pattern:
+                return False
+            
+            # Split the value by semicolons and trim spaces from each part
+            split_values = [part.strip() for part in value.split(';')]
+            
+            for part in split_values:
+                if not re.match(pattern, part):
+                    return False
+
+            # if "label" == "DATASET":
+            #     if database == "sociomap" and not value.startswith("SD"):
+            #         return False
+            #     if database == "archamap" and not value.startswith("AD"):
+            #         return False
+
+        return True
+
 def add_error_column(df,user):
     if 'nodeID' not in df.columns:
         updateLog(f"log/{user}uploadProgress.txt", "nodeID not found in final_results", write = 'a')
@@ -173,7 +242,7 @@ def createUSES(links,database,user, create = "MERGE"):
         print("check7")
 
         # Fetch properties from the database
-        db_properties = getQuery("MATCH (p:PROPERTY) RETURN p.property AS property", driver)
+        db_properties = getQuery("MATCH (p:PROPERTY) WHERE p.type = 'relationship' RETURN p.property AS property", driver)
         db_properties_list = [item['property'] for item in db_properties]
         print("check8")
         existing_columns = list(set(db_properties_list) & set(links.columns.tolist()))
@@ -192,7 +261,7 @@ def createUSES(links,database,user, create = "MERGE"):
         print("check6")
 
         # Select the appropriate columns based on the relationship type
-        vars = links.columns.difference(['datasetID', 'CMID', 'Key'])
+        vars = links.columns.difference(['datasetID', 'CMID', 'Key','CMName'])
 
         query = """
 match (n:METADATA:PROPERTY) 
@@ -208,7 +277,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         for var in vars:
             metaType = metaTypeDict.get(var)  # Get the metaType for the given property
             
-            keys.append(f"r.{var} = custom.combinedProperties('',row.{var},'{metaType}')[0].prop")
+            keys.append(f"r.{var} = custom.formatProperties(['',row.{var}],'{metaType}',';')[0].prop")
                 
         # Combine the keys into a single string for the Cypher query
         keys_string = ", ".join(keys)
@@ -414,7 +483,7 @@ def input_Nodes_Uses(dataset,
                  geocode=False,
                  batchSize=1000,
                  ):
-    
+        
     updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write = 'w')
 
     if user is None:
@@ -475,49 +544,7 @@ def input_Nodes_Uses(dataset,
     #             f"Invalid sampleSize values found:\n{invalid_sample_sizes}"
     #         )
 
-    def is_valid_cmid(column,value, database,label = "CATEGORY"):
-        if not isinstance(value, str):
-            return False
         
-        if column == "datasetID" or (label == "DATASET" and (column == "CMID" or column == "parent")):
-            
-            data_patterns = {
-            "SocioMap": r"SD\d+",
-            "ArchaMap": r"AD\d+" 
-        }
-    
-            data_pattern = data_patterns.get(database)
-            
-            if not data_pattern:
-                return False
-                        
-            if not re.match(data_pattern, value):
-                return False
-        else:
-            patterns = {
-                "SocioMap": r"^SM\d+$",
-                "ArchaMap": r"^AM\d+$" 
-            }
-
-            if column == "parent" and value == "":
-                return True
-        
-            pattern = patterns.get(database)
-            
-            if not pattern:
-                return False
-            
-            if not re.match(pattern, value):
-                return False
-
-            # if "label" == "DATASET":
-            #     if database == "sociomap" and not value.startswith("SD"):
-            #         return False
-            #     if database == "archamap" and not value.startswith("AD"):
-            #         return False
-
-        return True
-    
     #columns_to_check = ['parent', 'country', 'district', 'religion', 'CMID', 'datasetID', 'language']
     columns_to_check =['parent','CMID']
     invalid_entries = []
@@ -540,45 +567,41 @@ def input_Nodes_Uses(dataset,
             #     invalid_values = dataset.loc[~dataset['DATASETID'].apply(is_valid_integer), ['DATASETID']]
             #     for idx, row in invalid_values.iterrows():
             #         invalid_entries.append(('DATASETID', idx, row['DATASETID']))
-            if "label" in dataset.columns:
-                cols = [column, 'label']
+
+
+
+            if uploadOption =="add_node" or 'label' in dataset.columns:
+                continue                            
+            elif uploadOption == "add_uses" or uploadOption == "update_add" or uploadOption == "update_replace":
+                dataset['label'] = "CATEGORY"
+            elif uploadOption == "node_add" or uploadOption == "node_replace":
+                dataset['label'] = "DATASET"
             else:
-                cols = [column]
-            invalid_entries_for_column = dataset.loc[
-                ~dataset.apply(lambda row: is_valid_cmid(column,row[column], database, row.get('label', 'CATEGORY')), axis=1),
-                cols
-            ]
-
-            print(invalid_entries_for_column)
+                error_message = "Cannot determine upload method."
+                raise ValueError(error_message)
             
-            for idx, row in invalid_entries_for_column.iterrows():
-                invalid_entries.append((column, idx, row[column]))
+            print(dataset.head(5))
+            
 
+            invalid_entries_for_column = dataset.loc[
+                ~dataset.apply(lambda row: is_valid_cmid(column,row[column], database, row.get('label', '')), axis=1),
+                column
+            ]
+            
+            for idx, row in invalid_entries_for_column.items():
+                invalid_entries.append((column, idx, row))
+    
 
     if invalid_entries:
         error_message = "Invalid entries found:\n" + "\n".join(
             [f"Row {idx}, Column '{col}': {val}" for col, idx, val in invalid_entries]
         )
         raise ValueError(error_message)
-
-
-    def is_valid_integer_float(value):
-        try:
-            num = float(value)
-            return num.is_integer()
-        except (ValueError, TypeError):
-            return False
     
-    def is_valid_float(value):
-        try:
-            float(value)
-            return True
-        except (ValueError, TypeError):
-            return False
-
     columns_to_check = ['sampleSize', 'yearStart', 'yearEnd', 'recordStart', 'recordEnd']
 
-    columns_to_check = [col for col in columns_to_check if col in dataset.columns]
+
+    columns_to_check = [col for col in columns_to_check if col in linkProperties]
 
     invalid_values = {}
     for col in columns_to_check:
@@ -605,7 +628,7 @@ def input_Nodes_Uses(dataset,
     
     if geocode is True:
         raise Exception("Error: geocode must be False")
-    
+        
     if 'eventType' in dataset.columns:
 
         valid_event_types = {"SPLIT", "MERGED", "SPLITMERGE","HIERARCHY",""}
@@ -1005,9 +1028,9 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         for var in vars:
             metaType = metaTypeDict.get(var)  # Get the metaType for the given property
             if updateType == "overwrite" and var != 'log':
-                keys.append(f"r.{var} = custom.combinedProperties('',row.{var},'{metaType}')[0].prop")
+                keys.append(f"r.{var} = custom.formatProperties(['',row.{var}],'{metaType}',';')[0].prop")
             else:
-                keys.append(f"r.{var} = custom.combinedProperties(r.{var},row.{var},'{metaType}')[0].prop")
+                keys.append(f"r.{var} = custom.formatProperties([r.{var},row.{var}],'{metaType}',';')[0].prop")
 
         keys = ", ".join(keys)
 
