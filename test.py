@@ -99,10 +99,7 @@ if 'geoCoords' in links.columns:
 
 
 from CM import *
-# backup2CSV(database = "ArchaMap")
-
+import pandas as pd
 database = "sociomap"
-
-processUSES(database,CMID = "SM486101", user = "1")
-
+driver = getDriver(database)
 
