@@ -1655,7 +1655,7 @@ def getAdminEdit():
             result = CM.addIndexes(driver)
         elif fun == "processUSES":
             CMID = CM.cleanCMID(data.get('CMID'))
-            result = CM.processUSES(driver = driver, CMID = CMID)    
+            result = CM.processUSES(database = database, CMID = CMID)    
         else:
             raise Exception("Function does not exist")
         return result
@@ -1779,11 +1779,13 @@ def routines():
             result = CM.checkDomains(data = data, database = database)
         elif fun == "processUSES":
             CMID = request.args.get('CMID') 
-            result = CM.processUSES(database, CMID = CMID)    
+            result = CM.processUSES(database = database, CMID = CMID)    
         elif fun == "backup2CSV":
             result = CM.backup2CSV(database, mail)  
         elif fun == "getBadJSON":
             result = CM.getBadJSON(database, mail)  
+        elif fun == "getBadCMID":
+            result = CM.getBadCMID(database, mail)  
         else:
             result = "function not found"
         return result
