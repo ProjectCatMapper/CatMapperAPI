@@ -260,7 +260,7 @@ return count(a)
         result = str(e)
         return result, 500
 
-def updateUses(driver, CMID=None, user="0"): # update name to processUSES
+def processUSES(driver, CMID=None, user="0"): 
     try:
 
         # Update alternative names
@@ -310,7 +310,7 @@ def waitingUSES(database, BATCH_SIZE = 1000):
                 batch = CMID[i:i + BATCH_SIZE]
                 
                 # Perform the update operation for the current batch
-                updateUses(driver=driver, CMID=batch)
+                processUSES(driver=driver, CMID=batch)
                 
                 # Optional: Print progress (useful for debugging or monitoring)
                 print(f"Processed batch {i // BATCH_SIZE + 1} with {len(batch)} CMIDs.")
