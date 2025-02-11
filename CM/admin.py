@@ -196,7 +196,7 @@ def mergeNodes(request,driver):
         contextProps = [item['property'] for item in contextProps]
 
         # make sure the second EC tie is combined
-        # call the updateUSES function
+        # call the processUSES function
         for prop in properties:
             property = prop['property']
             if property in contextProps or property == "parentContext":
