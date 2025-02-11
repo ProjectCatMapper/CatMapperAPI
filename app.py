@@ -1653,9 +1653,9 @@ def getAdminEdit():
             result = CM.mergeNodes(request,driver)
         elif fun == "addIndexes":
             result = CM.addIndexes(driver)
-        elif fun == "updateUses":
+        elif fun == "processUSES":
             CMID = CM.cleanCMID(data.get('CMID'))
-            result = CM.updateUses(driver = driver, CMID = CMID)    
+            result = CM.processUSES(driver = driver, CMID = CMID)    
         else:
             raise Exception("Function does not exist")
         return result
@@ -1771,29 +1771,17 @@ def routines():
     try:
         database = CM.unlist(request.args.get('database'))
         fun = CM.unlist(request.args.get('fun'))
-        data = CM.unlist(request.args.get('data'))
-        if data is None:
-            data = False
-        elif data.lower() == "true":
-            data = True
-        else:
-            data = False
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        else:
-            raise Exception("Database must be 'SocioMap' or 'ArchaMap'")
         result = "Nothing returned"
         if fun == "addLog":
             result = CM.addLog(database)
         elif fun == "checkDomains":
-            result = CM.checkDomains(data = data,driver = driver)
-        elif fun == "updateUses":
+            data = CM.unlist(request.args.get('data'))
+            result = CM.checkDomains(data = data, database = database)
+        elif fun == "processUSES":
             CMID = request.args.get('CMID') 
-            result = CM.updateUses(driver = driver, CMID = CMID)    
+            result = CM.processUSES(database, CMID = CMID)    
         elif fun == "backup2CSV":
-            result = CM.backup2CSV(database)  
+            result = CM.backup2CSV(database, mail)  
         elif fun == "getBadJSON":
             result = CM.getBadJSON(database, mail)  
         else:
