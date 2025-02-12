@@ -1685,10 +1685,11 @@ def getDataset():
         
         driver = CM.getDriver(database)
 
-        if domain is None:
-            domain = ["CATEGORY"]
-        elif isinstance(domain, str):
+        if isinstance(domain, str):
             domain = [domain] 
+
+        if domain is None or "ANY DOMAIN" in domain:
+            domain = ["CATEGORY"]
 
         if domain != ["CATEGORY"]:
             labels = CM.getQuery(query="MATCH (l:LABEL) RETURN l.label AS label, l.groupLabel AS groupLabel", driver=driver)
@@ -1710,7 +1711,21 @@ def getDataset():
             if result is not None:
                 cmid = [cmid] + result
 
-        query = """
+        if "CATEGORY" in domain:
+
+            query = """
+        unwind $cmid as cmid
+        match (a:DATASET)-[r:USES]->(b:CATEGORY) 
+        where a.CMID = cmid
+        unwind keys(r) as property 
+        return distinct a.CMName as datasetName, a.CMID as datasetID, 
+        b.CMID as CMID, b.CMName as CMName, id(r) as relID, property, r[property] as value, custom.getName(r[property]) as property_name
+        """
+
+            data = CM.getQuery(query = query, driver = driver, params = {"cmid":cmid,"domain":domain})
+
+        else:
+            query = """
         unwind $cmid as cmid
         match (a:DATASET)-[r:USES]->(b:CATEGORY) 
         where a.CMID = cmid and not isEmpty([i in r.label
@@ -1720,7 +1735,7 @@ def getDataset():
         b.CMID as CMID, b.CMName as CMName, id(r) as relID, property, r[property] as value, custom.getName(r[property]) as property_name
         """
 
-        data = CM.getQuery(query = query, driver = driver, params = {"cmid":cmid,"domain":domain})
+            data = CM.getQuery(query = query, driver = driver, params = {"cmid":cmid,"domain":domain})
 
 
         df = pd.DataFrame(data)
