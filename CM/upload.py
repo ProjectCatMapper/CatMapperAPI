@@ -523,7 +523,33 @@ def input_Nodes_Uses(dataset,
     dataset = dataset.astype(str)
     dataset = dataset.replace({None,""})
     dataset = dataset.replace({"nan": "", "<NA>": "","None":""})
+
+    data_dict = dataset.to_dict(orient="records")
+    driver = getDriver(database)
+
+    if uploadOption == "add_uses":
+                error_query = """
+        UNWIND $rows AS row
+        WITH row
+        WHERE row.CMID IS NOT NULL AND row.CMID <> ""
+        OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
+        RETURN row.CMID AS CMID, row.datasetID AS datasetID, row.Key AS Key, COUNT(r) AS rel_count
+        """
+    elif uploadOption == "update_add" or uploadOption == "update_replace":
+                error_query = """
+    UNWIND $rows AS row
+    OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
+    RETURN row.CMID AS CMID, row.datasetID AS datasetID, row.Key AS Key, COUNT(r) AS rel_count
+    """
     
+    with driver.session() as session:
+        results = session.run(error_query, rows=data_dict)
+        missing = [(r["CMID"], r["datasetID"], r["Key"]) for r in results.data() if r["rel_count"] == 0]
+        print(missing)
+
+        if missing:
+            raise ValueError(f"Error: Invalid CMID or Key or datasetID for {missing}")
+            
     # if 'sampleSize' in dataset.columns:
     #     def is_valid_sample_size(value):
     #         try:
@@ -621,8 +647,6 @@ def input_Nodes_Uses(dataset,
         )
         raise ValueError(error_message)
     
-    driver = getDriver(database)
-
     if formatKey is True:
         dataset = createKey(dataset, "Key").copy()
     
