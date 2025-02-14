@@ -268,15 +268,17 @@ def getBadDomains(database,mail = None):
                 fp1 = "tmp/badLabels.xlsx"
                 bad_labels.to_excel(fp1, index = False)
                 sendEmail(mail, subject = "Bad Labels", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+        bad_labels = bad_labels.to_dict(orient="records")
                 
         missing_category = getQuery("match (c)<-[:USES]-(d:DATASET) where not 'CATEGORY' in labels(c) return c.CMID as CMID, c.CMName as CMName", driver)
 
         if len(missing_category) > 0:
             if mail is not None:
-                fp1 = "tmp/badLabels.xlsx"
+                fp1 = "tmp/missing_category.xlsx"
                 missing_category = pd.DataFrame(missing_category)
-                bad_labels.to_excel(fp1, index = False)
-                sendEmail(mail, subject = "Bad Labels", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+                missing_category.to_excel(fp1, index = False)
+                missing_category = missing_category.to_dict(orient="records")
+                sendEmail(mail, subject = "Missing CATEGORY Label", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
 
 
         missing_dataset = getQuery("match (c)<-[:USES]-(d:DATASET) where not 'DATASET' in labels(d) return d.CMID as CMID, d.CMName as CMName", driver)
@@ -284,16 +286,14 @@ def getBadDomains(database,mail = None):
         if len(missing_dataset) > 0:
             missing_dataset = pd.DataFrame(missing_dataset)
 
-        if mail is not None:
-            if results1:
-                sendEmail(mail, subject = "Invalid geoCoords properties", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
-                mailSent = "True"
+            if mail is not None:
+                if missing_dataset:
+                    fp1 = "tmp/missing_dataset.xlsx"
+                    missing_dataset.to_excel(fp1, index = False)
+                    missing_dataset = missing_dataset.to_dict(orient="records")
+                    sendEmail(mail, subject = "Missing DATASET Label", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])         
 
-            if results2:
-                sendEmail(mail, subject = "Invalid parentContext properties", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp2])
-                mailSent = "True"
-
-        return {"geoCoords": len(results1), "parentContext": len(results2), "geoCoords": results1, "parentContext": results2, "emailSent": mailSent}    
+        return {"bad_labels_count": len(bad_labels), "missing_category_count": len(missing_category), "missing_dataset_count": len(missing_dataset), "bad_labels": bad_labels, "missing_category": missing_category, "missing_dataset": missing_dataset}    
     except Exception as e:
         result = str(e)
         return result, 500  

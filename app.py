@@ -1278,7 +1278,7 @@ def getSearch():
             qStart = f"match (a:{domain}) with a, '' as matching, 0 as score" 
         elif property == "Key":
                 qStart = f"""
-call db.index.fulltext.queryRelationships('keys',custom.escapeText($term)) yield relationship
+call db.index.fulltext.queryRelationships('keys','"' + custom.escapeText($term) + '"') yield relationship
 with endnode(relationship) as a, relationship.Key as matching, case when $term contains ":" then $term else ": " + $term end as term
 where '{domain}' in labels(a) and matching ends with term
 with a, matching, 0 as score
@@ -1813,6 +1813,8 @@ def routines():
             result = CM.getBadCMID(database, mail)  
         elif fun == "getMultipleLabels":
             result = CM.getMultipleLabels(database, mail)  
+        elif fun == "getBadDomains":
+            result = CM.getBadDomains(database, mail) 
         else:
             result = "function not found"
         return result
