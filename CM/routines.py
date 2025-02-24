@@ -297,3 +297,37 @@ def getBadDomains(database,mail = None):
     except Exception as e:
         result = str(e)
         return result, 500  
+    
+
+def getBadRelations(database,mail = None):
+    try:        
+        driver = getDriver(database)
+        labels = getQuery("match (l:LABEL) where not l.relationship is null return distinct l.groupLabel as group, l.relationship as relationship", driver)
+
+        results = []
+        contains = []
+        for label in labels:
+            relationship = label['relationship']
+            group = label['group']
+            matches = getQuery(f"match (p:CATEGORY)-[:{relationship}]->(c:CATEGORY)<-[r:USES]-(d:DATASET) where not '{group}' in labels(p) unwind keys(r) as property with p.CMID as parentCMID, p.CMName as parentCMName, c.CMID as childCMID, c.CNName as childCMName, r.Key as Key, d.datasetID as datasetID, d.shortName as shortName, '{relationship}' as relationship, apoc.text.join([i in labels(p) where not i in ['CATEGORY']],'; ') as domains, property, r[property] as value where parentCMID = value or parentCMID in value return distinct parentCMID, parentCMName, childCMID, childCMName, Key, datasetID, shortName, relationship, domains, property, value", driver)
+            results.append(matches)
+            matchContains = getQuery(f"match (p:CATEGORY)-[:CONTAINS]->(c:{group})<-[r:USES]-(d:DATASET) where not 'GENERIC' in labels(p) with p,c,r,d where not '{group}' in labels(p) and (p.CMID in r.parent or p.CMID = r.parent) return distinct p.CMID as parentCMID, p.CMName as parentCMName, c.CMID as childCMID, c.CMName as childCMName, r.Key as Key, d.CMID as datasetID, d.shortName as shortName, 'CONTAINS' as relationship, apoc.text.join([i in labels(p) where i in $groups],',') + '->' + '{group}' as domains, 'parent' as property, r.parent as value", driver, params = {'groups': list(pd.DataFrame(labels)['group'].values)})
+            contains.append(matchContains)
+
+        results = pd.concat([pd.DataFrame(item) for item in results])
+        contains = pd.concat([pd.DataFrame(item) for item in contains])
+        results = pd.concat([results, contains])
+
+        if len(results) > 0:
+            if mail is not None:
+                if results:
+                    fp1 = "tmp/BadRelationshipLabels.xlsx"
+                    results.to_excel(fp1, index = False)
+                    results = results.to_dict(orient="records")
+                    sendEmail(mail, subject = "Bad Relationship Label", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])        
+
+                return {"bad_relationship_labels_count": len(results), "bad_relationship_labels": results}    
+    
+    except Exception as e:
+        result = str(e)
+        return result, 500  
