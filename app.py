@@ -1448,8 +1448,6 @@ def getTranslate2():
 
         data_dict = data.to_dict(orient='records')
 
-        print(data_dict)
-
         return data_dict
 
     except Exception as e:
@@ -1815,6 +1813,8 @@ def routines():
             result = CM.getMultipleLabels(database, mail)  
         elif fun == "getBadDomains":
             result = CM.getBadDomains(database, mail) 
+        elif fun == "getBadRelations":
+            result = CM.getBadRelations(database, mail) 
         else:
             result = "function not found"
         return result
