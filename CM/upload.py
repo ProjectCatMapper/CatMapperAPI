@@ -594,8 +594,8 @@ def input_Nodes_Uses(dataset,
     data_dict = dataset.to_dict(orient="records")
     driver = getDriver(database)
 
-    error_columns = ["CMID", "datasetID", "language", "parent", "district", "country", "religion"]
-    multi_value_columns = {"language", "district", "country", "religion"}  
+    error_columns = ["CMID", "datasetID", "language","district", "country", "religion"]
+    multi_value_columns = {"language", "district", "country", "religion","parent"}  
 
     for i in error_columns:
         if i in dataset.columns:
@@ -609,7 +609,7 @@ def input_Nodes_Uses(dataset,
             for row in data_dict:
                 if row.get(i):  
                     if i in multi_value_columns:
-                        values = [val.strip() for val in row[i].split(";") if val.strip()] 
+                        values = [val.strip() for val in row[i].split(";") if val.strip()]
                         rows_to_check.extend([{"value": v} for v in values])
                     else:
                         rows_to_check.append({"value": row[i]})
@@ -623,6 +623,66 @@ def input_Nodes_Uses(dataset,
 
             if missing_values:
                 raise ValueError(f"Error: Missing values in database for column '{i}': {missing_values}")
+            
+    if uploadOption =="node_add":
+            
+        from functools import reduce        
+
+        updated_dfs = []  # Store updated data for each property
+
+        with driver.session() as session:
+            for prop in linkProperties:  # Loop through each property
+                update_query = '''
+                    UNWIND $rows AS row
+                    MATCH (n {CMID: row.CMID}) 
+                    CALL apoc.create.setProperty(n, $prop, 
+                        CASE 
+                            WHEN apoc.meta.cypher.types(n[$prop]) = "STRING" THEN 
+                                CASE 
+                                    WHEN apoc.meta.cypher.types(row[$prop]) = "STRING" THEN [n[$prop], row[$prop]] 
+                                    ELSE [n[$prop]] + row[$prop] 
+                                END
+                            ELSE n[$prop] + 
+                                CASE 
+                                    WHEN apoc.meta.cypher.types(row[$prop]) = "STRING" THEN [row[$prop]] 
+                                    ELSE row[$prop] 
+                                END
+                        END
+                    ) YIELD node
+                    RETURN node.CMID AS CMID, node[$prop] AS updated_value
+                    '''
+
+                results = session.run(update_query, rows=data_dict, prop=prop)
+                updated_data = pd.DataFrame([
+                    {'CMID': record['CMID'], f'updated_{prop}': record['updated_value']} for record in results
+                ])
+
+                updated_dfs.append(updated_data)  # Store each updated DataFrame
+
+        # Merge all updated DataFrames together on CMID
+        if updated_dfs:
+            merged_updates = reduce(lambda left, right: pd.merge(left, right, on='CMID', how='outer'), updated_dfs)
+            merged_df = pd.merge(dataset, merged_updates, on='CMID', how='left')
+        
+        return merged_df
+            
+    if uploadOption == "node_replace":
+        linkProperties=linkProperties[0]
+        print(linkProperties)
+        update_query = """UNWIND $rows AS row
+                MATCH (n {CMID: row.CMID}) 
+                CALL apoc.create.setProperty(n, $prop, row[$prop]) YIELD node
+                RETURN n.CMID AS CMID, n[$prop] AS updated_value"""
+
+        with driver.session() as session:
+            results = session.run(update_query, rows=data_dict,prop=linkProperties)
+            updated_data = pd.DataFrame([{'CMID': record['CMID'],'updated_'+linkProperties: record['updated_value']} for record in results])
+
+            merged_df = pd.merge(dataset, updated_data, on='CMID', how='left')
+        
+        return merged_df
+
+
 
     if uploadOption == "update_add" or uploadOption == "update_replace":
                 error_query = """

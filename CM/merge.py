@@ -210,107 +210,46 @@ def proposeMerge(dataset_choices,category_label,criteria,database,intersection, 
                 return jsonify({"message": "No data found"}), 404
             
         elif criteria == "extended":
-            qContains = ""
-            qResult = ""
-            if ncontains > 1:
-                 for i in range(1, ncontains + 1):
-                    qContains = qContains + f"optional match (c)<-[:CONTAINS*..{i}]-(p{i}:CATEGORY) " 
-                    qResult = qResult + f", p{i}.CMID as parent{i} "
+            query = generate_cypher_query(ncontains)
 
-            query = f"""
-            UNWIND $datasets AS dataset
-            MATCH (d:DATASET {{CMID: dataset}})-[r:USES]->(c:{category_label}) 
-            optional match (c)<-[:CONTAINS]-(p:CATEGORY) 
-            {qContains}
-            RETURN DISTINCT d.CMID AS datasetID, r.Key AS Key, c.CMName AS CMName, c.CMID AS CMID,
-                            apoc.text.join(apoc.coll.toSet(r.Name), '; ') AS Name, p.CMID as parent
-                            {qResult}
-            ORDER BY CMName
-            """
+            datasets = ["SD21","SD14"]
+            driver = getDriver("SocioMap")
+            matches = getQuery(query, driver, {"datasets": datasets})
 
-            if len(dataset_choices) == 1:
-                return "Please select more than one dataset"
+            matches = pd.DataFrame(matches)
 
-            qContains = ""
-            qResult = ""
-            qWhere = ""
-            if ncontains > 1:
-                for i in range(1, ncontains + 1):
-                    qContains = qContains + f"optional match (c)<-[:CONTAINS*..{i}]-(p{i}:CATEGORY) " 
-                    qResult = qResult + f", p{i}.CMID as parent{i} "
-                    qWhere = qWhere + f"AND not 'GENERIC' in labels(p{i}) "
+            if matches.empty:
+                return jsonify({"message": "No data found"}), 404
 
-            query = f"""
-            UNWIND $datasets AS dataset
-            MATCH (d:DATASET {{CMID: dataset}})-[r:USES]->(c:{category_label}) 
-            optional match (c)<-[:CONTAINS]-(p:CATEGORY) 
-            {qContains}
-            WHERE not "GENERIC" in labels(p) 
-            {qWhere}
-            RETURN DISTINCT d.CMID AS datasetID, r.Key AS Key, c.CMID AS CMID,
-                apoc.text.join(apoc.coll.toSet(r.Name), '; ') AS Name, p.CMID as parent
-                {qResult}
-            """
+            # Split into groups by 'datasetID'
+            matches_grp = [group for _, group in matches.groupby("datasetID")]
+            
+            # Perform inner join on the first two groups
+            merge_how = "inner" if intersection else "outer"
+            result = pd.merge(
+                matches_grp[0].drop(columns=["datasetID"]),
+                matches_grp[1].drop(columns=["datasetID"]),
+                on=["LCA_CMID", "LCA_CMName"],
+                how=merge_how,
+                suffixes=(f"_{datasets[0]}", f"_{datasets[1]}")
+            ).drop_duplicates()
 
-            merged = getQuery(query, driver = driver,params = {'datasets': dataset_choices})
+            if result.empty:
+                return jsonify({"message": "No common ancestors found"}), 404
 
-            merged = pd.DataFrame(merged)
+            # Compute nTie and id
+            result["nTie"] = result.filter(like="tie").sum(axis=1, skipna=True)
+            result["id"] = result.filter(like="Key").apply(lambda row: " -- ".join(sorted(row.dropna().astype(str))), axis=1)
 
-            cols = [col for col in merged.columns if col.startswith('parent')]
+            # Select the rows with the minimum nTie per group
+            result = result.loc[result.groupby("id")["nTie"].idxmin()].drop(columns=["id"])
 
-            merged_long = merged.melt(id_vars=["datasetID", "Key", "Name"], 
-                            value_vars=["CMID"] + cols, 
-                            var_name="equivalence", value_name="CMIDs")
+            # Reorder columns
+            cols = ["LCA_CMID", "LCA_CMName", "nTie"] + [col for col in result.columns if col not in ["LCA_CMID", "LCA_CMName", "nTie"]]
+            result = result[cols]
+            result = result.fillna("")
 
-            merged_long = merged_long.dropna(subset=['CMIDs'])
-
-            merged_df = merged_long.pivot_table(
-                                index=['CMIDs', 'equivalence'],
-                                columns='datasetID',
-                                values=['Key', 'Name'],
-                                aggfunc=lambda x: '; '.join(filter(None, set(x)))
-                            ).reset_index()
-
-            merged_df.columns = [
-                col[0] if col[1] == "" else '_'.join(col).strip() 
-                if isinstance(col, tuple) else col 
-                for col in merged_df.columns
-            ]
-
-            merged_df = merged_df.sort_values(by=["equivalence"])
-
-            cols = ["Name_" + ds for ds in dataset_choices]
-            cols2 = ["Key_" + ds for ds in dataset_choices]
-
-            for col in cols:
-                merged_df[col] = merged_df[col].str.split("; ") 
-                merged_df = merged_df.explode(col, ignore_index=True).copy()
-            for col in cols2:
-                merged_df[col] = merged_df[col].str.split("; ") 
-                merged_df = merged_df.explode(col, ignore_index=True).copy()
-            for col in cols2:
-                merged_df = merged_df[merged_df[col].notna()]    
-            for col in cols2:
-                merged_df = merged_df.drop_duplicates(subset=col, keep="first")
-
-            merged_df.columns
-
-            merged_df
-
-            query2 = """
-            unwind $CMID as cmid 
-            MATCH (d:DATASET)-[r:USES]->(c:CATEGORY {CMID: cmid}) 
-            return distinct c.CMID as CMID, c.CMName as CMName
-            """
-
-            names = getQuery(query2, driver = driver, params = {'CMID': merged_df['CMIDs'].unique().tolist()})
-
-            names = pd.DataFrame(names)
-
-            merged_df.rename(columns = {'CMIDs':'CMID'}, inplace = True)
-            merged_df = pd.merge(merged_df, names, how='left', on='CMID')
-
-            return merged_df
+            return result.to_dict(orient='records')
 
         else:
             raise Exception("Invalid criteria")
@@ -320,3 +259,41 @@ def proposeMerge(dataset_choices,category_label,criteria,database,intersection, 
             return {"error": str(e)}, 500
         except:
             return {"Error": "Unable to process error"}, 500
+        
+def generate_cypher_query(nContains):
+    if nContains < 1:
+        raise ValueError("nContains must be at least 1")
+    elif nContains  > 4:
+        raise ValueError("nContains must be at most 4")
+    base_query = """
+    UNWIND $datasets AS dataset
+    MATCH (d:DATASET {CMID: dataset})-[r:USES]->(c:ETHNICITY)
+    RETURN DISTINCT d.CMID AS datasetID, r.Key AS Key, c.CMID AS CMID, c.CMName AS CMName,
+    c.CMID as LCA_CMID, c.CMName as LCA_CMName,
+    apoc.text.join(apoc.coll.toSet(r.Name), "; ") AS Name, 0 as tie
+    UNION ALL
+    UNWIND $datasets AS dataset
+    MATCH (d:DATASET {CMID: dataset})-[r:USES]->(c:ETHNICITY)
+    MATCH (c)<-[rc:CONTAINS]-(p:CATEGORY)
+    WHERE not rc.generic = true
+    RETURN DISTINCT d.CMID AS datasetID, r.Key AS Key, c.CMID AS CMID, c.CMName AS CMName,
+    p.CMID as LCA_CMID, p.CMName as LCA_CMName,
+    apoc.text.join(apoc.coll.toSet(r.Name), "; ") AS Name, 1 as tie
+    """
+    
+    union_queries = []
+    for i in range(2, nContains + 1):
+        union_query = f"""
+        UNION ALL
+        UNWIND $datasets AS dataset
+        MATCH (d:DATASET {{CMID: dataset}})-[r:USES]->(c:ETHNICITY)
+        MATCH (c)<-[rc:CONTAINS*{i - 1}]-(p:CATEGORY)
+        WHERE isEmpty([i in rc WHERE i.generic = true])
+        RETURN DISTINCT d.CMID AS datasetID, r.Key AS Key, c.CMID AS CMID, c.CMName AS CMName,
+        p.CMID as LCA_CMID, p.CMName as LCA_CMName,
+        apoc.text.join(apoc.coll.toSet(r.Name), "; ") AS Name, {i} as tie
+        """
+        union_queries.append(union_query)
+    
+    full_query = base_query + "\nUNION ALL".join(union_queries)
+    return full_query
