@@ -1,16 +1,9 @@
 [
     {
         "cood": [
-            -3.7134,
-            128.184
+            30,
+            69
         ],
-        "source": "glottolog4.4"
-    },
-    {
-        "cood": [
-            -3.7134,
-            128.184
-        ],
-        "source": "glottolog4.2.1"
+        "source": "EthnographicAtlas"
     }
 ]

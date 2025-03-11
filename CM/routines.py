@@ -320,13 +320,12 @@ def getBadRelations(database,mail = None):
 
         if len(results) > 0:
             if mail is not None:
-                if results:
-                    fp1 = "tmp/BadRelationshipLabels.xlsx"
-                    results.to_excel(fp1, index = False)
-                    results = results.to_dict(orient="records")
-                    sendEmail(mail, subject = "Bad Relationship Label", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])        
+                fp1 = "tmp/BadRelationshipLabels.xlsx"
+                results.to_excel(fp1, index = False)
+                results = results.to_dict(orient="records")
+                sendEmail(mail, subject = "Bad Relationship Label", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])        
 
-                return {"bad_relationship_labels_count": len(results), "bad_relationship_labels": results}    
+            return {"bad_relationship_labels_count": len(results), "bad_relationship_labels": results}    
     
     except Exception as e:
         result = str(e)
