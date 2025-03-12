@@ -982,8 +982,9 @@ return a, collect(distinct r) as r, collect(distinct e) as e
 def submit_merge():
     data = request.get_data() 
     data = json.loads(data)
-    print(data)
-    dataset_choices = data.get("datasetChoices", [])
+    dataset_choices = data.get("datasetChoices")
+    dataset_choices=dataset_choices.split(",")
+    print(dataset_choices)
     category_label = CM.unlist(data.get("categoryLabel", ""))
     intersection = CM.unlist(data.get("intersection", False))
     database = CM.unlist(data.get('database'))
@@ -1010,6 +1011,35 @@ def submitjoinDatasets():
     result = CM.joinDatasets(database, joinLeft, joinRight)
 
     return jsonify(result)
+
+@app.route('/validateDatasets', methods=['POST'])
+def submitvalidateDatasets():
+    data = request.get_data() 
+    data = json.loads(data)
+    database = CM.unlist(data.get("database", ""))
+    names = data.get("names").split(",")
+
+    if str.lower(database) == "sociomap":
+            driver = connectionSM()
+    elif str.lower(database) == "archamap":
+        driver = connectionAM()
+    else:
+        raise Exception("must specify database as SocioMap or ArchaMap")
+    
+
+    with driver.session() as session:
+        for i in names:
+            q ="""
+            MATCH (n:DATASET)
+            WHERE n.CMID = $prop
+            RETURN COUNT(n) > 0 AS nodeExists
+            """
+            result = session.run(q,prop=i)
+            node_exists = result.single()["nodeExists"]
+            if not node_exists:
+                return jsonify({"success": False, "message": "Check your Dataset IDs."})
+    driver.close()
+    return jsonify({"success": True, "message": "All IDs exist."})
 
 @app.route('/networksjs', methods=['GET'])
 def getNetworkjs():
