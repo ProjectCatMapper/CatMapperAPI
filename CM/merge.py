@@ -210,11 +210,9 @@ def proposeMerge(dataset_choices,category_label,criteria,database,intersection, 
                 return jsonify({"message": "No data found"}), 404
             
         elif criteria == "extended":
-            query = generate_cypher_query(ncontains)
+            query = generate_cypher_query(unlist(category_label),ncontains)
 
-            datasets = ["SD21","SD14"]
-            driver = getDriver("SocioMap")
-            matches = getQuery(query, driver, {"datasets": datasets})
+            matches = getQuery(query, driver, {"datasets": dataset_choices})
 
             matches = pd.DataFrame(matches)
 
@@ -231,7 +229,7 @@ def proposeMerge(dataset_choices,category_label,criteria,database,intersection, 
                 matches_grp[1].drop(columns=["datasetID"]),
                 on=["LCA_CMID", "LCA_CMName"],
                 how=merge_how,
-                suffixes=(f"_{datasets[0]}", f"_{datasets[1]}")
+                suffixes=(f"_{dataset_choices[0]}", f"_{dataset_choices[1]}")
             ).drop_duplicates()
 
             if result.empty:
@@ -260,34 +258,28 @@ def proposeMerge(dataset_choices,category_label,criteria,database,intersection, 
         except:
             return {"Error": "Unable to process error"}, 500
         
-def generate_cypher_query(nContains):
+def generate_cypher_query(domain,nContains):
+    if not isinstance(domain, str):
+        raise ValueError("domain must be a string")
     if nContains < 1:
         raise ValueError("nContains must be at least 1")
     elif nContains  > 4:
         raise ValueError("nContains must be at most 4")
-    base_query = """
+    base_query = f"""
     UNWIND $datasets AS dataset
-    MATCH (d:DATASET {CMID: dataset})-[r:USES]->(c:ETHNICITY)
+    MATCH (d:DATASET {{CMID: dataset}})-[r:USES]->(c:{domain})
     RETURN DISTINCT d.CMID AS datasetID, r.Key AS Key, c.CMID AS CMID, c.CMName AS CMName,
     c.CMID as LCA_CMID, c.CMName as LCA_CMName,
     apoc.text.join(apoc.coll.toSet(r.Name), "; ") AS Name, 0 as tie
-    UNION ALL
-    UNWIND $datasets AS dataset
-    MATCH (d:DATASET {CMID: dataset})-[r:USES]->(c:ETHNICITY)
-    MATCH (c)<-[rc:CONTAINS]-(p:CATEGORY)
-    WHERE not rc.generic = true
-    RETURN DISTINCT d.CMID AS datasetID, r.Key AS Key, c.CMID AS CMID, c.CMName AS CMName,
-    p.CMID as LCA_CMID, p.CMName as LCA_CMName,
-    apoc.text.join(apoc.coll.toSet(r.Name), "; ") AS Name, 1 as tie
     """
     
     union_queries = []
-    for i in range(2, nContains + 1):
+    for i in range(1, nContains + 1):
         union_query = f"""
         UNION ALL
         UNWIND $datasets AS dataset
-        MATCH (d:DATASET {{CMID: dataset}})-[r:USES]->(c:ETHNICITY)
-        MATCH (c)<-[rc:CONTAINS*{i - 1}]-(p:CATEGORY)
+        MATCH (d:DATASET {{CMID: dataset}})-[r:USES]->(c:{domain})
+        MATCH (c)<-[rc:CONTAINS*{i}]-(p:{domain})
         WHERE isEmpty([i in rc WHERE i.generic = true])
         RETURN DISTINCT d.CMID AS datasetID, r.Key AS Key, c.CMID AS CMID, c.CMName AS CMName,
         p.CMID as LCA_CMID, p.CMName as LCA_CMName,
@@ -295,5 +287,5 @@ def generate_cypher_query(nContains):
         """
         union_queries.append(union_query)
     
-    full_query = base_query + "\nUNION ALL".join(union_queries)
+    full_query = base_query + "\n".join(union_queries)
     return full_query
