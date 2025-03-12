@@ -210,6 +210,9 @@ def proposeMerge(dataset_choices,category_label,criteria,database,intersection, 
                 return jsonify({"message": "No data found"}), 404
             
         elif criteria == "extended":
+            if len(dataset_choices) > 2:
+                return jsonify({"message": "Please select only two datasets"}), 400
+            
             query = generate_cypher_query(unlist(category_label),ncontains)
 
             matches = getQuery(query, driver, {"datasets": dataset_choices})
@@ -234,17 +237,23 @@ def proposeMerge(dataset_choices,category_label,criteria,database,intersection, 
 
             if result.empty:
                 return jsonify({"message": "No common ancestors found"}), 404
+            
+            result["nTie"] = result.filter(like="tie").sum(axis=1, skipna=True)           
 
-            # Compute nTie and id
-            result["nTie"] = result.filter(like="tie").sum(axis=1, skipna=True)
-            result["id"] = result.filter(like="Key").apply(lambda row: " -- ".join(sorted(row.dropna().astype(str))), axis=1)
+            key1 = f"Key_{dataset_choices[0]}"
+            key2 = f"Key_{dataset_choices[1]}"
 
-            # Select the rows with the minimum nTie per group
-            result = result.loc[result.groupby("id")["nTie"].idxmin()].drop(columns=["id"])
+            min_nTie_1 = result.groupby(key1)["nTie"].transform("min")
+            min_nTie_2= result.groupby(key2)["nTie"].transform("min")
+
+            df_filtered = result[(result["nTie"] == min_nTie_1) | (result["nTie"] == min_nTie_2)]
+
+            df_filtered = df_filtered.drop_duplicates(subset=[key1, key2], keep="first")
+
 
             # Reorder columns
             cols = ["LCA_CMID", "LCA_CMName", "nTie"] + [col for col in result.columns if col not in ["LCA_CMID", "LCA_CMName", "nTie"]]
-            result = result[cols]
+            result = df_filtered[cols]
             result = result.fillna("")
 
             return result.to_dict(orient='records')
