@@ -24,6 +24,8 @@ def getQuery(query,driver, params = None, type = "dict"):
                 result = [dict(record) for record in result]
             elif type == "list":
                 result = list(itertools.chain.from_iterable(record.values() for record in result))
+            elif type == "df":
+                result = pd.DataFrame([dict(record) for record in result])
             else: 
                 raise Exception("invalid type")
             driver.close()

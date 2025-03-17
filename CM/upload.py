@@ -1033,6 +1033,8 @@ def input_Nodes_Uses(dataset,
                 link_cols = list(set(link_cols))
                 link_cols = [col for col in link_cols if col in links.columns]
 
+                print("step1")
+
                 if uploadOption == "update_replace":
                     updateLog(f"log/{user}uploadProgress.txt", "Overwriting property", write = 'a')
                     result = updateProperty(links[link_cols], database = database, user = user, updateType = "overwrite")
