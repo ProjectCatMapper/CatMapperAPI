@@ -3,3 +3,9 @@ __pycache__/app.cpython-38.pyc
 log/*
 .env
 .env1
+*.geojson
+api_env/*
+lib/*
+lib64/*
+.gpg
+pyvenv.cfg
