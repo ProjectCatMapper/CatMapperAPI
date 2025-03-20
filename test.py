@@ -170,52 +170,37 @@ syntax = createSyntax(database, template, syntax, dirpath)
 output_zip = syntax.process()
 print(output_zip)
 
-
-
-
-
-import fiona
-from shapely.geometry import shape, Polygon
-from shapely.validation import make_valid
+from CM.utils import *
+from CM.keys import *
 import geopandas as gpd
 import pandas as pd
-
-file_path = "GIS/languagemap_040429/languagemap_040102.shp"
-
-import fiona
-import geopandas as gpd
-from shapely.geometry import shape
 from shapely.validation import make_valid
 
-file_path = "GIS/languagemap_040429/languagemap_040102.shp"
+file_path = "GIS/language_map_valid.geojson"
 
-valid_geometries = []
-attributes = []
+# Read the file as a GeoDataFrame
+gis = gpd.read_file(file_path)
 
-with fiona.open(file_path, "r") as src:
-    for feature in src:
-        try:
-            geom = shape(feature["geometry"])  # Convert to Shapely
-            geom = make_valid(geom)  # Fix invalid geometries
-            if geom.is_empty:
-                print("Skipping empty geometry")
-                continue
-            valid_geometries.append(geom)
-            attributes.append(feature["properties"])
-        except Exception as e:
-            print(f"Skipping invalid feature: {e}")
+def validate_geometry(gdf):
+    # Ensure geometries are valid
+    gdf["geometry"] = gdf["geometry"].apply(make_valid)
+    return gdf
 
-# Convert to GeoDataFrame
-if valid_geometries:
-    gdf = gpd.GeoDataFrame(attributes, geometry=valid_geometries, crs="EPSG:4326")
-    gdf.to_file("fixed_shapefile.shp")
-    print(f"Saved {len(gdf)} repaired geometries.")
-else:
-    print("No valid geometries found!")
+# Validate the geometries
 
+gis = validate_geometry(gis)
 
-# Convert to GeoDataFrame
-gdf = gpd.GeoDataFrame(attributes, geometry=valid_geometries, crs="EPSG:4326")
-len(gdf)
-# Save fixed file
-gdf.to_file("fixed_shapefile.shp")
+# Save the valid geometries back to a file (if needed)
+gis.to_file("GIS/language_map_valid_fixed.geojson", driver="GeoJSON")
+
+gis
+
+driver = getDriver("SocioMap")
+datasetID = "SD486991"
+
+query = """
+MATCH (d:DATASET {CMID: $datasetID})-[r:USES]->(c:CATEGORY)
+RETURN c.CMID AS CMID, c.CMName AS CMName, r.Key as Key
+"""
+
+matches = getQuery(query, driver, params={"datasetID": datasetID})
