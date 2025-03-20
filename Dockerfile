@@ -1,4 +1,4 @@
-FROM tiangolo/uwsgi-nginx-flask:python3.8
+FROM tiangolo/uwsgi-nginx-flask:python3.9
 RUN apt update && apt install -y bash nano vim 
 RUN apt install -y libsodium-dev
 COPY ./requirements.txt /var/www/requirements.txt

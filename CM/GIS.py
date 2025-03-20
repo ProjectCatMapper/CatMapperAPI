@@ -1,7 +1,7 @@
 import json
 import pandas as pd
 from .utils import *
-import geopandas as gpd
+
 
 def convert_to_multipoint(geojson_string):
     """
