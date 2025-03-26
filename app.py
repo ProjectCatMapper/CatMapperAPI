@@ -1,6 +1,5 @@
 #from fastapi import FastAPI
-from flask import Flask,request,send_file
-from flask import jsonify, render_template, make_response, stream_with_context, Response
+from flask import Flask,request,send_file, send_from_directory, jsonify, render_template, make_response, stream_with_context, Response
 from flask_mail import Mail, Message
 from neo4j import GraphDatabase
 import os
@@ -10,19 +9,11 @@ from fuzzywuzzy import fuzz
 from bs4 import BeautifulSoup
 import json
 import re
-import string
-from flasgger import Swagger, LazyString, LazyJSONEncoder
+from flasgger import Swagger
 import CM
-import pysodium
 import pandas as pd
 import numpy as np
 from collections import defaultdict
-import logging
-from itsdangerous import URLSafeTimedSerializer
-from werkzeug.security import generate_password_hash
-from CM.upload  import input_Nodes_Uses
-from io import BytesIO
-# from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv(find_dotenv())
 uriSM = os.getenv("uriSM")
@@ -138,10 +129,6 @@ app.config['CORS_HEADERS']='Content-Type'
 app.config['PERMANENT_SESSION_LIFETIME'] = 999999999
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 
-# swagger documentation
-# app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_host=1)
-app.json_encoder = LazyJSONEncoder
-app.json.sort_keys = False
 
 app.config['MAIL_SERVER'] = os.getenv("mail_server")  # Replace with your mail server
 app.config['MAIL_PORT'] = os.getenv("mail_port")  # Typically 587 for TLS, 465 for SSL
@@ -153,16 +140,21 @@ app.config['MAIL_DEFAULT_SENDER'] = os.getenv("mail_default")  # Default sender
 
 mail = Mail(app)
 
-template = dict(swaggerUiPrefix="/api")
-swagger = Swagger(app, template=template)
-
 @app.route("/")
 def root ():
     headers = {'Content-Type': 'text/html'}
     return make_response(render_template('api.html'),200,headers)
 
 #tvalue = request.json['tvalue']
- 
+
+@app.route('/apidocs/')
+def swagger_ui():
+    return send_from_directory('static/swagger-ui', 'index.html')
+
+@app.route('/swagger.yaml')
+def swagger_yaml():
+    return send_file('swagger.yml', mimetype='application/yaml')
+
 text =['','','']
 @app.route("/count",methods=['GET','POST'])
 def abst():
@@ -227,7 +219,7 @@ def catm():
 
         relnames= []
         relations = ["USES","CONTAINS","DISTRICT_OF","LANGUOID_OF","RELIGION_OF"]
-        q = "match (a) where a.CMID = '"+cmid+"' return id(a) as id,labels(a) as label"
+        q = "match (a) where a.CMID = '"+cmid+"' return elementId(a) as id,labels(a) as label"
         # q = '''unwind $cmid as cmid unwind $relation as relation match (a)-[r]-(b) where a.CMID = cmid and type(r) = relation with b unwind labels(b) as l with l where not l = 'CATEGORY' return distinct l as label'''
         session = driver.session()
         labels = session.run(q)
@@ -517,7 +509,7 @@ return distinct Domain, Count order by Domain
 #         session = driver_neo4j.session()
 #         driver_neo4j1 =connectionGIS()
 #         session1 = driver_neo4j1.session()
-#         q = "match (a) where a.CMID = '"+socioid[0]+"' return id(a) as id,labels(a) as label"
+#         q = "match (a) where a.CMID = '"+socioid[0]+"' return elementId(a) as id,labels(a) as label"
 #         r = session.run(q)
 #         r = str(r.data()[0]['id'])
 #         label = session.run(q)
@@ -528,12 +520,12 @@ return distinct Domain, Count order by Domain
 #             if i['label'] in relations:
 #                 relnames.append(i['label'])
 #         q =   ''' match (a)<-[r:USES]-(d:DATASET)
-# where id(a) = '''+r+'''
+# where elementId(a) = '''+r+'''
 # with custom.anytoList(collect(r.Name),true) as Name, r.country as LocationID, d.project as Source, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
 # call apoc.when(LocationID is not null,'return custom.getName($id) as Location','return null',{id:LocationID}) yield value
 # return Name, custom.anytoList(collect(value.Location),true) as Location, type as Type, apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Populationest`,  apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Source, Version, Link order by `Time span`, Source, Name'''
 #         results = session.run(q)
-#         q1 = '''match (a)<-[r:USES]-(d:DATASET) where id(a) = '''+r+''' and (r.geoCoords is not null or r.geoPolygon is not null) return r.geoCoords as point, r.geoPolygon as polygon, d.shortName as source, r.Key as Key'''
+#         q1 = '''match (a)<-[r:USES]-(d:DATASET) where elementId(a) = '''+r+''' and (r.geoCoords is not null or r.geoPolygon is not null) return r.geoCoords as point, r.geoPolygon as polygon, d.shortName as source, r.Key as Key'''
 #         results1 = session.run(q1)
 #         resultsm = results1.data()
 #         flag = 0
@@ -840,7 +832,7 @@ def upload_API():
                     nodeProperties = linkProperties
                     linkProperties = None               
 
-            response = input_Nodes_Uses(
+            response = CM.input_Nodes_Uses(
                  dataset=df,
                  database=database,
                  uploadOption = uploadOption,
@@ -868,7 +860,7 @@ def upload_API():
             df.rename(columns={CMName: "CMName", CMID: "CMID", Name: "Name", Key: "Key", altNames: "altNames"}, inplace=True)
             df = df.to_dict(orient='records')
             # return {"Name":Name, "CMID":CMID,"altNames":altNames,"Key":Key,"user":user,"overwriteProperties":overwriteProperties,"updateProperties":updateProperties,"addDistrict":addDistrict,"addRecordYear":addRecordYear}
-            response = input_Nodes_Uses(
+            response = CM.input_Nodes_Uses(
                 dataset = df,
                 database = database,
                 uploadOption = "add_uses",
@@ -978,13 +970,13 @@ return a, collect(distinct r) as r, collect(distinct e) as e
     except Exception as e:
         return str(e), 500
     
-@app.route('/proposeMergeSubmit', methods=['POST']) # what about calling this createLinkfile internally?
+@app.route('/proposeMergeSubmit', methods=['POST']) # what about calling this createLinkfile internally? # do we want to?
 def submit_merge():
     data = request.get_data() 
     data = json.loads(data)
     dataset_choices = data.get("datasetChoices")
     dataset_choices=dataset_choices.split(",")
-    print(dataset_choices)
+    ncontains = data.get("mergelevel")
     category_label = CM.unlist(data.get("categoryLabel", ""))
     intersection = CM.unlist(data.get("intersection", False))
     database = CM.unlist(data.get('database'))
@@ -995,9 +987,15 @@ def submit_merge():
         category_label = "DISTRICT"
     
 
-    result = CM.proposeMerge(dataset_choices,category_label,criteria,database,intersection)
+    result = CM.proposeMerge(dataset_choices,category_label,criteria,database,intersection,ncontains)
 
     return result
+
+@app.route('/downloadMergeCode', methods=['POST']) 
+def get_merge_code():
+    data = request.get_data() 
+    data = json.loads(data)
+    
 
 @app.route('/joinDatasets', methods=['POST'])
 def submitjoinDatasets():
@@ -1222,223 +1220,20 @@ def getSearch():
         limit = request.args.get('limit')
         query = request.args.get('query')
 
-        if domain == "ANY DOMAIN":
-            domain = "CATEGORY"
-        if domain == "AREA":
-            domain = "DISTRICT"
+        result = CM.search(
+            database,
+            term,
+            property,
+            domain,
+            yearStart,
+            yearEnd, 
+            context, 
+            country, 
+            limit,
+            query
+        )
+        return result
 
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        else:
-            raise Exception("must specify database as 'SocioMap' or 'ArchaMap'")
-        
-        if term:
-            term= term.strip()
-        
-        if term == "":
-            term = None
-
-        if property == "":
-            property = None
-
-        if domain == "":
-            domain = None
-
-        if domain is None:
-            domain = "CATEGORY"
-
-        # need to add check to mak sure property is valid and domain is valid
-
-        if context is not None:
-            if context == "null" or context == "":
-                context = None
-            else:
-                if re.search("^SM|^SD|^AD|^AM",context) is None:
-                    raise Exception("context must be a valid CMID")
-            
-        if country is not None:
-            if country == "null":
-                country = None
-            else:
-                if re.search("^SM|^SD|^AD|^AM",country) is None:
-                    raise Exception("country must be a valid CMID")
-                  
-        if yearStart == "null":
-            yearStart = None
-
-        if yearEnd == "null":
-            yearEnd = None
-
-        try:
-            if yearStart is not None:
-                yearStart = int(yearStart)
-        except ValueError:
-            raise Exception("yearStart must be an integer")
-        
-        try:
-            if yearEnd is not None:
-                yearEnd = int(yearEnd)
-        except ValueError:
-            raise Exception("yearEnd must be an integer")
-
-        if yearEnd is None and yearStart is not None:
-            raise Exception("must specify yearEnd property")
-        
-        if yearStart is None and yearEnd is not None:
-            raise Exception("must specify yearStart property")
-
-        try:
-            if limit is not None:
-                limit = int(limit)
-        except ValueError:
-            raise Exception("limit must be an integer")
-
-        if limit is None:
-            limit = 10000
-        
-        if property is None and term is not None:
-            raise Exception("Must specify a property (e.g., Name, CMID, or Key)")
-        
-        # Define the Cypher query
-
-        # if no term specified
-        if term is None:
-            qStart = f"match (a:{domain}) with a, '' as matching, 0 as score" 
-        elif property == "Key":
-                qStart = f"""
-call db.index.fulltext.queryRelationships('keys','"' + custom.escapeText($term) + '"') yield relationship
-with endnode(relationship) as a, relationship.Key as matching, case when $term contains ":" then $term else ": " + $term end as term
-where '{domain}' in labels(a) and matching ends with term
-with a, matching, 0 as score
-"""
-                
-        elif property == "Name":
-            if domain != "DATASET":
-                qStart = f"""
-call {{with $term as term
-call db.index.fulltext.queryNodes('{domain}', '"' + term +'"') yield node return node
-union with $term as term
-call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term)) yield node return node
-union with $term as term
-call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term) + '~') yield node return node}}
-with node as a
-with a, custom.matchingDist(a.names, $term) as matching
-with a, matching.matching as matching, toInteger(matching.score) as score
-"""
-                
-            else:
-                qStart = f"""
-call {{with $term as term
-call db.index.fulltext.queryNodes('{domain}', '"' + term +'"') yield node return node
-union with $term as term
-call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term))  yield node return node
-union with $term as term
-call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term) + '~') yield node return node}}
-with node as a
-with a, custom.matchingDist([a.CMName, a.shortName, a.DatasetCitation], $term) as matching
-with a, matching.matching as matching, toInteger(matching.score) as score
-"""
-        elif property == "CMID":
-            qStart = """
-match (a) where a.CMID = $term
-call apoc.when("DELETED" in labels(a),"match (a)-[:IS]->(b) return b as node, a.CMID as matching","return a as node, a.CMID as matching",{a:a}) yield value
-with value.node as a, value.matching as matching, 0 as score
-"""         
-
-        else:
-            qStart = f"""
-match (a) where tolower(a.{property}) = tolower($term)
-with a, a.{property} as matching, 0 as score
-"""
-
-        # filter by domain
-
-        qDomain = f" where '{domain}' in labels(a) "
-
-        qUnique = """
-with a, collect(matching) as matchingL, 
-collect(score) as scores call {with matchingL, 
-scores unwind matchingL as matching 
-unwind scores as score return distinct matching, score order by score limit 1}
-with a, matching, score
-"""
-
-        # filter by country
-        if country is not None:
-            qCountryFilter = """
-where (a)<-[:DISTRICT_OF]-(:ADM0 {CMID: $country})
-with a, matching, score
-"""
-        else:
-            country = ""
-            qCountryFilter = " "
-
-        # filter by context
-        if context is not None:
-            qContext = """
-where (a)<--({CMID: $context})
-with a, matching, score
-"""
-        else:
-            context = ""
-            qContext = " "
-
-            # filter by year
-        if yearStart is not None:
-            if domain == "DATASET":
-                qYear = f"""
-call {{with a where not a.ApplicableYears is null with a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
-else a.ApplicableYears end as yearMatch, range(toInteger('{yearStart}'),toInteger('{yearEnd}')) as years
-with a, years, [i in apoc.coll.toSet(apoc.coll.flatten(collect(yearMatch),true))) | toInteger(i)] as yearMatch 
-where not isEmpty([i in yearMatch where toInteger(i) in years]) return a as node}}
-with node as a, matching, score
-"""   
-            else:
-                qYear = f"""
-call {{ with a with a, range(toInteger('{yearStart}'),toInteger('{yearEnd}')) as inputYears 
-match (a)<-[r:USES]-(:DATASET) where r.yearStart is not null and not isEmpty(r.yearStart) with a, inputYears, range(apoc.coll.min([i in apoc.coll.flatten(collect(r.yearStart),true) | 
-toInteger(i)]), apoc.coll.max(custom.getYear(collect(r.yearEnd)))) as years where not isEmpty([i in inputYears where i in years]) return a as node}}
-with node as a, matching, score order by score desc
-"""   
-        else: 
-            qYear = " "
-        
-        # limit results
-        qLimit = f"with distinct a, matching, score order by score limit {limit} "
-
-        # get country
-        qCountry = """
-optional match (a)<-[:DISTRICT_OF]-(c:ADM0)
-with a, matching, apoc.coll.toSet(collect(c.CMName)) as country, score
-"""
-
-
-
-        # return results
-        qReturn = """
-return distinct a.CMID as CMID, a.CMName as CMName, 
-custom.getLabel(a) as domain, matching, score as matchingDistance, 
-country order by matchingDistance
-"""
-
-        cypher_query = qStart + qDomain + qUnique + qCountryFilter + qContext + qYear + qLimit + qCountry + qReturn
-            
-        if query != 'true':   
-            # Execute the Cypher queries
-            with driver.session() as session:
-                result = session.run(cypher_query, term = term, context = context, country = country)
-            
-                # Process the query results and generate the dynamic JSON
-                data = [dict(record) for record in result]
-
-                driver.close()
-            return jsonify(data)
-        else:
-            print(cypher_query)
-            # return([qStart,qDomain,qUnique,qContext,qYear,qLimit,qCountry,qReturn])
-            return({"query":cypher_query,"parameters":[{"term": term,"context":context,"country":country,"domain":domain,"yearStart":yearStart,"yearEnd":yearEnd}]})
     except Exception as e:
         return str(e), 500
 
@@ -1747,7 +1542,7 @@ def getDataset():
         where a.CMID = cmid
         unwind keys(r) as property 
         return distinct a.CMName as datasetName, a.CMID as datasetID, 
-        b.CMID as CMID, b.CMName as CMName, id(r) as relID, property, r[property] as value, custom.getName(r[property]) as property_name
+        b.CMID as CMID, b.CMName as CMName, elementId(r) as relID, property, r[property] as value, custom.getName(r[property]) as property_name
         """
 
             data = CM.getQuery(query = query, driver = driver, params = {"cmid":cmid,"domain":domain})
@@ -1760,7 +1555,7 @@ def getDataset():
         where i in apoc.coll.flatten([$domain],true)])
         unwind keys(r) as property 
         return distinct a.CMName as datasetName, a.CMID as datasetID, 
-        b.CMID as CMID, b.CMName as CMName, id(r) as relID, property, r[property] as value, custom.getName(r[property]) as property_name
+        b.CMID as CMID, b.CMName as CMName, elementId(r) as relID, property, r[property] as value, custom.getName(r[property]) as property_name
         """
 
             data = CM.getQuery(query = query, driver = driver, params = {"cmid":cmid,"domain":domain})
@@ -1844,7 +1639,9 @@ def routines():
         elif fun == "getBadDomains":
             result = CM.getBadDomains(database, mail) 
         elif fun == "getBadRelations":
-            result = CM.getBadRelations(database, mail) 
+            result = CM.getBadRelations(database, mail)
+        elif fun == "cmnameNotInName":
+            result = CM.cmnameNotInName(database,mail)
         else:
             result = "function not found"
         return result
@@ -1872,13 +1669,13 @@ def getCMID():
 unwind $cmid as cmid 
 match (c {CMID: cmid}) 
 unwind keys(c) as nodeProperties  
-return id(c) as nodeID, nodeProperties, c[nodeProperties] as nodeValues
+return elementId(c) as nodeID, nodeProperties, c[nodeProperties] as nodeValues
 """
         query2 = """
 unwind $cmid as cmid 
 match (c {CMID: cmid})<-[r:USES]-(d) 
 unwind keys(r) as relProperties 
-return id(r) as relID, relProperties, r[relProperties] as relValues
+return elementId(r) as relID, relProperties, r[relProperties] as relValues
 """
 
         with driver.session() as session:
@@ -1931,7 +1728,7 @@ def getAllDatasets():
         
         query = """
 match (d:DATASET) 
-return id(d) as nodeID, 
+return elementId(d) as nodeID, 
 d.CMName as CMName, 
 d.CMID as CMID, 
 d.shortName as shortName, 

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>CatMapper API Docs</title>
+    <link rel="stylesheet" type="text/css" href="/api/static/swagger-ui/swagger-ui.css" />
+    <link rel="icon" type="image/png" href="/api/static/swagger-ui/favicon-32x32.png" sizes="32x32" />
+    <link rel="icon" type="image/png" href="/api/static/swagger-ui/favicon-16x16.png" sizes="16x16" />
+  </head>
+
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="/api/static/swagger-ui/swagger-ui-bundle.js" charset="UTF-8"></script>
+    <script src="/api/static/swagger-ui/swagger-ui-standalone-preset.js" charset="UTF-8"></script>
+    <script>
+      window.onload = () => {
+        window.ui = SwaggerUIBundle({
+          url: "/api/swagger.yaml",
+          dom_id: '#swagger-ui',
+          deepLinking: true,
+          presets: [
+            SwaggerUIBundle.presets.apis,
+            SwaggerUIStandalonePreset
+          ],
+          layout: "StandaloneLayout"
+        });
+      };
+    </script>
+  </body>
+</html>

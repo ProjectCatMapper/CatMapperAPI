@@ -5,6 +5,7 @@
 from neo4j import GraphDatabase
 from CM.utils import *
 from CM.email import *
+from CM.USES import *
 import pandas as pd
 import json
 
@@ -329,4 +330,42 @@ def getBadRelations(database,mail = None):
     
     except Exception as e:
         result = str(e)
-        return result, 500  
+        return result, 500
+
+
+def cmnameNotInName(database,mail=None):
+    try:        
+        driver = getDriver(database)
+
+        session = driver.session()
+
+        query = """
+        MATCH (n:CATEGORY)
+        WHERE NOT n.names CONTAINS n.CMName
+        RETURN n.CMName AS CMName, n.CMID as CMID
+        """
+
+        result = session.run(query)
+        
+        cmids = []
+        for record in result:
+            cmids.append(record["CMID"])
+        
+        if len(cmids)>0:
+            for cmid in cmids:
+                addCMNameRel(database, CMID=cmid)
+                updateAltNames(driver, CMID=cmid)
+            
+            if mail is not None:
+                fp1 = "tmp/BadCMNames.xlsx"
+                cmid.to_excel(fp1, index = False)
+                results = cmid.to_dict(orient="records")
+                sendEmail(mail, subject = "Bad Relationship Label", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+
+            return {"Name not in CMName":results}
+        
+    except Exception as e:
+        result = str(e)
+        return result, 500
+
+

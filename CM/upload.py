@@ -184,7 +184,7 @@ def createNodes(df,database,user, uniqueID = None):
         return a',
         {{row: row}}) yield value 
         with value.a as a 
-        return distinct id(a) as nodeID,
+        return distinct elementId(a) as nodeID,
         {return_clause}
         """
 
@@ -277,7 +277,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         MATCH (b:CATEGORY) WHERE row.CMID = b.CMID
         {create} (a)-[r:USES {{Key: row['Key']}}]->(b)
         {onCreate}SET r.status = 'update', {keys_string}
-        RETURN id(b) AS nodeID, b.CMID AS CMID, b.CMName as CMName, r.Key as Key, a.CMID as datasetID
+        RETURN elementId(b) AS nodeID, b.CMID AS CMID, b.CMName as CMName, r.Key as Key, a.CMID as datasetID
         """
 
         # Get the number of relationships before adding
@@ -375,14 +375,14 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}}) 
             WITH row, r, b
             SET {keys}, r.status = "update"
-            RETURN id(b) as nodeID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, row.parent as parent, row.parentContext as parentContext
+            RETURN elementId(b) as nodeID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, row.parent as parent, row.parentContext as parentContext
             """
         else:
             q = f"""
             UNWIND $rows AS row
             MATCH (r:DATASET {{CMID: row.CMID}})
             SET {keys}, r.status = "update"
-            RETURN id(r) as nodeID, r.CMID as CMID
+            RETURN elementId(r) as nodeID, r.CMID as CMID
             """
 
         links_dict = links.to_dict(orient = "records")
@@ -595,7 +595,7 @@ def input_Nodes_Uses(dataset,
     driver = getDriver(database)
 
     error_columns = ["CMID", "datasetID", "language","district", "country", "religion"]
-    multi_value_columns = {"language", "district", "country", "religion","parent"}  
+    multi_value_columns = {"language", "district", "country", "religion","parent"}
 
     for i in error_columns:
         if i in dataset.columns:
@@ -623,6 +623,44 @@ def input_Nodes_Uses(dataset,
 
             if missing_values:
                 raise ValueError(f"Error: Missing values in database for column '{i}': {missing_values}")
+    
+    #checking labels for columns
+    for i in multi_value_columns:
+        if i in dataset.columns:
+            rows_to_check = []
+            for row in data_dict:
+                if row.get(i):  
+                    values = [val.strip() for val in row[i].split(";") if val.strip()]
+                    rows_to_check.extend([{"value": v} for v in values])
+            
+            if not rows_to_check:
+                continue
+
+
+            if i != "parent":
+
+                if i == "country":
+                    check_label = "DISTRICT"
+                elif i == " language":
+                    check_label = "LANGUOID"
+                else:
+                    check_label = i.upper()
+
+                query ="""UNWIND $rows AS row
+                        OPTIONAL MATCH (n)
+                        WHERE NOT $label IN n.labels
+                        RETURN row.value AS value
+                        """
+
+                with driver.session() as session:
+                    results = session.run(query, rows=rows_to_check,label = check_label)
+                    wrong_labels = [r["value"] for r in results.data()]
+                
+                if wrong_labels:
+                    raise ValueError(f"Error: Wrong labels in database for column '{i}': {wrong_labels}")
+
+
+            
             
     if uploadOption =="node_add":
             
@@ -1112,6 +1150,8 @@ def input_Nodes_Uses(dataset,
                 f.write(f"Failed to process the exception: {internal_error}\n")
         return None
     
+    dup_result = final_result.copy(deep=True)
+    
     final_result = final_result.loc[:, ~final_result.columns.duplicated()]
     final_result = final_result.drop_duplicates()
     final_result = final_result.dropna(axis=1, how='any')
@@ -1120,9 +1160,9 @@ def input_Nodes_Uses(dataset,
     cols = list({x for x in cols if x in final_result.columns})
     df = dataset[cols]
 
-    print(dataset.columns)
-    print(final_result.columns)
-    print(cols)
+    secondary = pd.concat([dataset, dup_result.add_suffix('_new')], axis=1)
+
+    secondary.to_excel("sec.xlsx",index = False)
 
     final_result = pd.merge(df, final_result, how='left', on=cols)
 
