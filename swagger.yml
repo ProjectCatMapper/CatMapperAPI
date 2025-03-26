@@ -10,6 +10,30 @@ paths:
     get:
       summary: Download dataset information
       description: Return all USES relationships for the specified dataset
+      parameters:
+      - name: database
+        in: query
+        description: Name of the CatMapper database to search
+        required: true
+        style: form
+        explode: true
+        schema:
+          enum:
+          - SocioMap
+          - ArchaMap
+      responses:
+        "200":
+          description: "JSON of search results unless query is true, then a JSON with\
+            \ the cypher query is returned."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/inline_response_200'
+        "500":
+          description: JSON of error
+          content:
+            application/json:
+              schema: {}
   /search:
     get:
       summary: Search in the database

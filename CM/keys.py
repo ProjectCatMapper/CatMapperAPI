@@ -41,25 +41,21 @@ def extract_key(nodes, col="Key", sep=None):
         nodes = nodes.dropna(subset=[col])
         nodes[col] = nodes[col].astype(str).str.split(sep)
         nodes = nodes.explode(col)
+
+    nodes = nodes.reset_index() 
     
-    result = nodes.dropna(subset=[col]).copy()
-    result["tmp_key"] = result[col]
+    tmp = nodes[["index",col]].dropna(subset=[col]).copy()
+    tmp[col] = tmp[col].str.split(";")
+    tmp = tmp.explode(col)
+    tmp[col] = tmp[col].str.strip()
+    tmp[['KeyName', 'KeyVal']] = tmp[col].str.split(': ', n=1, expand=True)
+    tmp['KeyName'] = tmp['KeyName'].str.strip()
+    tmp['KeyVal'] = tmp['KeyVal'].str.strip()
+    tmp.drop(columns=[col], inplace=True)
+    tmp = tmp.pivot(index='index', columns='KeyName', values='KeyVal')
     
-    result[['primary', 'alternate']] = result['tmp_key'].str.split(';', n=1, expand=True).reindex(columns=['primary', 'alternate'])
-    result[["KeyName", "KeyVal"]] = result["primary"].astype(str).str.split(":", n=1, expand=True).reindex(columns=["KeyName", "KeyVal"])
-    result[["altKeyName", "altKeyVal"]] = result["alternate"].astype(str).str.split(":", n=1, expand=True).reindex(columns=["altKeyName", "altKeyVal"])
-    
-    result = result.drop(columns=["tmp_key", "primary", "alternate"], errors='ignore')
-    result = result.applymap(lambda x: x.strip() if isinstance(x, str) else x)
-    
-    result = pd.concat([result, error_nodes.astype(str)], ignore_index=True)
-    
-    if result["altKeyName"].dropna().eq("").all():
-        print("Removing empty columns")
-        result = result.drop(columns=["altKeyName"], errors='ignore')
-    
-    if result["altKeyVal"].dropna().eq("").all():
-        print("Removing empty columns")
-        result = result.drop(columns=["altKeyVal"], errors='ignore')
+    result = pd.merge(nodes, tmp, how='left', on = "index")
+    result.drop(columns=["index"], inplace=True)
+    result = pd.concat([result, error_nodes], ignore_index=True)
 
     return result
