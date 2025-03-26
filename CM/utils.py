@@ -197,22 +197,21 @@ def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database = "SocioMap"):
     newID = list(range(newID, newID + n))
 
     # Add prefixes based on the database and label
-    if new_id == "CMID":
-        prefix = ''
-        if database == "SocioMap":
-            prefix = "S"
-        elif database == "ArchaMap":
-            prefix = "A"
-        elif database == "gisdb":
-            prefix = "gis"
+    prefix = ''
+    if database == "SocioMap":
+        prefix = "S"
+    elif database == "ArchaMap":
+        prefix = "A"
+    elif database == "gisdb":
+        prefix = "gis"
         
-        if database == "gisdb":
-            newID = [f"{prefix}{x}" for x in newID]
+    if database == "gisdb":
+        newID = [f"{prefix}{x}" for x in newID]
+    else:
+        if label == "DATASET":
+            newID = [f"{prefix}D{x}" for x in newID]
         else:
-            if label == "DATASET":
-                newID = [f"{prefix}D{x}" for x in newID]
-            else:
-                newID = [f"{prefix}M{x}" for x in newID]
+            newID = [f"{prefix}M{x}" for x in newID]
 
     return newID
 
