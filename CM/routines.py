@@ -220,11 +220,11 @@ def getBadJSON(database,mail = None):
         results2 = validateJSON(database = database, property = 'parentContext', path = fp2)
 
         if mail is not None:
-            if results1:
+            if len(results1)>0:
                 sendEmail(mail, subject = "Invalid geoCoords properties", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
                 mailSent = "True"
 
-            if results2:
+            if len(results2)>0:
                 sendEmail(mail, subject = "Invalid parentContext properties", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp2])
                 mailSent = "True"
 
