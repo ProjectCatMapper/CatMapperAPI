@@ -116,7 +116,7 @@ def search(
     with a, a.names as nameList
     with a, nameList,  [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText($term))] as scores
     with a, nameList, scores, apoc.coll.min(scores) as score
-    with a, nameList[apoc.coll.indexOf(scores,scores)] as matching, score
+    with a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
     """
 
         else:
