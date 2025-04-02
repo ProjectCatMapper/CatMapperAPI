@@ -111,6 +111,8 @@ def createNodes(df,database,user, uniqueID = None):
 
         labels = getQuery("MATCH (l:LABEL) return l.label as label", driver, type = "list")
 
+        print(labels)
+
         df = df.copy()
 
         if "label" in df.columns:
@@ -125,7 +127,7 @@ def createNodes(df,database,user, uniqueID = None):
             raise Exception("Error: label must be more specific than CATEGORY")
 
         if not all(label in labels for label in df["label"].unique()):
-            raise Exception("Error: label is not valid.")
+            raise Exception("Error: label is not valid. Maybe check the spelling")
 
         idlabel = 'CATEGORY'
         if isDataset:
@@ -623,7 +625,7 @@ def input_Nodes_Uses(dataset,
 
             if missing_values:
                 raise ValueError(f"Error: Missing values in database for column '{i}': {missing_values}")
-    
+            
     #checking labels for columns
     for i in multi_value_columns:
         if i in dataset.columns:
@@ -641,14 +643,14 @@ def input_Nodes_Uses(dataset,
 
                 if i == "country":
                     check_label = "DISTRICT"
-                elif i == " language":
+                elif i == "language":
                     check_label = "LANGUOID"
                 else:
                     check_label = i.upper()
 
                 query ="""UNWIND $rows AS row
-                        OPTIONAL MATCH (n)
-                        WHERE NOT $label IN n.labels
+                        MATCH (n:CATEGORY {CMID: row.value})
+                        WHERE NOT $label IN labels(n)
                         RETURN row.value AS value
                         """
 
@@ -658,10 +660,42 @@ def input_Nodes_Uses(dataset,
                 
                 if wrong_labels:
                     raise ValueError(f"Error: Wrong labels in database for column '{i}': {wrong_labels}")
+            else:
+                if uploadOption == "add_node":
+                    continue
+                else:
+                    query ="""
+                    UNWIND keys($rows) AS cmid
+                    MATCH (n {CMID: cmid})
+                    MATCH (m {CMID: $rows[cmid]})
+                    RETURN labels(n) AS parent_labels, labels(m) AS child_labels
+                    """
 
+                    parent_labels = []
+                    child_labels = []
 
-            
-            
+                    combine = dict(zip(dataset["CMID"],rows_to_check))
+
+                    with driver.session() as session:
+                        results = session.run(query, rows=combine)
+                        for record in results:
+                                parent_labels.append(record["parent_labels"])
+                                child_labels.append(record["child_labels"])
+                    
+                    required_labels = {"LANGUOID", "RELIGION", "ETHNICITY", "DISTRICT"}
+
+                    def validate_labels(parent_labels, child_labels):
+                        for idx, (i, j) in enumerate(zip(parent_labels, child_labels)):
+                            value_has_required = required_labels.intersection(set(i))
+                            cmid_has_required = required_labels.intersection(set(j))
+
+                            if value_has_required != cmid_has_required:
+                                raise ValueError(f"Mismatch at row {idx}: Parent node labels dont match that of the child node.\n"
+                                                f"Parent Labels: {i}\n"
+                                                f"Child Labels: {j}")
+
+                    validate_labels(parent_labels, child_labels)
+                                  
     if uploadOption =="node_add":
             
         from functools import reduce        
@@ -1160,9 +1194,9 @@ def input_Nodes_Uses(dataset,
     cols = list({x for x in cols if x in final_result.columns})
     df = dataset[cols]
 
-    secondary = pd.concat([dataset, dup_result.add_suffix('_new')], axis=1)
+    # secondary = pd.concat([dataset, dup_result.add_suffix('_new')], axis=1)
 
-    secondary.to_excel("sec.xlsx",index = False)
+    # secondary.to_excel("sec.xlsx",index = False)
 
     final_result = pd.merge(df, final_result, how='left', on=cols)
 
