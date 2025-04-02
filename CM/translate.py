@@ -3,17 +3,18 @@ from .utils import *
 # import jsonify
 from flask import jsonify
 
-def search(            
-            database,
-            term,
-            property,
-            domain,
-            yearStart,
-            yearEnd, 
-            context, 
-            country, 
-            limit,
-            query):
+
+def search(
+        database,
+        term,
+        property,
+        domain,
+        yearStart,
+        yearEnd,
+        context,
+        country,
+        limit,
+        query):
 
     if domain == "ANY DOMAIN":
         domain = "CATEGORY"
@@ -23,7 +24,7 @@ def search(
     driver = getDriver(database)
 
     if term:
-        term= term.strip()
+        term = term.strip()
 
     if term == "":
         term = None
@@ -43,16 +44,16 @@ def search(
         if context == "null" or context == "":
             context = None
         else:
-            if re.search("^SM|^SD|^AD|^AM",context) is None:
+            if re.search("^SM|^SD|^AD|^AM", context) is None:
                 raise Exception("context must be a valid CMID")
-        
+
     if country is not None:
         if country == "null":
             country = None
         else:
-            if re.search("^SM|^SD|^AD|^AM",country) is None:
+            if re.search("^SM|^SD|^AD|^AM", country) is None:
                 raise Exception("country must be a valid CMID")
-                
+
     if yearStart == "null":
         yearStart = None
 
@@ -93,15 +94,15 @@ def search(
 
     # if no term specified
     if term is None:
-        qStart = f"match (a:{domain}) with a, '' as matching, 0 as score" 
+        qStart = f"match (a:{domain}) with a, '' as matching, 0 as score"
     elif property == "Key":
-            qStart = f"""
+        qStart = f"""
     call db.index.fulltext.queryRelationships('keys','"' + custom.escapeText($term) + '"') yield relationship
     with endnode(relationship) as a, relationship.Key as matching, case when $term contains ":" then $term else ": " + $term end as term
     where '{domain}' in labels(a) and matching ends with term
     with a, matching, 0 as score
     """
-            
+
     elif property == "Name":
         if domain != "DATASET":
             qStart = f"""
@@ -117,7 +118,7 @@ def search(
     with a, nameList, scores, apoc.coll.min(scores) as score
     with a, nameList[apoc.coll.indexOf(scores,scores)] as matching, score
     """
-            
+
         else:
             qStart = f"""
     call {{with $term as term
@@ -137,7 +138,7 @@ def search(
     match (a) where a.CMID = $term
     call apoc.when("DELETED" in labels(a),"match (a)-[:IS]->(b) return b as node, a.CMID as matching","return a as node, a.CMID as matching",{a:a}) yield value
     with value.node as a, value.matching as matching, 0 as score
-    """         
+    """
 
     else:
         qStart = f"""
@@ -186,15 +187,15 @@ def search(
     with a, years, [i in apoc.coll.toSet(apoc.coll.flatten(collect(coalesce(yearMatch,"")),true))) | toInteger(i)] as yearMatch 
     where not isEmpty([i in yearMatch where toInteger(i) in years]) return a as node}}
     with node as a, matching, score
-    """   
+    """
         else:
             qYear = f"""
     call {{ with a with a, range(toInteger('{yearStart}'),toInteger('{yearEnd}')) as inputYears 
     match (a)<-[r:USES]-(:DATASET) where r.yearStart is not null and not isEmpty(r.yearStart) with a, inputYears, range(apoc.coll.min([i in apoc.coll.flatten(collect(r.yearStart),true) | 
     toInteger(i)]), apoc.coll.max(custom.getYear(collect(r.yearEnd)))) as years where not isEmpty([i in inputYears where i in years]) return a as node}}
     with node as a, matching, score order by score desc
-    """   
-    else: 
+    """
+    else:
         qYear = " "
 
     # limit results
@@ -206,8 +207,6 @@ def search(
     with a, matching, apoc.coll.toSet(collect(c.CMName)) as country, score
     """
 
-
-
     # return results
     qReturn = """
     return distinct a.CMID as CMID, a.CMName as CMName, 
@@ -215,14 +214,17 @@ def search(
     country order by matchingDistance
     """
 
-    cypher_query = qStart + qDomain + qUnique + qCountryFilter + qContext + qYear + qLimit + qCountry + qReturn
-        
-    if query != 'true':   
-        data = getQuery(cypher_query, driver, params={"term": term, "context": context, "country": country, "yearStart": yearStart, "yearEnd": yearEnd})
-        
+    cypher_query = qStart + qDomain + qUnique + qCountryFilter + \
+        qContext + qYear + qLimit + qCountry + qReturn
+
+    if query != 'true':
+        data = getQuery(cypher_query, driver, params={
+                        "term": term, "context": context, "country": country, "yearStart": yearStart, "yearEnd": yearEnd})
+
         return jsonify(data)
     else:
-        return({"query":cypher_query,"parameters":[{"term": term,"context":context,"country":country,"domain":domain,"yearStart":yearStart,"yearEnd":yearEnd}]})
+        return ({"query": cypher_query, "parameters": [{"term": term, "context": context, "country": country, "domain": domain, "yearStart": yearStart, "yearEnd": yearEnd}]})
+
 
 def translate(
         database,
@@ -230,15 +232,15 @@ def translate(
         domain,
         key,
         term,
-        country, 
-        context ,
+        country,
+        context,
         dataset,
-        yearStart, 
+        yearStart,
         yearEnd,
         query,
         table,
         uniqueRows):
-    
+
     if query is not None:
         if query.lower() != 'true':
             query = 'false'
@@ -253,27 +255,29 @@ def translate(
     driver = getDriver(database)
 
     # format data
-    # add rowid, 
+    # add rowid,
     # table = [{'Name':'test1',"key": 1}, {'Name':'test1',"key": 2}, {'Name':'test2',"key": 3}]
     df = pd.DataFrame(table)
     df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
     df['CMuniqueRowID'] = df.index
-    rows = pd.DataFrame({'term': df[term],'CMuniqueRowID': df["CMuniqueRowID"]})
-    if isinstance(country,str) and country in df.columns:
+    rows = pd.DataFrame(
+        {'term': df[term], 'CMuniqueRowID': df["CMuniqueRowID"]})
+    if isinstance(country, str) and country in df.columns:
         rows['country'] = df[country]
-    if isinstance(context,str) and context in df.columns:
+    if isinstance(context, str) and context in df.columns:
         rows['context'] = df[context]
-    if isinstance(dataset,str) and dataset in df.columns:
+    if isinstance(dataset, str) and dataset in df.columns:
         rows['dataset'] = df[dataset]
-    if isinstance(yearStart,str) and yearStart is not None:
+    if isinstance(yearStart, str) and yearStart is not None:
         rows['yearStart'] = yearStart
-    if isinstance(yearEnd,str) and yearEnd is not None:
+    if isinstance(yearEnd, str) and yearEnd is not None:
         rows['yearEnd'] = yearEnd
     rows.dropna(subset=['term'], inplace=True)
     rows = rows[rows['term'] != '']
     columns_to_group_by = rows.columns.difference(['CMuniqueRowID']).tolist()
     if not uniqueRows:
-        rows = rows.groupby(columns_to_group_by)['CMuniqueRowID'].apply(list).reset_index()
+        rows = rows.groupby(columns_to_group_by)[
+            'CMuniqueRowID'].apply(list).reset_index()
     rows['CMuniqueCategoryID'] = rows.index
 
     rows = rows.to_dict('records')
@@ -290,7 +294,7 @@ def translate(
     AND ( (matching CONTAINS ";" AND row.term CONTAINS ";") OR NOT matching CONTAINS ";" )
     with row, a, matching, 0 as score
     """
-    elif property in ["glottocode","ISO","CMID"]:
+    elif property in ["glottocode", "ISO", "CMID"]:
         if property == "CMID":
             indx = "CMIDindex"
         else:
@@ -329,10 +333,10 @@ def translate(
     union with row 
     call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term) + '~') yield node return node}}
     with row, node as a
-    with a, [a.CMName, a.shortName, a.DatasetCitation] as nameList
-    with a, nameList,  [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText(row.term))] as scores
-    with a, nameList, scores, apoc.coll.min(scores) as score
-    with a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
+    with row, a, [a.CMName, a.shortName, a.DatasetCitation] as nameList
+    with row, a, nameList,  [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText(row.term))] as scores
+    with row, a, nameList, scores, apoc.coll.min(scores) as score
+    with row, a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
     """
 
     else:
@@ -373,7 +377,7 @@ def translate(
         where r.Key ends with row.term
         with row, a, matching, score
         """
-        else: 
+        else:
             qDataset = """
         match (a)<-[r:USES]-(d:DATASET {CMID: row.dataset}) 
         with row, a, matching, score
@@ -398,8 +402,8 @@ def translate(
     unwind r.yearEnd as yearEnd with years, a, r, apoc.coll.toSet(collect(yearStart) + collect(yearEnd)) as yearMatch 
     where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}}
     with row, node as a, matching, score order by score desc
-    """   
-    else: 
+    """
+    else:
         qYear = " "
 
     # limit results
@@ -426,7 +430,7 @@ def translate(
         optional match (a)<-[r:USES]-(:DATASET {CMID: row.dataset})
         with row, a, matching, country, score, r.Key as Key
         """
-    else: 
+    else:
         qKey = "with row, a, matching, country, score, '' as Key"
 
     # return results
@@ -434,13 +438,14 @@ def translate(
     return distinct row.CMuniqueCategoryID as CMuniqueCategoryID, row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, custom.getLabel(a) as label, 
     matching, score as matchingDistance, country, apoc.text.join(collect(Key),'; ') as Key order by matchingDistance
     """
-    cypher_query = qLoad + qStart + qDomain + qCountryFilter + qContext + qDataset + qYear + qLimit + qCountry + qKey + qReturn
+    cypher_query = qLoad + qStart + qDomain + qCountryFilter + \
+        qContext + qDataset + qYear + qLimit + qCountry + qKey + qReturn
     print(cypher_query)
     if query == "true":
-        qResult = getQuery(cypher_query, driver, params = {'rows': rows})
-        return [{"query": cypher_query.replace("\n"," "),"params":qResult,"rows":rows}]
+        qResult = getQuery(cypher_query, driver, params={'rows': rows})
+        return [{"query": cypher_query.replace("\n", " "), "params": qResult, "rows": rows}]
     else:
-        data = getQuery(cypher_query, driver, params = {'rows': rows})
+        data = getQuery(cypher_query, driver, params={'rows': rows})
 
     if not data:
         data = df
@@ -450,15 +455,16 @@ def translate(
     data = pd.DataFrame(data)
     data = data.replace("", pd.NA)
     data = data.dropna(axis='columns', how='all')
-  
+
     # return data
 
     print("holaaaaaaaaaaaaaa")
-  
+
     # add matching type
-    data = addMatchResults(df = data)
+    data = addMatchResults(df=data)
     data = data.drop('CMuniqueCategoryID', axis=1).copy()
-    new_column_names = {col: f"{col}_{term}" for col in data.columns if col != 'CMuniqueRowID'}
+    new_column_names = {
+        col: f"{col}_{term}" for col in data.columns if col != 'CMuniqueRowID'}
     data = data.rename(columns=new_column_names)
     data = data.drop(f"term_{term}", axis=1)
 
@@ -494,17 +500,16 @@ def translate(
         "CMuniqueRowID"
     ]
 
-
     for col in data.columns:
         if col not in colOrder:
             colOrder.append(col)
 
-
     finalColOrder = [col for col in colOrder if col in data.columns]
 
     data = data[finalColOrder]
-    
+
     return data
+
 
 def addMatchResults(df):
     try:
@@ -512,10 +517,12 @@ def addMatchResults(df):
         df['matchType'] = None
 
         # Count occurrences of each CMID within each CMuniqueCategoryID
-        cmid_counts_per_category = df.groupby(['CMuniqueCategoryID', 'CMID']).size()
+        cmid_counts_per_category = df.groupby(
+            ['CMuniqueCategoryID', 'CMID']).size()
 
         # Count occurrences of CMuniqueRowID within each CMuniqueCategoryID
-        cmunique_counts = df.groupby('CMuniqueCategoryID')['CMuniqueRowID'].count().to_dict()
+        cmunique_counts = df.groupby('CMuniqueCategoryID')[
+            'CMuniqueRowID'].count().to_dict()
 
         # Helper to assign match types
         def determine_match_type(row):
@@ -523,11 +530,12 @@ def addMatchResults(df):
             cmunique = row['CMuniqueRowID']
             matching_distance = row['matchingDistance']
             category_id = row['CMuniqueCategoryID']
-            
+
             # Check the count of the current CMID within the specific CMuniqueCategoryID
-            cmid_count_in_category = cmid_counts_per_category.get((category_id, cmid), 0)
+            cmid_count_in_category = cmid_counts_per_category.get(
+                (category_id, cmid), 0)
             cmunique_count = cmunique_counts.get(category_id, 0)
-            
+
             # Determine match type based on conditions
             if matching_distance == 0 and cmid_count_in_category == 1 and cmunique_count == 1:
                 return 'exact match'
@@ -541,10 +549,9 @@ def addMatchResults(df):
 
         # Apply the function to each row
         df['matchType'] = df.apply(determine_match_type, axis=1)
-        
+
         return df
 
     except Exception as e:
         print(f"Error returning match statistics: {e}")
         return e
-
