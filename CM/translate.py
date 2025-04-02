@@ -315,10 +315,10 @@ def translate(
     union with row 
     call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term) + '~') yield node return node}}
     with row, node as a
-    with a, a.names as nameList
-    with a, nameList, [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText($term))] as scores
-    with a, nameList, scores, apoc.coll.min(scores) as score
-    with a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
+    with row, a, a.names as nameList
+    with row, a, nameList, [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText(row.term))] as scores
+    with row, a, nameList, scores, apoc.coll.min(scores) as score
+    with row, a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
     """
         else:
             qStart = f"""
@@ -329,8 +329,8 @@ def translate(
     union with row 
     call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term) + '~') yield node return node}}
     with row, node as a
-    with a, [a.CMName, a.shortName, a.DatasetCitation]as nameList
-    with a, nameList,  [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText($term))] as scores
+    with a, [a.CMName, a.shortName, a.DatasetCitation] as nameList
+    with a, nameList,  [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText(row.term))] as scores
     with a, nameList, scores, apoc.coll.min(scores) as score
     with a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
     """
@@ -435,6 +435,7 @@ def translate(
     matching, score as matchingDistance, country, apoc.text.join(collect(Key),'; ') as Key order by matchingDistance
     """
     cypher_query = qLoad + qStart + qDomain + qCountryFilter + qContext + qDataset + qYear + qLimit + qCountry + qKey + qReturn
+    print(cypher_query)
     if query == "true":
         qResult = getQuery(cypher_query, driver, params = {'rows': rows})
         return [{"query": cypher_query.replace("\n"," "),"params":qResult,"rows":rows}]
@@ -451,6 +452,8 @@ def translate(
     data = data.dropna(axis='columns', how='all')
   
     # return data
+
+    print("holaaaaaaaaaaaaaa")
   
     # add matching type
     data = addMatchResults(df = data)
