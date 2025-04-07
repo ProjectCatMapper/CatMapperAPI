@@ -1,3 +1,8 @@
+from datetime import datetime
+from shapely.geometry import mapping
+import json
+from shapely.validation import make_valid
+import geopandas as gpd
 import os
 import pandas as pd
 import re
@@ -10,6 +15,35 @@ database = "SocioMap"
 syntax = "R"
 dirpath = "./tmp"
 template = pd.read_csv("55-template.csv")
+driver = getDriver(database)
+db_query = """
+    unwind $rows as row
+    match (m:DATASET {CMID: row.mergingID})-[rs:MERGING]->(s:DATASET {CMID: row.stackID})-[rm:MERGING]->(v:VARIABLE)<-[ru:USES]-(d:DATASET {CMID: row.datasetID})
+    return 
+    m.CMID as mergingID, m.CMName as mergingName, s.CMID as stackID, s.CMName as stackName, d.CMID as datasetID, d.CMName as datasetName, rs.aggBy as aggBy, v.CMID as variableCMID, rm.varName as varName, rm.transform as transform, rm.Rtransform as Rtransform, rm.Rfunction as Rfunction, rm.summaryStatistic as summaryStatistic, ru.Key as Key
+    """
+data = getQuery(db_query, driver=driver, params={
+                "rows": template.to_dict(orient='records')}, type="df")
+
+
+def transform_variables_r(self, variables):
+    variables["transform"] = variables["transform"].str.replace(
+        "~", "!", regex=True)
+    variables["transform"] = variables["transform"].str.replace(
+        "=", "==", regex=True)
+    variables["transform"] = variables["transform"].str.replace(
+        "!==", "!=", regex=True)
+    variables["transform"] = variables["transform"].str.replace(
+        "concat", "paste0", regex=True)
+    variables["transform"] = variables["transform"].str.replace(
+        r',0\)', ',na.rm = True', regex=True)
+    variables["transform"] = variables["transform"].str.replace(
+        "in", "%in%", regex=True)
+    variables["transform"] = variables["transform"].str.replace(
+        "na.rm == T", "na.rm = True", regex=True)
+    variables["transform"] = variables["transform"].str.replace(
+        "== as.numeric", "= as.numeric", regex=True)
+    return variables
 
 class createSyntax:
     def __init__(self, database, template, syntax="R", dirpath=None):
@@ -20,21 +54,29 @@ class createSyntax:
         self.dirpath = dirpath if dirpath else os.path.abspath("./tmp")
         os.makedirs(self.dirpath, exist_ok=True)
         self.files = []
-    
+
     def run_query(self, query, parameters=None):
-        return getQuery(query, driver=self.driver, params=parameters, type = "df")
+        return getQuery(query, driver=self.driver, params=parameters, type="df")
 
     def transform_variables_r(self, variables):
-        variables["transform"] = variables["transform"].str.replace("~", "!", regex=True)
-        variables["transform"] = variables["transform"].str.replace("=", "==", regex=True)
-        variables["transform"] = variables["transform"].str.replace("!==", "!=", regex=True)
-        variables["transform"] = variables["transform"].str.replace("concat", "paste0", regex=True)
-        variables["transform"] = variables["transform"].str.replace(r',0\)', ',na.rm = True', regex=True)
-        variables["transform"] = variables["transform"].str.replace("in", "%in%", regex=True)
-        variables["transform"] = variables["transform"].str.replace("na.rm == T", "na.rm = True", regex=True)
-        variables["transform"] = variables["transform"].str.replace("== as.numeric", "= as.numeric", regex=True)
+        variables["transform"] = variables["transform"].str.replace(
+            "~", "!", regex=True)
+        variables["transform"] = variables["transform"].str.replace(
+            "=", "==", regex=True)
+        variables["transform"] = variables["transform"].str.replace(
+            "!==", "!=", regex=True)
+        variables["transform"] = variables["transform"].str.replace(
+            "concat", "paste0", regex=True)
+        variables["transform"] = variables["transform"].str.replace(
+            r',0\)', ',na.rm = True', regex=True)
+        variables["transform"] = variables["transform"].str.replace(
+            "in", "%in%", regex=True)
+        variables["transform"] = variables["transform"].str.replace(
+            "na.rm == T", "na.rm = True", regex=True)
+        variables["transform"] = variables["transform"].str.replace(
+            "== as.numeric", "= as.numeric", regex=True)
         return variables
-    
+
     def load_r_syntax_template(self, filename, replacements):
         """ Reads R syntax template and replaces placeholders """
         try:
@@ -46,7 +88,7 @@ class createSyntax:
         except FileNotFoundError:
             print(f"Error: {filename} not found. Ensure the file exists.")
             return None
-        
+
     def zip_output_files(self, zip_filename="output.zip"):
         """ Zip all generated files into a single archive """
         zip_path = os.path.join(self.dirpath, zip_filename)
@@ -54,33 +96,36 @@ class createSyntax:
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
             for file in self.files:
                 if os.path.exists(file):  # Ensure file exists before adding
-                    zipf.write(file, os.path.basename(file))  # Store without full path
+                    # Store without full path
+                    zipf.write(file, os.path.basename(file))
                     print(f"Added to ZIP: {file}")
                 else:
-                    print(f"Warning: {file} does not exist and was not added to the ZIP.")
+                    print(
+                        f"Warning: {file} does not exist and was not added to the ZIP.")
 
         print(f"ZIP file created: {zip_path}")
         return zip_path
-        
+
     def process(self):
         if "filePath" not in self.template.columns:
-            raise ValueError("Must upload a list of datasets with the filePath column before generating syntax.")
-        
+            raise ValueError(
+                "Must upload a list of datasets with the filePath column before generating syntax.")
+
         wd = self.template.iloc[0]["filePath"]
 
         if re.match(r"^[a-zA-Z]:\\\\", wd) or "\\" in wd:
             print("Detected Windows path. Converting to compatible format...")
-            
+
             # Convert backslashes to forward slashes
             wd = wd.replace("\\", "/")
-            
+
             # Ensure proper formatting (R escape sequences)
             wd = wd.replace(" ", "\\ ")  # Escape spaces if needed
 
         self.template = self.template.iloc[1:]
 
         # verify CMIDs
-        cols = ["mergingID","stackID","datasetID"]
+        cols = ["mergingID", "stackID", "datasetID"]
         cols = [col for col in cols if col in self.template.columns]
         CMIDs = list(set(self.template[cols].values.flatten().tolist()))
 
@@ -97,26 +142,32 @@ class createSyntax:
         missing = [str(m) + "\n" for m in missing]
 
         if len(check) != len(CMIDs):
-            raise ValueError("Error: One or more CMIDs not found in the database\nMissing CMIDs: ", missing)
+            raise ValueError(
+                "Error: One or more CMIDs not found in the database\nMissing CMIDs: ", missing)
         else:
             print("All CMIDs found in the database.")
         self.template = self.template.drop(columns=["datasetName"])
-        self.template = pd.merge(self.template, check, how="left", left_on="mergingID", right_on="CMID")
+        self.template = pd.merge(
+            self.template, check, how="left", left_on="mergingID", right_on="CMID")
         self.template = self.template.rename(columns={"CMName": "mergingName"})
-        self.template = pd.merge(self.template, check, how="left", left_on="stackID", right_on="CMID")
+        self.template = pd.merge(
+            self.template, check, how="left", left_on="stackID", right_on="CMID")
         self.template = self.template.rename(columns={"CMName": "stackName"})
-        self.template = pd.merge(self.template, check, how="left", left_on="datasetID", right_on="CMID")
+        self.template = pd.merge(
+            self.template, check, how="left", left_on="datasetID", right_on="CMID")
         self.template = self.template.rename(columns={"CMName": "datasetName"})
-        self.template = self.template.drop(columns=["CMID_x", "CMID_y", "CMID"])
-        cols = ["mergingID","mergingName", "stackID", "stackName", "datasetID","datasetName", "filePath"]
+        self.template = self.template.drop(
+            columns=["CMID_x", "CMID_y", "CMID"])
+        cols = ["mergingID", "mergingName", "stackID",
+                "stackName", "datasetID", "datasetName", "filePath"]
         self.template = self.template[cols]
-        
+
         variable_list = []
         for s in self.template["stackID"].unique():
             print("getting variables for stackID: ", s)
             if self.syntax == "R":
-                result =  self.run_query(
-                """
+                result = self.run_query(
+                    """
                 unwind $stackID as id
                 match (v:VARIABLE)<-[r:MERGING]-(s:DATASET {CMID: id}) 
                 where not r.varName is null 
@@ -126,16 +177,17 @@ class createSyntax:
                 r.Rtransform as Rtransform, r.Rfunction as Rfunction, 
                 r.summaryStatistic as summaryStatistic
                 """,
-                parameters={"stackID": s, "mergingID": self.template["mergingID"].tolist()}
-            )
+                    parameters={
+                        "stackID": s, "mergingID": self.template["mergingID"].tolist()}
+                )
             else:
                 raise ValueError("Error: syntax not yet supported.")
                 # variables =  self.run_query(
                 #         """
                 #         unwind $stackIDs as id
-                #         match (s:DATASET {CMID: id})-[:MERGING]->(d2:DATASET) 
-                #         return head($mergingID) as mergingID, 
-                #         s.datasetID as stackID, d2.datasetID as datasetID, 
+                #         match (s:DATASET {CMID: id})-[:MERGING]->(d2:DATASET)
+                #         return head($mergingID) as mergingID,
+                #         s.datasetID as stackID, d2.datasetID as datasetID,
                 #         d2.datasetName as datasetName order by datasetName
                 #         """,
                 #         parameters={"stackIDs": self.template["stackID"].tolist(), "mergingID": self.template["mergingID"].tolist()}
@@ -145,7 +197,8 @@ class createSyntax:
                 print("transforming variables")
 
                 if "Rtransform" in result.columns:
-                    result['transform'] = result['Rtransform'].combine_first(result['transform'])
+                    result['transform'] = result['Rtransform'].combine_first(
+                        result['transform'])
 
                 CMshort = "SM" if self.database == "SocioMap" else "AM"
 
@@ -154,11 +207,13 @@ class createSyntax:
 
                 # Safely apply regex to extract CMIDs
                 result['CMID'] = result['transform'].apply(
-                    lambda x: list(set(re.findall(f'{CMshort}\\d+', x))) if x else []
+                    lambda x: list(
+                        set(re.findall(f'{CMshort}\\d+', x))) if x else []
                 )
 
                 # Replace empty lists with [NaN] to retain rows upon explosion
-                result['CMID'] = result['CMID'].apply(lambda x: x if x else [np.nan])
+                result['CMID'] = result['CMID'].apply(
+                    lambda x: x if x else [np.nan])
 
                 # Explode, preserving all rows
                 result = result.explode('CMID', ignore_index=True)
@@ -170,11 +225,11 @@ class createSyntax:
             # Convert list-type columns to tuples (safe for hashing)
             for col in variables.columns:
                 if variables[col].apply(lambda x: isinstance(x, list)).any():
-                    variables[col] = variables[col].apply(lambda x: tuple(x) if isinstance(x, list) else x)
+                    variables[col] = variables[col].apply(
+                        lambda x: tuple(x) if isinstance(x, list) else x)
 
             # Now drop duplicates safely
             variables = variables.drop_duplicates(ignore_index=True)
-
 
         if variables.empty:
             raise ValueError("Error: No variables retrieved from Neo4j.")
@@ -197,13 +252,17 @@ class createSyntax:
             MATCH (m:DATASET {CMID: row.mergingID})-[r:MERGING]->(s:DATASET {CMID: row.stackID})
             return s.CMID as stackID, r.aggBy as aggBy
             """
-            tempStacks = self.template[['mergingID', 'stackID']].drop_duplicates()
-            aggBy = self.run_query(query, parameters={"rows": tempStacks.to_dict(orient='records')})
+            tempStacks = self.template[[
+                'mergingID', 'stackID']].drop_duplicates()
+            aggBy = self.run_query(
+                query, parameters={"rows": tempStacks.to_dict(orient='records')})
             if aggBy is not None and not aggBy.empty:
-                variables = pd.merge(variables, aggBy, on='stackID', how='left')
+                variables = pd.merge(
+                    variables, aggBy, on='stackID', how='left')
 
             # Combine all query results into one DataFrame
-            agg_by = pd.concat(agg_by_list, ignore_index=True) if agg_by_list else pd.DataFrame()
+            agg_by = pd.concat(
+                agg_by_list, ignore_index=True) if agg_by_list else pd.DataFrame()
 
             # Left join with variables on "stackID"
             if not agg_by.empty:
@@ -218,8 +277,6 @@ class createSyntax:
             """,
             parameters={"CMID": self.template["mergingID"].tolist()}
         )
-
-
 
         # Debugging step: Check if categories dataframe is empty
         if categories.empty:
@@ -241,7 +298,8 @@ class createSyntax:
             # convert all columns to string
             categories = categories.astype(str)
             categories.replace("None", np.nan, inplace=True)
-            categories.to_csv(os.path.join(self.dirpath, "mergingCategories.csv"), index=False, na_rep='')
+            categories.to_csv(os.path.join(
+                self.dirpath, "mergingCategories.csv"), index=False, na_rep='')
 
         metadata = self.run_query(
             """
@@ -255,7 +313,8 @@ class createSyntax:
         if not metadata.empty:
             metadata = metadata.astype(str)
             metadata.replace("None", np.nan, inplace=True)
-            metadata.to_csv(os.path.join(self.dirpath, "metadata.csv"), index=False, na_rep='')
+            metadata.to_csv(os.path.join(
+                self.dirpath, "metadata.csv"), index=False, na_rep='')
             print("metadata.csv saved successfully!")
         else:
             print("Warning: No metadata found, metadata.csv not created.")
@@ -264,7 +323,6 @@ class createSyntax:
 
         print("Getting stack variables")
         print(self.template['stackID'].unique())
-
 
         for s in self.template['stackID'].unique():
             print("Getting stack variables for stackID: ", s)
@@ -285,7 +343,8 @@ class createSyntax:
             dfvar = self.run_query(query, parameters)
 
             if dfvar is not None and not dfvar.empty:
-                dfvar['Key'] = dfvar['Key'].str.replace(r"variable:\s*", "", regex=True).str.lower()
+                dfvar['Key'] = dfvar['Key'].str.replace(
+                    r"variable:\s*", "", regex=True).str.lower()
                 dfvar['stackID'] = s
                 stack_vars_list.append(dfvar)
 
@@ -294,10 +353,11 @@ class createSyntax:
             stack_vars = stack_vars.drop_duplicates()
             stack_vars = stack_vars.astype(str)
             stack_vars.replace("None", np.nan, inplace=True)
-            stack_vars.to_csv(os.path.join(self.dirpath, "stackVariables.csv"), index=False, na_rep='')
+            stack_vars.to_csv(os.path.join(
+                self.dirpath, "stackVariables.csv"), index=False, na_rep='')
             print("stackVariables.csv saved successfully!")
         else:
-            print("Warning: No stack variables found, stackVariables.csv not created.")   
+            print("Warning: No stack variables found, stackVariables.csv not created.")
 
         dataset_variables_list = []
 
@@ -323,7 +383,8 @@ class createSyntax:
                         "return v.CMID as variableCMID, tolower(replace(r.Key,'variable: ','')) as transform"
                     )
 
-                    tmp_result = self.run_query(query, parameters={"rows": rows.to_dict(orient='records')})
+                    tmp_result = self.run_query(
+                        query, parameters={"rows": rows.to_dict(orient='records')})
 
                     if not tmp_result.empty:
                         tmp_result = (
@@ -340,7 +401,8 @@ class createSyntax:
             dataset_variables_list.append(tmp_result)
 
         # Combine dataset-specific variables
-        dataset_variables = pd.concat(dataset_variables_list, ignore_index=True)
+        dataset_variables = pd.concat(
+            dataset_variables_list, ignore_index=True)
 
         # Filter and tag stack-level variables
         stack_vars = (
@@ -362,32 +424,37 @@ class createSyntax:
             .drop_duplicates()
             .astype(str)
         )
-                
+
         # Save files if syntax is R
         if self.syntax == "R":
             self.template = self.template.astype(str)
             self.template.replace("None", np.nan, inplace=True)
-            self.template.to_csv(os.path.join(self.dirpath, "template.csv"), index=False, na_rep='')
+            self.template.to_csv(os.path.join(
+                self.dirpath, "template.csv"), index=False, na_rep='')
             if self.syntax == "R":
                 variables = self.transform_variables_r(variables)
             variables = variables.drop_duplicates()
             variables = variables.astype(str)
             variables.replace("None", np.nan, inplace=True)
-            variables.to_csv(os.path.join(self.dirpath, "variables.csv"), index=False, na_rep='')
-            
+            variables.to_csv(os.path.join(
+                self.dirpath, "variables.csv"), index=False, na_rep='')
+
             # Create R syntax file
-            r_syntax_template = "syntax/Rsyntax.txt"  # Ensure this file exists in the working directory
+            # Ensure this file exists in the working directory
+            r_syntax_template = "syntax/Rsyntax.txt"
             replacements = {
-                "${f}": "\n".join(variables['transform'].dropna()),  # Functions applied
+                # Functions applied
+                "${f}": "\n".join(variables['transform'].dropna()),
                 "${wd}": wd,  # Working directory
                 "${database}": self.database  # Database name
             }
-            
-            r_syntax = self.load_r_syntax_template(r_syntax_template, replacements)
+
+            r_syntax = self.load_r_syntax_template(
+                r_syntax_template, replacements)
             if r_syntax:
                 with open(os.path.join(self.dirpath, "syntax.R"), "w") as f:
                     f.write(r_syntax)
-                
+
                 self.files.extend([
                     os.path.join(self.dirpath, "template.csv"),
                     os.path.join(self.dirpath, "variables.csv"),
@@ -396,7 +463,8 @@ class createSyntax:
                     os.path.join(self.dirpath, "metadata.csv")
                 ])
 
-                zip_path = self.zip_output_files("merged_output.zip")  # Zip them
+                zip_path = self.zip_output_files(
+                    "merged_output.zip")  # Zip them
                 return zip_path
             else:
                 raise ValueError("Error: R syntax not found.")
@@ -410,18 +478,12 @@ output_zip = syntax.process()
 
 print(output_zip)
 
-from CM.utils import *
-from CM.keys import *
-import geopandas as gpd
-import pandas as pd
-from shapely.validation import make_valid
-import json
-from shapely.geometry import mapping
 
 file_path = "GIS/language_map_valid.geojson"
 
 # Read the file as a GeoDataFrame
 gis = gpd.read_file(file_path)
+
 
 def validate_geometry(gdf):
     # Ensure geometries are valid
@@ -429,6 +491,7 @@ def validate_geometry(gdf):
     return gdf
 
 # Validate the geometries
+
 
 gis = validate_geometry(gis)
 gis['geojson'] = gis.geometry.apply(lambda geom: json.dumps(mapping(geom)))
@@ -453,7 +516,7 @@ MATCH (d:DATASET {CMID: $datasetID})-[r:USES]->(c:CATEGORY)
 RETURN c.CMID AS CMID, c.CMName AS CMName, r.Key as Key, d.CMID as datasetID
 """
 
-matches = getQuery(query, driver, params={"datasetID": datasetID}, type= "df")
+matches = getQuery(query, driver, params={"datasetID": datasetID}, type="df")
 
 result = pd.merge(gis, matches, how="left", on="Key")
 
@@ -461,11 +524,11 @@ result = pd.merge(gis, matches, how="left", on="Key")
 if result["CMID"].isna().any():
     raise ValueError("Error: Some keys do not match.")
 
-new_id = getAvailableID(new_id="geomID", label="CATEGORY", n=len(result), database = "gisdb")
+new_id = getAvailableID(new_id="geomID", label="CATEGORY",
+                        n=len(result), database="gisdb")
 result["geomID"] = new_id
 log = "Uploaded a new GeoJSON file"
 user = "1"
-from datetime import datetime
 logQ = f"{datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')} user {user}: {log}"
 result["log"] = logQ
 database = "SocioMap"
@@ -484,7 +547,8 @@ set g.geomID = row.geomID, g.geometry = row.geojson, g.log = row.log
 RETURN g.geomID as geomID
 """
 gisdriver = getDriver("gisdb")
-df = getQuery(query, gisdriver, params={"rows": result.to_dict(orient='records')}, type = "df")
+df = getQuery(query, gisdriver, params={
+              "rows": result.to_dict(orient='records')}, type="df")
 print(df)
 
 upload = result[['geomID', 'Key']]
@@ -495,8 +559,6 @@ upload = pd.merge(upload, matches, how="left", on="Key")
 upload.to_excel("upload_USES.xlsx", index=False)
 
 
-
-
 count = 1
 
 while count > 0:
@@ -505,9 +567,9 @@ while count > 0:
         WHERE g.origin contains ">"
         return count(*) as count
     """
-    count = getQuery(query,gisdriver, type = "list")[0]
+    count = getQuery(query, gisdriver, type="list")[0]
     print(count)
-   
+
     upload_query = """
     MATCH (g:GEOMETRY)
     WHERE g.origin contains ">"
@@ -516,5 +578,5 @@ while count > 0:
         // Modify the first element and keep the rest
         '{"database": ' + origins[0] + ", " + replace(origins[1],"Dataset",'"datasetName"') + ', "Key": ' + origins[2] + "}" AS updatedOrigins
     set g.origin = updatedOrigins
-    """ 
-    getQuery(upload_query, gisdriver, type = "list")
+    """
+    getQuery(upload_query, gisdriver, type="list")
