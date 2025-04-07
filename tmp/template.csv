@@ -1,75 +1,75 @@
-mergingID,stackID,datasetID,datasetName,filePath,mergingName,stackName,datasetName
-SD55,SD2178,SD61,DHS Bangladesh 1996 Women,datasets/Bangladesh1996.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Bangladesh 1996 Women
-SD55,SD2178,SD64,DHS Bangladesh 1999 Women,datasets/Bangladesh1999.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Bangladesh 1999 Women
-SD55,SD2178,SD67,DHS Bangladesh 2004 Women,datasets/Bangladesh2004.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Bangladesh 2004 Women
-SD55,SD2178,SD70,DHS Bangladesh 2007 Women,datasets/Bangladesh2007.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Bangladesh 2007 Women
-SD55,SD2178,SD73,DHS Bangladesh 2011 Women,datasets/Bangladesh2011new.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Bangladesh 2011 Women
-SD55,SD2178,SD79,DHS Benin 1996 Women,datasets/Benin1996.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Benin 1996 Women
-SD55,SD2178,SD82,DHS Benin 2001 Women,datasets/Benin2001.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Benin 2001 Women
-SD55,SD2178,SD85,DHS Benin 2006 Women,datasets/Benin2006.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Benin 2006 Women
-SD55,SD2178,SD134,DHS Burkina Faso 1993 Women,datasets/BurkinaFaso1992.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Burkina Faso 1993 Women
-SD55,SD2178,SD137,DHS Burkina Faso 1999 Women,datasets/BurkinaFaso1999.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Burkina Faso 1999 Women
-SD55,SD2178,SD140,DHS Burkina Faso 2003 Women,datasets/BurkinaFaso2003.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Burkina Faso 2003 Women
-SD55,SD2178,SD143,DHS Burkina Faso 2010 Women,datasets/BurkinaFaso2010.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Burkina Faso 2010 Women
-SD55,SD2178,SD148,DHS Cambodia 2000 Women,datasets/Cambodia2000.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Cambodia 2000 Women
-SD55,SD2178,SD150,DHS Cambodia 2005 Women,datasets/Cambodia2005.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Cambodia 2005 Women
-SD55,SD2178,SD153,DHS Cambodia 2010 Women,datasets/Cambodia2010.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Cambodia 2010 Women
-SD55,SD2178,SD162,DHS Cameroon 1998 Women,datasets/Cameroon1998.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Cameroon 1998 Women
-SD55,SD2178,SD165,DHS Cameroon 2004 Women,datasets/Cameroon2004.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Cameroon 2004 Women
-SD55,SD2178,SD171,DHS Central African Republic 1994 Women,datasets/CAR3.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Central African Republic 1994 Women
-SD55,SD2178,SD181,DHS Chad 1996 Women,datasets/Chad1996.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Chad 1996 Women
-SD55,SD2178,SD183,DHS Chad 2004 Women,datasets/Chad2004.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Chad 2004 Women
-SD55,SD2178,SD197,DHS Colombia 2010 Women,datasets/Colombia2010.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Colombia 2010 Women
-SD55,SD2178,SD174,DHS Congo Republic 2005 Women,datasets/CongoBrazzavile2005.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Congo Republic 2005 Women
-SD55,SD2178,SD212,DHS Cote D'Ivoire 1994 Women,datasets/Cotedivoire1994.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Cote D'Ivoire 1994 Women
-SD55,SD2178,SD214,DHS Cote D'Ivoire 1998 Women,datasets/Cotedivoire1998.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Cote D'Ivoire 1998 Women
-SD55,SD2178,SD208,DHS Democratic Republic of the Congo 2007 Women,datasets/CongoDemocraticRep2007.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Democratic Republic of the Congo 2007 Women
-SD55,SD2178,SD266,DHS Ethiopia 2000 Women,datasets/Ethiopia2000.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Ethiopia 2000 Women
-SD55,SD2178,SD269,DHS Ethiopia 2005 Women,datasets/Ethiopia2005.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Ethiopia 2005 Women
-SD55,SD2178,SD272,DHS Ethiopia 2011 Women,datasets/Ethiopia2011new.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Ethiopia 2011 Women
-SD55,SD2178,SD289,DHS Ghana 1993 Women,datasets/Ghana1993.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Ghana 1993 Women
-SD55,SD2178,SD292,DHS Ghana 1998 Women,datasets/Ghana1998.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Ghana 1998 Women
-SD55,SD2178,SD295,DHS Ghana 2003 Women,datasets/Ghana2003.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Ghana 2003 Women
-SD55,SD2178,SD298,DHS Ghana 2008 Women,datasets/Ghana2008.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Ghana 2008 Women
-SD55,SD2178,SD308,DHS Guatemala 1995 Women,datasets/Guatemala1995.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Guatemala 1995 Women
-SD55,SD2178,SD310,DHS Guatemala 1999 Women,datasets/Guatemala1999.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Guatemala 1999 Women
-SD55,SD2178,SD340,DHS India 1993 Women,datasets/India1993Child.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS India 1993 Women
-SD55,SD2178,SD342,DHS India 1999 Women,datasets/India1999.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS India 1999 Women
-SD55,SD2178,SD344,DHS India 2005 Women,datasets/India2005.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS India 2005 Women
-SD55,SD2178,SD393,DHS Kenya 1993 Women,datasets/Kenya1993.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Kenya 1993 Women
-SD55,SD2178,SD396,DHS Kenya 1998 Women,datasets/Kenya1998.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Kenya 1998 Women
-SD55,SD2178,SD399,DHS Kenya 2003 Women,datasets/Kenya2003.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Kenya 2003 Women
-SD55,SD2178,SD402,DHS Kenya 2008 Women,datasets/Kenya2008.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Kenya 2008 Women
-SD55,SD2178,SD417,DHS Liberia 2007 Women,datasets/Liberia2006.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Liberia 2007 Women
-SD55,SD2178,SD420,DHS Liberia 2009 Women,datasets/LBIR5AFL.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Liberia 2009 Women
-SD55,SD2178,SD422,DHS Liberia 2011 Women,datasets/LBIR61FL.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Liberia 2011 Women
-SD55,SD2178,SD485,DHS Mali 1996 Women,datasets/Mali1996.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Mali 1996 Women
-SD55,SD2178,SD488,DHS Mali 2001 Women,datasets/Mali2001.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Mali 2001 Women
-SD55,SD2178,SD491,DHS Mali 2006 Women,datasets/Mali2006.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Mali 2006 Women
-SD55,SD2178,SD449,DHS Morocco 1992 Women,datasets/Morocco1992.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Morocco 1992 Women
-SD55,SD2178,SD453,DHS Morocco 2003 Women,datasets/Morocco2003.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Morocco 2003 Women
-SD55,SD2178,SD527,DHS Namibia 1992 Women,datasets/Namibia1992.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Namibia 1992 Women
-SD55,SD2178,SD529,DHS Namibia 2000 Women,datasets/Namibia2000Child.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Namibia 2000 Women
-SD55,SD2178,SD532,DHS Namibia 2006 Women,datasets/Namibia2006.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Namibia 2006 Women
-SD55,SD2178,SD540,DHS Nepal 2001 Women,datasets/Nepal2001.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Nepal 2001 Women
-SD55,SD2178,SD543,DHS Nepal 2006 Women,datasets/Nepal2006.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Nepal 2006 Women
-SD55,SD2178,SD575,DHS Niger 1998 Women,datasets/Niger1998.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Niger 1998 Women
-SD55,SD2178,SD578,DHS Niger 2006 Women,datasets/Niger2006.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Niger 2006 Women
-SD55,SD2178,SD554,DHS Nigeria 2003 Women,datasets/Nigeria2003.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Nigeria 2003 Women
-SD55,SD2178,SD557,DHS Nigeria 2008 Women,datasets/Nigeria2008.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Nigeria 2008 Women
-SD55,SD2178,SD586,DHS Pakistan 1991 Women,datasets/Pakistan1991Child.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Pakistan 1991 Women
-SD55,SD2178,SD591,DHS Pakistan 2012 Women,dataset/Pakistan2012.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Pakistan 2012 Women
-SD55,SD2178,SD634,DHS Rwanda 2000 Women,datasets/Rwanda2000.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Rwanda 2000 Women
-SD55,SD2178,SD637,DHS Rwanda 2005 Women,datasets/Rwanda2005.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Rwanda 2005 Women
-SD55,SD2178,SD640,DHS Rwanda 2008 Women,datasets/RWIR5AFL.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Rwanda 2008 Women
-SD55,SD2178,SD643,DHS Rwanda 2010 Women,datasets/Rwanda2010new.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Rwanda 2010 Women
-SD55,SD2178,SD663,DHS Senegal 1997 Women,datasets/Senegal1997Child.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Senegal 1997 Women
-SD55,SD2178,SD666,DHS Senegal 2005 Women,datasets/Senegal2005.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Senegal 2005 Women
-SD55,SD2178,SD671,DHS Senegal 2010 Women,datasets/Senegal2010new.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Senegal 2010 Women
-SD55,SD2178,SD688,DHS Sierra Leone 2008 Women,datasets/SierraLeone2008.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Sierra Leone 2008 Women
-SD55,SD2178,SD711,DHS Tanzania 1996 Women,datasets/Tanzania1996.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Tanzania 1996 Women
-SD55,SD2178,SD746,DHS Timor L'Este 2009 Women,datasets/TimorLeste2009.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Timor L'Este 2009 Women
-SD55,SD2178,SD769,DHS Uganda 1995 Women,datasets/Uganda1995.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Uganda 1995 Women
-SD55,SD2178,SD775,DHS Uganda 2006 Women,datasets/Uganda2006.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Uganda 2006 Women
-SD55,SD2178,SD778,DHS Uganda 2009 Women,datasets/UGIR5HFL.feather,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) DHS Stack,DHS Uganda 2009 Women
-SD55,SD2179,SD1500,Tishkoff et al. 2009 (S1S8),datasets/Tishkoff2009S1S8.xlsx,Hruschka et al. 2015 (Women),Hruschka et al. 2015 (Women) Tishkoff Stack,Tishkoff et al. 2009 (S1S8)
+mergingID,mergingName,stackID,stackName,datasetID,datasetName,filePath
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD61,DHS Bangladesh 1996 Women,datasets/Bangladesh1996.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD64,DHS Bangladesh 1999 Women,datasets/Bangladesh1999.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD67,DHS Bangladesh 2004 Women,datasets/Bangladesh2004.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD70,DHS Bangladesh 2007 Women,datasets/Bangladesh2007.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD73,DHS Bangladesh 2011 Women,datasets/Bangladesh2011new.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD79,DHS Benin 1996 Women,datasets/Benin1996.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD82,DHS Benin 2001 Women,datasets/Benin2001.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD85,DHS Benin 2006 Women,datasets/Benin2006.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD134,DHS Burkina Faso 1993 Women,datasets/BurkinaFaso1992.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD137,DHS Burkina Faso 1999 Women,datasets/BurkinaFaso1999.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD140,DHS Burkina Faso 2003 Women,datasets/BurkinaFaso2003.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD143,DHS Burkina Faso 2010 Women,datasets/BurkinaFaso2010.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD148,DHS Cambodia 2000 Women,datasets/Cambodia2000.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD150,DHS Cambodia 2005 Women,datasets/Cambodia2005.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD153,DHS Cambodia 2010 Women,datasets/Cambodia2010.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD162,DHS Cameroon 1998 Women,datasets/Cameroon1998.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD165,DHS Cameroon 2004 Women,datasets/Cameroon2004.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD171,DHS Central African Republic 1994 Women,datasets/CAR3.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD181,DHS Chad 1996 Women,datasets/Chad1996.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD183,DHS Chad 2004 Women,datasets/Chad2004.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD197,DHS Colombia 2010 Women,datasets/Colombia2010.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD174,DHS Congo Republic 2005 Women,datasets/CongoBrazzavile2005.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD212,DHS Cote D'Ivoire 1994 Women,datasets/Cotedivoire1994.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD214,DHS Cote D'Ivoire 1998 Women,datasets/Cotedivoire1998.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD208,DHS Democratic Republic of the Congo 2007 Women,datasets/CongoDemocraticRep2007.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD266,DHS Ethiopia 2000 Women,datasets/Ethiopia2000.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD269,DHS Ethiopia 2005 Women,datasets/Ethiopia2005.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD272,DHS Ethiopia 2011 Women,datasets/Ethiopia2011new.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD289,DHS Ghana 1993 Women,datasets/Ghana1993.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD292,DHS Ghana 1998 Women,datasets/Ghana1998.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD295,DHS Ghana 2003 Women,datasets/Ghana2003.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD298,DHS Ghana 2008 Women,datasets/Ghana2008.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD308,DHS Guatemala 1995 Women,datasets/Guatemala1995.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD310,DHS Guatemala 1999 Women,datasets/Guatemala1999.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD340,DHS India 1993 Women,datasets/India1993Child.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD342,DHS India 1999 Women,datasets/India1999.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD344,DHS India 2005 Women,datasets/India2005.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD393,DHS Kenya 1993 Women,datasets/Kenya1993.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD396,DHS Kenya 1998 Women,datasets/Kenya1998.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD399,DHS Kenya 2003 Women,datasets/Kenya2003.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD402,DHS Kenya 2008 Women,datasets/Kenya2008.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD417,DHS Liberia 2007 Women,datasets/Liberia2006.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD420,DHS Liberia 2009 Women,datasets/LBIR5AFL.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD422,DHS Liberia 2011 Women,datasets/LBIR61FL.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD485,DHS Mali 1996 Women,datasets/Mali1996.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD488,DHS Mali 2001 Women,datasets/Mali2001.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD491,DHS Mali 2006 Women,datasets/Mali2006.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD449,DHS Morocco 1992 Women,datasets/Morocco1992.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD453,DHS Morocco 2003 Women,datasets/Morocco2003.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD527,DHS Namibia 1992 Women,datasets/Namibia1992.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD529,DHS Namibia 2000 Women,datasets/Namibia2000Child.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD532,DHS Namibia 2006 Women,datasets/Namibia2006.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD540,DHS Nepal 2001 Women,datasets/Nepal2001.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD543,DHS Nepal 2006 Women,datasets/Nepal2006.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD575,DHS Niger 1998 Women,datasets/Niger1998.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD578,DHS Niger 2006 Women,datasets/Niger2006.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD554,DHS Nigeria 2003 Women,datasets/Nigeria2003.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD557,DHS Nigeria 2008 Women,datasets/Nigeria2008.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD586,DHS Pakistan 1991 Women,datasets/Pakistan1991Child.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD591,DHS Pakistan 2012 Women,dataset/Pakistan2012.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD634,DHS Rwanda 2000 Women,datasets/Rwanda2000.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD637,DHS Rwanda 2005 Women,datasets/Rwanda2005.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD640,DHS Rwanda 2008 Women,datasets/RWIR5AFL.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD643,DHS Rwanda 2010 Women,datasets/Rwanda2010new.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD663,DHS Senegal 1997 Women,datasets/Senegal1997Child.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD666,DHS Senegal 2005 Women,datasets/Senegal2005.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD671,DHS Senegal 2010 Women,datasets/Senegal2010new.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD688,DHS Sierra Leone 2008 Women,datasets/SierraLeone2008.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD711,DHS Tanzania 1996 Women,datasets/Tanzania1996.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD746,DHS Timor L'Este 2009 Women,datasets/TimorLeste2009.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD769,DHS Uganda 1995 Women,datasets/Uganda1995.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD775,DHS Uganda 2006 Women,datasets/Uganda2006.feather
+SD55,Hruschka et al. 2015 (Women),SD2178,Hruschka et al. 2015 (Women) DHS Stack,SD778,DHS Uganda 2009 Women,datasets/UGIR5HFL.feather
+SD55,Hruschka et al. 2015 (Women),SD2179,Hruschka et al. 2015 (Women) Tishkoff Stack,SD1500,Tishkoff et al. 2009 (S1S8),datasets/Tishkoff2009S1S8.xlsx

@@ -1,5 +1,5 @@
-#from fastapi import FastAPI
-from flask import Flask,request,send_file, send_from_directory, jsonify, render_template, make_response, stream_with_context, Response
+# from fastapi import FastAPI
+from flask import Flask, request, send_file, send_from_directory, jsonify, render_template, make_response, stream_with_context, Response
 from flask_mail import Mail, Message
 from neo4j import GraphDatabase
 import os
@@ -27,33 +27,39 @@ apikeyEnv = os.getenv("apikey")
 
 rvals = {}
 
+
 def connectionSM():
-    driver = GraphDatabase.driver(uri=uriSM,auth=(user,pwdSM))
+    driver = GraphDatabase.driver(uri=uriSM, auth=(user, pwdSM))
     return driver
+
 
 def connectionGIS():
-    driver = GraphDatabase.driver(uri=uriG,auth=(user,pwdG))
+    driver = GraphDatabase.driver(uri=uriG, auth=(user, pwdG))
     return driver
+
 
 def connectionAM():
-    driver = GraphDatabase.driver(uri=uriAM,auth=(user,pwdAM))
+    driver = GraphDatabase.driver(uri=uriAM, auth=(user, pwdAM))
     return driver
+
 
 def connectionUsers():
-    driver = GraphDatabase.driver(uri=os.getenv("uriU"),auth=(os.getenv("user"),os.getenv("pwdU")))
+    driver = GraphDatabase.driver(uri=os.getenv(
+        "uriU"), auth=(os.getenv("user"), os.getenv("pwdU")))
     return driver
 
-def getPolygon(CMID,driver, simple = True):
+
+def getPolygon(CMID, driver, simple=True):
     try:
         with driver.session() as session:
             query = """
     match (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET) where not r.geoPolygon is null 
     return distinct r.geoPolygon as geomID, d.shortName as source
     """
-            results = session.run(query, CMID = CMID)
+            results = session.run(query, CMID=CMID)
             result = [dict(record) for record in results]
             driver.close()
-        driverGIS = connectionGIS() 
+        driverGIS = connectionGIS()
         with driverGIS.session() as session:
             if simple == True:
                 query = """
@@ -64,7 +70,7 @@ def getPolygon(CMID,driver, simple = True):
     match (g:GEOMETRY)
     where g.geomID = geomID
     return source, coalesce(g.simplified,g.geometry) as geometry, g.simplified is not null as simple
-    """         
+    """
             else:
                 query = """
     unwind $rows as row 
@@ -74,31 +80,34 @@ def getPolygon(CMID,driver, simple = True):
     match (g:GEOMETRY) 
     where g.geomID = geomID
     return source, g.geometry as geometry
-    """         
+    """
             # query = "unwind $rows as row return row"
-            polygons = session.run(query, rows = result)
+            polygons = session.run(query, rows=result)
             polygons = [dict(record) for record in polygons]
             driverGIS.close()
         return polygons
     except Exception as e:
-        return {"firstResult":result,"query":query,"error":str(e)}
-    
-def getPoints(CMID,driver):
+        return {"firstResult": result, "query": query, "error": str(e)}
+
+
+def getPoints(CMID, driver):
     with driver.session() as session:
         query = "match (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET) where not r.geoCoords is null return distinct r.geoCoords as geometry, d.shortName as source, r.Key as Key"
-        result = session.run(query, CMID = CMID)
+        result = session.run(query, CMID=CMID)
         points = [dict(record) for record in result]
         driver.close()
     return points
 
-def getRelations(CMID,driver):
+
+def getRelations(CMID, driver):
     with driver.session() as session:
         query = "match ({CMID: $CMID})-[r]-() return distinct type(r) as relation"
-        result = session.run(query, CMID = CMID)
+        result = session.run(query, CMID=CMID)
         for record in result:
             relations = record["relation"]
         driver.close()
     return relations
+
 
 def flatten_json(json_obj, parent_key='', sep='_'):
     flat_dict = {}
@@ -109,6 +118,7 @@ def flatten_json(json_obj, parent_key='', sep='_'):
         else:
             flat_dict[new_key] = value
     return flat_dict
+
 
 def custom_sort(elem):
     if elem == 'CONTAINS':
@@ -121,17 +131,19 @@ def custom_sort(elem):
         return 3
 
 
-#app=FastAPI()
+# app=FastAPI()
 app = Flask(__name__)
 
 CORS(app)
-app.config['CORS_HEADERS']='Content-Type'
+app.config['CORS_HEADERS'] = 'Content-Type'
 app.config['PERMANENT_SESSION_LIFETIME'] = 999999999
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 
 
-app.config['MAIL_SERVER'] = os.getenv("mail_server")  # Replace with your mail server
-app.config['MAIL_PORT'] = os.getenv("mail_port")  # Typically 587 for TLS, 465 for SSL
+app.config['MAIL_SERVER'] = os.getenv(
+    "mail_server")  # Replace with your mail server
+# Typically 587 for TLS, 465 for SSL
+app.config['MAIL_PORT'] = os.getenv("mail_port")
 app.config['MAIL_USE_TLS'] = True  # Use TLS
 app.config['MAIL_USE_SSL'] = False  # Use SSL (False if using TLS)
 app.config['MAIL_USERNAME'] = os.getenv("mail_address")  # Your email
@@ -140,26 +152,32 @@ app.config['MAIL_DEFAULT_SENDER'] = os.getenv("mail_default")  # Default sender
 
 mail = Mail(app)
 
-@app.route("/")
-def root ():
-    headers = {'Content-Type': 'text/html'}
-    return make_response(render_template('api.html'),200,headers)
 
-#tvalue = request.json['tvalue']
+@app.route("/")
+def root():
+    headers = {'Content-Type': 'text/html'}
+    return make_response(render_template('api.html'), 200, headers)
+
+# tvalue = request.json['tvalue']
+
 
 @app.route('/apidocs/')
 def swagger_ui():
     return send_from_directory('static/swagger-ui', 'index.html')
 
+
 @app.route('/swagger.yaml')
 def swagger_yaml():
     return send_file('swagger.yml', mimetype='application/yaml')
 
-text =['','','']
-@app.route("/count",methods=['GET','POST'])
+
+text = ['', '', '']
+
+
+@app.route("/count", methods=['GET', 'POST'])
 def abst():
     results = []
-    results1 =[]
+    results1 = []
     if request.method == 'GET':
         text[0] = request.args.get('label')
         text[1] = request.args.get('value')
@@ -170,89 +188,95 @@ def abst():
         driver_neo4j = connectionSM()
         session = driver_neo4j.session()
         if text[2] == "" or text[2] == "Name":
-          if text[1] == "":
-            q1 = "MATCH (n:"+text[0]+") RETURN n"
-            results = session.run(q1)
-            #return {"response":[{"Name":row["properties"]} for row in results]}(
-            return results.data()
-          else:
-            q1 = "MATCH (n:"+text[0]+") RETURN n"
-            #-[:DISTRICT_OF]-(m:COUNTRY)
-            #q1 = "MATCH (n:"+text[0]+") WHERE NONE(prop in keys(n) where TOSTRING(n[prop]) CONTAINS "+text[1]+") RETURN n"
-            results = session.run(q1)
-            results = results.data()
-            for i in range(0,len(results)):
-                temp = str(results[i])
-                #if text[1] in temp:
-                if fuzz.WRatio(text[1],temp) > 40:
-                    results1.append(results[i])
-            #return {"response":[{"Name":row["properties"]} for row in results]}(
-            print(results1)
-            return results1
+            if text[1] == "":
+                q1 = "MATCH (n:"+text[0]+") RETURN n"
+                results = session.run(q1)
+                # return {"response":[{"Name":row["properties"]} for row in results]}(
+                return results.data()
+            else:
+                q1 = "MATCH (n:"+text[0]+") RETURN n"
+                # -[:DISTRICT_OF]-(m:COUNTRY)
+                # q1 = "MATCH (n:"+text[0]+") WHERE NONE(prop in keys(n) where TOSTRING(n[prop]) CONTAINS "+text[1]+") RETURN n"
+                results = session.run(q1)
+                results = results.data()
+                for i in range(0, len(results)):
+                    temp = str(results[i])
+                    # if text[1] in temp:
+                    if fuzz.WRatio(text[1], temp) > 40:
+                        results1.append(results[i])
+                # return {"response":[{"Name":row["properties"]} for row in results]}(
+                print(results1)
+                return results1
         else:
-          if text[1] == "":
-            q1 = "MATCH (n:"+text[0]+") RETURN n"
-            results = session.run(q1)
-            #return {"response":[{"Name":row["properties"]} for row in results]}(
-            return results.data()
-          else:
-            q1 = "MATCH (n:"+text[0]+") where n."+text[2]+" = '"+text[1]+"' RETURN n"
-            results = session.run(q1)
-            results = results.data()
-            #print(results)
-            return jsonify(results)
-        
-        
-socioid=[""]
-@app.route("/category",methods=['GET'])
+            if text[1] == "":
+                q1 = "MATCH (n:"+text[0]+") RETURN n"
+                results = session.run(q1)
+                # return {"response":[{"Name":row["properties"]} for row in results]}(
+                return results.data()
+            else:
+                q1 = "MATCH (n:"+text[0]+") where n." + \
+                    text[2]+" = '"+text[1]+"' RETURN n"
+                results = session.run(q1)
+                results = results.data()
+                # print(results)
+                return jsonify(results)
+
+
+socioid = [""]
+
+
+@app.route("/category", methods=['GET'])
 def catm():
-        
-        cmid = request.args.get('cmid')
-        database = request.args.get('database')
 
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        else:
-            pass
+    cmid = request.args.get('cmid')
+    database = request.args.get('database')
 
-        relnames= []
-        relations = ["USES","CONTAINS","DISTRICT_OF","LANGUOID_OF","RELIGION_OF"]
-        q = "match (a) where a.CMID = '"+cmid+"' return elementId(a) as id,labels(a) as label"
-        # q = '''unwind $cmid as cmid unwind $relation as relation match (a)-[r]-(b) where a.CMID = cmid and type(r) = relation with b unwind labels(b) as l with l where not l = 'CATEGORY' return distinct l as label'''
-        session = driver.session()
-        labels = session.run(q)
-        labels = labels.data()
-        if labels:
-            labels = str(labels[0]['label'][-1])
-        else:
-            labels = ""
-        q = "MATCH (n:"+labels+" {CMID:'"+cmid+"'})-[r]-(n1) RETURN DISTINCT TYPE(r) as label"
-        rel_name = session.run(q).data()
-        print(rel_name)
-        for i in rel_name:
-            if i['label'] in relations:
-                relnames.append(i['label'])
-        driver.close()
-        print(labels)
+    if str.lower(database) == "sociomap":
+        driver = connectionSM()
+    elif str.lower(database) == "archamap":
+        driver = connectionAM()
+    else:
+        pass
 
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-            label = re.search("^SM",cmid)
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-            label = re.search("^AM",cmid)
-        else:
-            pass
+    relnames = []
+    relations = ["USES", "CONTAINS", "DISTRICT_OF",
+                 "LANGUOID_OF", "RELIGION_OF"]
+    q = "match (a) where a.CMID = '"+cmid + \
+        "' return elementId(a) as id,labels(a) as label"
+    # q = '''unwind $cmid as cmid unwind $relation as relation match (a)-[r]-(b) where a.CMID = cmid and type(r) = relation with b unwind labels(b) as l with l where not l = 'CATEGORY' return distinct l as label'''
+    session = driver.session()
+    labels = session.run(q)
+    labels = labels.data()
+    if labels:
+        labels = str(labels[0]['label'][-1])
+    else:
+        labels = ""
+    q = "MATCH (n:"+labels+" {CMID:'"+cmid + \
+        "'})-[r]-(n1) RETURN DISTINCT TYPE(r) as label"
+    rel_name = session.run(q).data()
+    print(rel_name)
+    for i in rel_name:
+        if i['label'] in relations:
+            relnames.append(i['label'])
+    driver.close()
+    print(labels)
 
-        if label is not None:
-            label = "CATEGORY"
-        else: 
-            label = "DATASET"
-        
-        if label == "CATEGORY":
-            qInfo = '''
+    if str.lower(database) == "sociomap":
+        driver = connectionSM()
+        label = re.search("^SM", cmid)
+    elif str.lower(database) == "archamap":
+        driver = connectionAM()
+        label = re.search("^AM", cmid)
+    else:
+        pass
+
+    if label is not None:
+        label = "CATEGORY"
+    else:
+        label = "DATASET"
+
+    if label == "CATEGORY":
+        qInfo = '''
     unwind $cmid as cmid match (a)<-[r:USES]-(d:DATASET)
     where a.CMID = cmid with a,r,d
     call apoc.when(r.country is not null and not r.country = [],'return custom.getName($id) as name','return null as name',{id:r.country}) yield value as country
@@ -269,8 +293,8 @@ def catm():
     a.CMID as CMID, apoc.text.join([i in labels(a) where not i = 'CATEGORY'],', ') as Domains, 
     custom.anytoList(collect(split(language.name,', ')),true) as Languages, custom.anytoList(collect(split(religion.name,', ')),true) as Religions, 
     custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
-    '''        
-            qSamples = ''' 
+    '''
+        qSamples = ''' 
     unwind $cmid as cmid
     match (a)<-[r:USES]-(d:DATASET)
     where a.CMID = cmid
@@ -288,21 +312,20 @@ def catm():
     apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`,Source as `Source`, 'https://catmapper.org/' + $database + '/' + datasetID  as `link2`,
     Version, Link order by `Time span`, Source, Name
     '''
-            qCategories = """
+        qCategories = """
 unwind $cmid as cmid 
 match (a:ADM0 {CMID: cmid})-[:DISTRICT_OF]-(c:CATEGORY) 
 unwind labels(c) as Domain with Domain, count(*) as Count 
 return distinct Domain, Count order by Domain
 """
 
-            
-            # with driver.session() as session:
-            #     samples = session.run(qSamples, cmid = cmid)
-            #     samples = [dict(record) for record in samples]
-            #     driver.close()
-        
-        else:
-             qInfo = '''
+        # with driver.session() as session:
+        #     samples = session.run(qSamples, cmid = cmid)
+        #     samples = [dict(record) for record in samples]
+        #     driver.close()
+
+    else:
+        qInfo = '''
     unwind $cmid as cmid 
     match (a:DATASET) 
     where a.CMID = cmid 
@@ -315,9 +338,9 @@ return distinct Domain, Count order by Domain
         custom.getName(a.foci) as Foci,
         a.Note as Note
     '''
-             qSamples = None
-        
-             qCategories = """
+        qSamples = None
+
+        qCategories = """
 unwind $cmid as cmid 
 match (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY) 
 unwind r.label as Domain 
@@ -328,174 +351,178 @@ return distinct Domain, Count order by Domain
 """
 
 #             qInfo = '''
-# unwind $cmid as cmid 
-# match (a:DATASET) 
-# where a.CMID = cmid 
+# unwind $cmid as cmid
+# match (a:DATASET)
+# where a.CMID = cmid
 # with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
-# 'return null as name',{id:a.District}) yield value as Location 
-# return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID, 
+# 'return null as name',{id:a.District}) yield value as Location
+# return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID,
 # labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
 # '''
-        #      samples = []
-        
-        # with driver.session() as session:
-        #     info = session.run(qInfo, cmid = cmid)
-        #     info = [dict(record) for record in info]
-        #     driver.close()
+    #      samples = []
 
-        with driver.session() as session:
-            info = session.run(qInfo, cmid = cmid)
-            info = [dict(record) for record in info]
-            if qCategories is None:
-                categories = []
-            else: 
-                categories = session.run(qCategories,cmid = cmid)
-                categories = [dict(record) for record in categories]
-            if qSamples is not None:
-                samples = session.run(qSamples, cmid = cmid,database = database)
-                samples = [dict(record) for record in samples]
-            else: 
-                samples = []
-            driver.close()
-        
-        if "Dataset Location" in info[0]:
-            print(info[0]["Dataset Location"])
-            if info[0]["Dataset Location"]:
-                soup = BeautifulSoup(info[0]["Dataset Location"], 'html.parser')
-                link_tag = soup.find('a')
-                if link_tag:
-                    info[0]["Dataset Location"] = link_tag.get('href')  
-              
-        
-        polygons = getPolygon(cmid,driver)
-        points = getPoints(cmid,driver)
+    # with driver.session() as session:
+    #     info = session.run(qInfo, cmid = cmid)
+    #     info = [dict(record) for record in info]
+    #     driver.close()
 
-        with open('poly.json', 'w', encoding='utf-8') as f:
-            json.dump(polygons, f, ensure_ascii=False, indent=4)
-        
-        polysources = []
-        
-        if len(polygons) != 0:
-            # polygons != "" or polygons != [] or 
-            if len(polygons) > 1:
-                poly = {"type": 'FeatureCollection',"features": []}
-                for i in range(0,len(polygons)):
-                    poly["features"].append(json.loads(polygons[i]['geometry']))
-                    poly["features"][i]["source"] = (polygons[i]['source'])
-                    polysources.append(polygons[i]['source'])
-                polygons = poly
-                # polygons = json.loads(polygons)
-            else:
-                temp = polygons
-                polygons = [json.loads(polygons[0]['geometry'])]
-                polygons[0]["source"] = (temp[0]['source'])
-                polysources.append(temp[0]['source'])
-                temp = None
+    with driver.session() as session:
+        info = session.run(qInfo, cmid=cmid)
+        info = [dict(record) for record in info]
+        if qCategories is None:
+            categories = []
+        else:
+            categories = session.run(qCategories, cmid=cmid)
+            categories = [dict(record) for record in categories]
+        if qSamples is not None:
+            samples = session.run(qSamples, cmid=cmid, database=database)
+            samples = [dict(record) for record in samples]
+        else:
+            samples = []
+        driver.close()
 
-        with open('new.json', 'w', encoding='utf-8') as f:
-            json.dump(polygons, f, ensure_ascii=False, indent=4)
-        
-        with open('data.json', 'w', encoding='utf-8') as f:
-            json.dump(points, f, ensure_ascii=False, indent=4)
-            
-        valid_data = []
+    if "Dataset Location" in info[0]:
+        print(info[0]["Dataset Location"])
+        if info[0]["Dataset Location"]:
+            soup = BeautifulSoup(info[0]["Dataset Location"], 'html.parser')
+            link_tag = soup.find('a')
+            if link_tag:
+                info[0]["Dataset Location"] = link_tag.get('href')
 
-        bad_sources = []
+    polygons = getPolygon(cmid, driver)
+    points = getPoints(cmid, driver)
 
-        def is_valid_lat_long(lat, long):
-            return -90 <= lat <= 90 and -180 <= long <= 180
+    with open('poly.json', 'w', encoding='utf-8') as f:
+        json.dump(polygons, f, ensure_ascii=False, indent=4)
 
-        for entry in points:
-            try:
-                geometry = entry['geometry']
-                
-                if isinstance(geometry, list):
-                    if len(geometry) == 1:
-                        geometry = geometry[0]
-                    else:
-                        raise ValueError("Multiple geometries found where one was expected")
+    polysources = []
 
-                if isinstance(geometry, str):
-                    if geometry.count("{") != geometry.count("}"):
-                        raise ValueError("Missing brackets in geometry JSON")
-                    
-                    geometry = json.loads(geometry)
+    if len(polygons) != 0:
+        # polygons != "" or polygons != [] or
+        if len(polygons) > 1:
+            poly = {"type": 'FeatureCollection', "features": []}
+            for i in range(0, len(polygons)):
+                poly["features"].append(json.loads(polygons[i]['geometry']))
+                poly["features"][i]["source"] = (polygons[i]['source'])
+                polysources.append(polygons[i]['source'])
+            polygons = poly
+            # polygons = json.loads(polygons)
+        else:
+            temp = polygons
+            polygons = [json.loads(polygons[0]['geometry'])]
+            polygons[0]["source"] = (temp[0]['source'])
+            polysources.append(temp[0]['source'])
+            temp = None
 
-                if 'coordinates' not in geometry:
-                    raise ValueError("Coordinates missing in geometry JSON")
-                
-                if geometry['type'] == 'Point':
-                    long, lat = geometry['coordinates']
+    with open('new.json', 'w', encoding='utf-8') as f:
+        json.dump(polygons, f, ensure_ascii=False, indent=4)
+
+    with open('data.json', 'w', encoding='utf-8') as f:
+        json.dump(points, f, ensure_ascii=False, indent=4)
+
+    valid_data = []
+
+    bad_sources = []
+
+    def is_valid_lat_long(lat, long):
+        return -90 <= lat <= 90 and -180 <= long <= 180
+
+    for entry in points:
+        try:
+            geometry = entry['geometry']
+
+            if isinstance(geometry, list):
+                if len(geometry) == 1:
+                    geometry = geometry[0]
+                else:
+                    raise ValueError(
+                        "Multiple geometries found where one was expected")
+
+            if isinstance(geometry, str):
+                if geometry.count("{") != geometry.count("}"):
+                    raise ValueError("Missing brackets in geometry JSON")
+
+                geometry = json.loads(geometry)
+
+            if 'coordinates' not in geometry:
+                raise ValueError("Coordinates missing in geometry JSON")
+
+            if geometry['type'] == 'Point':
+                long, lat = geometry['coordinates']
+                if not is_valid_lat_long(lat, long):
+                    raise ValueError(
+                        f"Out of range latitude/longitude: {lat}, {long}")
+            elif geometry['type'] == 'MultiPoint':
+                for coord in geometry['coordinates']:
+                    long, lat = coord
                     if not is_valid_lat_long(lat, long):
-                        raise ValueError(f"Out of range latitude/longitude: {lat}, {long}")
-                elif geometry['type'] == 'MultiPoint':
-                    for coord in geometry['coordinates']:
-                        long, lat = coord
-                        if not is_valid_lat_long(lat, long):
-                            raise ValueError(f"Out of range latitude/longitude in MultiPoint: {lat}, {long}")
-                else:
-                    raise ValueError(f"Unsupported geometry type: {geometry['type']}")
-                
-                print(geometry)
+                        raise ValueError(
+                            f"Out of range latitude/longitude in MultiPoint: {lat}, {long}")
+            else:
+                raise ValueError(
+                    f"Unsupported geometry type: {geometry['type']}")
 
-                entry['geometry'] = geometry
-                valid_data.append(entry)
-            except (json.JSONDecodeError, KeyError,ValueError) as e:
-                 bad_sources.append({'source': entry.get('source', 'Unknown'),'key': entry.get('key', 'Unknown'), 'error': str(e)})
-                                                
-        if len(valid_data) > 0:
-            point= []
-            for i in range(0,len(valid_data)):
-                if valid_data[i]['geometry'] == "null":
-                    continue
-                if valid_data[i]['geometry']["type"] != "MultiPoint":
-                    point.append({"cood" : valid_data[i]['geometry']["coordinates"][::-1],"source": valid_data[i]["source"]})
-                else:
-                    temp = valid_data[i]
-                    source = temp['source']
-                    for j in range(0,len(temp['geometry']['coordinates'])):
-                        point.append({'cood' : temp['geometry']['coordinates'][j][::-1], "source" : source })
-            if point:
-                    points= point
-        
-                      
-        # if len(points) > 0:
-        #     for i in range(0,len(points)):
-        #         if isinstance(json.loads(points[i]['geometry'])["coordinates"][0],int):
-        #             points[i] = {"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]}
-        #         elif isinstance(json.loads(points[i]['geometry'])["coordinates"][0],float):
-        #             points[i] = {"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]}
-        #         else:
-        #             for j in range(0,len(json.loads(points[i]['geometry'])["coordinates"])):
-        #                 print(points[i])
+            print(geometry)
 
-        with open('data.json', 'w', encoding='utf-8') as f:
-                json.dump(points, f, ensure_ascii=False, indent=4)
-        
-        
-        relnames = sorted(relnames, key=custom_sort)
+            entry['geometry'] = geometry
+            valid_data.append(entry)
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            bad_sources.append({'source': entry.get(
+                'source', 'Unknown'), 'key': entry.get('key', 'Unknown'), 'error': str(e)})
 
-        if "Languages" in  info[0]:
-            if info[0]['Languages'][:1]    == ",":
-                info[0]['Languages'] = info[0]['Languages'][2:].strip()
-            if info[0]['Languages'][-2:-1]    == ",":
-                info[0]['Languages'] = info[0]['Languages'][:-2].strip()
-        
-        if "Location" in  info[0]:
-            if info[0]['Location'][-2:-1]    == ",":
-                info[0]['Location'] = info[0]['Location'][:-2].strip()
-        
-        if "Date range" in info[0]:
-            if info[0]["Date range"] == "-":
-                del info[0]["Date range"]
-                          
-        return jsonify({
+    if len(valid_data) > 0:
+        point = []
+        for i in range(0, len(valid_data)):
+            if valid_data[i]['geometry'] == "null":
+                continue
+            if valid_data[i]['geometry']["type"] != "MultiPoint":
+                point.append(
+                    {"cood": valid_data[i]['geometry']["coordinates"][::-1], "source": valid_data[i]["source"]})
+            else:
+                temp = valid_data[i]
+                source = temp['source']
+                for j in range(0, len(temp['geometry']['coordinates'])):
+                    point.append(
+                        {'cood': temp['geometry']['coordinates'][j][::-1], "source": source})
+        if point:
+            points = point
+
+    # if len(points) > 0:
+    #     for i in range(0,len(points)):
+    #         if isinstance(json.loads(points[i]['geometry'])["coordinates"][0],int):
+    #             points[i] = {"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]}
+    #         elif isinstance(json.loads(points[i]['geometry'])["coordinates"][0],float):
+    #             points[i] = {"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]}
+    #         else:
+    #             for j in range(0,len(json.loads(points[i]['geometry'])["coordinates"])):
+    #                 print(points[i])
+
+    with open('data.json', 'w', encoding='utf-8') as f:
+        json.dump(points, f, ensure_ascii=False, indent=4)
+
+    relnames = sorted(relnames, key=custom_sort)
+
+    if "Languages" in info[0]:
+        if info[0]['Languages'][:1] == ",":
+            info[0]['Languages'] = info[0]['Languages'][2:].strip()
+        if info[0]['Languages'][-2:-1] == ",":
+            info[0]['Languages'] = info[0]['Languages'][:-2].strip()
+
+    if "Location" in info[0]:
+        if info[0]['Location'][-2:-1] == ",":
+            info[0]['Location'] = info[0]['Location'][:-2].strip()
+
+    if "Date range" in info[0]:
+        if info[0]["Date range"] == "-":
+            del info[0]["Date range"]
+
+    return jsonify({
         "info": info[0],
         "samples": samples,
         "categories": categories,
         "polygons": polygons,
         "points": points,
-        "label":labels,
+        "label": labels,
         "relnames": relnames,
         "polysource": polysources,
         "badsources": bad_sources
@@ -571,12 +598,12 @@ return distinct Domain, Count order by Domain
 #                             center = (results1['coordinates'][0][0][0])[::-1]
 #                     with open('data.json', 'w', encoding='utf-8') as f:
 #                          json.dump(results1, f, ensure_ascii=False, indent=4)
-                    
+
 #                 break
-        
+
 #         if flag == 0:
 #             results1=[]
-        
+
 #         poid=[]
 #         for i in range(0,len(resultsm)):
 #             if resultsm[i]['point'] is not None:
@@ -592,7 +619,7 @@ return distinct Domain, Count order by Domain
 #                 poid.append(dict([("id",resultsm[i]['source']),('coordinates',cood)]))
 #                 #poid[i]['id'] = resultsm[i]['source']
 #                 #poid[i]['coordinates'] = json.loads(resultsm[i]['point'])['coordinates'][0]
-        
+
 #         print(poid)
 
 #         '''
@@ -602,8 +629,8 @@ return distinct Domain, Count order by Domain
 #                  easting = obj["coordinates"][1]
 #                  obj["coordinates"] = [ easting, northing ]
 #         '''
-    
-        
+
+
 #         payload = {
 #     "current_response": results.data(),
 #     "future_response": results1,
@@ -612,42 +639,44 @@ return distinct Domain, Count order by Domain
 #     "label":label,
 #     "relnames": relnames
 # }
-        
+
 #         #print(payload)
 #         return jsonify(payload)
 #         #return (results.data())
 
-@app.route("/network",methods=['GET'])
+@app.route("/network", methods=['GET'])
 def net():
     p0 = request.args.get('value')
     p1 = request.args.get('cmid')
     p2 = request.args.get('relation')
-    driver_neo4j =connectionSM()
+    driver_neo4j = connectionSM()
     session = driver_neo4j.session()
-    q = "MATCH (n:"+p0+" {CMID:'"+p1+"'})-[r:"+p2+"]-(OtherNodes) RETURN n,r,OtherNodes"
+    q = "MATCH (n:"+p0+" {CMID:'"+p1+"'})-[r:" + \
+        p2+"]-(OtherNodes) RETURN n,r,OtherNodes"
     r = session.run(q)
     resultnet = r.data()
     return resultnet
 
-@app.route("/explore",methods=['GET'])
+
+@app.route("/explore", methods=['GET'])
 def getExplore():
-    
+
     try:
         cmid = request.args.get('cmid')
         database = request.args.get('database')
 
         if str.lower(database) == "sociomap":
             driver = connectionSM()
-            label = re.search("^SM",cmid)
+            label = re.search("^SM", cmid)
         elif str.lower(database) == "archamap":
             driver = connectionAM()
-            label = re.search("^AM",cmid)
+            label = re.search("^AM", cmid)
         else:
             pass
 
         if label is not None:
             label = "CATEGORY"
-        else: 
+        else:
             label = "DATASET"
 
         if label == "CATEGORY":
@@ -669,7 +698,7 @@ def getExplore():
     a.CMID as CMID, apoc.text.join([i in labels(a) where not i = 'CATEGORY'],', ') as Domains, 
     custom.anytoList(collect(split(language.name,', ')),true) as Languages, custom.anytoList(collect(split(religion.name,', ')),true) as Religions, 
     custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
-    '''        
+    '''
             qSamples = ''' 
     unwind $cmid as cmid
     match (a)<-[r:USES]-(d:DATASET)
@@ -725,29 +754,29 @@ return distinct Domain, Count order by Domain
         # return [{"info": qInfo,
         #         "samples":qSamples,
         #         "categories": qCategories}]
-        
+
         with driver.session() as session:
-            info = session.run(qInfo, cmid = cmid)
+            info = session.run(qInfo, cmid=cmid)
             info = [dict(record) for record in info]
             if qCategories is None:
                 categories = []
-            else: 
-                categories = session.run(qCategories,cmid = cmid)
+            else:
+                categories = session.run(qCategories, cmid=cmid)
                 categories = [dict(record) for record in categories]
             if qSamples is not None:
-                samples = session.run(qSamples, cmid = cmid, database = database)
+                samples = session.run(qSamples, cmid=cmid, database=database)
                 samples = [dict(record) for record in samples]
-            else: 
+            else:
                 samples = []
             driver.close()
 
-        polygons = getPolygon(cmid,driver)
-        points = getPoints(cmid,driver)
+        polygons = getPolygon(cmid, driver)
+        points = getPoints(cmid, driver)
 
         if info is None:
             raise Exception("No results for info")
         if samples is None:
-            raise Exception("No results for samples")        
+            raise Exception("No results for samples")
 
         return jsonify({
             "info": info,
@@ -756,11 +785,13 @@ return distinct Domain, Count order by Domain
             "points": points,
             "categories": categories
         })
-    
+
     except Exception as e:
-        return "Error returning results: " + str(e), 500    
+        return "Error returning results: " + str(e), 500
 
 # Function to serialize a Neo4j Node object into a serializable dictionary
+
+
 def serialize_node(node):
     return {
         "id": node.element_id,
@@ -769,6 +800,8 @@ def serialize_node(node):
     }
 
 # Function to serialize Neo4j Relationship object into a serializable dictionary
+
+
 def serialize_relationship(relationship):
     return {
         "type": relationship.type,
@@ -777,10 +810,11 @@ def serialize_relationship(relationship):
         "properties": dict(relationship.items())
     }
 
-@app.route("/uploadInputNodes",methods=['GET','POST'])
+
+@app.route("/uploadInputNodes", methods=['GET', 'POST'])
 def upload_API():
     try:
-        data = request.get_data() 
+        data = request.get_data()
         data = json.loads(data)
         df = data.get("df")
         database = CM.unlist(data.get("database"))
@@ -795,22 +829,22 @@ def upload_API():
         Name = formData["categoryNamesColumn"]
         altNames = formData["alternateCategoryNamesColumn"]
         CMID = formData["cmidColumn"]
-        Key = formData["keyColumn"]   
+        Key = formData["keyColumn"]
 
         linkProperties = data.get("linkContext")
         if not linkProperties:
-            linkProperties = None     
-        
+            linkProperties = None
+
         if data.get("addoptions")["district"] == False:
             addDistrict = False
         else:
             addDistrict = True
-        
+
         if data.get("addoptions")["recordyear"] == False:
             addRecordYear = False
         else:
             addRecordYear = True
-        
+
         user = data.get("user")
 
         if data.get("so") == "advanced":
@@ -818,34 +852,35 @@ def upload_API():
             uploadOption = data.get("ao")
 
             dfpd = pd.DataFrame(df)
-            required = ["CMName","Name","CMID", "label", "altNames", "Key", "datasetID"]
+            required = ["CMName", "Name", "CMID",
+                        "label", "altNames", "Key", "datasetID"]
             key_cols = {}
             for key in required:
                 if key in dfpd.columns.to_list():
                     key_cols[key] = key
-                else: 
+                else:
                     key_cols[key] = None
 
             nodeProperties = None
             if 'label' in dfpd.columns:
                 if dfpd['label'][0] == "DATASET":
                     nodeProperties = linkProperties
-                    linkProperties = None               
+                    linkProperties = None
 
             response = CM.input_Nodes_Uses(
-                 dataset=df,
-                 database=database,
-                 uploadOption = uploadOption,
-                 formatKey=False,
-                 nodeProperties=nodeProperties, 
-                 linkProperties=linkProperties,
-                 user=user,
-                 addDistrict=addDistrict,
-                 addRecordYear=addRecordYear,
-                 geocode=False,
-                 batchSize=1000)
+                dataset=df,
+                database=database,
+                uploadOption=uploadOption,
+                formatKey=False,
+                nodeProperties=nodeProperties,
+                linkProperties=linkProperties,
+                user=user,
+                addDistrict=addDistrict,
+                addRecordYear=addRecordYear,
+                geocode=False,
+                batchSize=1000)
         else:
-           
+
             if not label:
                 raise Exception("Must specify a domain")
             df = pd.DataFrame(df)
@@ -857,29 +892,30 @@ def upload_API():
             if not CMID in df.columns:
                 df['CMID'] = ""
                 CMID = "CMID"
-            df.rename(columns={CMName: "CMName", CMID: "CMID", Name: "Name", Key: "Key", altNames: "altNames"}, inplace=True)
+            df.rename(columns={CMName: "CMName", CMID: "CMID", Name: "Name",
+                      Key: "Key", altNames: "altNames"}, inplace=True)
             df = df.to_dict(orient='records')
             # return {"Name":Name, "CMID":CMID,"altNames":altNames,"Key":Key,"user":user,"overwriteProperties":overwriteProperties,"updateProperties":updateProperties,"addDistrict":addDistrict,"addRecordYear":addRecordYear}
             response = CM.input_Nodes_Uses(
-                dataset = df,
-                database = database,
-                uploadOption = "add_uses",
+                dataset=df,
+                database=database,
+                uploadOption="add_uses",
                 formatKey=True,
-                nodeProperties=None, 
+                nodeProperties=None,
                 linkProperties=None,
                 user=user,
                 addDistrict=False,
                 addRecordYear=False,
                 geocode=False,
                 batchSize=1000)
-                            
+
         if isinstance(response, pd.DataFrame):
             n = len(response)
             response_dict = response.to_dict(orient='records')
             return {"message": f"Upload completed for {n} row(s)", "file": response_dict}
         # else:
         #     return "Error!! Check your file."
-        
+
     except Exception as e:
         log_file = f'log/{user}uploadProgress.txt'
         full_log = []
@@ -888,7 +924,7 @@ def upload_API():
                 full_log = file.readlines()
         else:
             full_log.append("Log file not found.")
-        
+
         response_data = {
             "error": f"Upload error - {str(e)}",
             "full_log": full_log
@@ -896,16 +932,17 @@ def upload_API():
 
         return json.dumps(response_data), 500
 
+
 @app.route('/networks', methods=['GET'])
 def getNetwork():
     try:
         cmid = request.args.get('cmid')
-        cmid = re.split(",",cmid)
+        cmid = re.split(",", cmid)
         domain = request.args.get('domain')
         if domain is not None:
-            domain = re.split(",",domain)
+            domain = re.split(",", domain)
         else:
-            domain = ["CATEGORY","DATASET"]
+            domain = ["CATEGORY", "DATASET"]
 
         endcmid = request.args.get('endcmid')
         relation = request.args.get('relation')
@@ -931,7 +968,7 @@ not isEmpty([label IN labels(e)
 WHERE label IN apoc.coll.flatten([$domain],true)]) 
 with collect(distinct a) as a, r, e
 return a, collect(distinct r) as r, collect(distinct e) as e
-"""        
+"""
         else:
             cypher_query = """
 unwind $cmid as cmid unwind $relation as relation MATCH (a) 
@@ -942,40 +979,43 @@ not isEmpty([label IN labels(e)
 WHERE label IN apoc.coll.flatten([$domain],true)]) 
 with collect(distinct a) as a, r, e limit 10
 return a, collect(distinct r) as r, collect(distinct e) as e
-"""        
-        
+"""
+
         with driver.session() as session:
             # Execute the Cypher queries
-            result = session.run(cypher_query, cmid = cmid, relation = relation,domain = domain, endcmid = endcmid)
+            result = session.run(
+                cypher_query, cmid=cmid, relation=relation, domain=domain, endcmid=endcmid)
             result = CM.unlist([dict(record) for record in result])
             node = []
             rel = []
             end = []
             a = result['a']
             for record in a:
-                node.append({"node":serialize_node(record)})
+                node.append({"node": serialize_node(record)})
             r = result['r']
             for record in r:
-                rel.append({"relation":serialize_relationship(record)})
+                rel.append({"relation": serialize_relationship(record)})
             e = result['e']
             for record in e:
-                end.append({"end":serialize_node(record)})
+                end.append({"end": serialize_node(record)})
 
         driver.close()
         node = [flatten_json(entry) for entry in node]
         rel = [flatten_json(entry) for entry in rel]
         end = [flatten_json(entry) for entry in end]
 
-        return {"node":node,"relations":rel,"relNodes":end,"query":cypher_query,"params":[{"cmid":cmid,"database":database,"domain":domain,"relation":relation,"endcmid":endcmid}]}
+        return {"node": node, "relations": rel, "relNodes": end, "query": cypher_query, "params": [{"cmid": cmid, "database": database, "domain": domain, "relation": relation, "endcmid": endcmid}]}
     except Exception as e:
         return str(e), 500
-    
-@app.route('/proposeMergeSubmit', methods=['POST']) # what about calling this createLinkfile internally? # do we want to?
+
+
+# what about calling this createLinkfile internally? # do we want to?
+@app.route('/proposeMergeSubmit', methods=['POST'])
 def submit_merge():
-    data = request.get_data() 
+    data = request.get_data()
     data = json.loads(data)
     dataset_choices = data.get("datasetChoices")
-    dataset_choices=dataset_choices.split(",")
+    dataset_choices = dataset_choices.split(",")
     ncontains = data.get("mergelevel")
     category_label = CM.unlist(data.get("categoryLabel", ""))
     intersection = CM.unlist(data.get("intersection", False))
@@ -985,70 +1025,72 @@ def submit_merge():
         category_label = "CATEGORY"
     elif category_label == "AREA":
         category_label = "DISTRICT"
-    
 
-    result = CM.proposeMerge(dataset_choices,category_label,criteria,database,intersection,ncontains)
+    result = CM.proposeMerge(dataset_choices=dataset_choices, category_label=category_label,
+                             criteria=criteria, database=database, intersection=intersection, ncontains=ncontains)
 
     return result
 
-@app.route('/downloadMergeCode', methods=['POST']) 
+
+@app.route('/downloadMergeCode', methods=['POST'])
 def get_merge_code():
-    data = request.get_data() 
+    data = request.get_data()
     data = json.loads(data)
-    
+
 
 @app.route('/joinDatasets', methods=['POST'])
 def submitjoinDatasets():
-    data = request.get_data() 
+    data = request.get_data()
     data = json.loads(data)
     # print(data)
     database = CM.unlist(data.get("database", ""))
     joinLeft = data.get("joinLeft")
     joinRight = data.get("joinRight")
-    
+
     result = CM.joinDatasets(database, joinLeft, joinRight)
 
     return jsonify(result)
 
+
 @app.route('/validateDatasets', methods=['POST'])
 def submitvalidateDatasets():
-    data = request.get_data() 
+    data = request.get_data()
     data = json.loads(data)
     database = CM.unlist(data.get("database", ""))
     names = data.get("names").split(",")
 
     if str.lower(database) == "sociomap":
-            driver = connectionSM()
+        driver = connectionSM()
     elif str.lower(database) == "archamap":
         driver = connectionAM()
     else:
         raise Exception("must specify database as SocioMap or ArchaMap")
-    
 
     with driver.session() as session:
         for i in names:
-            q ="""
+            q = """
             MATCH (n:DATASET)
             WHERE n.CMID = $prop
             RETURN COUNT(n) > 0 AS nodeExists
             """
-            result = session.run(q,prop=i)
+            result = session.run(q, prop=i)
             node_exists = result.single()["nodeExists"]
             if not node_exists:
                 return jsonify({"success": False, "message": "Check your Dataset IDs."})
     driver.close()
     return jsonify({"success": True, "message": "All IDs exist."})
 
+
 @app.route('/networksjs', methods=['GET'])
 def getNetworkjs():
     try:
         cmid = request.args.get('cmid')
-        cmid = re.split(",",cmid)
+        cmid = re.split(",", cmid)
         domain = request.args.get('domain')
         if domain is not None:
-            domain = re.split(",",domain)
+            domain = re.split(",", domain)
         else:
-            domain = ["CATEGORY","DATASET"]
+            domain = ["CATEGORY", "DATASET"]
 
         endcmid = request.args.get('endcmid')
         relation = request.args.get('relation')
@@ -1074,7 +1116,7 @@ not isEmpty([label IN labels(e)
 WHERE label IN apoc.coll.flatten([$domain],true)]) 
 with collect(distinct a) as a, r, e
 return a, collect(distinct r) as r, collect(distinct e) as e
-"""        
+"""
         else:
             cypher_query = """
 unwind $cmid as cmid unwind $relation as relation MATCH (a) 
@@ -1085,34 +1127,36 @@ not isEmpty([label IN labels(e)
 WHERE label IN apoc.coll.flatten([$domain],true)]) 
 with collect(distinct a) as a, r, e
 return a, collect(distinct r) as r, collect(distinct e) as e
-"""        
-        
+"""
+
         with driver.session() as session:
             # Execute the Cypher queries
-            result = session.run(cypher_query, cmid = cmid, relation = relation,domain = domain, endcmid = endcmid)
+            result = session.run(
+                cypher_query, cmid=cmid, relation=relation, domain=domain, endcmid=endcmid)
             result = CM.unlist([dict(record) for record in result])
             node = []
             rel = []
             end = []
             a = result['a']
             for record in a:
-                node.append({"node":serialize_node(record)})
+                node.append({"node": serialize_node(record)})
             r = result['r']
             for record in r:
-                rel.append({"relation":serialize_relationship(record)})
+                rel.append({"relation": serialize_relationship(record)})
             e = result['e']
             for record in e:
-                end.append({"end":serialize_node(record)})
+                end.append({"end": serialize_node(record)})
 
         driver.close()
         node = [flatten_json(entry) for entry in node]
         rel = [flatten_json(entry) for entry in rel]
         end = [flatten_json(entry) for entry in end]
 
-        return {"node":node,"relations":rel,"relNodes":end,"query":cypher_query,"params":[{"cmid":cmid,"database":database,"domain":domain,"relation":relation,"endcmid":endcmid}]}
+        return {"node": node, "relations": rel, "relNodes": end, "query": cypher_query, "params": [{"cmid": cmid, "database": database, "domain": domain, "relation": relation, "endcmid": endcmid}]}
     except Exception as e:
         return str(e), 500
-    
+
+
 @app.route('/search', methods=['GET'])
 def getSearch():
     """Search endpoint for explore page
@@ -1226,9 +1270,9 @@ def getSearch():
             property,
             domain,
             yearStart,
-            yearEnd, 
-            context, 
-            country, 
+            yearEnd,
+            context,
+            country,
             limit,
             query
         )
@@ -1238,14 +1282,15 @@ def getSearch():
     except Exception as e:
         return str(e), 500
 
+
 @app.route('/translate2', methods=['POST'])
 def getTranslate2():
     try:
-        data = request.get_data()  
+        data = request.get_data()
         data = json.loads(data)
         database = CM.unlist(data.get("database"))
         property = CM.unlist(data.get("property"))
-        domain = CM.unlist(data.get("domain"))        
+        domain = CM.unlist(data.get("domain"))
         key = CM.unlist(data.get("key"))
         term = CM.unlist(data.get("term"))
         country = CM.unlist(data.get('country'))
@@ -1258,19 +1303,19 @@ def getTranslate2():
         uniqueRows = data.get("uniqueRows")
 
         data = CM.translate(
-            database = database,
-            property = property,
-            domain = domain,
-            key = key,
-            term = term,
-            country = country, 
-            context = context,
-            dataset = dataset,
-            yearStart = yearStart, 
-            yearEnd = yearEnd,
-            query = query,
-            table = table,
-            uniqueRows = uniqueRows)
+            database=database,
+            property=property,
+            domain=domain,
+            key=key,
+            term=term,
+            country=country,
+            context=context,
+            dataset=dataset,
+            yearStart=yearStart,
+            yearEnd=yearEnd,
+            query=query,
+            table=table,
+            uniqueRows=uniqueRows)
 
         data_dict = data.to_dict(orient='records')
 
@@ -1283,14 +1328,14 @@ def getTranslate2():
 @app.route('/query', methods=['POST'])
 def getQuery():
     try:
-        rows = request.get_data()  
+        rows = request.get_data()
         rows = json.loads(rows)
         database = rows.get("database")
         query = rows.get("query")
         user = rows.get("user")
         pwd = rows.get("pwd")
         params = rows.get("params")
-        
+
         if str.lower(database) == "sociomap":
             driver = connectionSM()
         elif str.lower(database) == "archamap":
@@ -1298,13 +1343,14 @@ def getQuery():
         elif database == "gisdb":
             driver = connectionGIS()
         else:
-            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
-        
-        verified = CM.verifyUser(user,pwd)
-    
+            raise Exception(
+                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+
+        verified = CM.verifyUser(user, pwd)
+
         if verified == "verified":
             with driver.session() as session:
-                result = session.run(query,params)
+                result = session.run(query, params)
                 data = [dict(record) for record in result]
                 driver.close()
             return jsonify(data)
@@ -1312,7 +1358,7 @@ def getQuery():
             raise Exception(f"error: User is not verified")
 
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
+        # In case of an error, return an error response with an appropriate HTTP status code
         data = str(e)
 
         return data, 500
@@ -1332,14 +1378,15 @@ def getGeometry():
     elif database == "gisdb":
         driver = connectionGIS()
 
-    polygons = getPolygon(cmid,driver,simple = True)
-    points = getPoints(cmid,driver)
-    return jsonify({"polygons":polygons,"points":points})
+    polygons = getPolygon(cmid, driver, simple=True)
+    points = getPoints(cmid, driver)
+    return jsonify({"polygons": polygons, "points": points})
+
 
 @app.route('/newuser', methods=['POST'])
 def getnewuser():
     try:
-        data = request.get_data()  
+        data = request.get_data()
         data = json.loads(data)
         database = data.get("database")
         firstName = data.get("firstName")
@@ -1356,33 +1403,38 @@ def getnewuser():
             database = "ArchaMap"
         else:
             raise Exception("database must be 'SocioMap' or 'ArchaMap'")
-        
-        driver = CM.getDriver("userdb")  
-        
+
+        driver = CM.getDriver("userdb")
+
         queryExists = """
-match (u:USER {username: $username}) 
+MATCH (u:USER {access: 'new',username: $username})
+WHERE $database IN u.database
 return true as exists
 """
         with driver.session() as session:
-            result = session.run(queryExists, username = username)
+            result = session.run(
+                queryExists, username=username, database=database)
             data = [dict(record) for record in result]
             driver.close()
-        
+
         if isinstance(data, list) and data and data[0].get("exists") is not None:
-            raise Exception("Username already exists. Please try another username.")
-        
+            raise Exception(
+                "Username already exists. Please try another username.")
+
         queryExists = """
-match (u:USER {Email: $email}) 
+match (u:USER {email: $email,access:'new'})
+WHERE $database IN u.database
 return true as exists
 """
         with driver.session() as session:
-            result = session.run(queryExists, email = email)
+            result = session.run(queryExists, email=email, database=database)
             data = [dict(record) for record in result]
             driver.close()
-        
+
         if isinstance(data, list) and data and data[0].get("exists") is not None:
-            raise Exception("Account with this email already exists. Please contact admin@catmapper.org to reset password.")
-        
+            raise Exception(
+                "Account with this email already exists. Please contact admin@catmapper.org to reset password.")
+
         query = """
 match (p:USER) with toInteger(p.userid) + 1 as id order by id desc limit 1
 merge (u:USER {username: $username}) 
@@ -1401,7 +1453,8 @@ return u.userid as userid
 """
 
         with driver.session() as session:
-            result = session.run(query,firstName = firstName, lastName = lastName, email = email, password = password,username = username,intendedUse = intendedUse,database = database)
+            result = session.run(query, firstName=firstName, lastName=lastName, email=email,
+                                 password=password, username=username, intendedUse=intendedUse, database=database)
             data = [dict(record) for record in result]
             driver.close()
 
@@ -1413,23 +1466,25 @@ email: {email}
 database: {database}
 description: {intendedUse}
 """
-        CM.sendEmail(mail, subject = "New registered user", recipients = ["admin@catmapper.org"], body = body, sender = os.getenv("mail_default"))
+        CM.sendEmail(mail, subject="New registered user", recipients=[
+                     "admin@catmapper.org"], body=body, sender=os.getenv("mail_default"))
 
         return jsonify(data)
 
     except Exception as e:
         # Check for specific error messages
         error_message = str(e)
-        
+
         if "Account with this email already exists." in error_message:
-            return f"Error: {error_message}", 400  # Return 400 Bad Request
+            return jsonify({"error": str(e)}), 400    # Return 400 Bad Request
 
         elif "Username already exists" in error_message:
-            return f"Error: {error_message}", 400  # Return 400 Bad Request
+            return jsonify({"error": str(e)}), 400   # Return 400 Bad Request
 
         else:
             # Default error message
-            return f"Error: please contact admin@catmapper.org. Error: {error_message}", 500
+            return jsonify({"error": "please contact admin@catmapper.org. Error:" + error_message}), 500
+
 
 @app.route('/admin', methods=['GET'])
 def getAdmin():
@@ -1451,18 +1506,19 @@ def getAdmin():
     ```
     """
     headers = {'Content-Type': 'text/html'}
-    return make_response(render_template('admin.html'),200,headers)
+    return make_response(render_template('admin.html'), 200, headers)
 
-@app.route('/admin/edit', methods=['GET','POST'])
+
+@app.route('/admin/edit', methods=['GET', 'POST'])
 def getAdminEdit():
     # will not be documented in swagger at this point
     try:
         if request.method == 'GET':
             data = request.args
         elif request.method == "POST":
-            data = request.get_data()  
+            data = request.get_data()
             data = json.loads(data)
-        else: 
+        else:
             raise Exception("invalid request method")
         database = CM.unlist(data.get('database'))
         fun = CM.unlist(data.get('fun'))
@@ -1474,21 +1530,22 @@ def getAdminEdit():
         # if fun == "getUSESrels":
         #     result = CM.getUSESrels(request,driver)
         if fun == "mergeNodes":
-            result = CM.mergeNodes(request,driver)
+            result = CM.mergeNodes(request, driver)
         elif fun == "addIndexes":
             result = CM.addIndexes(driver)
         elif fun == "processUSES":
             CMID = CM.cleanCMID(data.get('CMID'))
-            result = CM.processUSES(database = database, CMID = CMID)    
+            result = CM.processUSES(database=database, CMID=CMID)
         else:
             raise Exception("Function does not exist")
         return result
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
+        # In case of an error, return an error response with an appropriate HTTP status code
         data = str(e)
         return data, 500
 
-@app.route('/dataset', methods=['GET','POST'])
+
+@app.route('/dataset', methods=['GET', 'POST'])
 def getDataset():
     # to do: document
     try:
@@ -1498,30 +1555,31 @@ def getDataset():
             domain = CM.unlist(request.args.get('domain'))
             children = CM.unlist(request.args.get('children'))
         elif request.method == "POST":
-            data = request.get_data()  
+            data = request.get_data()
             data = json.loads(data)
             database = CM.unlist(data.get('database'))
             cmid = CM.unlist(data.get('cmid'))
             domain = data.get('domain')
             children = CM.unlist(data.get('children'))
-        else: 
+        else:
             raise Exception("invalid request method")
-        
+
         driver = CM.getDriver(database)
 
         if isinstance(domain, str):
-            domain = [domain] 
+            domain = [domain]
 
         if domain is None or "ANY DOMAIN" in domain:
             domain = ["CATEGORY"]
 
         if domain != ["CATEGORY"]:
-            labels = CM.getQuery(query="MATCH (l:LABEL) RETURN l.label AS label, l.groupLabel AS groupLabel", driver=driver)
+            labels = CM.getQuery(
+                query="MATCH (l:LABEL) RETURN l.label AS label, l.groupLabel AS groupLabel", driver=driver)
             labels = pd.DataFrame(labels)
             # Checking if any item in domain is in the groupLabel list
             if any(i in labels['groupLabel'].values for i in domain):
-                domain = list(labels[labels['groupLabel'].isin(domain)]['label'].values) + domain
-
+                domain = list(labels[labels['groupLabel'].isin(
+                    domain)]['label'].values) + domain
 
         if children is not None:
             children = str(children).lower()
@@ -1531,7 +1589,7 @@ def getDataset():
             unwind $cmid as cmid
             match (:DATASET {CMID: cmid})-[:CONTAINS*..5]->(d:DATASET) return distinct d.CMID as CMID
             """
-            result = CM.getQuery(query = query, driver = driver, type = "list")
+            result = CM.getQuery(query=query, driver=driver, type="list")
             if result is not None:
                 cmid = [cmid] + result
 
@@ -1546,7 +1604,8 @@ def getDataset():
         b.CMID as CMID, b.CMName as CMName, elementId(r) as relID, property, r[property] as value, custom.getName(r[property]) as property_name
         """
 
-            data = CM.getQuery(query = query, driver = driver, params = {"cmid":cmid,"domain":domain})
+            data = CM.getQuery(query=query, driver=driver, params={
+                               "cmid": cmid, "domain": domain})
 
         else:
             query = """
@@ -1559,8 +1618,8 @@ def getDataset():
         b.CMID as CMID, b.CMName as CMName, elementId(r) as relID, property, r[property] as value, custom.getName(r[property]) as property_name
         """
 
-            data = CM.getQuery(query = query, driver = driver, params = {"cmid":cmid,"domain":domain})
-
+            data = CM.getQuery(query=query, driver=driver, params={
+                               "cmid": cmid, "domain": domain})
 
         df = pd.DataFrame(data)
 
@@ -1569,7 +1628,8 @@ def getDataset():
         # result = df.to_json(orient="records")
         # return result
 
-        required_columns = ["datasetID", "CMID", "property", "property_name", "relID"]
+        required_columns = ["datasetID", "CMID",
+                            "property", "property_name", "relID"]
         if not all(column in df.columns for column in required_columns):
             result = df.to_json(orient="records")
             return result
@@ -1578,16 +1638,20 @@ def getDataset():
 
         df = df.drop("property_name", axis=1)
 
-        df_names.dropna(subset=["property_name"], how = "all", inplace = True)
+        df_names.dropna(subset=["property_name"], how="all", inplace=True)
         df_names = df_names[df_names['property_name'] != '']
-        df_names['property'] = df_names['property'].apply(lambda x: f"{x}_name")
+        df_names['property'] = df_names['property'].apply(
+            lambda x: f"{x}_name")
 
-        df_names = df_names.pivot_table(index=["datasetID","CMID","relID"], columns='property', values='property_name', aggfunc='first').reset_index()
+        df_names = df_names.pivot_table(
+            index=["datasetID", "CMID", "relID"], columns='property', values='property_name', aggfunc='first').reset_index()
 
         cols = [col for col in df.columns if col not in ['property', 'value']]
-        df = df.pivot_table(index=cols, columns='property', values='value', aggfunc='first').reset_index()
+        df = df.pivot_table(index=cols, columns='property',
+                            values='value', aggfunc='first').reset_index()
         if len(df_names) > 0:
-            df = pd.merge(df, df_names, on=['datasetID', 'CMID','relID'], how='left')
+            df = pd.merge(df, df_names, on=[
+                          'datasetID', 'CMID', 'relID'], how='left')
         dtypes = df.dtypes.to_dict()
         list_cols = []
 
@@ -1595,23 +1659,24 @@ def getDataset():
             if typ == 'object' and not df[col_name].empty and isinstance(df[col_name].iloc[0], list):
                 list_cols.append(col_name)
 
-
         for col in list_cols:
-            df[col] = df[col].apply(lambda x: '; '.join(map(str, x)) if isinstance(x, list) else x)
+            df[col] = df[col].apply(lambda x: '; '.join(
+                map(str, x)) if isinstance(x, list) else x)
 
         df = df.astype(str)
-        df.replace([np.nan, None,"nan"], '', inplace=True)
+        df.replace([np.nan, None, "nan"], '', inplace=True)
 
         df = df.drop('relID', axis=1).copy()
 
         print(df)
 
         return df.to_json(orient='records')
-    
+
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
+        # In case of an error, return an error response with an appropriate HTTP status code
         result = "Error: " + str(e)
         return result, 500
+
 
 @app.route('/routines', methods=['GET'])
 def routines():
@@ -1625,31 +1690,32 @@ def routines():
             result = CM.addLog(database)
         elif fun == "checkDomains":
             data = CM.unlist(request.args.get('data'))
-            result = CM.checkDomains(data = data, database = database)
+            result = CM.checkDomains(data=data, database=database)
         elif fun == "processUSES":
-            CMID = request.args.get('CMID') 
-            result = CM.processUSES(database = database, CMID = CMID)    
+            CMID = request.args.get('CMID')
+            result = CM.processUSES(database=database, CMID=CMID)
         elif fun == "backup2CSV":
-            result = CM.backup2CSV(database, mail)  
+            result = CM.backup2CSV(database, mail)
         elif fun == "getBadJSON":
-            result = CM.getBadJSON(database, mail)  
+            result = CM.getBadJSON(database, mail)
         elif fun == "getBadCMID":
-            result = CM.getBadCMID(database, mail)  
+            result = CM.getBadCMID(database, mail)
         elif fun == "getMultipleLabels":
-            result = CM.getMultipleLabels(database, mail)  
+            result = CM.getMultipleLabels(database, mail)
         elif fun == "getBadDomains":
-            result = CM.getBadDomains(database, mail) 
+            result = CM.getBadDomains(database, mail)
         elif fun == "getBadRelations":
             result = CM.getBadRelations(database, mail)
         elif fun == "cmnameNotInName":
-            result = CM.cmnameNotInName(database,mail)
+            result = CM.cmnameNotInName(database, mail)
         else:
             result = "function not found"
         return result
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
+        # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
         return result, 500
+
 
 @app.route('/CMID', methods=['GET'])
 def getCMID():
@@ -1664,8 +1730,9 @@ def getCMID():
         elif database == "gisdb":
             driver = connectionGIS()
         else:
-            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")   
-        
+            raise Exception(
+                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+
         query1 = """
 unwind $cmid as cmid 
 match (c {CMID: cmid}) 
@@ -1680,9 +1747,9 @@ return elementId(r) as relID, relProperties, r[relProperties] as relValues
 """
 
         with driver.session() as session:
-            result = session.run(query1,cmid = cmid)
+            result = session.run(query1, cmid=cmid)
             node = [dict(record) for record in result]
-            result = session.run(query2,cmid = cmid)
+            result = session.run(query2, cmid=cmid)
             relations = [dict(record) for record in result]
             driver.close()
 
@@ -1692,26 +1759,26 @@ return elementId(r) as relID, relProperties, r[relProperties] as relValues
             rel_id = entry['relID']
             prop = entry['relProperties']
             val = entry['relValues']
-            
 
             if prop in grouped_data[rel_id]:
 
                 if isinstance(grouped_data[rel_id][prop], list):
-                    grouped_data[rel_id][prop].extend(val if isinstance(val, list) else [val])
+                    grouped_data[rel_id][prop].extend(
+                        val if isinstance(val, list) else [val])
                 else:
                     grouped_data[rel_id][prop] = val
             else:
                 grouped_data[rel_id][prop] = val
 
-
         relations = dict(grouped_data)
 
-        return {"node": node,"relations":relations}
+        return {"node": node, "relations": relations}
 
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
+        # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
         return result, 500
+
 
 @app.route('/allDatasets', methods=['GET'])
 def getAllDatasets():
@@ -1725,8 +1792,9 @@ def getAllDatasets():
         elif database == "gisdb":
             driver = connectionGIS()
         else:
-            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")   
-        
+            raise Exception(
+                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+
         query = """
 match (d:DATASET) 
 return elementId(d) as nodeID, 
@@ -1754,9 +1822,10 @@ d.Note as Note
         return data
 
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
+        # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
         return result, 500
+
 
 @app.route('/linkfile', methods=['GET'])
 def getLinkFile():
@@ -1766,13 +1835,13 @@ def getLinkFile():
         intersection = request.args.get('intersection')
         domain = request.args.get('domain')
 
-        if not isinstance(datasets,list):
+        if not isinstance(datasets, list):
             raise Exception("datasets must be a list")
 
-        if not isinstance(domain,str):
+        if not isinstance(domain, str):
             raise Exception("domain must be a string")
-        
-        if not isinstance(intersection,bool):
+
+        if not isinstance(intersection, bool):
             raise Exception("intersection must be a boolean")
 
         if str.lower(database) == "sociomap":
@@ -1780,30 +1849,32 @@ def getLinkFile():
         elif str.lower(database) == "archamap":
             driver = connectionAM()
         else:
-            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")   
-        
+            raise Exception(
+                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+
         query = f"""
 match (c:{domain})<-[r:USES]-(d:DATASET) where d.CMID in $datasets
 return distinct d.CMName as DatasetName, r.Key as Key, c.CMName as CMName, c.CMID as CMID, apoc.text.join(r.Name,'; ') as Name order by CMName
 """
 
         with driver.session() as session:
-            result = session.run(query, datasets = datasets)
+            result = session.run(query, datasets=datasets)
             data = [dict(record) for record in result]
             driver.close()
 
         return data
 
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
+        # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
         return result, 500
+
 
 @app.route('/networknodes', methods=['POST'])
 def getnetworknodes():
     try:
-    
-        data = request.get_data()  
+
+        data = request.get_data()
         data = json.loads(data)
 
         database = CM.unlist(data.get('database'))
@@ -1816,8 +1887,9 @@ def getnetworknodes():
         elif str.lower(database) == "archamap":
             driver = connectionAM()
         else:
-            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")  
-        
+            raise Exception(
+                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+
         query = """
         unwind $cmid as cmid 
         unwind $relation as relation 
@@ -1828,21 +1900,23 @@ def getnetworknodes():
 """
 
         with driver.session() as session:
-            result = session.run(query, cmid = cmid, relation = relation, domains = domains)
+            result = session.run(
+                query, cmid=cmid, relation=relation, domains=domains)
             data = [dict(record) for record in result]
             driver.close()
 
         return data
 
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
+        # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
         return result, 500
 
+
 @app.route('/datasetDomains', methods=['POST'])
 def getdatasetDomains():
-    try:    
-        data = request.get_data()  
+    try:
+        data = request.get_data()
         data = json.loads(data)
 
         database = CM.unlist(data.get('database'))
@@ -1850,7 +1924,7 @@ def getdatasetDomains():
         children = CM.unlist(data.get('children'))
 
         driver = CM.getDriver(database)
-        
+
         # combine queries
         if children == True:
             query = """
@@ -1867,15 +1941,15 @@ unwind labels as label
 return label
 """
 
+        data = CM.getQuery(query=query, driver=driver, params={"cmid": cmid})
 
-        data = CM.getQuery(query = query, driver = driver, params = {"cmid":cmid})
-        
         return data
 
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
+        # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
         return result, 500
+
 
 @app.route('/foci', methods=['GET'])
 def getFoci():
@@ -1888,8 +1962,9 @@ def getFoci():
             # driver = connectionAM()
             return "ArchaMap not available"
         else:
-            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")   
-        
+            raise Exception(
+                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+
         query1 = """
 match (d:DATASET) 
 where d.foci is not null  
@@ -1924,7 +1999,8 @@ return custom.getName(foci) as Focus, custom.getDisplayName(label) as domain, n 
         df2.dropna(axis=1, how='all', inplace=True)
 
         cols = [col for col in df2.columns if col not in ['domain', 'n']]
-        df2 = df2.pivot_table(index=cols, columns='domain', values='n', aggfunc='first').reset_index()
+        df2 = df2.pivot_table(index=cols, columns='domain',
+                              values='n', aggfunc='first').reset_index()
 
         df = df1.join(df2.set_index('Focus'), on='Focus')
 
@@ -1934,9 +2010,10 @@ return custom.getName(foci) as Focus, custom.getDisplayName(label) as domain, n 
 
         return df.to_json(orient='records')
     except Exception as e:
-    # In case of an error, return an error response with an appropriate HTTP status code
+        # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
-        return result, 500   
+        return result, 500
+
 
 @app.route('/createNodes', methods=['POST'])
 def createNodesapi():
@@ -1945,44 +2022,46 @@ def createNodesapi():
         data = request.get_data()
         data = json.loads(data)
         df = data.get('df')
-        database =  CM.unlist(data.get('database'))
-        user =  CM.unlist(data.get('user'))
-        pwd =  CM.unlist(data.get('password'))
+        database = CM.unlist(data.get('database'))
+        user = CM.unlist(data.get('user'))
+        pwd = CM.unlist(data.get('password'))
 
-        verify = CM.verifyUser(user,pwd)
+        verify = CM.verifyUser(user, pwd)
 
         if not verify == "verified":
             raise Exception("User is not verified.")
 
         if not df or len(df) == 0:
-            return jsonify({"error": "Data is empty"}), 400    
+            return jsonify({"error": "Data is empty"}), 400
 
         df = pd.DataFrame(df)
 
-        results = CM.createNodes(df,database,user)
+        results = CM.createNodes(df, database, user)
 
-        return results  
+        return results
 
     except Exception as e:
         result = str(e)
         return result, 500
 
+
 @app.route('/login', methods=['POST'])
 def getLogin():
     try:
-        data =request.get_data()
+        data = request.get_data()
         data = json.loads(data)
-        database =  CM.unlist(data.get('database'))
-        user =  CM.unlist(data.get('user'))
-        password =  CM.unlist(data.get('password'))
+        database = CM.unlist(data.get('database'))
+        user = CM.unlist(data.get('user'))
+        password = CM.unlist(data.get('password'))
 
-        credentials = CM.login(database,user,password)
+        credentials = CM.login(database, user, password)
 
         return credentials
 
     except Exception as e:
         result = str(e)
-        return result, 500    
+        return result, 500
+
 
 @app.route('/addFoci', methods=['GET'])
 def addFoci():
@@ -1990,21 +2069,22 @@ def addFoci():
         database = request.args.get('database')
         datasetID = request.args.get('datasetID')
         foci = request.args.get('foci')
-        
+
         driver = CM.getDriver(database)
 
         query = "MATCH (v:VARIABLE {CMID: $foci}) return v.CMID as CMID"
-        verifyFoci = CM.getQuery(query,driver,params = {"foci":foci})
+        verifyFoci = CM.getQuery(query, driver, params={"foci": foci})
 
         query = "MATCH (d:DATASET {CMID: $datasetID}) return d.CMID as CMID"
-        verifydb = CM.getQuery(query,driver,params = {"datasetID":datasetID})
+        verifydb = CM.getQuery(query, driver, params={"datasetID": datasetID})
 
         if not datasetID in [item["CMID"] for item in verifydb]:
             raise Exception("datasetID does not exist - please check the CMID")
 
         if foci in [item["CMID"] for item in verifyFoci]:
             query = "MATCH (d:DATASET {CMID: $datasetID}) with d, apoc.coll.toSet(coalesce(d.foci,[]) + $foci) as result set d.foci = result return d.CMID as datasetID, d.foci as foci"
-            result = CM.getQuery(query,driver,params = {"foci":foci,"datasetID":datasetID})
+            result = CM.getQuery(query, driver, params={
+                                 "foci": foci, "datasetID": datasetID})
         else:
             raise Exception("foci does not exist - please check the CMID")
 
@@ -2012,7 +2092,8 @@ def addFoci():
 
     except Exception as e:
         result = str(e)
-        return result, 500    
+        return result, 500
+
 
 @app.route('/progress', methods=['GET'])
 def getProgress():
@@ -2026,7 +2107,7 @@ def getProgress():
         where l.public = 'TRUE' and l.groupLabel = l.label and not l.label = "CATEGORY"
         return l.label as label, l.displayName as newlabel
         """
-        domains = CM.getQuery(query = query, driver = driver)
+        domains = CM.getQuery(query=query, driver=driver)
         domains = pd.DataFrame(domains)
 
         query = """
@@ -2049,44 +2130,46 @@ def getProgress():
         order by label
         """
 
-        data = CM.getQuery(query = query, driver = driver, params={"labels":domains["label"]})
+        data = CM.getQuery(query=query, driver=driver, params={
+                           "labels": domains["label"]})
 
         df = pd.DataFrame(data)
 
         query = """
         match (n:TRANSLATION) where n.table = "display" return n.table as table, n.from as label, n.to as newlabel order by label
         """
-        translations = CM.getQuery(query = query, driver = driver)
+        translations = CM.getQuery(query=query, driver=driver)
         translations = pd.DataFrame(translations)
-        translations = pd.concat([translations, domains], axis=0, ignore_index=True)
+        translations = pd.concat(
+            [translations, domains], axis=0, ignore_index=True)
         translations = translations.drop('table', axis=1)
 
-        df = df.merge(translations, on = "label", how = "inner")
+        df = df.merge(translations, on="label", how="inner")
         df = df.drop('label', axis=1)
         df = df.rename(columns={'newlabel': 'label'})
 
-
         nodes = df[df['type'] == 'nodes'].copy()
-        nodes = nodes.drop('type', axis = 1)
+        nodes = nodes.drop('type', axis=1)
         nodes = nodes.to_dict(orient='records')
 
         encodings = df[df['type'] == 'encodings'].copy()
-        encodings = encodings.drop('type', axis = 1)
+        encodings = encodings.drop('type', axis=1)
         encodings = encodings.to_dict(orient='records')
 
-        relations = df[df['type'] == 'relations'].copy()     
-        relations = relations.drop('type', axis = 1)
+        relations = df[df['type'] == 'relations'].copy()
+        relations = relations.drop('type', axis=1)
         relations = relations.to_dict(orient='records')
 
-        return {"nodes": nodes, "encodings":encodings,"relations":relations}
+        return {"nodes": nodes, "encodings": encodings, "relations": relations}
 
     except Exception as e:
         result = str(e)
-        return result, 500    
-    
+        return result, 500
+
+
 @app.route('/test', methods=['GET'])
 def test():
-    
+
     # database = request.args.get('database')
 
     # driver = CM.getDriver(database)
@@ -2095,18 +2178,18 @@ def test():
 
     # data = [dict(record) for record in data]
 
-
     return {
-    'Zebra': ['Row1_Zebra', 'Row2_Zebra', 'Row3_Zebra'],
-    'Apple': ['Row1_Apple', 'Row2_Apple', 'Row3_Apple'],
-    'Mountain': ['Row1_Mountain', 'Row2_Mountain', 'Row3_Mountain'],
-    'Sunflower': ['Row1_Sunflower', 'Row2_Sunflower', 'Row3_Sunflower'],
-    'Kite': ['Row1_Kite', 'Row2_Kite', 'Row3_Kite']
-}
+        'Zebra': ['Row1_Zebra', 'Row2_Zebra', 'Row3_Zebra'],
+        'Apple': ['Row1_Apple', 'Row2_Apple', 'Row3_Apple'],
+        'Mountain': ['Row1_Mountain', 'Row2_Mountain', 'Row3_Mountain'],
+        'Sunflower': ['Row1_Sunflower', 'Row2_Sunflower', 'Row3_Sunflower'],
+        'Kite': ['Row1_Kite', 'Row2_Kite', 'Row3_Kite']
+    }
+
 
 @app.route('/mergeDatasets', methods=['GET'])
 def getMergeDatasets():
-       
+
     database = request.args.get('database')
 
     driver = CM.getDriver(database)
@@ -2115,18 +2198,20 @@ def getMergeDatasets():
 
     return data
 
+
 @app.route('/updateWaitingUSES', methods=['POST'])
 def getUpdateWaitingUSES():
-    data = request.get_data() 
+    data = request.get_data()
     data = json.loads(data)
     database = data.get("database")
     result = CM.waitingUSES(database)
     return result
 
+
 @app.route('/updateNewUsers', methods=['POST'])
 def updateNewUsers():
     try:
-        data = request.get_data() 
+        data = request.get_data()
         data = json.loads(data)
         database = CM.unlist(data.get('database'))
         credentials = CM.unlist(data.get('credentials'))
@@ -2138,18 +2223,17 @@ def updateNewUsers():
             database = "ArchaMap"
         else:
             raise Exception("database must be 'SocioMap' or 'ArchaMap'")
-        
-        print(credentials)
-        
+
         if isinstance(credentials, dict):
             pass
         else:
             credentials = json.loads(credentials)
-        
+
         if CM.unlist(credentials.get("role")) != "admin":
             raise Exception("Error: User is not an admin")
-        
-        verified = CM.verifyUser(CM.unlist(credentials.get("userid")),CM.unlist(credentials.get("key")))
+
+        verified = CM.verifyUser(CM.unlist(credentials.get(
+            "userid")), CM.unlist(credentials.get("key")))
 
         if verified != "verified":
             raise Exception("Error: User is not verified")
@@ -2159,7 +2243,7 @@ def updateNewUsers():
         if process == "approve":
             if userid is None:
                 raise Exception("Error: userid must be specified")
-         
+
             userid = CM.flattenList(userid)
 
             query = f"""
@@ -2169,7 +2253,7 @@ match (u {{access: 'new', userid: id}}) where '{database}' in u.database
 set u.access = 'enabled', u.log = u.log + [toString(datetime()) + ": access approved by {CM.unlist(credentials.get("userid"))}"]
 return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
 """
-            result = CM.getQuery(query, driver, params = {"userids": userid})
+            result = CM.getQuery(query, driver, params={"userids": userid})
             for user in result:
                 body = f"""
     Hello {user.get("first")} {user.get("last")},
@@ -2179,28 +2263,30 @@ return u.userid as userid, u.first as first, u.last as last, u.email as email, u
     Best,
     CatMapper Team
                 """
-                CM.sendEmail(mail, subject = "CatMapper Registration Approved", recipients = [user.get("email"),'admin@catmapper.org'], body = body, sender = os.getenv("mail_default"))
+                CM.sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
+                    "email"), 'admin@catmapper.org'], body=body, sender=os.getenv("mail_default"))
         else:
             query = f"""
 match (u {{access: 'new'}}) where '{database}' in u.database
 return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
 """
             result = CM.getQuery(query, driver)
-        
+
         return result
     except Exception as e:
         result = str(e)
         return result, 500
 
+
 @app.route('/send-test-email', methods=['GET'])
 def send_test_email():
     try:
-        msg = CM.sendEmail(mail, "Test Email",["bischrob@gmail.com"],"This is a test email sent from a Flask application. Have fun.","admin@catmapper.org")
+        msg = CM.sendEmail(mail, "Test Email", [
+                           "bischrob@gmail.com"], "This is a test email sent from a Flask application. Have fun.", "admin@catmapper.org")
         return msg
     except Exception as e:
         return str(e), 500
 
-if __name__== "__main__":
-    app.run(debug=True,port=5001)
 
-
+if __name__ == "__main__":
+    app.run(debug=True, port=5001)
