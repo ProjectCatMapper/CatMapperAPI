@@ -33,28 +33,6 @@ getMode = function(x){
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 ################################################################################
 for(i in 1:nrow(template)){
   row = template[i,] %>% dplyr::mutate_all(as.character)

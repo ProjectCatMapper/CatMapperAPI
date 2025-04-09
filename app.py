@@ -10,7 +10,7 @@ from bs4 import BeautifulSoup
 import json
 import re
 from flasgger import Swagger
-import CM
+from CM import *
 import pandas as pd
 import numpy as np
 from collections import defaultdict
@@ -26,110 +26,6 @@ pwdAM = os.getenv("pwdAM")
 apikeyEnv = os.getenv("apikey")
 
 rvals = {}
-
-
-def connectionSM():
-    driver = GraphDatabase.driver(uri=uriSM, auth=(user, pwdSM))
-    return driver
-
-
-def connectionGIS():
-    driver = GraphDatabase.driver(uri=uriG, auth=(user, pwdG))
-    return driver
-
-
-def connectionAM():
-    driver = GraphDatabase.driver(uri=uriAM, auth=(user, pwdAM))
-    return driver
-
-
-def connectionUsers():
-    driver = GraphDatabase.driver(uri=os.getenv(
-        "uriU"), auth=(os.getenv("user"), os.getenv("pwdU")))
-    return driver
-
-
-def getPolygon(CMID, driver, simple=True):
-    try:
-        with driver.session() as session:
-            query = """
-    match (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET) where not r.geoPolygon is null 
-    return distinct r.geoPolygon as geomID, d.shortName as source
-    """
-            results = session.run(query, CMID=CMID)
-            result = [dict(record) for record in results]
-            driver.close()
-        driverGIS = connectionGIS()
-        with driverGIS.session() as session:
-            if simple == True:
-                query = """
-    unwind $rows as row 
-    unwind row.geomID as geomID
-    unwind row.source as source
-    with geomID, source
-    match (g:GEOMETRY)
-    where g.geomID = geomID
-    return source, coalesce(g.simplified,g.geometry) as geometry, g.simplified is not null as simple
-    """
-            else:
-                query = """
-    unwind $rows as row 
-    unwind row.geomID as geomID
-    unwind row.source as source
-    with geomID, source
-    match (g:GEOMETRY) 
-    where g.geomID = geomID
-    return source, g.geometry as geometry
-    """
-            # query = "unwind $rows as row return row"
-            polygons = session.run(query, rows=result)
-            polygons = [dict(record) for record in polygons]
-            driverGIS.close()
-        return polygons
-    except Exception as e:
-        return {"firstResult": result, "query": query, "error": str(e)}
-
-
-def getPoints(CMID, driver):
-    with driver.session() as session:
-        query = "match (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET) where not r.geoCoords is null return distinct r.geoCoords as geometry, d.shortName as source, r.Key as Key"
-        result = session.run(query, CMID=CMID)
-        points = [dict(record) for record in result]
-        driver.close()
-    return points
-
-
-def getRelations(CMID, driver):
-    with driver.session() as session:
-        query = "match ({CMID: $CMID})-[r]-() return distinct type(r) as relation"
-        result = session.run(query, CMID=CMID)
-        for record in result:
-            relations = record["relation"]
-        driver.close()
-    return relations
-
-
-def flatten_json(json_obj, parent_key='', sep='_'):
-    flat_dict = {}
-    for key, value in json_obj.items():
-        new_key = key if parent_key else key
-        if isinstance(value, dict):
-            flat_dict.update(flatten_json(value, new_key, sep=sep))
-        else:
-            flat_dict[new_key] = value
-    return flat_dict
-
-
-def custom_sort(elem):
-    if elem == 'CONTAINS':
-        return 0
-    elif elem == 'DISTRICT_OF':
-        return 1
-    elif elem == 'USES':
-        return 2
-    else:
-        return 3
-
 
 # app=FastAPI()
 app = Flask(__name__)
@@ -182,10 +78,13 @@ def abst():
         text[0] = request.args.get('label')
         text[1] = request.args.get('value')
         text[2] = request.args.get('options')
-        print(text[0])
-        print(text[1])
-        print(text[2])
-        driver_neo4j = connectionSM()
+        database = request.args.get('database')
+        if not database:
+            database = "sociomap"
+        # print(text[0])
+        # print(text[1])
+        # print(text[2])
+        driver_neo4j = getDriver(database)
         session = driver_neo4j.session()
         if text[2] == "" or text[2] == "Name":
             if text[1] == "":
@@ -231,12 +130,7 @@ def catm():
     cmid = request.args.get('cmid')
     database = request.args.get('database')
 
-    if str.lower(database) == "sociomap":
-        driver = connectionSM()
-    elif str.lower(database) == "archamap":
-        driver = connectionAM()
-    else:
-        pass
+    driver = getDriver(database)
 
     relnames = []
     relations = ["USES", "CONTAINS", "DISTRICT_OF",
@@ -261,11 +155,11 @@ def catm():
     driver.close()
     print(labels)
 
+    driver = getDriver(database)
+
     if str.lower(database) == "sociomap":
-        driver = connectionSM()
         label = re.search("^SM", cmid)
     elif str.lower(database) == "archamap":
-        driver = connectionAM()
         label = re.search("^AM", cmid)
     else:
         pass
@@ -532,9 +426,9 @@ return distinct Domain, Count order by Domain
 #         relnames= []
 #         relations = ["USES","CONTAINS","DISTRICT_OF","LANGUOID_OF","RELIGION_OF"]
 #         socioid[0] = request.args.get('cmid')
-#         driver_neo4j = connectionSM()
+#         driver_neo4j = getDriver('sociomap')
 #         session = driver_neo4j.session()
-#         driver_neo4j1 =connectionGIS()
+#         driver_neo4j1 = getDriver('gisdb')
 #         session1 = driver_neo4j1.session()
 #         q = "match (a) where a.CMID = '"+socioid[0]+"' return elementId(a) as id,labels(a) as label"
 #         r = session.run(q)
@@ -649,7 +543,10 @@ def net():
     p0 = request.args.get('value')
     p1 = request.args.get('cmid')
     p2 = request.args.get('relation')
-    driver_neo4j = connectionSM()
+    database = request.args.get('database')
+    if not database:
+        database = "sociomap"
+    driver_neo4j = getDriver(database)
     session = driver_neo4j.session()
     q = "MATCH (n:"+p0+" {CMID:'"+p1+"'})-[r:" + \
         p2+"]-(OtherNodes) RETURN n,r,OtherNodes"
@@ -666,13 +563,13 @@ def getExplore():
         database = request.args.get('database')
 
         if str.lower(database) == "sociomap":
-            driver = connectionSM()
             label = re.search("^SM", cmid)
         elif str.lower(database) == "archamap":
-            driver = connectionAM()
             label = re.search("^AM", cmid)
         else:
             pass
+
+        driver = getDriver(database)
 
         if label is not None:
             label = "CATEGORY"
@@ -817,8 +714,8 @@ def upload_API():
         data = request.get_data()
         data = json.loads(data)
         df = data.get("df")
-        database = CM.unlist(data.get("database"))
-        formData = CM.unlist(data.get("formData"))
+        database = unlist(data.get("database"))
+        formData = unlist(data.get("formData"))
         label = formData["domain"]
         if label == "ANY DOMAIN":
             label = "CATEGORY"
@@ -867,7 +764,7 @@ def upload_API():
                     nodeProperties = linkProperties
                     linkProperties = None
 
-            response = CM.input_Nodes_Uses(
+            response = input_Nodes_Uses(
                 dataset=df,
                 database=database,
                 uploadOption=uploadOption,
@@ -896,7 +793,7 @@ def upload_API():
                       Key: "Key", altNames: "altNames"}, inplace=True)
             df = df.to_dict(orient='records')
             # return {"Name":Name, "CMID":CMID,"altNames":altNames,"Key":Key,"user":user,"overwriteProperties":overwriteProperties,"updateProperties":updateProperties,"addDistrict":addDistrict,"addRecordYear":addRecordYear}
-            response = CM.input_Nodes_Uses(
+            response = input_Nodes_Uses(
                 dataset=df,
                 database=database,
                 uploadOption="add_uses",
@@ -950,12 +847,7 @@ def getNetwork():
             relation = "USES"
         database = request.args.get('database')
 
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        else:
-            raise Exception("must specify database as SocioMap or ArchaMap")
+        driver = getDriver(database)
 
         if endcmid is not None:
             cypher_query = """
@@ -985,7 +877,7 @@ return a, collect(distinct r) as r, collect(distinct e) as e
             # Execute the Cypher queries
             result = session.run(
                 cypher_query, cmid=cmid, relation=relation, domain=domain, endcmid=endcmid)
-            result = CM.unlist([dict(record) for record in result])
+            result = unlist([dict(record) for record in result])
             node = []
             rel = []
             end = []
@@ -1015,19 +907,19 @@ def submit_merge():
     data = request.get_data()
     data = json.loads(data)
     dataset_choices = data.get("datasetChoices")
-    dataset_choices = dataset_choices.split(",")
+    dataset_choices = [choice.strip() for choice in dataset_choices.split(",")]
     ncontains = data.get("mergelevel")
-    category_label = CM.unlist(data.get("categoryLabel", ""))
-    intersection = CM.unlist(data.get("intersection", False))
-    database = CM.unlist(data.get('database'))
-    criteria = str.lower(CM.unlist(data.get('equivalence')))
+    category_label = unlist(data.get("categoryLabel", ""))
+    intersection = unlist(data.get("intersection", False))
+    database = unlist(data.get('database'))
+    criteria = str.lower(unlist(data.get('equivalence')))
     if category_label == "ANY DOMAIN":
         category_label = "CATEGORY"
     elif category_label == "AREA":
         category_label = "DISTRICT"
 
-    result = CM.proposeMerge(dataset_choices=dataset_choices, category_label=category_label,
-                             criteria=criteria, database=database, intersection=intersection, ncontains=ncontains)
+    result = proposeMerge(dataset_choices=dataset_choices, category_label=category_label,
+                          criteria=criteria, database=database, intersection=intersection, ncontains=ncontains)
 
     return result
 
@@ -1043,11 +935,11 @@ def submitjoinDatasets():
     data = request.get_data()
     data = json.loads(data)
     # print(data)
-    database = CM.unlist(data.get("database", ""))
+    database = unlist(data.get("database", ""))
     joinLeft = data.get("joinLeft")
     joinRight = data.get("joinRight")
 
-    result = CM.joinDatasets(database, joinLeft, joinRight)
+    result = joinDatasets(database, joinLeft, joinRight)
 
     return jsonify(result)
 
@@ -1056,15 +948,10 @@ def submitjoinDatasets():
 def submitvalidateDatasets():
     data = request.get_data()
     data = json.loads(data)
-    database = CM.unlist(data.get("database", ""))
+    database = unlist(data.get("database", ""))
     names = data.get("names").split(",")
 
-    if str.lower(database) == "sociomap":
-        driver = connectionSM()
-    elif str.lower(database) == "archamap":
-        driver = connectionAM()
-    else:
-        raise Exception("must specify database as SocioMap or ArchaMap")
+    driver = getDriver(database)
 
     with driver.session() as session:
         for i in names:
@@ -1073,7 +960,7 @@ def submitvalidateDatasets():
             WHERE n.CMID = $prop
             RETURN COUNT(n) > 0 AS nodeExists
             """
-            result = session.run(q, prop=i)
+            result = session.run(q, prop=i.strip())
             node_exists = result.single()["nodeExists"]
             if not node_exists:
                 return jsonify({"success": False, "message": "Check your Dataset IDs."})
@@ -1098,12 +985,7 @@ def getNetworkjs():
             relation = "USES"
         database = request.args.get('database')
 
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        else:
-            raise Exception("must specify database as SocioMap or ArchaMap")
+        driver = getDriver(database)
 
         if endcmid is not None:
             cypher_query = """
@@ -1133,7 +1015,7 @@ return a, collect(distinct r) as r, collect(distinct e) as e
             # Execute the Cypher queries
             result = session.run(
                 cypher_query, cmid=cmid, relation=relation, domain=domain, endcmid=endcmid)
-            result = CM.unlist([dict(record) for record in result])
+            result = unlist([dict(record) for record in result])
             node = []
             rel = []
             end = []
@@ -1264,7 +1146,7 @@ def getSearch():
         limit = request.args.get('limit')
         query = request.args.get('query')
 
-        result = CM.search(
+        result = search(
             database,
             term,
             property,
@@ -1288,21 +1170,21 @@ def getTranslate2():
     try:
         data = request.get_data()
         data = json.loads(data)
-        database = CM.unlist(data.get("database"))
-        property = CM.unlist(data.get("property"))
-        domain = CM.unlist(data.get("domain"))
-        key = CM.unlist(data.get("key"))
-        term = CM.unlist(data.get("term"))
-        country = CM.unlist(data.get('country'))
-        context = CM.unlist(data.get('context'))
-        dataset = CM.unlist(data.get('dataset'))
-        yearStart = CM.unlist(data.get('yearStart'))
-        yearEnd = CM.unlist(data.get('yearEnd'))
-        query = CM.unlist(data.get("query"))
+        database = unlist(data.get("database"))
+        property = unlist(data.get("property"))
+        domain = unlist(data.get("domain"))
+        key = unlist(data.get("key"))
+        term = unlist(data.get("term"))
+        country = unlist(data.get('country'))
+        context = unlist(data.get('context'))
+        dataset = unlist(data.get('dataset'))
+        yearStart = unlist(data.get('yearStart'))
+        yearEnd = unlist(data.get('yearEnd'))
+        query = unlist(data.get("query"))
         table = data.get("table")
         uniqueRows = data.get("uniqueRows")
 
-        data = CM.translate(
+        data = translate(
             database=database,
             property=property,
             domain=domain,
@@ -1326,7 +1208,7 @@ def getTranslate2():
 
 
 @app.route('/query', methods=['POST'])
-def getQuery():
+def getRouteQuery():
     try:
         rows = request.get_data()
         rows = json.loads(rows)
@@ -1336,17 +1218,9 @@ def getQuery():
         pwd = rows.get("pwd")
         params = rows.get("params")
 
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        elif database == "gisdb":
-            driver = connectionGIS()
-        else:
-            raise Exception(
-                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+        driver = getDriver(database)
 
-        verified = CM.verifyUser(user, pwd)
+        verified = verifyUser(user, pwd)
 
         if verified == "verified":
             with driver.session() as session:
@@ -1371,12 +1245,8 @@ def getGeometry():
     simple = request.args.get('simple')
     if simple is None:
         simple = True
-    if str.lower(database) == "sociomap":
-        driver = connectionSM()
-    elif str.lower(database) == "archamap":
-        driver = connectionAM()
-    elif database == "gisdb":
-        driver = connectionGIS()
+
+    driver = getDriver(database)
 
     polygons = getPolygon(cmid, driver, simple=True)
     points = getPoints(cmid, driver)
@@ -1394,7 +1264,7 @@ def getnewuser():
         email = data.get("email")
         username = data.get("username")
         password = data.get("password")
-        password = CM.password_hash(password)
+        password = password_hash(password)
         intendedUse = data.get("intendedUse")
 
         if database.lower() == "sociomap":
@@ -1404,7 +1274,7 @@ def getnewuser():
         else:
             raise Exception("database must be 'SocioMap' or 'ArchaMap'")
 
-        driver = CM.getDriver("userdb")
+        driver = getDriver("userdb")
 
         queryExists = """
 MATCH (u:USER {access: 'new',username: $username})
@@ -1466,8 +1336,8 @@ email: {email}
 database: {database}
 description: {intendedUse}
 """
-        CM.sendEmail(mail, subject="New registered user", recipients=[
-                     "admin@catmapper.org"], body=body, sender=os.getenv("mail_default"))
+        sendEmail(mail, subject="New registered user", recipients=[
+            "admin@catmapper.org"], body=body, sender=os.getenv("mail_default"))
 
         return jsonify(data)
 
@@ -1520,22 +1390,22 @@ def getAdminEdit():
             data = json.loads(data)
         else:
             raise Exception("invalid request method")
-        database = CM.unlist(data.get('database'))
-        fun = CM.unlist(data.get('fun'))
-        apikey = CM.unlist(data.get('apikey'))
+        database = unlist(data.get('database'))
+        fun = unlist(data.get('fun'))
+        apikey = unlist(data.get('apikey'))
         if apikey != apikeyEnv:
             raise Exception(f"Error: apikey is invalid: {apikey}")
-        driver = CM.getDriver(database)
+        driver = getDriver(database)
         result = "Nothing returned"
         # if fun == "getUSESrels":
-        #     result = CM.getUSESrels(request,driver)
+        #     result = getUSESrels(request,driver)
         if fun == "mergeNodes":
-            result = CM.mergeNodes(request, driver)
+            result = mergeNodes(request, driver)
         elif fun == "addIndexes":
-            result = CM.addIndexes(driver)
+            result = addIndexes(driver)
         elif fun == "processUSES":
-            CMID = CM.cleanCMID(data.get('CMID'))
-            result = CM.processUSES(database=database, CMID=CMID)
+            CMID = cleanCMID(data.get('CMID'))
+            result = processUSES(database=database, CMID=CMID)
         else:
             raise Exception("Function does not exist")
         return result
@@ -1549,22 +1419,23 @@ def getAdminEdit():
 def getDataset():
     # to do: document
     try:
+
         if request.method == 'GET':
-            database = CM.unlist(request.args.get('database'))
-            cmid = CM.unlist(request.args.get('cmid'))
-            domain = CM.unlist(request.args.get('domain'))
-            children = CM.unlist(request.args.get('children'))
+            database = unlist(request.args.get('database'))
+            cmid = unlist(request.args.get('cmid'))
+            domain = unlist(request.args.get('domain'))
+            children = unlist(request.args.get('children'))
         elif request.method == "POST":
             data = request.get_data()
             data = json.loads(data)
-            database = CM.unlist(data.get('database'))
-            cmid = CM.unlist(data.get('cmid'))
+            database = unlist(data.get('database'))
+            cmid = unlist(data.get('cmid'))
             domain = data.get('domain')
-            children = CM.unlist(data.get('children'))
+            children = unlist(data.get('children'))
         else:
             raise Exception("invalid request method")
 
-        driver = CM.getDriver(database)
+        driver = getDriver(database)
 
         if isinstance(domain, str):
             domain = [domain]
@@ -1573,7 +1444,7 @@ def getDataset():
             domain = ["CATEGORY"]
 
         if domain != ["CATEGORY"]:
-            labels = CM.getQuery(
+            labels = getQuery(
                 query="MATCH (l:LABEL) RETURN l.label AS label, l.groupLabel AS groupLabel", driver=driver)
             labels = pd.DataFrame(labels)
             # Checking if any item in domain is in the groupLabel list
@@ -1589,7 +1460,7 @@ def getDataset():
             unwind $cmid as cmid
             match (:DATASET {CMID: cmid})-[:CONTAINS*..5]->(d:DATASET) return distinct d.CMID as CMID
             """
-            result = CM.getQuery(query=query, driver=driver, type="list")
+            result = getQuery(query=query, driver=driver, type="list")
             if result is not None:
                 cmid = [cmid] + result
 
@@ -1604,8 +1475,8 @@ def getDataset():
         b.CMID as CMID, b.CMName as CMName, elementId(r) as relID, property, r[property] as value, custom.getName(r[property]) as property_name
         """
 
-            data = CM.getQuery(query=query, driver=driver, params={
-                               "cmid": cmid, "domain": domain})
+            data = getQuery(query=query, driver=driver, params={
+                "cmid": cmid, "domain": domain})
 
         else:
             query = """
@@ -1618,8 +1489,8 @@ def getDataset():
         b.CMID as CMID, b.CMName as CMName, elementId(r) as relID, property, r[property] as value, custom.getName(r[property]) as property_name
         """
 
-            data = CM.getQuery(query=query, driver=driver, params={
-                               "cmid": cmid, "domain": domain})
+            data = getQuery(query=query, driver=driver, params={
+                "cmid": cmid, "domain": domain})
 
         df = pd.DataFrame(data)
 
@@ -1683,31 +1554,31 @@ def routines():
     # this route will not be documented in swagger
     # it is intended for automatic routines only
     try:
-        database = CM.unlist(request.args.get('database'))
-        fun = CM.unlist(request.args.get('fun'))
+        database = unlist(request.args.get('database'))
+        fun = unlist(request.args.get('fun'))
         result = "Nothing returned"
         if fun == "addLog":
-            result = CM.addLog(database)
+            result = addLog(database)
         elif fun == "checkDomains":
-            data = CM.unlist(request.args.get('data'))
-            result = CM.checkDomains(data=data, database=database)
+            data = unlist(request.args.get('data'))
+            result = checkDomains(data=data, database=database)
         elif fun == "processUSES":
             CMID = request.args.get('CMID')
-            result = CM.processUSES(database=database, CMID=CMID)
+            result = processUSES(database=database, CMID=CMID)
         elif fun == "backup2CSV":
-            result = CM.backup2CSV(database, mail)
+            result = backup2CSV(database, mail)
         elif fun == "getBadJSON":
-            result = CM.getBadJSON(database, mail)
+            result = getBadJSON(database, mail)
         elif fun == "getBadCMID":
-            result = CM.getBadCMID(database, mail)
+            result = getBadCMID(database, mail)
         elif fun == "getMultipleLabels":
-            result = CM.getMultipleLabels(database, mail)
+            result = getMultipleLabels(database, mail)
         elif fun == "getBadDomains":
-            result = CM.getBadDomains(database, mail)
+            result = getBadDomains(database, mail)
         elif fun == "getBadRelations":
-            result = CM.getBadRelations(database, mail)
+            result = getBadRelations(database, mail)
         elif fun == "cmnameNotInName":
-            result = CM.cmnameNotInName(database, mail)
+            result = cmnameNotInName(database, mail)
         else:
             result = "function not found"
         return result
@@ -1723,15 +1594,7 @@ def getCMID():
         database = request.args.get('database')
         cmid = request.args.get('cmid')
 
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        elif database == "gisdb":
-            driver = connectionGIS()
-        else:
-            raise Exception(
-                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+        driver = getDriver(database)
 
         query1 = """
 unwind $cmid as cmid 
@@ -1785,15 +1648,7 @@ def getAllDatasets():
     try:
         database = request.args.get('database')
 
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        elif database == "gisdb":
-            driver = connectionGIS()
-        else:
-            raise Exception(
-                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+        driver = getDriver(database)
 
         query = """
 match (d:DATASET) 
@@ -1844,13 +1699,7 @@ def getLinkFile():
         if not isinstance(intersection, bool):
             raise Exception("intersection must be a boolean")
 
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        else:
-            raise Exception(
-                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+        driver = getDriver(database)
 
         query = f"""
 match (c:{domain})<-[r:USES]-(d:DATASET) where d.CMID in $datasets
@@ -1877,18 +1726,12 @@ def getnetworknodes():
         data = request.get_data()
         data = json.loads(data)
 
-        database = CM.unlist(data.get('database'))
-        cmid = CM.unlist(data.get('cmid'))
+        database = unlist(data.get('database'))
+        cmid = unlist(data.get('cmid'))
         relation = data.get('relation')
         domains = data.get('domains')
 
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            driver = connectionAM()
-        else:
-            raise Exception(
-                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+        driver = getDriver(database)
 
         query = """
         unwind $cmid as cmid 
@@ -1919,11 +1762,11 @@ def getdatasetDomains():
         data = request.get_data()
         data = json.loads(data)
 
-        database = CM.unlist(data.get('database'))
-        cmid = CM.unlist(data.get('cmid'))
-        children = CM.unlist(data.get('children'))
+        database = unlist(data.get('database'))
+        cmid = unlist(data.get('cmid'))
+        children = unlist(data.get('children'))
 
-        driver = CM.getDriver(database)
+        driver = getDriver(database)
 
         # combine queries
         if children == True:
@@ -1941,7 +1784,7 @@ unwind labels as label
 return label
 """
 
-        data = CM.getQuery(query=query, driver=driver, params={"cmid": cmid})
+        data = getQuery(query=query, driver=driver, params={"cmid": cmid})
 
         return data
 
@@ -1956,14 +1799,7 @@ def getFoci():
     try:
         database = request.args.get('database')
 
-        if str.lower(database) == "sociomap":
-            driver = connectionSM()
-        elif str.lower(database) == "archamap":
-            # driver = connectionAM()
-            return "ArchaMap not available"
-        else:
-            raise Exception(
-                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+        driver = getDriver(database)
 
         query1 = """
 match (d:DATASET) 
@@ -2022,11 +1858,11 @@ def createNodesapi():
         data = request.get_data()
         data = json.loads(data)
         df = data.get('df')
-        database = CM.unlist(data.get('database'))
-        user = CM.unlist(data.get('user'))
-        pwd = CM.unlist(data.get('password'))
+        database = unlist(data.get('database'))
+        user = unlist(data.get('user'))
+        pwd = unlist(data.get('password'))
 
-        verify = CM.verifyUser(user, pwd)
+        verify = verifyUser(user, pwd)
 
         if not verify == "verified":
             raise Exception("User is not verified.")
@@ -2036,7 +1872,7 @@ def createNodesapi():
 
         df = pd.DataFrame(df)
 
-        results = CM.createNodes(df, database, user)
+        results = createNodes(df, database, user)
 
         return results
 
@@ -2050,11 +1886,11 @@ def getLogin():
     try:
         data = request.get_data()
         data = json.loads(data)
-        database = CM.unlist(data.get('database'))
-        user = CM.unlist(data.get('user'))
-        password = CM.unlist(data.get('password'))
+        database = unlist(data.get('database'))
+        user = unlist(data.get('user'))
+        password = unlist(data.get('password'))
 
-        credentials = CM.login(database, user, password)
+        credentials = login(database, user, password)
 
         return credentials
 
@@ -2070,21 +1906,21 @@ def addFoci():
         datasetID = request.args.get('datasetID')
         foci = request.args.get('foci')
 
-        driver = CM.getDriver(database)
+        driver = getDriver(database)
 
         query = "MATCH (v:VARIABLE {CMID: $foci}) return v.CMID as CMID"
-        verifyFoci = CM.getQuery(query, driver, params={"foci": foci})
+        verifyFoci = getQuery(query, driver, params={"foci": foci})
 
         query = "MATCH (d:DATASET {CMID: $datasetID}) return d.CMID as CMID"
-        verifydb = CM.getQuery(query, driver, params={"datasetID": datasetID})
+        verifydb = getQuery(query, driver, params={"datasetID": datasetID})
 
         if not datasetID in [item["CMID"] for item in verifydb]:
             raise Exception("datasetID does not exist - please check the CMID")
 
         if foci in [item["CMID"] for item in verifyFoci]:
             query = "MATCH (d:DATASET {CMID: $datasetID}) with d, apoc.coll.toSet(coalesce(d.foci,[]) + $foci) as result set d.foci = result return d.CMID as datasetID, d.foci as foci"
-            result = CM.getQuery(query, driver, params={
-                                 "foci": foci, "datasetID": datasetID})
+            result = getQuery(query, driver, params={
+                "foci": foci, "datasetID": datasetID})
         else:
             raise Exception("foci does not exist - please check the CMID")
 
@@ -2100,14 +1936,14 @@ def getProgress():
     try:
         database = request.args.get('database')
 
-        driver = CM.getDriver(database)
+        driver = getDriver(database)
 
         query = """
         match (l:LABEL) 
         where l.public = 'TRUE' and l.groupLabel = l.label and not l.label = "CATEGORY"
         return l.label as label, l.displayName as newlabel
         """
-        domains = CM.getQuery(query=query, driver=driver)
+        domains = getQuery(query=query, driver=driver)
         domains = pd.DataFrame(domains)
 
         query = """
@@ -2130,15 +1966,15 @@ def getProgress():
         order by label
         """
 
-        data = CM.getQuery(query=query, driver=driver, params={
-                           "labels": domains["label"]})
+        data = getQuery(query=query, driver=driver, params={
+            "labels": domains["label"]})
 
         df = pd.DataFrame(data)
 
         query = """
         match (n:TRANSLATION) where n.table = "display" return n.table as table, n.from as label, n.to as newlabel order by label
         """
-        translations = CM.getQuery(query=query, driver=driver)
+        translations = getQuery(query=query, driver=driver)
         translations = pd.DataFrame(translations)
         translations = pd.concat(
             [translations, domains], axis=0, ignore_index=True)
@@ -2172,7 +2008,7 @@ def test():
 
     # database = request.args.get('database')
 
-    # driver = CM.getDriver(database)
+    # driver = getDriver(database)
     # session = driver.session()
     # data = session.run("match (c) return count(*) as count")
 
@@ -2192,9 +2028,9 @@ def getMergeDatasets():
 
     database = request.args.get('database')
 
-    driver = CM.getDriver(database)
+    driver = getDriver(database)
     query = "match (d:DATASET) return d.CMID as CMID order by CMID"
-    data = CM.getQuery(query, driver)
+    data = getQuery(query, driver)
 
     return data
 
@@ -2204,7 +2040,7 @@ def getUpdateWaitingUSES():
     data = request.get_data()
     data = json.loads(data)
     database = data.get("database")
-    result = CM.waitingUSES(database)
+    result = waitingUSES(database)
     return result
 
 
@@ -2213,9 +2049,9 @@ def updateNewUsers():
     try:
         data = request.get_data()
         data = json.loads(data)
-        database = CM.unlist(data.get('database'))
-        credentials = CM.unlist(data.get('credentials'))
-        process = CM.unlist(data.get('process'))
+        database = unlist(data.get('database'))
+        credentials = unlist(data.get('credentials'))
+        process = unlist(data.get('process'))
         userid = data.get('userid')
         if database.lower() == "sociomap":
             database = "SocioMap"
@@ -2229,31 +2065,31 @@ def updateNewUsers():
         else:
             credentials = json.loads(credentials)
 
-        if CM.unlist(credentials.get("role")) != "admin":
+        if unlist(credentials.get("role")) != "admin":
             raise Exception("Error: User is not an admin")
 
-        verified = CM.verifyUser(CM.unlist(credentials.get(
-            "userid")), CM.unlist(credentials.get("key")))
+        verified = verifyUser(unlist(credentials.get(
+            "userid")), unlist(credentials.get("key")))
 
         if verified != "verified":
             raise Exception("Error: User is not verified")
 
-        driver = CM.getDriver('userdb')
+        driver = getDriver('userdb')
 
         if process == "approve":
             if userid is None:
                 raise Exception("Error: userid must be specified")
 
-            userid = CM.flattenList(userid)
+            userid = flattenList(userid)
 
             query = f"""
 unwind $userids as id
 with toString(id) as id
 match (u {{access: 'new', userid: id}}) where '{database}' in u.database 
-set u.access = 'enabled', u.log = u.log + [toString(datetime()) + ": access approved by {CM.unlist(credentials.get("userid"))}"]
+set u.access = 'enabled', u.log = u.log + [toString(datetime()) + ": access approved by {unlist(credentials.get("userid"))}"]
 return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
 """
-            result = CM.getQuery(query, driver, params={"userids": userid})
+            result = getQuery(query, driver, params={"userids": userid})
             for user in result:
                 body = f"""
     Hello {user.get("first")} {user.get("last")},
@@ -2263,14 +2099,14 @@ return u.userid as userid, u.first as first, u.last as last, u.email as email, u
     Best,
     CatMapper Team
                 """
-                CM.sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
+                sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
                     "email"), 'admin@catmapper.org'], body=body, sender=os.getenv("mail_default"))
         else:
             query = f"""
 match (u {{access: 'new'}}) where '{database}' in u.database
 return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
 """
-            result = CM.getQuery(query, driver)
+            result = getQuery(query, driver)
 
         return result
     except Exception as e:
@@ -2281,8 +2117,8 @@ return u.userid as userid, u.first as first, u.last as last, u.email as email, u
 @app.route('/send-test-email', methods=['GET'])
 def send_test_email():
     try:
-        msg = CM.sendEmail(mail, "Test Email", [
-                           "bischrob@gmail.com"], "This is a test email sent from a Flask application. Have fun.", "admin@catmapper.org")
+        msg = sendEmail(mail, "Test Email", [
+            "bischrob@gmail.com"], "This is a test email sent from a Flask application. Have fun.", "admin@catmapper.org")
         return msg
     except Exception as e:
         return str(e), 500
