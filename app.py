@@ -1,60 +1,22 @@
-# from fastapi import FastAPI
-from flask import Flask, request, send_file, send_from_directory, jsonify, render_template, make_response, stream_with_context, Response
-from flask_mail import Mail, Message
-from neo4j import GraphDatabase
+from flask import request, send_file, send_from_directory, jsonify, render_template, make_response
 import os
-from dotenv import load_dotenv, find_dotenv
-from flask_cors import CORS
 from fuzzywuzzy import fuzz
 from bs4 import BeautifulSoup
 import json
 import re
-from flasgger import Swagger
-from CM import *
 import pandas as pd
 import numpy as np
 from collections import defaultdict
+from CM import *
+from CMroutes import *
 
-load_dotenv(find_dotenv())
-uriSM = os.getenv("uriSM")
-user = os.getenv("user")
-pwdSM = os.getenv("pwdSM")
-uriG = os.getenv("uriG")
-pwdG = os.getenv("pwdG")
-uriAM = os.getenv("uriAM")
-pwdAM = os.getenv("pwdAM")
-apikeyEnv = os.getenv("apikey")
-
-rvals = {}
-
-# app=FastAPI()
-app = Flask(__name__)
-
-CORS(app)
-app.config['CORS_HEADERS'] = 'Content-Type'
-app.config['PERMANENT_SESSION_LIFETIME'] = 999999999
-app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
-
-
-app.config['MAIL_SERVER'] = os.getenv(
-    "mail_server")  # Replace with your mail server
-# Typically 587 for TLS, 465 for SSL
-app.config['MAIL_PORT'] = os.getenv("mail_port")
-app.config['MAIL_USE_TLS'] = True  # Use TLS
-app.config['MAIL_USE_SSL'] = False  # Use SSL (False if using TLS)
-app.config['MAIL_USERNAME'] = os.getenv("mail_address")  # Your email
-app.config['MAIL_PASSWORD'] = os.getenv("mail_pwd")  # Your email password
-app.config['MAIL_DEFAULT_SENDER'] = os.getenv("mail_default")  # Default sender
-
-mail = Mail(app)
+app = create_app()
 
 
 @app.route("/")
 def root():
     headers = {'Content-Type': 'text/html'}
     return make_response(render_template('api.html'), 200, headers)
-
-# tvalue = request.json['tvalue']
 
 
 @app.route('/apidocs/')
@@ -2114,15 +2076,11 @@ return u.userid as userid, u.first as first, u.last as last, u.email as email, u
         return result, 500
 
 
-@app.route('/send-test-email', methods=['GET'])
-def send_test_email():
-    try:
-        msg = sendEmail(mail, "Test Email", [
-            "bischrob@gmail.com"], "This is a test email sent from a Flask application. Have fun.", "admin@catmapper.org")
-        return msg
-    except Exception as e:
-        return str(e), 500
+app.add_url_rule('/test/send_test_email', 'send_test_email',
+                 send_test_email, methods=['GET'])
 
+app.add_url_rule('/test/testmsg', 'testmsg',
+                 testmsg, methods=['GET'])
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)
