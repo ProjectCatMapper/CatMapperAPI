@@ -9,6 +9,7 @@ from CM.USES import *
 import pandas as pd
 import json
 
+
 def is_valid_json(json_string):
     try:
         json.loads(json_string)
@@ -16,7 +17,8 @@ def is_valid_json(json_string):
     except json.JSONDecodeError:
         return False
 
-def validateJSON(database, property = 'parentContext', path ="/mnt/storage/app/tmp/invalid_json.xlsx" ):
+
+def validateJSON(database, property='parentContext', path="/mnt/storage/app/tmp/invalid_json.xlsx"):
     try:
 
         driver = getDriver(database)
@@ -37,11 +39,11 @@ def validateJSON(database, property = 'parentContext', path ="/mnt/storage/app/t
 
         invalid = invalid.to_dict(orient="records")
 
-        return(invalid)
+        return (invalid)
 
     except Exception as e:
         return "Unable to validate JSON properties: " + str(e)
-    
+
 
 def addLog(database):
     try:
@@ -59,8 +61,9 @@ def addLog(database):
         return "Completed"
     except Exception as e:
         return str(e)
-    
-def checkDomains(data,database):
+
+
+def checkDomains(data, database):
     try:
         if data is None:
             data = False
@@ -81,20 +84,20 @@ def checkDomains(data,database):
         return "MissingCATEGORY" as query,  n.CMID as CMID, n.CMName as CMName, r.label as label, d.CMID as datasetID
         """
         result = getQuery(query, driver)
-        
+
         if data:
             return result
         else:
             return "Completed"
-         
+
     except Exception as e:
         return str(e)
-    
+
 
 # need to create function based off this
 # with "eventType" as prop match (a)-[r]->(b) where not r[prop] is null and r[prop] = [] call apoc.cypher.doIt("with r set r." + prop + " = NULL",{r:r}) yield value return count(*)
 
-def backup2CSV(database, mail = None):
+def backup2CSV(database, mail=None):
     try:
         driver = getDriver(database)
         query = """
@@ -105,29 +108,29 @@ def backup2CSV(database, mail = None):
 
         result = getQuery(query, driver)
         print(result)
-         
+
         query2 = """
             with 'match (n:CATEGORY)<-[r:USES]-(d:DATASET) unwind keys(r) as property return distinct id(r) as relID, n.CMID as CMID, n.CMName as CMName, d.CMName as dataset, d.CMID as datasetID, property, r[property] as value order by CMName' as query CALL apoc.export.csv.query(query, '/backups/USESties.csv', {})
             YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
             RETURN count(*);
             """
-        
+
         result2 = getQuery(query2, driver)
-        print(result2)
+        # print(result2)
 
         if mail:
-            sendEmail(mail, subject = "Weekly CSV Backup", recipients = ["rjbischo@catmapper.org"], body = "Weekly CSV backup completed.", sender = os.getenv("mail_default"))
+            sendEmail(mail, subject="Weekly CSV Backup", recipients=[
+                      "rjbischo@catmapper.org"], body="Weekly CSV backup completed.", sender=os.getenv("mail_default"))
 
         return "backup2CSV completed"
-        
+
     except Exception as e:
         return str(e)
-    
 
 
-def getBadCMID(database,mail = None):
+def getBadCMID(database, mail=None):
     try:
-         
+
         driver = getDriver(database)
         properties = getPropertiesMetadata(driver)
         properties = pd.DataFrame(properties)
@@ -167,28 +170,30 @@ def getBadCMID(database,mail = None):
             return old.CMID as badCMID, c.CMID as newCMID
             """
 
-            deleted = getQuery(query2, driver, {"cmids": list(results["badCMID"].unique())})
+            deleted = getQuery(
+                query2, driver, {"cmids": list(results["badCMID"].unique())})
 
             if len(deleted) > 0:
 
                 deleted = pd.DataFrame(deleted)
 
-                results = results.merge(deleted, on = "badCMID", how = "left")
+                results = results.merge(deleted, on="badCMID", how="left")
 
-            if mail is not None:
-                fp1 = "tmp/badCMIDs.xlsx"
-                results.to_excel(fp1, index = False)
-                sendEmail(mail, subject = "Bad CMIDs", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+                if mail is not None:
+                    fp1 = "tmp/badCMIDs.xlsx"
+                    results.to_excel(fp1, index=False)
+                    sendEmail(mail, subject="Bad CMIDs", recipients=[
+                              "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
 
             return results.to_dict(orient="records")
-        else: 
+        else:
             return "No bad CMIDs found"
 
     except Exception as e:
         return "Error: " + str(e)
-        
 
-def getMultipleLabels(database, mail = None):
+
+def getMultipleLabels(database, mail=None):
     try:
         driver = getDriver(database)
         query = """
@@ -201,46 +206,57 @@ def getMultipleLabels(database, mail = None):
             if mail is not None:
                 fp1 = "tmp/multipleLabels.xlsx"
                 data = pd.DataFrame(results)
-                data.to_excel(fp1, index = False)
-                sendEmail(mail, subject = "Multiple Labels", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+                data.to_excel(fp1, index=False)
+                sendEmail(mail, subject="Multiple Labels", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
 
             return results
-        
+
         else:
             return "No multiple labels found"
-        
+
     except Exception as e:
         return str(e)
-    
-def getBadJSON(database,mail = None):
-    try:        
+
+
+def getBadJSON(database, mail=None):
+    try:
         fp1 = "tmp/invalid_json_geoCoords.xlsx"
-        results1 = validateJSON(database = database, property = 'geoCoords', path = fp1)
+        results1 = validateJSON(
+            database=database, property='geoCoords', path=fp1)
         fp2 = "tmp/invalid_json_parentContext.xlsx"
-        results2 = validateJSON(database = database, property = 'parentContext', path = fp2)
+        results2 = validateJSON(
+            database=database, property='parentContext', path=fp2)
+
+        mailSent = "False"
 
         if mail is not None:
-            if len(results1)>0:
-                sendEmail(mail, subject = "Invalid geoCoords properties", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+            if len(results1) > 1:
+                sendEmail(mail, subject="Invalid geoCoords properties", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
                 mailSent = "True"
 
-            if len(results2)>0:
-                sendEmail(mail, subject = "Invalid parentContext properties", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp2])
+            if len(results2) > 1:
+                sendEmail(mail, subject="Invalid parentContext properties", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp2])
                 mailSent = "True"
 
-        return {"geoCoords": len(results1), "parentContext": len(results2), "geoCoords": results1, "parentContext": results2, "emailSent": mailSent}    
+        return {"geoCoords": len(results1), "parentContext": len(results2), "geoCoords": results1, "parentContext": results2, "emailSent": mailSent}
     except Exception as e:
         result = str(e)
-        return result, 500  
-    
-def getBadDomains(database,mail = None):
-    try:        
+        return result, 500
+
+
+def getBadDomains(database, mail=None):
+    try:
         driver = getDriver(database)
-        labels = getQuery("match (l:LABEL) return l.label as label, l.groupLabel as groupLabel", driver)
+        labels = getQuery(
+            "match (l:LABEL) return l.label as label, l.groupLabel as groupLabel", driver)
         labels = pd.DataFrame(labels)
         groups = list(labels['groupLabel'].unique())
 
-        matches = getQuery("match (c) return distinct [i in  labels(c) where not i = 'CATEGORY'] as label", driver)
+        matches = getQuery(
+            "match (c) return distinct [i in  labels(c) where not i = 'CATEGORY'] as label", driver)
         matches = pd.DataFrame(matches)
 
         bad_labels = []
@@ -253,7 +269,8 @@ def getBadDomains(database,mail = None):
                 if group in label:
                     bad = [x for x in label if not x in sub_labels]
                     if len(bad) > 0:
-                        print("bad label for " + group + ": " + ", ".join(label))
+                        print("bad label for " + group +
+                              ": " + ", ".join(label))
                         fmt_label = ":".join(label)
                         query = f"""
                         match (c:{fmt_label})
@@ -262,27 +279,29 @@ def getBadDomains(database,mail = None):
                         result = getQuery(query, driver)
                         bad_labels.append(result)
 
-
         bad_labels = pd.concat([pd.DataFrame(item) for item in bad_labels])
         if len(bad_labels) > 0:
             if mail is not None:
                 fp1 = "tmp/badLabels.xlsx"
-                bad_labels.to_excel(fp1, index = False)
-                sendEmail(mail, subject = "Bad Labels", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+                bad_labels.to_excel(fp1, index=False)
+                sendEmail(mail, subject="Bad Labels", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
         bad_labels = bad_labels.to_dict(orient="records")
-                
-        missing_category = getQuery("match (c)<-[:USES]-(d:DATASET) where not 'CATEGORY' in labels(c) return c.CMID as CMID, c.CMName as CMName", driver)
+
+        missing_category = getQuery(
+            "match (c)<-[:USES]-(d:DATASET) where not 'CATEGORY' in labels(c) return c.CMID as CMID, c.CMName as CMName", driver)
 
         if len(missing_category) > 0:
             if mail is not None:
                 fp1 = "tmp/missing_category.xlsx"
                 missing_category = pd.DataFrame(missing_category)
-                missing_category.to_excel(fp1, index = False)
+                missing_category.to_excel(fp1, index=False)
                 missing_category = missing_category.to_dict(orient="records")
-                sendEmail(mail, subject = "Missing CATEGORY Label", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+                sendEmail(mail, subject="Missing CATEGORY Label", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
 
-
-        missing_dataset = getQuery("match (c)<-[:USES]-(d:DATASET) where not 'DATASET' in labels(d) return d.CMID as CMID, d.CMName as CMName", driver)
+        missing_dataset = getQuery(
+            "match (c)<-[:USES]-(d:DATASET) where not 'DATASET' in labels(d) return d.CMID as CMID, d.CMName as CMName", driver)
 
         if len(missing_dataset) > 0:
             missing_dataset = pd.DataFrame(missing_dataset)
@@ -290,30 +309,42 @@ def getBadDomains(database,mail = None):
             if mail is not None:
                 if missing_dataset:
                     fp1 = "tmp/missing_dataset.xlsx"
-                    missing_dataset.to_excel(fp1, index = False)
+                    missing_dataset.to_excel(fp1, index=False)
                     missing_dataset = missing_dataset.to_dict(orient="records")
-                    sendEmail(mail, subject = "Missing DATASET Label", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])         
+                    sendEmail(mail, subject="Missing DATASET Label", recipients=[
+                              "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
 
-        return {"bad_labels_count": len(bad_labels), "missing_category_count": len(missing_category), "missing_dataset_count": len(missing_dataset), "bad_labels": bad_labels, "missing_category": missing_category, "missing_dataset": missing_dataset}    
+        return {"bad_labels_count": len(bad_labels), "missing_category_count": len(missing_category), "missing_dataset_count": len(missing_dataset), "bad_labels": bad_labels, "missing_category": missing_category, "missing_dataset": missing_dataset}
     except Exception as e:
         result = str(e)
-        return result, 500  
-    
+        return result, 500
 
-def getBadRelations(database,mail = None):
-    try:        
+
+def getBadRelations(database, mail=None):
+    try:
         driver = getDriver(database)
-        labels = getQuery("match (l:LABEL) where not l.relationship is null return distinct l.groupLabel as group, l.relationship as relationship", driver)
+        labels = getQuery(
+            "match (l:LABEL) where not l.relationship is null return distinct l.groupLabel as group, l.relationship as relationship", driver)
+
+        labels.update({'ETHNICITY': ""})
 
         results = []
         contains = []
         for label in labels:
-            relationship = label['relationship']
-            group = label['group']
-            matches = getQuery(f"match (p:CATEGORY)-[:{relationship}]->(c:CATEGORY)<-[r:USES]-(d:DATASET) where not '{group}' in labels(p) unwind keys(r) as property with p.CMID as parentCMID, p.CMName as parentCMName, c.CMID as childCMID, c.CNName as childCMName, r.Key as Key, d.datasetID as datasetID, d.shortName as shortName, '{relationship}' as relationship, apoc.text.join([i in labels(p) where not i in ['CATEGORY']],'; ') as domains, property, r[property] as value where parentCMID = value or parentCMID in value return distinct parentCMID, parentCMName, childCMID, childCMName, Key, datasetID, shortName, relationship, domains, property, value", driver)
-            results.append(matches)
-            matchContains = getQuery(f"match (p:CATEGORY)-[:CONTAINS]->(c:{group})<-[r:USES]-(d:DATASET) where not 'GENERIC' in labels(p) with p,c,r,d where not '{group}' in labels(p) and (p.CMID in r.parent or p.CMID = r.parent) return distinct p.CMID as parentCMID, p.CMName as parentCMName, c.CMID as childCMID, c.CMName as childCMName, r.Key as Key, d.CMID as datasetID, d.shortName as shortName, 'CONTAINS' as relationship, apoc.text.join([i in labels(p) where i in $groups],',') + '->' + '{group}' as domains, 'parent' as property, r.parent as value", driver, params = {'groups': list(pd.DataFrame(labels)['group'].values)})
-            contains.append(matchContains)
+            if label == "ETHNICITY":
+                group = label['group']
+                matchContains = getQuery(
+                    f"MATCH (p:CATEGORY)-[:CONTAINS]->(c:$group) WHERE NOT 'GENERIC' IN labels(p) WITH p, c,[x IN labels(p) WHERE x IN ['DISTRICT','LANGUOID','RELIGION','ETHNICITY']] AS parentLabels,[y IN labels(c) WHERE y IN ['DISTRICT','LANGUOID','RELIGION','ETHNICITY']] AS childLabels UNWIND parentLabels AS parentLabel UNWIND childLabels AS childLabel WITH p, c, parentLabel, childLabel WHERE parentLabel <> $group AND childLabel = $group RETURN DISTINCT p.CMID AS parentCMID, p.CMName AS parentCMName, parentLabel + '->' + childLabel AS domains, c.CMID AS childCMID, c.CMName AS childCMName, 'CONTAINS' AS relationship", driver, params={'group': group})
+                contains.append(matchContains)
+            else:
+                relationship = label['relationship']
+                group = label['group']
+                matches = getQuery(f"match (p:CATEGORY)-[:{relationship}]->(c:CATEGORY)<-[r:USES]-(d:DATASET) where not '{group}' in labels(p) unwind keys(r) as property with p.CMID as parentCMID, p.CMName as parentCMName, c.CMID as childCMID, c.CNName as childCMName, r.Key as Key, d.datasetID as datasetID, d.shortName as shortName, '{relationship}' as relationship, apoc.text.join([i in labels(p) where not i in ['CATEGORY']],'; ') as domains, property, r[property] as value where parentCMID = value or parentCMID in value return distinct parentCMID, parentCMName, childCMID, childCMName, Key, datasetID, shortName, relationship, domains, property, value", driver)
+                results.append(matches)
+                # matchContains = getQuery(f"match (p:CATEGORY)-[:CONTAINS]->(c:{group})<-[r:USES]-(d:DATASET) where not 'GENERIC' in labels(p) with p,c,r,d where not '{group}' in labels(p) and (p.CMID in r.parent or p.CMID = r.parent) return distinct p.CMID as parentCMID, p.CMName as parentCMName, c.CMID as childCMID, c.CMName as childCMName, r.Key as Key, d.CMID as datasetID, d.shortName as shortName, 'CONTAINS' as relationship, apoc.text.join([i in labels(p) where i in $groups],',') + '->' + '{group}' as domains, 'parent' as property, r.parent as value", driver, params = {'groups': list(pd.DataFrame(labels)['group'].values)})
+                matchContains = getQuery(
+                    f"MATCH (p:CATEGORY)-[:CONTAINS]->(c:$group) WHERE NOT 'GENERIC' IN labels(p) WITH p, c,[x IN labels(p) WHERE x IN ['DISTRICT','LANGUOID','RELIGION','ETHNICITY']] AS parentLabels,[y IN labels(c) WHERE y IN ['DISTRICT','LANGUOID','RELIGION','ETHNICITY']] AS childLabels UNWIND parentLabels AS parentLabel UNWIND childLabels AS childLabel WITH p, c, parentLabel, childLabel WHERE parentLabel <> $group AND childLabel = $group RETURN DISTINCT p.CMID AS parentCMID, p.CMName AS parentCMName, parentLabel + '->' + childLabel AS domains, c.CMID AS childCMID, c.CMName AS childCMName, 'CONTAINS' AS relationship", driver, params={'group': group})
+                contains.append(matchContains)
 
         results = pd.concat([pd.DataFrame(item) for item in results])
         contains = pd.concat([pd.DataFrame(item) for item in contains])
@@ -322,19 +353,20 @@ def getBadRelations(database,mail = None):
         if len(results) > 0:
             if mail is not None:
                 fp1 = "tmp/BadRelationshipLabels.xlsx"
-                results.to_excel(fp1, index = False)
+                results.to_excel(fp1, index=False)
                 results = results.to_dict(orient="records")
-                sendEmail(mail, subject = "Bad Relationship Label", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])        
+                sendEmail(mail, subject="Bad Relationship Label", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
 
-            return {"bad_relationship_labels_count": len(results), "bad_relationship_labels": results}    
-    
+            return {"bad_relationship_labels_count": len(results), "bad_relationship_labels": results}
+
     except Exception as e:
         result = str(e)
         return result, 500
 
 
-def cmnameNotInName(database,mail=None):
-    try:        
+def cmnameNotInName(database, mail=None):
+    try:
         driver = getDriver(database)
 
         session = driver.session()
@@ -346,26 +378,25 @@ def cmnameNotInName(database,mail=None):
         """
 
         result = session.run(query)
-        
+
         cmids = []
         for record in result:
             cmids.append(record["CMID"])
-        
-        if len(cmids)>0:
+
+        if len(cmids) > 0:
             for cmid in cmids:
                 addCMNameRel(database, CMID=cmid)
                 updateAltNames(driver, CMID=cmid)
-            
+
             if mail is not None:
                 fp1 = "tmp/BadCMNames.xlsx"
-                cmid.to_excel(fp1, index = False)
+                cmid.to_excel(fp1, index=False)
                 results = cmid.to_dict(orient="records")
-                sendEmail(mail, subject = "Bad Relationship Label", recipients = ["admin@catmapper.org"], body = "See attached", sender = os.getenv("mail_default"), attachments = [fp1])
+                sendEmail(mail, subject="Bad Relationship Label", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
 
-            return {"Name not in CMName":results}
-        
+            return {"Name not in CMName": results}
+
     except Exception as e:
         result = str(e)
         return result, 500
-
-
