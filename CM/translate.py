@@ -240,6 +240,21 @@ def translate(
         query,
         table,
         uniqueRows):
+    """
+    database: Name or identifier of the target database; used to initialize a connection driver.
+    property: The property or attribute to match against in the graph database (e.g., 'Name', 'Key', 'glottocode').
+    domain: The graph node label/domain to limit the query scope (e.g., 'LANGUAGE', 'DATASET', 'AREA'); may be normalized internally.
+    key: Optional flag (string 'true' or 'false') to include associated 'Key' values from dataset relationships in the results.
+    term: The column name in the input table containing the text values to search for in the database.
+    country: Optional column name from the table used to filter matches by country (ADM0 level in the graph).
+    context: Optional column name from the table to filter matches by a contextual node (e.g., higher-level grouping).
+    dataset: Optional column name from the table specifying dataset CMIDs used to filter matches by dataset usage.
+    yearStart: Optional string or column name indicating the lower bound of the date range for filtering dataset applicability.
+    yearEnd: Optional string or column name indicating the upper bound of the date range for filtering dataset applicability.
+    query: Optional string ('true' or 'false') that determines whether to return the Cypher query instead of executing it.
+    table: List of dictionaries representing input records to be matched; typically contains a 'term' field and other metadata.
+    uniqueRows: Boolean flag that determines whether identical input rows should be grouped together or processed individually.
+    """
 
     if query is not None:
         if query.lower() != 'true':

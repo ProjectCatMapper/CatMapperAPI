@@ -16,38 +16,43 @@ import json
 
 load_dotenv(find_dotenv())
 
-def getQuery(query,driver, params = None, type = "dict"):
+
+def getQuery(query, driver, params=None, type="dict"):
     try:
         with driver.session() as session:
-            result = session.run(query,params)
+            result = session.run(query, params)
             if type == "dict":
                 result = [dict(record) for record in result]
             elif type == "list":
-                result = list(itertools.chain.from_iterable(record.values() for record in result))
+                result = list(itertools.chain.from_iterable(
+                    record.values() for record in result))
             elif type == "df":
                 result = pd.DataFrame([dict(record) for record in result])
-            else: 
+            else:
                 raise Exception("invalid type")
             driver.close()
         return result
     except Exception as e:
         raise RuntimeError(f"An error occurred: {e}")
 
+
 def unlist(l):
     if isinstance(l, list):
         l = l[0]
     return l
 
+
 def isValidCMID(cmid, driver):
-    
+
     query = "unwind $cmid as cmid match (c) where c.CMID = cmid return c.CMID as cmid, true as exists"
 
     with driver.session() as session:
-        result = session.run(query,cmid = cmid)
+        result = session.run(query, cmid=cmid)
         result = [dict(record) for record in result]
         driver.close()
 
     return result
+
 
 def createLog(id, type, log, user, driver):
     # Remove single and double quotes from the log message
@@ -68,10 +73,11 @@ def createLog(id, type, log, user, driver):
     q = f"unwind $ids as id match {qs} with l, apoc.coll.flatten(['{logQ}',coalesce(l.log,[])],true) as log set l.log = log"
 
     with driver.session() as session:
-        session.run(q, user = user, ids = id)
+        session.run(q, user=user, ids=id)
         driver.close()
 
     return "Completed"
+
 
 def getPropertiesMetadata(driver):
     try:
@@ -84,12 +90,13 @@ n.display as display, n.group as group,
 n.metaType as metaType, n.search as search, 
 n.translation as translation
 """
-        data = getQuery(query = query, driver = driver)
+        data = getQuery(query=query, driver=driver)
         return data
-    
+
     except Exception as e:
         return str(e), 500
-    
+
+
 def getLabelsMetadata(driver):
     try:
 
@@ -100,39 +107,47 @@ n.relationship as relationship, n.public as public,
 n.default as default, n.description as description, 
 n.displayName as displayName, n.remove as remove, n.color as color
 """
-        data = getQuery(query = query, driver = driver)
+        data = getQuery(query=query, driver=driver)
         return data
-    
+
     except Exception as e:
         return str(e), 500
-    
+
+
 def getDriver(database):
     try:
         if str.lower(database) == "sociomap":
-            driver = GraphDatabase.driver(os.getenv("uriSM"), auth=(os.getenv("user"), os.getenv("pwdSM")))
+            driver = GraphDatabase.driver(os.getenv("uriSM"), auth=(
+                os.getenv("user"), os.getenv("pwdSM")))
         elif str.lower(database) == "archamap":
-            driver = GraphDatabase.driver(os.getenv("uriAM"), auth=(os.getenv("user"), os.getenv("pwdAM")))
+            driver = GraphDatabase.driver(os.getenv("uriAM"), auth=(
+                os.getenv("user"), os.getenv("pwdAM")))
         elif str.lower(database) == "gisdb":
-            driver = GraphDatabase.driver(os.getenv("uriG"), auth=(os.getenv("user"), os.getenv("pwdG")))
+            driver = GraphDatabase.driver(os.getenv("uriG"), auth=(
+                os.getenv("user"), os.getenv("pwdG")))
         elif str.lower(database) == "userdb":
-            driver = GraphDatabase.driver(os.getenv("uriU"), auth=(os.getenv("user"), os.getenv("pwdU")))
+            driver = GraphDatabase.driver(os.getenv("uriU"), auth=(
+                os.getenv("user"), os.getenv("pwdU")))
         else:
-            raise Exception(f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
-        
+            raise Exception(
+                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+
         return driver
 
     except Exception as e:
         print(f"Error validating database: {e}")
-        abort(500, description = f"An unexpected error occurred: {str(e)}")
-    
-def validateCols(df,required):
+        abort(500, description=f"An unexpected error occurred: {str(e)}")
+
+
+def validateCols(df, required):
     missing = [col for col in df.columns if col not in required]
 
     if len(missing) > 0:
         return f"Missing the following required column(s): {missing}\n"
     else:
         return True
-      
+
+
 def cleanCMID(cmid):
     # Define the regex pattern for valid prefixes
     valid_prefix_pattern = re.compile(r'^(AD|SD|AM|SM)')
@@ -153,20 +168,21 @@ def cleanCMID(cmid):
         # If cmid is neither a list nor a string, return None
         return None
 
-def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database = "SocioMap"):
+
+def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database="SocioMap"):
     print(database)
 
     if database.lower() == 'sociomap':
         database = 'SocioMap'
-    elif database.lower() =='archamap':
+    elif database.lower() == 'archamap':
         database = 'ArchaMap'
     elif database.lower() == 'gisdb':
         database = 'gisdb'
     elif database.lower() == 'userdb':
         database = 'userdb'
     else:
-        raise ValueError(f"Database must be 'SocioMap', 'ArchaMap', 'gisdb', or 'userdb', but database is {database}")
-
+        raise ValueError(
+            f"Database must be 'SocioMap', 'ArchaMap', 'gisdb', or 'userdb', but database is {database}")
 
     driver = getDriver(database)
 
@@ -186,7 +202,7 @@ def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database = "SocioMap"):
     RETURN new_id + 1 as new_id
     '''
 
-    newID = getQuery(query, driver, type = "list")
+    newID = getQuery(query, driver, type="list")
     newID = newID[0]
 
     # If no ID is found, start from 1
@@ -204,7 +220,7 @@ def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database = "SocioMap"):
         prefix = "A"
     elif database == "gisdb":
         prefix = "gis"
-        
+
     if database == "gisdb":
         newID = [f"{prefix}{x}" for x in newID]
     else:
@@ -214,6 +230,7 @@ def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database = "SocioMap"):
             newID = [f"{prefix}M{x}" for x in newID]
 
     return newID
+
 
 def list2character(col):
     # If col is a list, join the items into a single string
@@ -225,6 +242,7 @@ def list2character(col):
     # Otherwise, convert it to a string
     else:
         return str(col)
+
 
 def flattenList(input_data):
     if isinstance(input_data, str):
@@ -239,10 +257,33 @@ def flattenList(input_data):
         return flat_list
     else:
         return [input_data]
-    
+
+
 def is_valid_json(json_string):
     try:
         json.loads(json_string)
         return True
     except json.JSONDecodeError:
         return False
+
+
+def flatten_json(json_obj, parent_key='', sep='_'):
+    flat_dict = {}
+    for key, value in json_obj.items():
+        new_key = key if parent_key else key
+        if isinstance(value, dict):
+            flat_dict.update(flatten_json(value, new_key, sep=sep))
+        else:
+            flat_dict[new_key] = value
+    return flat_dict
+
+
+def custom_sort(elem):
+    if elem == 'CONTAINS':
+        return 0
+    elif elem == 'DISTRICT_OF':
+        return 1
+    elif elem == 'USES':
+        return 2
+    else:
+        return 3

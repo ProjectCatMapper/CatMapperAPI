@@ -625,6 +625,27 @@ def input_Nodes_Uses(dataset,
 
             if missing_values:
                 raise ValueError(f"Error: Missing values in database for column '{i}': {missing_values}")
+    
+    #checking if label column matches CMID column
+    if "label" in dataset.columns:
+
+        if uploadOption == "add_node" and 'parent' in dataset.columns:
+            combine = dict(zip(dataset['parent'],dataset["label"]))
+        else:
+            combine = dict(zip(dataset['CMID'],dataset["label"]))
+        query = """
+        UNWIND keys($rows) AS cmid
+        MATCH (n:CATEGORY {CMID: cmid})
+        where not $rows[cmid] in labels(n)
+        RETURN n.CMID AS CMID
+        LIMIT 1
+        """
+        with driver.session() as session:
+            term_mismatch = session.run(query, rows=combine)
+            mismatch = term_mismatch.single()
+        
+        if mismatch:
+            raise ValueError(f"Lable provided in file doesnt match for CMID: {mismatch['CMID']}")
             
     #checking labels for columns
     for i in multi_value_columns:
@@ -637,7 +658,6 @@ def input_Nodes_Uses(dataset,
             
             if not rows_to_check:
                 continue
-
 
             if i != "parent":
 
