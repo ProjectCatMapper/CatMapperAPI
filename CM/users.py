@@ -2,6 +2,9 @@
 
 import pysodium
 from .utils import *
+from .email import sendEmail
+from CMroutes import mail
+
 
 def password_hash(password):
     try:
@@ -16,14 +19,16 @@ def password_hash(password):
 
         # # Convert the bytes to hexadecimal and then decode to string
         hashed_string = hashed_bytes.decode("utf-8")
-        hashed_string = hashed_string.replace("\x00","")
+        hashed_string = hashed_string.replace("\x00", "")
 
         return hashed_string
-    
+
     except Exception as e:
         return f"password hash failed: {str(e)}"
 
 # Function to verify the password
+
+
 def verifyPassword(stored_hash, password):
     try:
         if not stored_hash.endswith("\x00"):
@@ -37,7 +42,8 @@ def verifyPassword(stored_hash, password):
         print(f"Verification failed: {e}")
         return False
 
-def login(database,user,password):
+
+def login(database, user, password):
     try:
 
         if database.lower() == "archamap":
@@ -54,16 +60,17 @@ def login(database,user,password):
         where toLower(u.username) = toLower($username) and $database in u.database and u.access = "enabled"
         return u.username as username, u.userid as userid, u.password as key, u.access as access, u.role as role
 """
-        result = getQuery(query,driver, params = {'username': user, 'database': database})
+        result = getQuery(query, driver, params={
+                          'username': user, 'database': database})
 
         if len(result) == 0:
             raise Exception("User not found")
 
         pwd = result[0].get("key")
-        valid = verifyPassword(pwd,password)
+        valid = verifyPassword(pwd, password)
 
         if valid:
-            result = result[0]  
+            result = result[0]
         else:
             raise Exception("invalid password")
 
@@ -71,13 +78,55 @@ def login(database,user,password):
 
     except Exception as e:
         return f"verification failed: {str(e)}", 500
-    
 
-def verifyUser(user,pwd):
+
+def verifyUser(user, pwd):
     try:
         driver = getDriver("userdb")
         query = "match (u:USER {userid: toString($user),password: $pwd, access: 'enabled'}) return 'verified' as verified"
-        result = getQuery(query, driver, params = {'user': user, 'pwd': pwd}, type = 'list')
+        result = getQuery(query, driver, params={
+                          'user': user, 'pwd': pwd}, type='list')
         return result[0]
     except Exception as e:
         return f"Error verifying user: {e}", 500
+
+
+def enableUser(database, process, userid, approver):
+
+    mail = mail()
+
+    driver = getDriver('userdb')
+
+    if process == "approve":
+        if userid is None:
+            raise Exception("Error: userid must be specified")
+
+        userid = flattenList(userid)
+
+        query = f"""
+unwind $userids as id
+with toString(id) as id
+match (u {{access: 'new', userid: id}}) where '{database}' in u.database 
+set u.access = 'enabled', u.log = u.log + [toString(datetime()) + ": access approved by {approver}"]
+return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
+"""
+        result = getQuery(query, driver, params={"userids": userid})
+        for user in result:
+            body = f"""
+Hello {user.get("first")} {user.get("last")},
+
+Your registration has been approved. You can now access the {'and '.join(user.get("database"))} database. Please see catmapper.org/help or email support@catmapper.org for any questions.
+
+Best,
+CatMapper Team
+            """
+            sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
+                "email"), 'admin@catmapper.org'], body=body, sender=os.getenv("mail_default"))
+    else:
+        query = f"""
+match (u {{access: 'new'}}) where '{database}' in u.database
+return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
+"""
+        result = getQuery(query, driver)
+
+        return result

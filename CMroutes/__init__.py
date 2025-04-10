@@ -1,6 +1,7 @@
-from .tests import *
+from .test_routes import *
+from .merge_routes import *
 
-from flask import Flask
+from flask import Flask, abort, send_from_directory
 from .extensions import *
 
 from dotenv import load_dotenv, find_dotenv
@@ -14,6 +15,7 @@ def create_app():
                 template_folder=os.path.join(
                     os.path.dirname(__file__), '../templates'),
                 static_folder=os.path.join(os.path.dirname(__file__), '../static'))
+
     CORS(app)
     app.config['CORS_HEADERS'] = 'Content-Type'
     app.config['PERMANENT_SESSION_LIFETIME'] = 999999999
@@ -29,4 +31,5 @@ def create_app():
     app.config['MAIL_DEFAULT_SENDER'] = os.getenv(
         "mail_default")  # Default sender
     mail.init_app(app)
+
     return app
