@@ -7,9 +7,18 @@ import pandas as pd
 from flask import jsonify
 import os
 import re
-
+from datetime import datetime
+import hashlib
+import base64
 import zipfile
 import numpy as np
+
+
+def generate_unique_hash():
+    now = datetime.utcnow().isoformat()
+    return base64.urlsafe_b64encode(
+        hashlib.sha256(now.encode()).digest()
+    ).decode()[:16]
 
 
 def joinDatasets(database, joinLeft, joinRight):
@@ -389,26 +398,66 @@ def zip_output_files(files, dirpath, zip_filename="output.zip"):
     return zip_path
 
 
+def getMergingTemplate(datasetID, database):
+    try:
+        driver = getDriver(database)
+
+        query = """
+            RETURN "" as mergingID, "" as stackID, "" as datasetID, "" as datasetName, "Please enter the working directory as the first filepath" as filePath
+            UNION ALL 
+            MATCH (m:DATASET {CMID: $datasetID})-[:MERGING]->(s:DATASET)-[:MERGING]->(d:DATASET)
+            RETURN
+            m.CMID as mergingID, s.CMID as stackID, d.CMID as datasetID, d.CMName as datasetName, "" as filePath
+            """
+        data = getQuery(query, driver=driver, params={
+            "datasetID": datasetID})
+
+        if data[0].get("error"):
+            return jsonify({"message": "No data found"}), 404
+
+        desired_order = ["mergingID", "stackID",
+                         "datasetID", "datasetName", "filePath"]
+
+        template = [
+            {key: item.get(key, "") for key in desired_order}
+            for item in data
+        ]
+
+        return jsonify(template)
+
+    except Exception as e:
+        try:
+            return {"error": str(e)}, 500
+        except:
+            return {"Error": "Unable to process error"}, 500
+
+
 def createSyntax(template, database="SocioMap",
-                 syntax="R", dirpath="./tmp"):
+                 syntax="R", dirpath=None, download=True):
     try:
 
-        if not os.path.exists(dirpath):
-            os.makedirs(dirpath)
-
-        if not isinstance(template, pd.DataFrame):
+        try:
+            template = pd.DataFrame(template)
+        except Exception as e:
             raise ValueError("Template must be a pandas DataFrame.")
+
         if template.empty:
             raise ValueError("Template DataFrame is empty.")
+
         if "datasetID" not in template.columns:
             raise ValueError(
                 "Template DataFrame must contain 'datasetID' column.")
+
         if "mergingID" not in template.columns:
             raise ValueError(
                 "Template DataFrame must contain 'mergingID' column.")
+
         if "stackID" not in template.columns:
             raise ValueError(
                 "Template DataFrame must contain 'stackID' column.")
+
+        if dirpath is None:
+            dirpath = "./tmp"
 
         driver = getDriver(database)
 
@@ -461,9 +510,9 @@ def createSyntax(template, database="SocioMap",
         data = getQuery(db_query, driver=driver, params={
                         "rows": template.to_dict(orient='records')}, type="df")
 
-        pd.set_option('display.max_rows', None)
+        # pd.set_option('display.max_rows', None)
 
-        print(data.head(10))
+        # print(data.head(10))
 
         if "transform" in data.columns:
             print("transforming variables")
@@ -481,6 +530,7 @@ def createSyntax(template, database="SocioMap",
             ': ', n=1, expand=True)
 
         data = pd.merge(data, variables, on=["datasetID", "Key"], how="left")
+
         data["variable"] = data["variable"].str.lower()
         data = data.astype(str)
         data.replace("None", np.nan, inplace=True)
@@ -545,9 +595,16 @@ def createSyntax(template, database="SocioMap",
             os.path.join(dirpath, "syntax.R")
 
         ])
-        zip_path = zip_output_files(files, dirpath, "merged_output.zip")
 
-        return zip_path
+        if download == True:
+            hash_id = generate_unique_hash()
+            zip_filename = f"merged_output_{hash_id}.zip"
+        else:
+            hash_id = ""
+            zip_filename = "merged_output.zip"
+        zip_path = zip_output_files(files, dirpath, zip_filename)
+
+        return {"zip": zip_path, "hash": hash_id}
 
     except Exception as e:
         try:

@@ -4,9 +4,8 @@ from flask_mail import Mail
 from .extensions import mail
 
 
-def testmsg():
-    msg = request.args.get("msg")
-    return "This is a test message that says: " + msg
+def testmsg(database, msg):
+    return "This is a test message from the " + database + " database that says: " + msg
 
 
 def send_test_email():
