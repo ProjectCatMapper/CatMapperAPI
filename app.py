@@ -1,6 +1,5 @@
-from flask import request, send_file, send_from_directory, jsonify, render_template, make_response
+from flask import request, send_file, send_from_directory, jsonify, render_template, make_response, send_from_directory
 import os
-from fuzzywuzzy import fuzz
 from bs4 import BeautifulSoup
 import json
 import re
@@ -27,63 +26,6 @@ def swagger_ui():
 @app.route('/swagger.yaml')
 def swagger_yaml():
     return send_file('swagger.yml', mimetype='application/yaml')
-
-
-text = ['', '', '']
-
-
-@app.route("/count", methods=['GET', 'POST'])
-def abst():
-    results = []
-    results1 = []
-    if request.method == 'GET':
-        text[0] = request.args.get('label')
-        text[1] = request.args.get('value')
-        text[2] = request.args.get('options')
-        database = request.args.get('database')
-        if not database:
-            database = "sociomap"
-        # print(text[0])
-        # print(text[1])
-        # print(text[2])
-        driver_neo4j = getDriver(database)
-        session = driver_neo4j.session()
-        if text[2] == "" or text[2] == "Name":
-            if text[1] == "":
-                q1 = "MATCH (n:"+text[0]+") RETURN n"
-                results = session.run(q1)
-                # return {"response":[{"Name":row["properties"]} for row in results]}(
-                return results.data()
-            else:
-                q1 = "MATCH (n:"+text[0]+") RETURN n"
-                # -[:DISTRICT_OF]-(m:COUNTRY)
-                # q1 = "MATCH (n:"+text[0]+") WHERE NONE(prop in keys(n) where TOSTRING(n[prop]) CONTAINS "+text[1]+") RETURN n"
-                results = session.run(q1)
-                results = results.data()
-                for i in range(0, len(results)):
-                    temp = str(results[i])
-                    # if text[1] in temp:
-                    if fuzz.WRatio(text[1], temp) > 40:
-                        results1.append(results[i])
-                # return {"response":[{"Name":row["properties"]} for row in results]}(
-                print(results1)
-                return results1
-        else:
-            if text[1] == "":
-                q1 = "MATCH (n:"+text[0]+") RETURN n"
-                results = session.run(q1)
-                # return {"response":[{"Name":row["properties"]} for row in results]}(
-                return results.data()
-            else:
-                q1 = "MATCH (n:"+text[0]+") where n." + \
-                    text[2]+" = '"+text[1]+"' RETURN n"
-                results = session.run(q1)
-                results = results.data()
-                # print(results)
-                return jsonify(results)
-
-
-socioid = [""]
 
 
 @app.route("/category", methods=['GET'])
@@ -175,11 +117,6 @@ unwind labels(c) as Domain with Domain, count(*) as Count
 return distinct Domain, Count order by Domain
 """
 
-        # with driver.session() as session:
-        #     samples = session.run(qSamples, cmid = cmid)
-        #     samples = [dict(record) for record in samples]
-        #     driver.close()
-
     else:
         qInfo = '''
     unwind $cmid as cmid 
@@ -205,23 +142,6 @@ unwind Domains as Domain
 with Domain, count(*) as Count 
 return distinct Domain, Count order by Domain
 """
-
-#             qInfo = '''
-# unwind $cmid as cmid
-# match (a:DATASET)
-# where a.CMID = cmid
-# with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
-# 'return null as name',{id:a.District}) yield value as Location
-# return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID,
-# labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation, a.DatasetLocation as `Dataset Location`, a.ApplicableYears as `Applicable Years`, a.Note as Note
-# '''
-    #      samples = []
-
-    # with driver.session() as session:
-    #     info = session.run(qInfo, cmid = cmid)
-    #     info = [dict(record) for record in info]
-    #     driver.close()
-
     with driver.session() as session:
         info = session.run(qInfo, cmid=cmid)
         info = [dict(record) for record in info]
@@ -343,16 +263,6 @@ return distinct Domain, Count order by Domain
         if point:
             points = point
 
-    # if len(points) > 0:
-    #     for i in range(0,len(points)):
-    #         if isinstance(json.loads(points[i]['geometry'])["coordinates"][0],int):
-    #             points[i] = {"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]}
-    #         elif isinstance(json.loads(points[i]['geometry'])["coordinates"][0],float):
-    #             points[i] = {"cood" : json.loads(points[i]['geometry'])["coordinates"][::-1],"source": points[i]["source"]}
-    #         else:
-    #             for j in range(0,len(json.loads(points[i]['geometry'])["coordinates"])):
-    #                 print(points[i])
-
     with open('data.json', 'w', encoding='utf-8') as f:
         json.dump(points, f, ensure_ascii=False, indent=4)
 
@@ -384,121 +294,6 @@ return distinct Domain, Count order by Domain
         "badsources": bad_sources
     })
 
-#         center = 0
-#         relnames= []
-#         relations = ["USES","CONTAINS","DISTRICT_OF","LANGUOID_OF","RELIGION_OF"]
-#         socioid[0] = request.args.get('cmid')
-#         driver_neo4j = getDriver('sociomap')
-#         session = driver_neo4j.session()
-#         driver_neo4j1 = getDriver('gisdb')
-#         session1 = driver_neo4j1.session()
-#         q = "match (a) where a.CMID = '"+socioid[0]+"' return elementId(a) as id,labels(a) as label"
-#         r = session.run(q)
-#         r = str(r.data()[0]['id'])
-#         label = session.run(q)
-#         label = str(label.data()[0]['label'][-1])
-#         q = "MATCH (n:"+label+" {CMID:'"+socioid[0]+"'})-[r]-(n1) RETURN DISTINCT TYPE(r) as label"
-#         rel_name = session.run(q).data()
-#         for i in rel_name:
-#             if i['label'] in relations:
-#                 relnames.append(i['label'])
-#         q =   ''' match (a)<-[r:USES]-(d:DATASET)
-# where elementId(a) = '''+r+'''
-# with custom.anytoList(collect(r.Name),true) as Name, r.country as LocationID, d.project as Source, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
-# call apoc.when(LocationID is not null,'return custom.getName($id) as Location','return null',{id:LocationID}) yield value
-# return Name, custom.anytoList(collect(value.Location),true) as Location, type as Type, apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Populationest`,  apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`, Source, Version, Link order by `Time span`, Source, Name'''
-#         results = session.run(q)
-#         q1 = '''match (a)<-[r:USES]-(d:DATASET) where elementId(a) = '''+r+''' and (r.geoCoords is not null or r.geoPolygon is not null) return r.geoCoords as point, r.geoPolygon as polygon, d.shortName as source, r.Key as Key'''
-#         results1 = session.run(q1)
-#         resultsm = results1.data()
-#         flag = 0
-#         for i in range(0,len(resultsm)):
-#             if resultsm[i]['polygon'] is not None:
-#                 print("...................................")
-#                 flag =1
-#                 relid = resultsm[i]['polygon']
-#                 if isinstance(relid,list):
-#                     relid = str(relid[0])
-#                     q1 = '''match (g:GEOMETRY) where g.geomID = "'''+relid+'''" return g.geometry'''
-#                     results1=''
-#                     results1 = session1.run(q1)
-#                     results1 = results1.data()
-#                     results1 = (results1[0]['g.geometry']).replace("u\'","\'")
-#                     results1 = json.loads(results1)
-#                     with open('data.json', 'w', encoding='utf-8') as f:
-#                          json.dump(results1, f, ensure_ascii=False, indent=4)
-#                     if results1['type'] == "Polygon":
-#                         center = (results1['coordinates'][0][0])[::-1]
-#                     if results1['type'] == "MultiPolygon":
-#                         center = (results1['coordinates'][0][0][0])[::-1]
-#                 else:
-#                     relid = str(relid)
-#                     q1 = '''match (g:GEOMETRY) where g.geomID = "'''+relid+'''" return g.geometry'''
-#                     results1=''
-#                     results1 = session1.run(q1)
-#                     results1 = results1.data()
-#                     results1 = (results1[0]['g.geometry']).replace("u\'","\'")
-#                     if "features" in results1:
-#                         results1 = json.loads(results1)
-#                         results1 = results1['features'][0]
-#                         if results1['geometry']['type'] == "Polygon":
-#                             center = (results1['geometry']['coordinates'][0][0])[::-1]
-#                         if results1['geometry']['type'] == "MultiPolygon":
-#                             center = (results1['geometry']['coordinates'][0][0][0])[::-1]
-#                     else:
-#                         results1 = json.loads(results1)
-#                         if results1['type'] == "Polygon":
-#                             center = (results1['coordinates'][0][0])[::-1]
-#                         if results1['type'] == "MultiPolygon":
-
-#                             center = (results1['coordinates'][0][0][0])[::-1]
-#                     with open('data.json', 'w', encoding='utf-8') as f:
-#                          json.dump(results1, f, ensure_ascii=False, indent=4)
-
-#                 break
-
-#         if flag == 0:
-#             results1=[]
-
-#         poid=[]
-#         for i in range(0,len(resultsm)):
-#             if resultsm[i]['point'] is not None:
-#                 #poid[resultsm[i]['source']] = json.loads(resultsm[i]['point'])['coordinates'][0]
-#                 print((resultsm[i]['point']))
-#                 if isinstance(resultsm[i]['point'], list):
-#                     cood=(json.loads(resultsm[i]['point'][0])['coordinates'])
-#                 else:
-#                     cood=(json.loads(resultsm[i]['point'])['coordinates'])
-#                 if isinstance(cood, list):
-#                     cood = cood[::-1]
-#                 print(cood)
-#                 poid.append(dict([("id",resultsm[i]['source']),('coordinates',cood)]))
-#                 #poid[i]['id'] = resultsm[i]['source']
-#                 #poid[i]['coordinates'] = json.loads(resultsm[i]['point'])['coordinates'][0]
-
-#         print(poid)
-
-#         '''
-#         for obj in results1:
-#              if "coordinates" in obj:
-#                  northing = obj["coordinates"][0]
-#                  easting = obj["coordinates"][1]
-#                  obj["coordinates"] = [ easting, northing ]
-#         '''
-
-
-#         payload = {
-#     "current_response": results.data(),
-#     "future_response": results1,
-#     "center": center,
-#     "poid": poid,
-#     "label":label,
-#     "relnames": relnames
-# }
-
-#         #print(payload)
-#         return jsonify(payload)
-#         #return (results.data())
 
 @app.route("/network", methods=['GET'])
 def net():
@@ -609,10 +404,6 @@ unwind Domains as Domain
 with Domain, count(*) as Count 
 return distinct Domain, Count order by Domain
 """
-
-        # return [{"info": qInfo,
-        #         "samples":qSamples,
-        #         "categories": qCategories}]
 
         with driver.session() as session:
             info = session.run(qInfo, cmid=cmid)
@@ -928,6 +719,15 @@ def submitvalidateDatasets():
                 return jsonify({"success": False, "message": "Check your Dataset IDs."})
     driver.close()
     return jsonify({"success": True, "message": "All IDs exist."})
+
+
+# Download template
+app.add_url_rule('/merge/template/<database>/<datasetID>', 'get_merge_template',
+                 get_merge_template, methods=['GET'])
+
+# Merging syntax -- only accepts R syntax for now
+app.add_url_rule('/merge/syntax/<database>', 'get_merge_syntax_route',
+                 get_merge_syntax_route, methods=['POST'])
 
 
 @app.route('/networksjs', methods=['GET'])
@@ -1274,8 +1074,8 @@ on create set u.username = $username,
 u.first = $firstName,
 u.last = $lastName,
 u.email = $email,
-u.access = "new",
-u.log = [toString(datetime()) + ": created user via API"],
+u.access = "enabled",
+u.log = [toString(datetime()) + ": created user via API", toString(datetime()) + ": created autoapproved via API during workshop registration"],
 u.password = $password,
 u.userid = toString(id),
 u.role = 'user',
@@ -2036,39 +1836,10 @@ def updateNewUsers():
         if verified != "verified":
             raise Exception("Error: User is not verified")
 
-        driver = getDriver('userdb')
+        approver = unlist(credentials.get("userid"))
 
-        if process == "approve":
-            if userid is None:
-                raise Exception("Error: userid must be specified")
-
-            userid = flattenList(userid)
-
-            query = f"""
-unwind $userids as id
-with toString(id) as id
-match (u {{access: 'new', userid: id}}) where '{database}' in u.database 
-set u.access = 'enabled', u.log = u.log + [toString(datetime()) + ": access approved by {unlist(credentials.get("userid"))}"]
-return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
-"""
-            result = getQuery(query, driver, params={"userids": userid})
-            for user in result:
-                body = f"""
-    Hello {user.get("first")} {user.get("last")},
-
-    Your registration has been approved. You can now access the {'and '.join(user.get("database"))} database. Please see catmapper.org/help or email support@catmapper.org for any questions.
-
-    Best,
-    CatMapper Team
-                """
-                sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
-                    "email"), 'admin@catmapper.org'], body=body, sender=os.getenv("mail_default"))
-        else:
-            query = f"""
-match (u {{access: 'new'}}) where '{database}' in u.database
-return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
-"""
-            result = getQuery(query, driver)
+        result = enableUser(database=database, process=process,
+                            userid=userid, approver=approver)
 
         return result
     except Exception as e:
@@ -2079,8 +1850,39 @@ return u.userid as userid, u.first as first, u.last as last, u.email as email, u
 app.add_url_rule('/test/send_test_email', 'send_test_email',
                  send_test_email, methods=['GET'])
 
-app.add_url_rule('/test/testmsg', 'testmsg',
+app.add_url_rule('/test/testmsg/<database>/<msg>', 'testmsg',
                  testmsg, methods=['GET'])
+
+
+@app.route("/download/test", methods=["GET"])
+def test_download():
+
+    filename = "test.txt"
+    file_path = os.path.join(TMP_DIR, filename)
+
+    if os.path.exists(file_path):
+        return send_from_directory(TMP_DIR, filename, as_attachment=True)
+    else:
+        abort(404, description="test.txt not found")
+
+
+@app.route('/download/zip/<hash_id>', methods=['GET'])
+def download_zip(hash_id):
+
+    import subprocess
+
+    TMP_DIR = "/app/tmp"
+
+    subprocess.run(["chmod", "-R", "777", TMP_DIR], check=True)
+
+    filename = f"merged_output_{hash_id}.zip"
+    file_path = os.path.join(TMP_DIR, filename)
+
+    if os.path.exists(file_path):
+        return send_from_directory(TMP_DIR, filename, as_attachment=True)
+    else:
+        abort(404, description=f"{file_path} not found")
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)
