@@ -1,10 +1,10 @@
 import os
-from CM import *
 from flask import request, jsonify
 
 
 def get_merge_syntax_route(database):
     try:
+        from CM.merge import createSyntax
         data = request.get_data()
         data = json.loads(data)
         template = data.get("template")
@@ -13,7 +13,7 @@ def get_merge_syntax_route(database):
         if result.get("hash") != "":
             return {"msg": "Syntax created successfully", "download": result}, 200
         else:
-            return "Syntax creation failed", 500
+            return {"msg": "Syntax creation failed"}, 500
     except Exception as e:
         result = str(e)
         return result, 500

@@ -8,6 +8,7 @@ from CM.email import *
 from CM.USES import *
 import pandas as pd
 import json
+import tempfile
 
 
 def is_valid_json(json_string):
@@ -75,12 +76,12 @@ def checkDomains(data, database):
         query = """
         match (n:CATEGORY)
         where size(labels(n)) = 1
-        optional match (n)<-[r:USES]-(d:DATASET) 
+        optional match (n)<-[r:USES]-(d:DATASET)
         return "CATEGORY" as query, n.CMID as CMID, n.CMName as CMName, r.label as label, d.CMID as datasetID
         UNION ALL
         match (n)
-        where isEmpty([i in labels(n) where i in ["DATASET","METADATA","USER","CATEGORY","DELETED"]]) 
-        optional match (n)<-[r:USES]-(d:DATASET) 
+        where isEmpty([i in labels(n) where i in ["DATASET","METADATA","USER","CATEGORY","DELETED"]])
+        optional match (n)<-[r:USES]-(d:DATASET)
         return "MissingCATEGORY" as query,  n.CMID as CMID, n.CMName as CMName, r.label as label, d.CMID as datasetID
         """
         result = getQuery(query, driver)
@@ -147,41 +148,38 @@ def getBadCMID(database, mail=None):
         """
 
             query = f"""
-            MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET) 
+            MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
             with apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.{property}),true)) as val
-            call {{with val match (c:CATEGORY) where c.CMID in val return collect(c.CMID) as val2}} 
+            call {{with val match (c:CATEGORY) where c.CMID in val return collect(c.CMID) as val2}}
             with [i in val where not i in val2] as badlist
             unwind badlist as bad
             with bad
-            match (c:CATEGORY)<-[r:USES]-(d:DATASET) where bad in r.{property} 
+            match (c:CATEGORY)<-[r:USES]-(d:DATASET) where bad in r.{property}
             return c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset, '{property}' as propertyType, apoc.text.join(r.{property},"; ") as property, bad as badCMID
             """
-            result = getQuery(query, driver)
+            result = getQuery(query, driver, type="df")
             if len(result) > 0:
                 results.append(result)
 
         if len(results) > 0:
-            results = [pd.DataFrame(item) for item in results]
             results = pd.concat(results)
 
             query2 = """
-            MATCH (old:DELETED)-[:IS]->(c) 
-            where old.CMID in $cmids 
+            MATCH (old:DELETED)-[:IS]->(c)
+            where old.CMID in $cmids
             return old.CMID as badCMID, c.CMID as newCMID
             """
 
             deleted = getQuery(
-                query2, driver, {"cmids": list(results["badCMID"].unique())})
+                query2, driver, {"cmids": list(results["badCMID"].unique())}, type="df")
 
-            if len(deleted) > 0:
-
-                deleted = pd.DataFrame(deleted)
-
+            if isinstance(results, pd.DataFrame) and not results.empty:
                 results = results.merge(deleted, on="badCMID", how="left")
 
                 if mail is not None:
-                    fp1 = "tmp/badCMIDs.xlsx"
-                    results.to_excel(fp1, index=False)
+                    with tempfile.NamedTemporaryFile(delete=False, suffix="_badCMID.xlsx", dir="/tmp") as tmpfile:
+                        fp1 = tmpfile.name
+                        results.to_excel(fp1, index=False)
                     sendEmail(mail, subject="Bad CMIDs", recipients=[
                               "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
 
@@ -199,14 +197,14 @@ def getMultipleLabels(database, mail=None):
         query = """
         match (d:DATASET)-[r:USES]->(c:CATEGORY) where apoc.meta.cypher.type(r.label) = "LIST OF STRING" and size(r.label) > 1 return c.CMID as CMID, c.CMName as CMName, d.CMID as datasetID, r.Key as Key, apoc.text.join(r.label, "; ") as label
         """
-        results = getQuery(query, driver)
+        results = getQuery(query, driver, type="df")
 
-        if len(results) > 0:
+        if isinstance(results, pd.DataFrame) and not results.empty:
 
             if mail is not None:
-                fp1 = "tmp/multipleLabels.xlsx"
-                data = pd.DataFrame(results)
-                data.to_excel(fp1, index=False)
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_multipleLabels.xlsx", dir="/tmp") as tmpfile:
+                    fp1 = tmpfile.name
+                    results.to_excel(fp1, index=False)
                 sendEmail(mail, subject="Multiple Labels", recipients=[
                           "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
 
@@ -221,10 +219,12 @@ def getMultipleLabels(database, mail=None):
 
 def getBadJSON(database, mail=None):
     try:
-        fp1 = "tmp/invalid_json_geoCoords.xlsx"
+        fd, fp1 = tempfile.mkstemp(suffix="_geoCoords.json", dir="/tmp")
+        os.close(fd)
+        fd, fp2 = tempfile.mkstemp(suffix="_parentContext.json", dir="/tmp")
+        os.close(fd)
         results1 = validateJSON(
             database=database, property='geoCoords', path=fp1)
-        fp2 = "tmp/invalid_json_parentContext.xlsx"
         results2 = validateJSON(
             database=database, property='parentContext', path=fp2)
 
@@ -251,13 +251,11 @@ def getBadDomains(database, mail=None):
     try:
         driver = getDriver(database)
         labels = getQuery(
-            "match (l:LABEL) return l.label as label, l.groupLabel as groupLabel", driver)
-        labels = pd.DataFrame(labels)
+            "match (l:LABEL) return l.label as label, l.groupLabel as groupLabel", driver, type="df")
         groups = list(labels['groupLabel'].unique())
 
         matches = getQuery(
-            "match (c) return distinct [i in  labels(c) where not i = 'CATEGORY'] as label", driver)
-        matches = pd.DataFrame(matches)
+            "match (c) return distinct [i in  labels(c) where not i = 'CATEGORY'] as label", driver, type="df")
 
         bad_labels = []
 
@@ -280,41 +278,37 @@ def getBadDomains(database, mail=None):
                         bad_labels.append(result)
 
         bad_labels = pd.concat([pd.DataFrame(item) for item in bad_labels])
-        if len(bad_labels) > 0:
+        if bad_labels and isinstance(bad_labels, list) and len(bad_labels) > 0:
             if mail is not None:
-                fp1 = "tmp/badLabels.xlsx"
-                bad_labels.to_excel(fp1, index=False)
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_bad_labels.xlsx", dir="/tmp") as tmpfile:
+                    fp1 = tmpfile.name
+                    bad_labels.to_excel(fp1, index=False)
                 sendEmail(mail, subject="Bad Labels", recipients=[
                           "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
-        bad_labels = bad_labels.to_dict(orient="records")
 
         missing_category = getQuery(
-            "match (c)<-[:USES]-(d:DATASET) where not 'CATEGORY' in labels(c) return c.CMID as CMID, c.CMName as CMName", driver)
+            "match (c)<-[:USES]-(d:DATASET) where not 'CATEGORY' in labels(c) return c.CMID as CMID, c.CMName as CMName", driver, type="df")
 
-        if len(missing_category) > 0:
+        if missing_category and isinstance(missing_category, list) and len(missing_category) > 0:
             if mail is not None:
-                fp1 = "tmp/missing_category.xlsx"
-                missing_category = pd.DataFrame(missing_category)
-                missing_category.to_excel(fp1, index=False)
-                missing_category = missing_category.to_dict(orient="records")
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_missing_category.xlsx", dir="/tmp") as tmpfile:
+                    fp1 = tmpfile.name
+                    missing_category.to_excel(fp1, index=False)
                 sendEmail(mail, subject="Missing CATEGORY Label", recipients=[
                           "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
 
         missing_dataset = getQuery(
-            "match (c)<-[:USES]-(d:DATASET) where not 'DATASET' in labels(d) return d.CMID as CMID, d.CMName as CMName", driver)
+            "match (c)<-[:USES]-(d:DATASET) where not 'DATASET' in labels(d) return d.CMID as CMID, d.CMName as CMName", driver, type="df")
 
-        if len(missing_dataset) > 0:
-            missing_dataset = pd.DataFrame(missing_dataset)
-
+        if missing_dataset and isinstance(missing_dataset, list) and len(missing_dataset) > 0:
             if mail is not None:
-                if missing_dataset:
-                    fp1 = "tmp/missing_dataset.xlsx"
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_missing_dataset.xlsx", dir="/tmp") as tmpfile:
+                    fp1 = tmpfile.name
                     missing_dataset.to_excel(fp1, index=False)
-                    missing_dataset = missing_dataset.to_dict(orient="records")
-                    sendEmail(mail, subject="Missing DATASET Label", recipients=[
-                              "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+                sendEmail(mail, subject="Missing DATASET Label", recipients=[
+                    "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
 
-        return {"bad_labels_count": len(bad_labels), "missing_category_count": len(missing_category), "missing_dataset_count": len(missing_dataset), "bad_labels": bad_labels, "missing_category": missing_category, "missing_dataset": missing_dataset}
+        return {"bad_labels_count": len(bad_labels), "missing_category_count": len(missing_category), "missing_dataset_count": len(missing_dataset), "bad_labels": bad_labels.to_dict(orient="records"), "missing_category": missing_category.to_dict(orient="records"), "missing_dataset": missing_dataset.to_dict(orient="records")}
     except Exception as e:
         result = str(e)
         return result, 500
@@ -350,15 +344,15 @@ def getBadRelations(database, mail=None):
         contains = pd.concat([pd.DataFrame(item) for item in contains])
         results = pd.concat([results, contains])
 
-        if len(results) > 0:
+        if results and isinstance(results, list) and len(results) > 0:
             if mail is not None:
-                fp1 = "tmp/BadRelationshipLabels.xlsx"
-                results.to_excel(fp1, index=False)
-                results = results.to_dict(orient="records")
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_bad_relationship_labels.xlsx", dir="/tmp") as tmpfile:
+                    fp1 = tmpfile.name
+                    results.to_excel(fp1, index=False)
                 sendEmail(mail, subject="Bad Relationship Label", recipients=[
                           "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
 
-            return {"bad_relationship_labels_count": len(results), "bad_relationship_labels": results}
+            return {"bad_relationship_labels_count": len(results), "bad_relationship_labels": results.to_dict(orient="records")}
 
     except Exception as e:
         result = str(e)
@@ -369,33 +363,28 @@ def cmnameNotInName(database, mail=None):
     try:
         driver = getDriver(database)
 
-        session = driver.session()
-
         query = """
         MATCH (n:CATEGORY)
-        WHERE NOT n.names CONTAINS n.CMName
-        RETURN n.CMName AS CMName, n.CMID as CMID
+        WHERE NOT n.CMName in n.names
+        RETURN n.CMID as CMID
         """
 
-        result = session.run(query)
-
-        cmids = []
-        for record in result:
-            cmids.append(record["CMID"])
+        cmids = getQuery(query, driver, type="list")
 
         if len(cmids) > 0:
-            for cmid in cmids:
-                addCMNameRel(database, CMID=cmid)
-                updateAltNames(driver, CMID=cmid)
+            addCMNameRel(database, CMID=cmids)
+            updateAltNames(driver, CMID=cmids)
 
             if mail is not None:
-                fp1 = "tmp/BadCMNames.xlsx"
-                cmid.to_excel(fp1, index=False)
-                results = cmid.to_dict(orient="records")
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_BadCMNames.xlsx", dir="/tmp") as tmpfile:
+                    fp1 = tmpfile.name
+                    cmids = pd.DataFrame(cmids)
+                    cmids.columns = ["CMID"]
+                    cmids.to_excel(fp1, index=False)
                 sendEmail(mail, subject="Bad Relationship Label", recipients=[
                           "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
 
-            return {"Name not in CMName": results}
+        return {"Total": len(cmids), "Name not in CMName": cmids}
 
     except Exception as e:
         result = str(e)

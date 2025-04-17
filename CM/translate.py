@@ -455,7 +455,6 @@ def translate(
     """
     cypher_query = qLoad + qStart + qDomain + qCountryFilter + \
         qContext + qDataset + qYear + qLimit + qCountry + qKey + qReturn
-    print(cypher_query)
     if query == "true":
         qResult = getQuery(cypher_query, driver, params={'rows': rows})
         return [{"query": cypher_query.replace("\n", " "), "params": qResult, "rows": rows}]
@@ -472,8 +471,6 @@ def translate(
     data = data.dropna(axis='columns', how='all')
 
     # return data
-
-    print("holaaaaaaaaaaaaaa")
 
     # add matching type
     data = addMatchResults(df=data)

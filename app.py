@@ -97,18 +97,18 @@ def catm():
     match (a)<-[r:USES]-(d:DATASET)
     where a.CMID = cmid
     with custom.anytoList(collect(r.Name),true) as Name, r.country as countryID,
-    r.district as districtID, d.project as Source, d.CMID as datasetID, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, 
+    r.district as districtID, d.project as Source, d.CMID as datasetID, d.DatasetVersion as Version,r.categoryType as cType, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd, 
     toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
     call apoc.when(countryID is not null,'return custom.getName($id) as country','return null',{id:countryID}) yield value
-    with Name, value as country, districtID, Source, datasetID, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
+    with Name, value as country, districtID, Source, datasetID, Version,cType, Link, recordStart, recordEnd, Population, `Sample size`, type
     call apoc.when(districtID is not null,'return custom.getName($id) as district','return null',{id:districtID}) yield value
-    with Name, country, value as district, Source, datasetID, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
+    with Name, country, value as district, Source, datasetID, Version,cType, Link, recordStart, recordEnd, Population, `Sample size`, type
     return Name, apoc.text.join([i in [custom.anytoList(collect(country.country),true),custom.anytoList(collect(district.district),true)] where not i = ''],', ') as Location, type as Type, 
     apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),
     toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),
     toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Population est.`,  
     apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`,Source as `Source`, 'https://catmapper.org/' + $database + '/' + datasetID  as `link2`,
-    Version, Link order by `Time span`, Source, Name
+    Version,cType,Link order by `Time span`, Source, Name
     '''
         qCategories = """
 unwind $cmid as cmid 
@@ -960,7 +960,7 @@ def getTranslate2():
             query=query,
             table=table,
             uniqueRows=uniqueRows)
-
+        
         data_dict = data.to_dict(orient='records')
 
         return data_dict
@@ -1143,6 +1143,9 @@ def getAdmin():
 
 @app.route('/admin/edit', methods=['GET', 'POST'])
 def getAdminEdit():
+    from dotenv import load_dotenv, find_dotenv
+    load_dotenv(find_dotenv())
+    apikeyEnv = os.getenv("apikey")
     # will not be documented in swagger at this point
     try:
         if request.method == 'GET':
