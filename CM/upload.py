@@ -4,6 +4,7 @@ from .utils import *
 from .USES import *
 from .keys import *
 from .GIS import *
+from .log import *
 import json
 import pandas as pd
 from flask import jsonify
@@ -122,8 +123,6 @@ def createNodes(df, database, user, uniqueID=None):
         labels = getQuery(
             "MATCH (l:LABEL) return l.label as label", driver, type="list")
 
-        print(labels)
-
         df = df.copy()
 
         if "label" in df.columns:
@@ -148,9 +147,15 @@ def createNodes(df, database, user, uniqueID=None):
         else:
             required = ["CMName", "label"]
             df['label'] = df['label'].apply(lambda x: f"CATEGORY:{x}")
+        
+        missing = [column for column in required if column not in df.columns]
+        if missing:
+            raise Exception(f"Error: missing required columns to create new node: {missing}")
 
-        if not all(column in df.columns for column in required):
-            raise Exception("Error: missing required columns.")
+
+        # if not all(column in df.columns for column in required):
+        #     raise Exception(
+        #         "Error: missing required columns to create new node.")
 
         # ad-hoc column for row recognition on query return
         if not uniqueID in df.columns or uniqueID is None:
@@ -199,12 +204,11 @@ def createNodes(df, database, user, uniqueID=None):
         unwind $rows as row
         call apoc.cypher.doIt('
         MERGE (a:' + row.label + ' {{{uniqueID}: row.{uniqueID}}})
-        ON CREATE SET 
-        {set_clause},
-        a.log = toString(datetime()) + " user {user}: created node"
+        ON CREATE SET
+        {set_clause}
         return a',
-        {{row: row}}) yield value 
-        with value.a as a 
+        {{row: row}}) yield value
+        with value.a as a
         return distinct elementId(a) as nodeID,
         {return_clause}
         """
@@ -222,6 +226,24 @@ def createNodes(df, database, user, uniqueID=None):
             updateLog(f"log/{user}uploadProgress.txt", str(results), write='a')
 
         results_df = pd.DataFrame(results)
+
+        updateLog(f"log/{user}uploadProgress.txt",
+                  "Updating log", write='a')
+
+        log_entries = results_df[vars + ['nodeID']].to_dict(orient='records')
+
+        createLog(
+            id=results_df['nodeID'].tolist(),
+            type="node",
+            log=[
+                "created node with " + ", ".join(
+                    [f"{k}: {str(v)}" for k, v in row.items() if k != "nodeID"]
+                )
+                for row in log_entries
+            ],
+            user=user,
+            driver=driver
+        )
 
         return results_df
     except Exception as e:
@@ -267,8 +289,6 @@ def createUSES(links, database, user, create="MERGE"):
         links = links.loc[:, ~links.columns.duplicated()].copy()
         links[existing_columns] = links[existing_columns].applymap(
             lambda x: re.sub(r'[\t\n\r\f\v]', '', x).strip() if isinstance(x, str) else x)
-        links['log'] = links.apply(
-            lambda row: f"{time.strftime('%Y-%m-%dT%H:%M:%SZ')} user {user}: created relationship", axis=1)
 
         # Convert all values to strings and replace NaN with empty strings
         links = links.fillna("").astype(str)
@@ -277,9 +297,9 @@ def createUSES(links, database, user, create="MERGE"):
         vars = links.columns.difference(['datasetID', 'CMID', 'Key', 'CMName'])
 
         query = """
-match (n:METADATA:PROPERTY) 
-return n.property as property, n.type as type, 
-n.relationship as relationship, n.description as description, 
+match (n:METADATA:PROPERTY)
+return n.property as property, n.type as type,
+n.relationship as relationship, n.description as description,
 n.display as display, n.group as group, n.metaType as metaType, n.search as search, n.translation as translation
 """
 
@@ -288,6 +308,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
                         for item in metaTypes}
 
         keys = []
+        return_clause = []
         for var in vars:
             # Get the metaType for the given property
             metaType = metaTypeDict.get(var)
@@ -295,8 +316,11 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             keys.append(
                 f"r.{var} = custom.formatProperties(['',row.{var}],'{metaType}',';')[0].prop")
 
+            return_clause.append(f"row.{var} as {var}")
+
         # Combine the keys into a single string for the Cypher query
         keys_string = ", ".join(keys)
+        return_clause_string = ", ".join(return_clause)
 
         onCreate = "" if create.lower() == "create" else "ON CREATE "
 
@@ -307,7 +331,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         MATCH (b:CATEGORY) WHERE row.CMID = b.CMID
         {create} (a)-[r:USES {{Key: row['Key']}}]->(b)
         {onCreate}SET r.status = 'update', {keys_string}
-        RETURN elementId(b) AS nodeID, b.CMID AS CMID, b.CMName as CMName, r.Key as Key, a.CMID as datasetID
+        RETURN elementId(b) AS nodeID, elementId(r) as relID, a.datasetID as datasetID, b.CMID as CMID, {return_clause_string}
         """
 
         # Get the number of relationships before adding
@@ -332,6 +356,21 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         # Update alternate names
         CMIDs = [item['CMID'] for item in result]
         updateAltNames(driver, CMIDs)
+
+        updateLog(f"log/{user}uploadProgress.txt",
+                  "adding logs to USES ties", write='a')
+        updateLog(f"log/{user}uploadProgress.txt",
+                  ", ".join(vars), write='a')
+        result_df = pd.DataFrame(result)
+        createLog(id=result_df['relID'].tolist(),
+                  type="relation",
+                  log=["created relationship with " + ", ".join(
+                      [f"{k}: str({v})" for k, v in row.items() if not k in ["nodeID", "relID"]]) for row in result],
+                  user=user,
+                  driver=driver)
+
+        updateLog(f"log/{user}uploadProgress.txt",
+                  " test 3 ", write='a')
 
         # Get the number of relationships after adding
         nRels2 = getQuery(
@@ -390,9 +429,9 @@ def updateProperty(links, database, user, updateType, propertyType="USES"):
             columns=[col for col in requiredCols if col in links.columns]).columns.tolist()
 
         query = """
-match (n:METADATA:PROPERTY) 
-return n.property as property, n.type as type, 
-n.relationship as relationship, n.description as description, 
+match (n:METADATA:PROPERTY)
+return n.property as property, n.type as type,
+n.relationship as relationship, n.description as description,
 n.display as display, n.group as group, n.metaType as metaType, n.search as search, n.translation as translation
 """
 
@@ -418,7 +457,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         if propertyType == "USES":
             q = f"""
             UNWIND $rows AS row
-            MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}}) 
+            MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}})
             WITH row, r, b
             SET {keys}, r.status = "update"
             RETURN elementId(b) as nodeID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, row.parent as parent, row.parentContext as parentContext
@@ -625,6 +664,8 @@ def input_Nodes_Uses(dataset,
 
     dataset = pd.DataFrame(dataset)
 
+    dataset_dup = dataset.copy(deep=True)
+
     # trim whitespace
     dataset = dataset.applymap(
         lambda x: x.strip() if isinstance(x, str) else x)
@@ -806,18 +847,18 @@ def input_Nodes_Uses(dataset,
             for prop in linkProperties:  # Loop through each property
                 update_query = '''
                     UNWIND $rows AS row
-                    MATCH (n {CMID: row.CMID}) 
-                    CALL apoc.create.setProperty(n, $prop, 
-                        CASE 
-                            WHEN apoc.meta.cypher.types(n[$prop]) = "STRING" THEN 
-                                CASE 
-                                    WHEN apoc.meta.cypher.types(row[$prop]) = "STRING" THEN [n[$prop], row[$prop]] 
-                                    ELSE [n[$prop]] + row[$prop] 
+                    MATCH (n {CMID: row.CMID})
+                    CALL apoc.create.setProperty(n, $prop,
+                        CASE
+                            WHEN apoc.meta.cypher.types(n[$prop]) = "STRING" THEN
+                                CASE
+                                    WHEN apoc.meta.cypher.types(row[$prop]) = "STRING" THEN [n[$prop], row[$prop]]
+                                    ELSE [n[$prop]] + row[$prop]
                                 END
-                            ELSE n[$prop] + 
-                                CASE 
-                                    WHEN apoc.meta.cypher.types(row[$prop]) = "STRING" THEN [row[$prop]] 
-                                    ELSE row[$prop] 
+                            ELSE n[$prop] +
+                                CASE
+                                    WHEN apoc.meta.cypher.types(row[$prop]) = "STRING" THEN [row[$prop]]
+                                    ELSE row[$prop]
                                 END
                         END
                     ) YIELD node
@@ -845,7 +886,7 @@ def input_Nodes_Uses(dataset,
         linkProperties = linkProperties[0]
         print(linkProperties)
         update_query = """UNWIND $rows AS row
-                MATCH (n {CMID: row.CMID}) 
+                MATCH (n {CMID: row.CMID})
                 CALL apoc.create.setProperty(n, $prop, row[$prop]) YIELD node
                 RETURN n.CMID AS CMID, n[$prop] AS updated_value"""
 
@@ -953,7 +994,7 @@ def input_Nodes_Uses(dataset,
 
     if 'eventType' in dataset.columns:
 
-        valid_event_types = {"SPLIT", "MERGED", "SPLITMERGE", "HIERARCHY", ""}
+        valid_event_types = {"SPLIT", "MERGED", "SPLITMERGE", "HIERARCHY", "BECAME",""}
 
         invalid_event_types = dataset.loc[~dataset['eventType'].isin(valid_event_types), [
             'eventType']]
@@ -990,7 +1031,7 @@ def input_Nodes_Uses(dataset,
     if isDataset and uploadOption == "add_node":
         query = "unwind $rows as row match (d:DATASET {shortName: row.shortName}) return d.shortName as shortName"
         shortNames = getQuery(query, driver, params={
-                              "rows": dataset[['shortName']].to_dict(orient='records')}, type="list")
+            "rows": dataset[['shortName']].to_dict(orient='records')}, type="list")
         if len(shortNames) > 0:
             raise ValueError(
                 "Error: shortName already exists for: " + ", ".join(shortNames))
@@ -1095,7 +1136,7 @@ def input_Nodes_Uses(dataset,
                 updateLog(f"log/{user}uploadProgress.txt",
                           "Adding districts", write='a')
                 matches = getQuery(params={'rows': sub_dataset[[
-                                   "datasetID"]]}, q='DISTRICT QUERY', database=database, user='1')
+                    "datasetID"]]}, q='DISTRICT QUERY', database=database, user='1')
                 if not matches.empty:
                     sub_dataset = sub_dataset.merge(
                         matches, on="datasetID", how="left")
@@ -1133,6 +1174,19 @@ def input_Nodes_Uses(dataset,
                     nodes = sub_dataset[node_columns]
 
             if not nodes.empty:
+                if uploadOption =="add_uses":
+                    if "CMName" in dataset_dup.columns:
+                        cm_mapping = dataset_dup["CMName"].reset_index()
+                        cm_mapping["importID"] = cm_mapping["index"] + 1
+                        cm_mapping = cm_mapping[["importID", "CMName"]]
+
+                        # Ensure importID types match
+                        cm_mapping["importID"] = cm_mapping["importID"].astype(str)
+                        nodes["importID"] = nodes["importID"].astype(str)
+
+                        # Merge onto nodes
+                        nodes1 = nodes.merge(cm_mapping, on="importID", how="left")
+                print(nodes1)
                 updateLog(f"log/{user}uploadProgress.txt",
                           "Adding nodes with columns: " + ", ".join(nodes.columns), write='a')
                 match = createNodes(
@@ -1251,7 +1305,7 @@ def input_Nodes_Uses(dataset,
                         links = links.drop(
                             columns=['parentContext', 'parent']).copy()
                         links = pd.merge(links, sub_links, on=[
-                                         'datasetID', 'CMID', 'Key'], how='left')
+                            'datasetID', 'CMID', 'Key'], how='left')
 
                     # Replace values that do not contain 'eventDate' or 'eventType' with an empty string
                     links['parentContext'] = links['parentContext'].apply(
@@ -1270,8 +1324,6 @@ def input_Nodes_Uses(dataset,
                 link_cols = required_for_operation + linkProperties
                 link_cols = list(set(link_cols))
                 link_cols = [col for col in link_cols if col in links.columns]
-
-                print("step1")
 
                 if uploadOption == "update_replace":
                     updateLog(f"log/{user}uploadProgress.txt",
