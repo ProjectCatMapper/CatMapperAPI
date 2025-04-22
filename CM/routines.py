@@ -177,7 +177,7 @@ def getBadCMID(database, mail=None):
                 results = results.merge(deleted, on="badCMID", how="left")
 
                 if mail is not None:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix="_badCMID.xlsx", dir="/tmp") as tmpfile:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix="_badCMID.xlsx", dir="/tmpapi") as tmpfile:
                         fp1 = tmpfile.name
                         results.to_excel(fp1, index=False)
                     sendEmail(mail, subject="Bad CMIDs", recipients=[
@@ -202,7 +202,7 @@ def getMultipleLabels(database, mail=None):
         if isinstance(results, pd.DataFrame) and not results.empty:
 
             if mail is not None:
-                with tempfile.NamedTemporaryFile(delete=False, suffix="_multipleLabels.xlsx", dir="/tmp") as tmpfile:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_multipleLabels.xlsx", dir="/tmpapi") as tmpfile:
                     fp1 = tmpfile.name
                     results.to_excel(fp1, index=False)
                 sendEmail(mail, subject="Multiple Labels", recipients=[
@@ -219,9 +219,9 @@ def getMultipleLabels(database, mail=None):
 
 def getBadJSON(database, mail=None):
     try:
-        fd, fp1 = tempfile.mkstemp(suffix="_geoCoords.json", dir="/tmp")
+        fd, fp1 = tempfile.mkstemp(suffix="_geoCoords.xlsx", dir="/tmpapi")
         os.close(fd)
-        fd, fp2 = tempfile.mkstemp(suffix="_parentContext.json", dir="/tmp")
+        fd, fp2 = tempfile.mkstemp(suffix="_parentContext.xlsx", dir="/tmpapi")
         os.close(fd)
         results1 = validateJSON(
             database=database, property='geoCoords', path=fp1)
@@ -277,10 +277,13 @@ def getBadDomains(database, mail=None):
                         result = getQuery(query, driver)
                         bad_labels.append(result)
 
-        bad_labels = pd.concat([pd.DataFrame(item) for item in bad_labels])
-        if bad_labels and isinstance(bad_labels, list) and len(bad_labels) > 0:
+        if len(bad_labels) > 0:
+            bad_labels = pd.concat([pd.DataFrame(item) for item in bad_labels])
+        else:
+            bad_labels = pd.DataFrame(columns=["CMID", "CMName", "label"])
+        if isinstance(bad_labels, pd.DataFrame) and not bad_labels.empty:
             if mail is not None:
-                with tempfile.NamedTemporaryFile(delete=False, suffix="_bad_labels.xlsx", dir="/tmp") as tmpfile:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_bad_labels.xlsx", dir="/tmpapi") as tmpfile:
                     fp1 = tmpfile.name
                     bad_labels.to_excel(fp1, index=False)
                 sendEmail(mail, subject="Bad Labels", recipients=[
@@ -289,9 +292,9 @@ def getBadDomains(database, mail=None):
         missing_category = getQuery(
             "match (c)<-[:USES]-(d:DATASET) where not 'CATEGORY' in labels(c) return c.CMID as CMID, c.CMName as CMName", driver, type="df")
 
-        if missing_category and isinstance(missing_category, list) and len(missing_category) > 0:
+        if isinstance(missing_category, pd.DataFrame) and not missing_category.empty:
             if mail is not None:
-                with tempfile.NamedTemporaryFile(delete=False, suffix="_missing_category.xlsx", dir="/tmp") as tmpfile:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_missing_category.xlsx", dir="/tmpapi") as tmpfile:
                     fp1 = tmpfile.name
                     missing_category.to_excel(fp1, index=False)
                 sendEmail(mail, subject="Missing CATEGORY Label", recipients=[
@@ -300,9 +303,9 @@ def getBadDomains(database, mail=None):
         missing_dataset = getQuery(
             "match (c)<-[:USES]-(d:DATASET) where not 'DATASET' in labels(d) return d.CMID as CMID, d.CMName as CMName", driver, type="df")
 
-        if missing_dataset and isinstance(missing_dataset, list) and len(missing_dataset) > 0:
+        if isinstance(missing_dataset, pd.DataFrame) and not missing_dataset.empty:
             if mail is not None:
-                with tempfile.NamedTemporaryFile(delete=False, suffix="_missing_dataset.xlsx", dir="/tmp") as tmpfile:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_missing_dataset.xlsx", dir="/tmpapi") as tmpfile:
                     fp1 = tmpfile.name
                     missing_dataset.to_excel(fp1, index=False)
                 sendEmail(mail, subject="Missing DATASET Label", recipients=[
@@ -320,7 +323,7 @@ def getBadRelations(database, mail=None):
         labels = getQuery(
             "match (l:LABEL) where not l.relationship is null return distinct l.groupLabel as group, l.relationship as relationship", driver)
 
-        labels.update({'ETHNICITY': ""})
+        labels.append({'group': 'ETHNICITY', 'relationship': ''})
 
         results = []
         contains = []
@@ -328,16 +331,16 @@ def getBadRelations(database, mail=None):
             if label == "ETHNICITY":
                 group = label['group']
                 matchContains = getQuery(
-                    f"MATCH (p:CATEGORY)-[:CONTAINS]->(c:$group) WHERE NOT 'GENERIC' IN labels(p) WITH p, c,[x IN labels(p) WHERE x IN ['DISTRICT','LANGUOID','RELIGION','ETHNICITY']] AS parentLabels,[y IN labels(c) WHERE y IN ['DISTRICT','LANGUOID','RELIGION','ETHNICITY']] AS childLabels UNWIND parentLabels AS parentLabel UNWIND childLabels AS childLabel WITH p, c, parentLabel, childLabel WHERE parentLabel <> $group AND childLabel = $group RETURN DISTINCT p.CMID AS parentCMID, p.CMName AS parentCMName, parentLabel + '->' + childLabel AS domains, c.CMID AS childCMID, c.CMName AS childCMName, 'CONTAINS' AS relationship", driver, params={'group': group})
+                    f"MATCH (p:CATEGORY)-[:CONTAINS]->(c:{group}) WHERE NOT 'GENERIC' IN labels(p) WITH p, c,[x IN labels(p) WHERE x IN ['DISTRICT','LANGUOID','RELIGION','ETHNICITY']] AS parentLabels,[y IN labels(c) WHERE y IN ['DISTRICT','LANGUOID','RELIGION','ETHNICITY']] AS childLabels UNWIND parentLabels AS parentLabel UNWIND childLabels AS childLabel WITH p, c, parentLabel, childLabel WHERE parentLabel <> '{group}' AND childLabel = '{group}' RETURN DISTINCT p.CMID AS parentCMID, p.CMName AS parentCMName, parentLabel + '->' + childLabel AS domains, c.CMID AS childCMID, c.CMName AS childCMName, 'CONTAINS' AS relationship", driver)
                 contains.append(matchContains)
             else:
                 relationship = label['relationship']
                 group = label['group']
-                matches = getQuery(f"match (p:CATEGORY)-[:{relationship}]->(c:CATEGORY)<-[r:USES]-(d:DATASET) where not '{group}' in labels(p) unwind keys(r) as property with p.CMID as parentCMID, p.CMName as parentCMName, c.CMID as childCMID, c.CNName as childCMName, r.Key as Key, d.datasetID as datasetID, d.shortName as shortName, '{relationship}' as relationship, apoc.text.join([i in labels(p) where not i in ['CATEGORY']],'; ') as domains, property, r[property] as value where parentCMID = value or parentCMID in value return distinct parentCMID, parentCMName, childCMID, childCMName, Key, datasetID, shortName, relationship, domains, property, value", driver)
+                matches = getQuery(f"match (p:CATEGORY)-[:{relationship}]->(c:{group})<-[r:USES]-(d:DATASET) where not '{group}' in labels(p) unwind keys(r) as property with p.CMID as parentCMID, p.CMName as parentCMName, c.CMID as childCMID, c.CNName as childCMName, r.Key as Key, d.datasetID as datasetID, d.shortName as shortName, '{relationship}' as relationship, apoc.text.join([i in labels(p) where not i in ['CATEGORY']],'; ') as domains, property, r[property] as value where parentCMID = value or parentCMID in value return distinct parentCMID, parentCMName, childCMID, childCMName, Key, datasetID, shortName, relationship, domains, property, value", driver)
                 results.append(matches)
                 # matchContains = getQuery(f"match (p:CATEGORY)-[:CONTAINS]->(c:{group})<-[r:USES]-(d:DATASET) where not 'GENERIC' in labels(p) with p,c,r,d where not '{group}' in labels(p) and (p.CMID in r.parent or p.CMID = r.parent) return distinct p.CMID as parentCMID, p.CMName as parentCMName, c.CMID as childCMID, c.CMName as childCMName, r.Key as Key, d.CMID as datasetID, d.shortName as shortName, 'CONTAINS' as relationship, apoc.text.join([i in labels(p) where i in $groups],',') + '->' + '{group}' as domains, 'parent' as property, r.parent as value", driver, params = {'groups': list(pd.DataFrame(labels)['group'].values)})
                 matchContains = getQuery(
-                    f"MATCH (p:CATEGORY)-[:CONTAINS]->(c:$group) WHERE NOT 'GENERIC' IN labels(p) WITH p, c,[x IN labels(p) WHERE x IN ['DISTRICT','LANGUOID','RELIGION','ETHNICITY']] AS parentLabels,[y IN labels(c) WHERE y IN ['DISTRICT','LANGUOID','RELIGION','ETHNICITY']] AS childLabels UNWIND parentLabels AS parentLabel UNWIND childLabels AS childLabel WITH p, c, parentLabel, childLabel WHERE parentLabel <> $group AND childLabel = $group RETURN DISTINCT p.CMID AS parentCMID, p.CMName AS parentCMName, parentLabel + '->' + childLabel AS domains, c.CMID AS childCMID, c.CMName AS childCMName, 'CONTAINS' AS relationship", driver, params={'group': group})
+                    f"MATCH (p:CATEGORY)-[:CONTAINS]->(c:CATEGORY) WHERE NOT 'GENERIC' IN labels(p) WITH p, c,[x IN labels(p) WHERE x IN ['DISTRICT','LANGUOID','RELIGION','ETHNICITY']] AS parentLabels,[y IN labels(c) WHERE y IN ['DISTRICT','LANGUOID','RELIGION','ETHNICITY']] AS childLabels UNWIND parentLabels AS parentLabel UNWIND childLabels AS childLabel WITH p, c, parentLabel, childLabel WHERE NOT parentLabel in $group AND childLabel in $group RETURN DISTINCT p.CMID AS parentCMID, p.CMName AS parentCMName, parentLabel + '->' + childLabel AS domains, c.CMID AS childCMID, c.CMName AS childCMName, 'CONTAINS' AS relationship", driver, params={'group': group})
                 contains.append(matchContains)
 
         results = pd.concat([pd.DataFrame(item) for item in results])
@@ -346,7 +349,7 @@ def getBadRelations(database, mail=None):
 
         if results and isinstance(results, list) and len(results) > 0:
             if mail is not None:
-                with tempfile.NamedTemporaryFile(delete=False, suffix="_bad_relationship_labels.xlsx", dir="/tmp") as tmpfile:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_bad_relationship_labels.xlsx", dir="/tmpapi") as tmpfile:
                     fp1 = tmpfile.name
                     results.to_excel(fp1, index=False)
                 sendEmail(mail, subject="Bad Relationship Label", recipients=[
@@ -359,7 +362,7 @@ def getBadRelations(database, mail=None):
         return result, 500
 
 
-def cmnameNotInName(database, mail=None):
+def CMNameNotInName(database, mail=None):
     try:
         driver = getDriver(database)
 
@@ -376,7 +379,7 @@ def cmnameNotInName(database, mail=None):
             updateAltNames(driver, CMID=cmids)
 
             if mail is not None:
-                with tempfile.NamedTemporaryFile(delete=False, suffix="_BadCMNames.xlsx", dir="/tmp") as tmpfile:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_BadCMNames.xlsx", dir="/tmpapi") as tmpfile:
                     fp1 = tmpfile.name
                     cmids = pd.DataFrame(cmids)
                     cmids.columns = ["CMID"]
