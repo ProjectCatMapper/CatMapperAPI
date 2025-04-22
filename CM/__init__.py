@@ -10,3 +10,4 @@ from .translate import *
 from .keys import *
 from .merge import *
 from .GIS import *
+from .log import *
