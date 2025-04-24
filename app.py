@@ -96,9 +96,26 @@ def catm():
     unwind $cmid as cmid
     match (a)<-[r:USES]-(d:DATASET)
     where a.CMID = cmid
-    with custom.anytoList(collect(r.Name),true) as Name, r.country as countryID,
-    r.district as districtID, d.project as Source, d.CMID as datasetID, d.DatasetVersion as Version,r.categoryType as cType, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd,
-    toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
+    WITH custom.anytoList(collect(r.Name), true) AS Name,
+     r.country AS countryID,
+     r.district AS districtID,
+     d.project AS Source,
+     d.CMID AS datasetID,
+     d.DatasetVersion AS Version,
+     collect(r.categoryType) AS categoryTypes,
+     r.url AS Link,
+     r.recordStart AS recordStart,
+     r.recordEnd AS recordEnd,
+     toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) AS Population,
+     toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) AS `Sample size`,
+     r.type AS type
+
+    WITH Name, countryID, districtID, Source, datasetID, Version,      
+    CASE          
+    WHEN size(apoc.coll.removeAll(Population, [NULL])) = 0 THEN ""          
+    ELSE head(categoryTypes)      
+    END AS cType,Link, recordStart, recordEnd, Population, `Sample size`,type
+
     call apoc.when(countryID is not null,'return custom.getName($id) as country','return null',{id:countryID}) yield value
     with Name, value as country, districtID, Source, datasetID, Version,cType, Link, recordStart, recordEnd, Population, `Sample size`, type
     call apoc.when(districtID is not null,'return custom.getName($id) as district','return null',{id:districtID}) yield value

@@ -147,11 +147,11 @@ def createNodes(df, database, user, uniqueID=None):
         else:
             required = ["CMName", "label"]
             df['label'] = df['label'].apply(lambda x: f"CATEGORY:{x}")
-        
+
         missing = [column for column in required if column not in df.columns]
         if missing:
-            raise Exception(f"Error: missing required columns to create new node: {missing}")
-
+            raise Exception(
+                f"Error: missing required columns to create new node: {missing}")
 
         # if not all(column in df.columns for column in required):
         #     raise Exception(
@@ -994,7 +994,8 @@ def input_Nodes_Uses(dataset,
 
     if 'eventType' in dataset.columns:
 
-        valid_event_types = {"SPLIT", "MERGED", "SPLITMERGE", "HIERARCHY", "BECAME",""}
+        valid_event_types = {"SPLIT", "MERGED",
+                             "SPLITMERGE", "HIERARCHY", "BECAME", ""}
 
         invalid_event_types = dataset.loc[~dataset['eventType'].isin(valid_event_types), [
             'eventType']]
@@ -1174,19 +1175,21 @@ def input_Nodes_Uses(dataset,
                     nodes = sub_dataset[node_columns]
 
             if not nodes.empty:
-                if uploadOption =="add_uses":
+                if uploadOption == "add_uses":
                     if "CMName" in dataset_dup.columns:
                         cm_mapping = dataset_dup["CMName"].reset_index()
                         cm_mapping["importID"] = cm_mapping["index"] + 1
                         cm_mapping = cm_mapping[["importID", "CMName"]]
 
                         # Ensure importID types match
-                        cm_mapping["importID"] = cm_mapping["importID"].astype(str)
+                        cm_mapping["importID"] = cm_mapping["importID"].astype(
+                            str)
                         nodes["importID"] = nodes["importID"].astype(str)
 
                         # Merge onto nodes
-                        nodes1 = nodes.merge(cm_mapping, on="importID", how="left")
-                print(nodes1)
+                        nodes1 = nodes.merge(
+                            cm_mapping, on="importID", how="left")
+                # print(nodes1)
                 updateLog(f"log/{user}uploadProgress.txt",
                           "Adding nodes with columns: " + ", ".join(nodes.columns), write='a')
                 match = createNodes(
