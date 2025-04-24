@@ -432,7 +432,7 @@ def getMergingTemplate(datasetID, database):
             return {"Error": "Unable to process error"}, 500
 
 
-def createSyntax(template, database="SocioMap",
+def createSyntax(template, database="SocioMap", domain="ETHNICITY",
                  syntax="R", dirpath=None, download=True):
     try:
 
@@ -538,9 +538,9 @@ def createSyntax(template, database="SocioMap",
             data, template[["datasetID", "filePath"]], on="datasetID", how="left")
         # print(dirpath)
         data.to_excel(os.path.join(dirpath, "data.xlsx"), index=False)
-        cat_query = """
+        cat_query = f"""
             unwind $rows as row
-            match (d:DATASET {CMID: row.datasetID})-[ru:USES]->(c:CATEGORY) optional match (c)-[:EQUIVALENT]->(e:CATEGORY)
+            match (d:DATASET {{CMID: row.datasetID}})-[ru:USES]->(c:{domain}) optional match (c)-[:EQUIVALENT]->(e:{domain})
             return d.CMID as datasetID, ru.Key as Key, c.CMID as CMID, c.CMName as CMName, e.CMID as equivalentCMID, e.CMName as equivalentCMName
         """
         categories = getQuery(cat_query, driver=driver, params={
@@ -572,7 +572,7 @@ def createSyntax(template, database="SocioMap",
         # print(categories.head(100))
         categories.to_excel(os.path.join(
             dirpath, "categories.xlsx"), index=False)
-        r_syntax_template = "syntax/Rsyntax.txt"
+        r_syntax_template = "syntax/R_syntax.txt"
         replacements = {
             # Functions applied
             "${f}": "\n".join(data['transform'].dropna()),

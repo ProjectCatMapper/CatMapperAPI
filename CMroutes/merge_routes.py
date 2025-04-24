@@ -1,5 +1,6 @@
 import os
 from flask import request, jsonify
+import json
 
 
 def get_merge_syntax_route(database):
