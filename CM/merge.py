@@ -559,8 +559,11 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
         #     value_name='value'
         # )
         # print(keys_df.head(10))
-        keys_df[['variable', 'value']] = keys_df['Key'].str.split(
+        keys_df['Key2'] = keys_df['Key'].str.split('; ')
+        keys_df = keys_df.explode('Key2').reset_index(drop=True)
+        keys_df[['variable', 'value']] = keys_df['Key2'].str.split(
             ': ', n=1, expand=True)
+        keys_df.drop(columns=["Key2"], inplace=True)
         categories = pd.merge(categories, keys_df, on=[
                               "datasetID", "Key"], how="left")
         categories = categories.drop_duplicates(

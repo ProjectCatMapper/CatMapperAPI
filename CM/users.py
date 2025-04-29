@@ -2,8 +2,6 @@
 
 import pysodium
 from .utils import *
-from .email import sendEmail
-from CMroutes import mail
 
 
 def password_hash(password):
@@ -93,8 +91,6 @@ def verifyUser(user, pwd):
 
 def enableUser(database, process, userid, approver):
 
-    mail = mail()
-
     driver = getDriver('userdb')
 
     if process == "approve":
@@ -111,17 +107,7 @@ set u.access = 'enabled', u.log = u.log + [toString(datetime()) + ": access appr
 return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
 """
         result = getQuery(query, driver, params={"userids": userid})
-        for user in result:
-            body = f"""
-Hello {user.get("first")} {user.get("last")},
 
-Your registration has been approved. You can now access the {'and '.join(user.get("database"))} database. Please see catmapper.org/help or email support@catmapper.org for any questions.
-
-Best,
-CatMapper Team
-            """
-            sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
-                "email"), 'admin@catmapper.org'], body=body, sender=os.getenv("mail_default"))
     else:
         query = f"""
 match (u {{access: 'new'}}) where '{database}' in u.database

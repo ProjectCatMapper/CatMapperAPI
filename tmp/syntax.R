@@ -8,7 +8,7 @@ library(stringr)
 library(tictoc)
 tic("Merge")
 # set working directory
-wd = 'E:/Dropbox\ (ASU)/RA/CatMapper/Code/SocioMap/data/surveys'
+wd = 'C:/Users/rjbischo/Nextcloud/CatMapper_nc/merge_syntax'
 setwd(wd)
 if(!dir.exists('temp'))
   dir.create('temp')
@@ -41,7 +41,7 @@ getMode = function(x){
   return(val[which.max(tabulate(match(x, val)))])
 }
 
-wd = 'E:/Dropbox\ (ASU)/RA/CatMapper/Code/SocioMap/data/surveys'
+
 
 ################################################################################
 for(i in 1:nrow(template)){
