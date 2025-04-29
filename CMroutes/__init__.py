@@ -1,6 +1,7 @@
 from .test_routes import *
 from .merge_routes import *
 from .routines import *
+from .query import *
 
 from flask import Flask, abort, send_from_directory
 from .extensions import *
