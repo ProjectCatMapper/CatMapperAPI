@@ -919,6 +919,8 @@ def getSearch():
         database = request.args.get('database')
         term = request.args.get('term')
         property = request.args.get('property')
+        if property == "CatMapper ID (CMID)":
+            property = "CMID"
         domain = request.args.get('domain')
         yearStart = request.args.get('yearStart')
         yearEnd = request.args.get('yearEnd')
@@ -986,37 +988,6 @@ def getTranslate2():
 
     except Exception as e:
         return str(e), 500
-
-
-@app.route('/query', methods=['POST'])
-def getRouteQuery():
-    try:
-        rows = request.get_data()
-        rows = json.loads(rows)
-        database = rows.get("database")
-        query = rows.get("query")
-        user = rows.get("user")
-        pwd = rows.get("pwd")
-        params = rows.get("params")
-
-        driver = getDriver(database)
-
-        verified = verifyUser(user, pwd)
-
-        if verified == "verified":
-            with driver.session() as session:
-                result = session.run(query, params)
-                data = [dict(record) for record in result]
-                driver.close()
-            return jsonify(data)
-        else:
-            raise Exception(f"error: User is not verified")
-
-    except Exception as e:
-        # In case of an error, return an error response with an appropriate HTTP status code
-        data = str(e)
-
-        return data, 500
 
 
 @app.route('/geometry', methods=['GET'])
@@ -1825,6 +1796,21 @@ def updateNewUsers():
         result = enableUser(database=database, process=process,
                             userid=userid, approver=approver)
 
+        users = [user for user in result if user.get("email")]
+        mail = Mail()
+
+        for user in users:
+            body = f"""
+Hello {user.get("first")} {user.get("last")},
+
+Your registration has been approved. You can now access the {'and '.join(user.get("database"))} database. Please see catmapper.org/help or email support@catmapper.org for any questions.
+
+Best,
+CatMapper Team
+            """
+            sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
+                "email"), 'admin@catmapper.org'], body=body, sender=os.getenv("mail_default"))
+
         return result
     except Exception as e:
         result = str(e)
@@ -1839,6 +1825,9 @@ app.add_url_rule('/test/testmsg/<database>/<msg>', 'testmsg',
 
 app.add_url_rule('/routines/<routine>/<database>', 'get_routines',
                  get_routines, methods=['GET'])
+
+app.add_url_rule('/admin/query/<database>', 'getRouteQuery',
+                 getRouteQuery, methods=['POST'])
 
 
 @app.route("/download/test", methods=["GET"])
