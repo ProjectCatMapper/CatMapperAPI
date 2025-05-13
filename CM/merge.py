@@ -189,6 +189,15 @@ def joinDatasets(database, joinLeft, joinRight):
         link_file = link_file.drop_duplicates().sort_values(
             by=['datasetID_left', 'datasetID_right', 'CMName', 'CMID'])
 
+        # replace NaN with empty string
+        link_file = link_file.fillna("")
+
+        desired_order = ['CMID', 'CMName',
+                         'datasetID_left', 'datasetID_right']
+        remaining_cols = [
+            col for col in link_file.columns if col not in desired_order]
+        link_file = link_file[desired_order + remaining_cols]
+
         return link_file.to_dict(orient='records')
 
     except Exception as e:
@@ -567,7 +576,7 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
         categories = pd.merge(categories, keys_df, on=[
                               "datasetID", "Key"], how="left")
         categories = categories.drop_duplicates(
-            subset=["datasetID", "Key", "CMID"])
+            subset=["datasetID", "Key", "CMID", "variable", "value"])
         categories["variable"] = categories["variable"].str.lower()
         categories = categories.astype(str)
         categories.replace("None", np.nan, inplace=True)

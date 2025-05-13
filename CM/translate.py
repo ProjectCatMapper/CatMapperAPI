@@ -21,7 +21,11 @@ def search(
     if domain == "AREA":
         domain = "DISTRICT"
 
+    print("check0")
+
     driver = getDriver(database)
+
+    print("check1")
 
     if term:
         term = term.strip()
@@ -38,7 +42,7 @@ def search(
     if domain is None:
         domain = "CATEGORY"
 
-    # need to add check to mak sure property is valid and domain is valid
+    # need to add check to make sure property is valid and domain is valid
 
     if context is not None:
         if context == "null" or context == "":
@@ -216,6 +220,8 @@ def search(
 
     cypher_query = qStart + qDomain + qUnique + qCountryFilter + \
         qContext + qYear + qLimit + qCountry + qReturn
+
+    print("hi")
 
     if query != 'true':
         data = getQuery(cypher_query, driver, params={
