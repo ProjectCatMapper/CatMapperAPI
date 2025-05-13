@@ -1120,6 +1120,7 @@ def input_Nodes_Uses(dataset,
 
     sq = range(0, len(dataset), batchSize)
 
+
     try:
         final_result = pd.DataFrame()
         dataset_match = pd.DataFrame()
@@ -1173,7 +1174,7 @@ def input_Nodes_Uses(dataset,
                                         == ''][node_columns].drop_duplicates()
                 elif "Name" in sub_dataset.columns:
                     nodes = sub_dataset[node_columns]
-
+            
             if not nodes.empty:
                 if uploadOption == "add_uses":
                     if "CMName" in dataset_dup.columns:
@@ -1187,9 +1188,10 @@ def input_Nodes_Uses(dataset,
                         nodes["importID"] = nodes["importID"].astype(str)
 
                         # Merge onto nodes
-                        nodes1 = nodes.merge(
+                        nodes = nodes.merge(
                             cm_mapping, on="importID", how="left")
-                # print(nodes1)
+                        nodes.drop('CMName_y', axis=1, inplace=True)
+                        nodes.rename(columns={'CMName_x': 'CMName'}, inplace=True)
                 updateLog(f"log/{user}uploadProgress.txt",
                           "Adding nodes with columns: " + ", ".join(nodes.columns), write='a')
                 match = createNodes(

@@ -7,14 +7,11 @@ from datetime import datetime
 from neo4j import GraphDatabase
 import pandas as pd
 import numpy as np
-from dotenv import load_dotenv, find_dotenv
 import os
 from flask import abort
 import itertools
 from collections.abc import Iterable
 import json
-
-load_dotenv(find_dotenv())
 
 
 def getQuery(query, driver, params=None, type="dict"):
@@ -91,18 +88,24 @@ n.displayName as displayName, n.remove as remove, n.color as color
 
 def getDriver(database):
     try:
+        from configparser import ConfigParser
+        config = ConfigParser()
+        config.read('config.ini')
+        user = config['DB']['user']
+        pwd = config['DB']['pwd']
+
         if str.lower(database) == "sociomap":
-            driver = GraphDatabase.driver(os.getenv("uriSM"), auth=(
-                os.getenv("user"), os.getenv("pwdSM")))
+            driver = GraphDatabase.driver(config['DB']['uriSM'], auth=(
+                user, pwd))
         elif str.lower(database) == "archamap":
-            driver = GraphDatabase.driver(os.getenv("uriAM"), auth=(
-                os.getenv("user"), os.getenv("pwdAM")))
+            driver = GraphDatabase.driver(config['DB']['uriAM'], auth=(
+                user, pwd))
         elif str.lower(database) == "gisdb":
-            driver = GraphDatabase.driver(os.getenv("uriG"), auth=(
-                os.getenv("user"), os.getenv("pwdG")))
+            driver = GraphDatabase.driver(config['DB']['uriG'], auth=(
+                user, pwd))
         elif str.lower(database) == "userdb":
-            driver = GraphDatabase.driver(os.getenv("uriU"), auth=(
-                os.getenv("user"), os.getenv("pwdU")))
+            driver = GraphDatabase.driver(config['DB']['uriI'], auth=(
+                user, pwd))
         else:
             raise Exception(
                 f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")

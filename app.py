@@ -1008,6 +1008,10 @@ def getGeometry():
 @app.route('/newuser', methods=['POST'])
 def getnewuser():
     try:
+        from configparser import ConfigParser
+        config = ConfigParser()
+        config.read('config.ini')
+        mail_default = config['MAIL']['mail_default']
         data = request.get_data()
         data = json.loads(data)
         database = data.get("database")
@@ -1064,7 +1068,7 @@ on create set u.username = $username,
 u.first = $firstName,
 u.last = $lastName,
 u.email = $email,
-u.access = "enabled",
+u.access = "pending",
 u.log = [toString(datetime()) + ": created user via API", toString(datetime()) + \
                   ": created autoapproved via API during workshop registration"],
 u.password = $password,
@@ -1090,7 +1094,7 @@ database: {database}
 description: {intendedUse}
 """
         sendEmail(mail, subject="New registered user", recipients=[
-            "admin@catmapper.org"], body=body, sender=os.getenv("mail_default"))
+            "admin@catmapper.org"], body=body, sender=mail_default)
 
         return jsonify(data)
 
@@ -1134,9 +1138,10 @@ def getAdmin():
 
 @app.route('/admin/edit', methods=['GET', 'POST'])
 def getAdminEdit():
-    from dotenv import load_dotenv, find_dotenv
-    load_dotenv(find_dotenv())
-    apikeyEnv = os.getenv("apikey")
+    from configparser import ConfigParser
+    config = ConfigParser()
+    config.read('config.ini')
+    apikeyEnv = config['DEFAULT']['apikey']
     # will not be documented in swagger at this point
     try:
         if request.method == 'GET':
@@ -1809,7 +1814,7 @@ Best,
 CatMapper Team
             """
             sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
-                "email"), 'admin@catmapper.org'], body=body, sender=os.getenv("mail_default"))
+                "email"), 'admin@catmapper.org'], body=body, sender="admin@catmapper.org")
 
         return result
     except Exception as e:
