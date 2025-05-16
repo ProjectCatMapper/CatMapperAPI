@@ -33,6 +33,8 @@ def get_routines(routine, database):
             result = getBadRelations(database, mail)
         elif fun == "CMNameNotInName":
             result = CMNameNotInName(database, mail)
+        elif fun == "fixMetaTypes":
+            result = fixMetaTypes(database)
         else:
             result = "function not found"
         return result

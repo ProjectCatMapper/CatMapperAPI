@@ -392,3 +392,41 @@ def CMNameNotInName(database, mail=None):
     except Exception as e:
         result = str(e)
         return result, 500
+
+
+def fixMetaTypes(database):
+    try:
+        driver = getDriver(database)
+        properties = getPropertiesMetadata(driver)
+        properties = pd.DataFrame(properties)
+        properties = properties[properties['metaType'].notna()]
+        node_properties = properties[properties['type'] == 'node']
+        relationship_properties = properties[properties['type']
+                                             == 'relationship']
+
+        for property, metaType in zip(node_properties['property'], node_properties['metaType']):
+            metaType = metaType.upper()
+            metaType_neo4j = "STRING" if metaType == "STRING" else "LIST OF STRING"
+            query = f"""
+            MATCH (n)
+            WHERE n.{property} IS NOT NULL AND apoc.meta.cypher.type(n.{property}) <> "{metaType_neo4j}"
+            SET n.{property} = custom.formatProperties([n.{property}],'{metaType}',';')[0].prop
+            return count(*) as count
+            """
+            result = getQuery(query, driver)
+            print(f"Updated {property} to {metaType}: {result}")
+
+        for property, metaType in zip(relationship_properties['property'], relationship_properties['metaType']):
+            metaType = metaType.upper()
+            metaType_neo4j = "STRING" if metaType == "STRING" else "LIST OF STRING"
+            query = f"""
+            MATCH (n)-[rel]->(m)
+            WHERE rel.{property} IS NOT NULL AND apoc.meta.cypher.type(rel.{property}) <> "{metaType_neo4j}"
+            SET rel.{property} = custom.formatProperties([rel.{property}],'{metaType}',';')[0].prop
+            return count(*) as count
+            """
+            result = getQuery(query, driver)
+            print(f"Updated {property} to {metaType}: {result}")
+    except Exception as e:
+        result = str(e)
+        return result, 500
