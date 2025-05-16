@@ -77,7 +77,7 @@ match (n:METADATA:LABEL)
 return n.label as label, n.groupLabel as groupLabel, 
 n.relationship as relationship, n.public as public, 
 n.default as default, n.description as description, 
-n.displayName as displayName, n.remove as remove, n.color as color
+n.displayName as displayName, n.remove as remove, n.color as color  
 """
         data = getQuery(query=query, driver=driver)
         return data

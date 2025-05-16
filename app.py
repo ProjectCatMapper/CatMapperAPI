@@ -113,10 +113,11 @@ def catm():
     WITH Name, countryID, districtID, Source, datasetID, Version,      
     CASE          
     WHEN size(apoc.coll.removeAll(Population, [NULL])) = 0 THEN ""          
-    ELSE head(categoryTypes)      
-    END AS cType,Link, recordStart, recordEnd, Population, `Sample size`,type
+    ELSE categoryTypes      
+    END AS cTypes,Link, recordStart, recordEnd, Population, `Sample size`,type
 
     call apoc.when(countryID is not null,'return custom.getName($id) as country','return null',{id:countryID}) yield value
+    unwind cTypes as cType
     with Name, value as country, districtID, Source, datasetID, Version,cType, Link, recordStart, recordEnd, Population, `Sample size`, type
     call apoc.when(districtID is not null,'return custom.getName($id) as district','return null',{id:districtID}) yield value
     with Name, country, value as district, Source, datasetID, Version,cType, Link, recordStart, recordEnd, Population, `Sample size`, type
@@ -1141,7 +1142,7 @@ def getAdminEdit():
     from configparser import ConfigParser
     config = ConfigParser()
     config.read('config.ini')
-    apikeyEnv = config['DEFAULT']['apikey']
+    apikeyEnv = config['DB']['apikey']
     # will not be documented in swagger at this point
     try:
         if request.method == 'GET':
