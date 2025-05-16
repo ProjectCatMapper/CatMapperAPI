@@ -126,3 +126,17 @@ response=$(curl -ks --max-time 600000 "Content-type: application/json" "$api_url
 
 echo "API Response for CMNameNotInName in ArchaMap:"
 echo "$response"
+
+api_url="https://catmapper.org/api/routines/fixMetaTypes/SocioMap"
+
+response=$(curl -ks --max-time 600000 "Content-type: application/json" "$api_url")
+
+echo "API Response for fixMetaTypes in SocioMap:"
+echo "$response"
+
+api_url="https://catmapper.org/api/routines/fixMetaTypes/ArchaMap"
+
+response=$(curl -ks --max-time 600000 "Content-type: application/json" "$api_url")
+
+echo "API Response for fixMetaTypes in ArchaMap:"
+echo "$response"

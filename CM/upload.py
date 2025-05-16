@@ -736,8 +736,21 @@ def input_Nodes_Uses(dataset,
                                   for r in results.data() if r["count"] == 0]
 
             if missing_values:
-                raise ValueError(
-                    f"Error: Missing values in database for column '{i}': {missing_values}")
+                if i == "datasetID":
+                    raise ValueError(f"Please confirm the following datasetID(s) are correct and try again: {', '.join(missing_values)}.")
+                else:
+                    no_prefix = [v for v in missing_values if not any(v.startswith(p) for p in ["AM", "AD", "SM", "SD"])]
+                    with_prefix = [v for v in missing_values if v not in no_prefix]
+
+                    message_parts = []
+                    if no_prefix:
+                        message_parts.append(
+                            f"Please use valid CatMapper IDs for: {', '.join(no_prefix)}.")
+                    if with_prefix:
+                        message_parts.append(
+                            f"Please check CatMapper IDs for: {', '.join(with_prefix)} and try again.")
+
+                    raise ValueError(" ".join(message_parts))
 
     # checking if label column matches CMID column
     if "label" in dataset.columns and "CMID" in dataset.columns:
@@ -760,7 +773,7 @@ def input_Nodes_Uses(dataset,
 
         if mismatch:
             raise ValueError(
-                f"Lable provided in file doesnt match for CMID: {mismatch['CMID']}")
+                f"Label provided in file doesnt match for CMID: {mismatch['CMID']}")
 
     # checking labels for columns
     for i in multi_value_columns:
@@ -884,7 +897,6 @@ def input_Nodes_Uses(dataset,
 
     if uploadOption == "node_replace":
         linkProperties = linkProperties[0]
-        print(linkProperties)
         update_query = """UNWIND $rows AS row
                 MATCH (n {CMID: row.CMID})
                 CALL apoc.create.setProperty(n, $prop, row[$prop]) YIELD node
