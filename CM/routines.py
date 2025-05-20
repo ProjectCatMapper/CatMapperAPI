@@ -320,7 +320,8 @@ def getBadRelations(database, mail=None):
         labels = getQuery(
             "match (l:LABEL) where not l.relationship is null return distinct l.groupLabel as group, l.relationship as relationship", driver)
 
-        labels.append({'group': 'ETHNICITY', 'relationship': ''})
+        if database.lower() == "sociomap":
+            labels.append({'group': 'ETHNICITY', 'relationship': ''})
         groups = list(set(item['group'] for item in labels))
 
         results = []
@@ -355,7 +356,7 @@ def getBadRelations(database, mail=None):
                 sendEmail(mail, subject=f"Bad Relationship Label for {database}", recipients=[
                           "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
 
-            return {"bad_relationship_labels_count": len(results), "bad_relationship_labels": results.to_dict(orient="records")}
+        return {"bad_relationship_labels_count": len(results), "bad_relationship_labels": results.to_dict(orient="records")}
 
     except Exception as e:
         result = str(e)
@@ -427,6 +428,7 @@ def fixMetaTypes(database):
             """
             result = getQuery(query, driver)
             print(f"Updated {property} to {metaType}: {result}")
+        return "completed"
     except Exception as e:
         result = str(e)
         return result, 500
