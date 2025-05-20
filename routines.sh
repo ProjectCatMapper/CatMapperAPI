@@ -1,19 +1,5 @@
 #!/bin/bash
 
-api_url="https://catmapper.org/api/routines/addLog/ArchaMap"
-
-response=$(curl -ks "Content-Type: application/json" "$api_url")
-
-echo "API Response for addLog in ArchaMap:"
-echo "$response"
-
-api_url="https://catmapper.org/api/routines/addLog/SocioMap"
-
-response=$(curl -ks "Content-Type: application/json" "$api_url")
-
-echo "API Response for addLog in SocioMap:"
-echo "$response"
-
 
 api_url="https://catmapper.org/api/routines/checkDomains/ArchaMap"
 

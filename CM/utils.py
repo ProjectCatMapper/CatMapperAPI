@@ -104,7 +104,7 @@ def getDriver(database):
             driver = GraphDatabase.driver(config['DB']['uriG'], auth=(
                 user, pwd))
         elif str.lower(database) == "userdb":
-            driver = GraphDatabase.driver(config['DB']['uriI'], auth=(
+            driver = GraphDatabase.driver(config['DB']['uriU'], auth=(
                 user, pwd))
         else:
             raise Exception(

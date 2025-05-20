@@ -1,18 +1,21 @@
 ''' admin.py '''
 
-from .utils import * 
+from .utils import *
 
 # This is a module for admin functions in CatMapper
 
 import re
 from neo4j import GraphDatabase
 
-def replaceProperty(cmid, property, old, new, driver):
+
+def replaceProperty(cmid, datasetID, key, property, old, new, database):
     """
     Replace a specified property value in relationships for a given CMID.
 
     Parameters:
     - cmid: The CMID for which the property replacement should occur.
+    - datasetID: The ID of the dataset to be used.
+    - key: The key to identify the relationship.
     - property: The name of the property to be replaced.
     - old: The old value to be replaced.
     - new: The new value to replace the old value.
@@ -25,22 +28,27 @@ def replaceProperty(cmid, property, old, new, driver):
     - Exception: In case of any unexpected errors during property replacement.
     """
     try:
+        driver = getDriver(database)
         query = f"""
-match (c {{CMID: $cmid}})--(node)
-match (node)<-[r:USES]-(d) 
+match (:CATEGORY {{CMID: $cmid}})<-[r:USES {{Key: $key}}]-(:DATASET {{CMID: $datasetID}}) 
 where not r.{property} is null 
 with r, case when apoc.meta.cypher.type(r.{property}) contains "LIST" 
-then apoc.coll.toSet([x in [i in r.{property} | replace(i,$old,$new)] where not x = ""]) 
+then apoc.coll.toSet([x in [i in r.{property} | where i = $old] where not x = ""]) 
 else replace(r.{property},$old,$new) end as prop 
 with r, prop, case when isEmpty(prop) then NULL else prop end as valid 
 set r.{property} = valid
 """
-        with driver.session() as session:
-            session.run(query,cmid = cmid, old = old, new = new)
-            driver.close()
+        getQuery(query, driver, params={
+            "cmid": cmid,
+            "datasetID": datasetID,
+            "key": key,
+            "old": old,
+            "new": new
+        })
         return f"Completed {cmid} property {property}"
     except Exception as e:
         return str(e), 500
+
 
 def getUSESrels(request, driver):
     """
@@ -57,7 +65,7 @@ def getUSESrels(request, driver):
     - Exception: If an invalid CMID is provided or in case of any unexpected errors.
     """
     try:
-        cmid = request.args.get('cmid') 
+        cmid = request.args.get('cmid')
         if re.search("^AM|^AD|^SM|^AD", cmid) is None:
             raise Exception("Invalid CMID")
         query = f"""
@@ -69,7 +77,7 @@ def getUSESrels(request, driver):
         order by relationship
         """
         with driver.session() as session:
-            result = session.run(query,cmid = cmid)
+            result = session.run(query, cmid=cmid)
             data = [dict(record) for record in result]
             driver.close()
         return data
@@ -77,6 +85,8 @@ def getUSESrels(request, driver):
         return str(e), 500
 
 # function to add CMName to Name property
+
+
 def addCMNametoName(cmid, driver):
     try:
         if re.search("^SM", cmid) is None:
@@ -100,7 +110,7 @@ def addCMNametoName(cmid, driver):
         """
 
         with driver.session() as session:
-            results = session.run(query,cmid = cmid, dataset = dataset)
+            results = session.run(query, cmid=cmid, dataset=dataset)
             driver.close()
 
         return f"Completed adding names to {cmid}"
@@ -109,7 +119,9 @@ def addCMNametoName(cmid, driver):
         return str(e), 500
 
 # function to merge nodes
-def mergeNodes(request,driver):
+
+
+def mergeNodes(request, driver):
     """
     Merges nodes in a Neo4j database based on specified CMIDs.
 
@@ -125,7 +137,7 @@ def mergeNodes(request,driver):
     """
     try:
 
-        keepcmid = request.args.get('keepcmid') 
+        keepcmid = request.args.get('keepcmid')
         deletecmid = request.args.get('deletecmid')
         user = request.args.get("user")
 
@@ -136,36 +148,36 @@ def mergeNodes(request,driver):
 
         session = driver.session()
 
-        validKeep = isValidCMID(keepcmid,driver)
+        validKeep = isValidCMID(keepcmid, driver)
 
-        results = results + ["checking if keepcmid is valid",validKeep]
+        results = results + ["checking if keepcmid is valid", validKeep]
 
         if len(validKeep) > 0:
             if validKeep[0].get("exists") != True:
                 raise Exception(f"{keepcmid} is invalid")
-        else: 
+        else:
             raise Exception(f"{keepcmid} is invalid")
-        
-        deleteKeep = isValidCMID(deletecmid,driver)
 
-        results = results + ["checking if deletecmid is valid",deleteKeep]
+        deleteKeep = isValidCMID(deletecmid, driver)
+
+        results = results + ["checking if deletecmid is valid", deleteKeep]
 
         if len(deleteKeep) > 0:
             if deleteKeep[0].get("exists") != True:
                 raise Exception(f"{deletecmid} is invalid")
-            
-        else: 
+
+        else:
             raise Exception(f"{deletecmid} is invalid")
-        
+
         results = results + [addCMNametoName(keepcmid, driver)]
         results = results + [addCMNametoName(deletecmid, driver)]
 
         # get EC relID
         query = """
         unwind $cmid as cmid match (c {CMID: cmid})<-[r:USES]-(d:DATASET {CMID: "SD11"}) return id(r) as relID
-            """ 
-        
-        result = session.run(query,cmid = keepcmid)
+            """
+
+        result = session.run(query, cmid=keepcmid)
         relID = [item['relID'] for item in result]
 
         results = results + ["relID to keep"]
@@ -189,9 +201,10 @@ def mergeNodes(request,driver):
         """
 
 # add in properties for anything that is a parent type node
-        result = session.run(query,keepcmid = keepcmid,deletecmid = deletecmid)
+        result = session.run(query, keepcmid=keepcmid, deletecmid=deletecmid)
         properties = [dict(record) for record in result]
-        result = session.run("match (m:PROPERTY) where m.relationship is not null return m.property as property")
+        result = session.run(
+            "match (m:PROPERTY) where m.relationship is not null return m.property as property")
         contextProps = [dict(record) for record in result]
         contextProps = [item['property'] for item in contextProps]
 
@@ -201,7 +214,8 @@ def mergeNodes(request,driver):
             property = prop['property']
             if property in contextProps or property == "parentContext":
                 results = results + [f"updating {property} with new CMID"]
-                replaceProperty(cmid = keepcmid, property = property, old = deletecmid, new = keepcmid, driver = driver)    
+                replaceProperty(cmid=keepcmid, property=property,
+                                old=deletecmid, new=keepcmid, driver=driver)
 
         # create deleted node and relationship
         query = """
@@ -212,11 +226,10 @@ def mergeNodes(request,driver):
         create (del)-[:IS]->(new)
         """
 
-        session.run(query,keepcmid = keepcmid,deletecmid = deletecmid)
+        session.run(query, keepcmid=keepcmid, deletecmid=deletecmid)
 
-        
         # combine EC USES ties
-        
+
         if len(relID) > 0:
             query = """
             unwind $cmid as cmid 
@@ -228,25 +241,27 @@ def mergeNodes(request,driver):
             return value
             """
 
-            session.run(query,cmid = keepcmid,relID = relID)
-
+            session.run(query, cmid=keepcmid, relID=relID)
 
         # need to update USES ties
-            
-        id = session.run("unwind $keepcmid as cmid match (n {CMID: cmid}) return id(n) as id", keepcmid = keepcmid)
+
+        id = session.run(
+            "unwind $keepcmid as cmid match (n {CMID: cmid}) return id(n) as id", keepcmid=keepcmid)
         id = [item['id'] for item in id]
         id = unlist(id)
-        results = results + ["id is:",id]
-        createLog(id = id, type = "node", log = f"merged {deletecmid} into {keepcmid}", user = user, driver = driver)
+        results = results + ["id is:", id]
+        createLog(id=id, type="node",
+                  log=f"merged {deletecmid} into {keepcmid}", user=user, driver=driver)
 
-        results = results + [f"Completed combining {deletecmid} into {keepcmid}"]
+        results = results + \
+            [f"Completed combining {deletecmid} into {keepcmid}"]
 
         return results
-    
-    
+
     except Exception as e:
         return str(e), 500
-    
+
+
 def addIndexes(driver):
     try:
         query = """
