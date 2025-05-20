@@ -93,40 +93,58 @@ def catm():
     custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
     '''
         qSamples = '''
-    unwind $cmid as cmid
-    match (a)<-[r:USES]-(d:DATASET)
-    where a.CMID = cmid
-    WITH custom.anytoList(collect(r.Name), true) AS Name,
-     r.country AS countryID,
-     r.district AS districtID,
-     d.project AS Source,
-     d.CMID AS datasetID,
-     d.DatasetVersion AS Version,
-     collect(r.categoryType) AS categoryTypes,
-     r.url AS Link,
-     r.recordStart AS recordStart,
-     r.recordEnd AS recordEnd,
-     toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) AS Population,
-     toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) AS `Sample size`,
-     r.type AS type
+   UNWIND $cmid AS cmid
+MATCH (a)<-[r:USES]-(d:DATASET)
+WHERE a.CMID = cmid
 
-    WITH Name, countryID, districtID, Source, datasetID, Version,      
-    CASE          
-    WHEN size(apoc.coll.removeAll(Population, [NULL])) = 0 THEN ""          
-    ELSE categoryTypes      
-    END AS cTypes,Link, recordStart, recordEnd, Population, `Sample size`,type
+WITH a, d, r, d.project AS Source, d.CMID AS datasetID, d.DatasetVersion AS Version
 
-    call apoc.when(countryID is not null,'return custom.getName($id) as country','return null',{id:countryID}) yield value
-    unwind cTypes as cType
-    with Name, value as country, districtID, Source, datasetID, Version,cType, Link, recordStart, recordEnd, Population, `Sample size`, type
-    call apoc.when(districtID is not null,'return custom.getName($id) as district','return null',{id:districtID}) yield value
-    with Name, country, value as district, Source, datasetID, Version,cType, Link, recordStart, recordEnd, Population, `Sample size`, type
-    return Name, apoc.text.join([i in [custom.anytoList(collect(country.country),true),custom.anytoList(collect(district.district),true)] where not i = ''],', ') as Location, type as Type,
-    apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),
-    toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),
-    toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Population est.`,
-    apoc.coll.sum(apoc.coll.removeAll(`Sample size`,[NULL])) as `Sample size`,Source as `Source`, 'https://catmapper.org/' + $database + '/' + datasetID  as `link2`,
-    Version,cType,Link order by `Time span`, Source, Name
+WITH a, d, r, Source, datasetID, Version,
+     COLLECT(DISTINCT r.categoryType) AS allCTypes
+
+WITH a, d, r, Source, datasetID, Version, allCTypes,
+     SIZE([x IN allCTypes WHERE x IS NOT NULL AND x <> '']) AS cTypeCount
+
+WITH r, d, Source, datasetID, Version, cTypeCount,
+     r.Name AS Name, r.country AS countryID, r.district AS districtID,
+     r.url AS Link, r.recordStart AS recordStart, r.recordEnd AS recordEnd, r.yearStart as yearStart, r.yearEnd as yearEnd,
+     toInteger(r.populationEstimate) AS Population, toInteger(r.sampleSize) AS `Sample size`,
+     r.type AS type,
+     CASE
+       WHEN r.populationEstimate IS NULL OR r.populationEstimate = 0 THEN null
+       WHEN cTypeCount > 1 THEN r.categoryType
+       ELSE null
+     END AS cType
+
+
+CALL apoc.when(countryID IS NOT NULL,
+    'RETURN custom.getName($id) AS country',
+    'RETURN null AS country',
+    {id: countryID}) YIELD value AS country
+
+CALL apoc.when(districtID IS NOT NULL,
+    'RETURN custom.getName($id) AS district',
+    'RETURN null AS district',
+    {id: districtID}) YIELD value AS district
+
+RETURN 
+    custom.anytoList([Name], true) AS Name,
+    apoc.text.join([i IN [country.country, district.district] WHERE i IS NOT NULL AND i <> ''], ', ') AS Location,
+    type AS Type,
+    apoc.text.join([
+        coalesce(toString(recordStart), ''),
+        coalesce(toString(recordEnd), '')
+    ], '-') AS `Time span`,
+    yearStart AS `ystart`,
+    yearEnd AS `yend`,
+    Population AS `Population est.`,
+    `Sample size` AS `Sample size`,
+    Source AS `Source`,
+    'https://catmapper.org/' + $database + '/' + datasetID AS `link2`,
+    Version,
+    cType,
+    Link
+ORDER BY `Time span`, Source, Name
     '''
         qCategories = """
 unwind $cmid as cmid
@@ -152,13 +170,24 @@ return distinct Domain, Count order by Domain
         qSamples = None
 
         qCategories = """
-unwind $cmid as cmid
-match (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY)
-unwind r.label as Domain
-with distinct c, apoc.coll.toSet(apoc.coll.flatten(collect(Domain),true)) as Domains
-unwind Domains as Domain
-with Domain, count(*) as Count
-return distinct Domain, Count order by Domain
+UNWIND $cmid AS cmid
+MATCH (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY)
+
+// Unwind labels per relationship
+UNWIND r.label AS Domain
+
+WITH Domain, c, r
+
+// Count distinct nodes per Domain and collect all uses relationships per Domain
+WITH Domain, 
+     COUNT(DISTINCT c) AS distinctNodeCount,   // distinct CATEGORY nodes per domain
+     COLLECT(r) AS usesRels                    // all :USES rels for this domain
+
+WITH Domain, distinctNodeCount, usesRels, size(usesRels) AS totalUses
+
+RETURN Domain, distinctNodeCount AS Count, totalUses as TotalUses
+ORDER BY Domain
+
 """
     with driver.session() as session:
         info = session.run(qInfo, cmid=cmid)
@@ -1154,9 +1183,19 @@ def getAdminEdit():
             raise Exception("invalid request method")
         database = unlist(data.get('database'))
         fun = unlist(data.get('fun'))
+        user = unlist(data.get('user'))
+        pwd = unlist(data.get('pwd'))
         apikey = unlist(data.get('apikey'))
-        if apikey != apikeyEnv:
-            raise Exception(f"Error: apikey is invalid: {apikey}")
+        validated = False
+        if apikey == apikeyEnv:
+            validated = True
+        if not validated:
+            credentials = login(database, user, pwd)
+            if isinstance(credentials, dict) and credentials.get('role') == "admin":
+                validated = True
+        if not validated:
+            raise Exception("User not authorized")
+
         driver = getDriver(database)
         result = "Nothing returned"
         # if fun == "getUSESrels":
@@ -1168,6 +1207,12 @@ def getAdminEdit():
         elif fun == "processUSES":
             CMID = cleanCMID(data.get('CMID'))
             result = processUSES(database=database, CMID=CMID)
+        elif fun == "replaceProperty":
+            cmid = unlist(data.get('cmid'))
+            property = unlist(data.get('property'))
+            old = unlist(data.get('old'))
+            new = unlist(data.get('new'))
+            result = replaceProperty(cmid, property, old, new, database)
         else:
             raise Exception("Function does not exist")
         return result
