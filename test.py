@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from CM import *
-database = "SocioMap"
+database = "Archamap"
 driver = getDriver(database)
 mail = None
 labels = getQuery(

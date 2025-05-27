@@ -1,6 +1,6 @@
 {
     "[python]": {
-        "editor.defaultFormatter": "ms-python.autopep8",
+        "editor.defaultFormatter": "mikoz.black-py",
         "python.defaultInterpreterPath": "/usr/bin/python3.8"
     },
     "python.REPL.enableREPLSmartSend": false
