@@ -52,12 +52,10 @@ def catm():
     q = "MATCH (n:"+labels+" {CMID:'"+cmid + \
         "'})-[r]-(n1) RETURN DISTINCT TYPE(r) as label"
     rel_name = session.run(q).data()
-    print(rel_name)
     for i in rel_name:
         if i['label'] in relations:
             relnames.append(i['label'])
     driver.close()
-    print(labels)
 
     driver = getDriver(database)
 
@@ -81,17 +79,17 @@ def catm():
     call apoc.when(r.district is not null and not r.district = [],'return custom.getName($id) as name','return null as name',{id:r.district}) yield value as district
     call apoc.when(r.language is not null and not r.language = [],'return custom.getGlot($id) as name','return null as name',{id:r.language}) yield value as language
     call apoc.when(r.religion is not null and not r.religion = [],'return custom.getName($id) as name','return null as name',{id:r.religion}) yield value as religion
-    with a,r,d, country, district, language, religion,
-    case when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is not null then custom.getMinYear(r.yearStart) + '-' + custom.getMaxYear(r.yearEnd)
-    when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is null then custom.getMinYear(r.yearStart) + '-present'
-    when custom.getMinYear(r.yearStart) is null and custom.getMaxYear(r.yearEnd) is not null then custom.getMaxYear(r.yearEnd)
-    else null
-    end as timeSpan
+    with a,r,d, country, district, language, religion
     return a.CMName as CMName, apoc.text.join([i in [custom.anytoList(collect(split(country.name,', ')),true),custom.anytoList(collect(split(district.name,', ')),true)] where not i = ''],', ') as Location,
     a.CMID as CMID, apoc.text.join([i in labels(a) where not i = 'CATEGORY'],', ') as Domains,
-    custom.anytoList(collect(split(language.name,', ')),true) as Languages, custom.anytoList(collect(split(religion.name,', ')),true) as Religions,
-    custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
+    custom.anytoList(collect(split(language.name,', ')),true) as Languages, custom.anytoList(collect(split(religion.name,', ')),true) as Religions
     '''
+    # case when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is not null then custom.getMinYear(r.yearStart) + '-' + custom.getMaxYear(r.yearEnd)
+    # when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is null then custom.getMinYear(r.yearStart) + '-present'
+    # when custom.getMinYear(r.yearStart) is null and custom.getMaxYear(r.yearEnd) is not null then custom.getMaxYear(r.yearEnd)
+    # else null
+    # end as timeSpan
+    # custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
         qSamples = '''
    UNWIND $cmid AS cmid
 MATCH (a)<-[r:USES]-(d:DATASET)
@@ -112,10 +110,9 @@ WITH r, d, Source, datasetID, Version, cTypeCount,
      r.type AS type,
      CASE
        WHEN r.populationEstimate IS NULL OR r.populationEstimate = 0 THEN null
-       WHEN cTypeCount > 1 THEN r.categoryType
+       WHEN cTypeCount >= 1 THEN r.categoryType
        ELSE null
      END AS cType
-
 
 CALL apoc.when(countryID IS NOT NULL,
     'RETURN custom.getName($id) AS country',
@@ -128,15 +125,13 @@ CALL apoc.when(districtID IS NOT NULL,
     {id: districtID}) YIELD value AS district
 
 RETURN 
-    custom.anytoList([Name], true) AS Name,
+    apoc.text.join(Name, ', ') AS Name,
     apoc.text.join([i IN [country.country, district.district] WHERE i IS NOT NULL AND i <> ''], ', ') AS Location,
     type AS Type,
-    apoc.text.join([
-        coalesce(toString(recordStart), ''),
-        coalesce(toString(recordEnd), '')
-    ], '-') AS `Time span`,
-    yearStart AS `ystart`,
-    yearEnd AS `yend`,
+    recordStart AS `rStart`,
+    recordEnd AS `rEnd`,    
+    yearStart AS `yStart`,
+    yearEnd AS `yEnd`,
     Population AS `Population est.`,
     `Sample size` AS `Sample size`,
     Source AS `Source`,
@@ -144,8 +139,13 @@ RETURN
     Version,
     cType,
     Link
-ORDER BY `Time span`, Source, Name
+ORDER BY Source, Name
     '''
+    # apoc.text.join([
+    #     coalesce(toString(recordStart), ''),
+    #     coalesce(toString(recordEnd), '')
+    # ], '-') AS `Time span`,
+
         qCategories = """
 unwind $cmid as cmid
 match (a:ADM0 {CMID: cmid})-[:DISTRICT_OF]-(c:CATEGORY)
@@ -204,8 +204,6 @@ ORDER BY Domain
             samples = []
         driver.close()
 
-    print(info)
-
     if "Dataset Location" in info[0]:
         print(info[0]["Dataset Location"])
         if info[0]["Dataset Location"]:
@@ -216,6 +214,35 @@ ORDER BY Domain
 
     polygons = getPolygon(cmid, driver)
     points = getPoints(cmid, driver)
+    dataset_points = getDatasetPoints(cmid,driver)
+
+    transformed_points = []
+
+    for point in dataset_points:
+        try:
+            geom = json.loads(point["geometry"])
+            coords = geom.get("coordinates")
+            geom_type = geom.get("type")
+
+            if geom_type == "Point" and isinstance(coords, list) and len(coords) == 2:
+                new_point = point.copy()
+                new_point["cood"] = [coords[0], coords[1]]
+                transformed_points.append(new_point)
+
+            elif geom_type == "MultiPoint" and isinstance(coords, list):
+                for lng, lat in coords:
+                    if isinstance(lng, (int, float)) and isinstance(lat, (int, float)):
+                        new_point = point.copy()
+                        new_point["cood"] = [lng, lat]
+                        transformed_points.append(new_point)
+
+            else:
+                point["cood"] = None
+                transformed_points.append(point)
+
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            point["cood"] = None
+            transformed_points.append(point)
 
     with open('poly.json', 'w', encoding='utf-8') as f:
         json.dump(polygons, f, ensure_ascii=False, indent=4)
@@ -244,6 +271,9 @@ ORDER BY Domain
 
     with open('data.json', 'w', encoding='utf-8') as f:
         json.dump(points, f, ensure_ascii=False, indent=4)
+    
+    with open('data1.json', 'w', encoding='utf-8') as f:
+        json.dump(transformed_points, f, ensure_ascii=False, indent=4)
 
     valid_data = []
 
@@ -287,8 +317,6 @@ ORDER BY Domain
                 raise ValueError(
                     f"Unsupported geometry type: {geometry['type']}")
 
-            print(geometry)
-
             entry['geometry'] = geometry
             valid_data.append(entry)
         except (json.JSONDecodeError, KeyError, ValueError) as e:
@@ -327,9 +355,20 @@ ORDER BY Domain
         if info[0]['Location'][-2:-1] == ",":
             info[0]['Location'] = info[0]['Location'][:-2].strip()
 
-    if "Date range" in info[0]:
-        if info[0]["Date range"] == "-":
-            del info[0]["Date range"]
+    # if "Date range" in info[0]:
+    #     if info[0]["Date range"] == "-":
+    #         del info[0]["Date range"]
+    
+    # for obj in samples:
+    #     ystart = obj.get("ystart")
+    #     yend = obj.get("yend")
+    #     if ystart is None and yend is None:
+    #         obj["time_span_2"] = None
+    #     else:
+    #         obj["time_span_2"] = f"{ystart}-{yend}"
+    #     obj.pop("ystart", None)
+    #     obj.pop("yend", None)
+
 
     return jsonify({
         "info": info[0],
@@ -337,7 +376,7 @@ ORDER BY Domain
         "categories": categories,
         "polygons": polygons,
         "points": points,
-        "label": labels,
+        "datasetpoints" : transformed_points,
         "relnames": relnames,
         "polysource": polysources,
         "badsources": bad_sources
@@ -985,6 +1024,8 @@ def getTranslate2():
         data = json.loads(data)
         database = unlist(data.get("database"))
         property = unlist(data.get("property"))
+        if property == "CatMapper ID (CMID)":
+            property = "CMID"
         domain = unlist(data.get("domain"))
         key = unlist(data.get("key"))
         term = unlist(data.get("term"))

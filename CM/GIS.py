@@ -128,6 +128,14 @@ def getPoints(CMID, driver):
         driver.close()
     return points
 
+def getDatasetPoints(CMID, driver):
+    with driver.session() as session:
+        query = "match (c:CATEGORY)<-[r:USES]-(:DATASET {CMID: $CMID}) where not r.geoCoords is null return distinct r.geoCoords as geometry, c.CMName as source"
+        result = session.run(query, CMID=CMID)
+        points = [dict(record) for record in result]
+        driver.close()
+    return points
+
 
 def getRelations(CMID, driver):
     with driver.session() as session:
