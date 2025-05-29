@@ -1,6 +1,8 @@
 ''' admin.py '''
 
 from .utils import *
+from .log import createLog
+from .USES import processUSES
 
 # This is a module for admin functions in CatMapper
 
@@ -8,14 +10,14 @@ import re
 from neo4j import GraphDatabase
 
 
-def replaceProperty(cmid, datasetID, key, property, old, new, database):
+def replaceProperty(cmid, property, old, new, database, datasetID = None, Key = None):
     """
     Replace a specified property value in relationships for a given CMID.
 
     Parameters:
     - cmid: The CMID for which the property replacement should occur.
     - datasetID: The ID of the dataset to be used.
-    - key: The key to identify the relationship.
+    - Key: The key to identify the relationship.
     - property: The name of the property to be replaced.
     - old: The old value to be replaced.
     - new: The new value to replace the old value.
@@ -29,19 +31,27 @@ def replaceProperty(cmid, datasetID, key, property, old, new, database):
     """
     try:
         driver = getDriver(database)
-        query = f"""
-match (:CATEGORY {{CMID: $cmid}})<-[r:USES {{Key: $key}}]-(:DATASET {{CMID: $datasetID}}) 
-where not r.{property} is null 
-with r, case when apoc.meta.cypher.type(r.{property}) contains "LIST" 
-then apoc.coll.toSet([x in [i in r.{property} | where i = $old] where not x = ""]) 
-else replace(r.{property},$old,$new) end as prop 
-with r, prop, case when isEmpty(prop) then NULL else prop end as valid 
-set r.{property} = valid
-"""
+        if datasetID is None and Key is None:
+            query = f"""
+            unwind $cmid as cmid
+            match (:CATEGORY {{CMID: cmid}})<-[r:USES]-(:DATASET) 
+            where not r.{property} is null
+            with r, [i in r.{property} | case when i = $old then $new else i end] as prop
+            set r.{property} = prop
+            """
+        else:
+            if len(cmid) > 0:
+                raise Exception("cmid must be a single value, not a list")
+            query = f"""
+            match (:CATEGORY {{CMID: $cmid}})<-[r:USES {{Key: $key}}]-(:DATASET {{CMID: $datasetID}}) 
+            where not r.{property} is null
+            with r, [i in r.{property} | case when i = $old then $new else i end] as prop
+            set r.{property} = prop
+            """
         getQuery(query, driver, params={
             "cmid": cmid,
             "datasetID": datasetID,
-            "key": key,
+            "key": Key,
             "old": old,
             "new": new
         })
@@ -72,7 +82,7 @@ def getUSESrels(request, driver):
         unwind $cmid as cmid 
         match (a)-[r:USES]->(b) 
         where b.CMID = cmid 
-        return distinct id(r) as relID, 
+        return distinct elementId(r) as relID, 
         a.CMName + '-' + type(r) + '-' + coalesce(r.Key,'') + '->' + b.CMName as relationship 
         order by relationship
         """
@@ -121,7 +131,7 @@ def addCMNametoName(cmid, driver):
 # function to merge nodes
 
 
-def mergeNodes(request, driver):
+def mergeNodes(keepcmid,deletecmid,user,database):
     """
     Merges nodes in a Neo4j database based on specified CMIDs.
 
@@ -137,16 +147,12 @@ def mergeNodes(request, driver):
     """
     try:
 
-        keepcmid = request.args.get('keepcmid')
-        deletecmid = request.args.get('deletecmid')
-        user = request.args.get("user")
-
         if keepcmid == deletecmid:
             raise Exception(f"keepcmid and deletecmid cannot be the same")
+        
+        driver = getDriver(database)
 
         results = [f"Started Combining {deletecmid} into {keepcmid}"]
-
-        session = driver.session()
 
         validKeep = isValidCMID(keepcmid, driver)
 
@@ -165,7 +171,6 @@ def mergeNodes(request, driver):
         if len(deleteKeep) > 0:
             if deleteKeep[0].get("exists") != True:
                 raise Exception(f"{deletecmid} is invalid")
-
         else:
             raise Exception(f"{deletecmid} is invalid")
 
@@ -174,14 +179,32 @@ def mergeNodes(request, driver):
 
         # get EC relID
         query = """
-        unwind $cmid as cmid match (c {CMID: cmid})<-[r:USES]-(d:DATASET {CMID: "SD11"}) return id(r) as relID
+        unwind $cmid as cmid match (c {CMID: cmid})<-[r:USES]-(d:DATASET {CMID: "SD11"}) return elementId(r) as relID
             """
 
-        result = session.run(query, cmid=keepcmid)
-        relID = [item['relID'] for item in result]
+        relID = getQuery(query, driver, params = {"cmid": keepcmid}, type = "list")
 
         results = results + ["relID to keep"]
         results = results + relID
+
+        # replace the CMID in the USES relationships
+        contextProps = getQuery(
+            "match (m:PROPERTY) where m.relationship is not null return m.property as property", driver, type = "list")
+        contextProps.append("parentContext") 
+
+        cmids = getQuery(
+            "match (:CATEGORY {CMID: $deletecmid})-[rel]->(c:CATEGORY) return c.CMID as cmid", driver, params={
+                "deletecmid": deletecmid
+            },
+            type="list"
+        )
+
+        for property in contextProps:
+            results = results + [f"updating {property} with new CMID"]
+            replaceProperty(cmid=cmids, property=property,
+                            old=deletecmid, new=keepcmid, database=database)
+
+        # combine the nodes
 
         query = """
         match (a) where a.CMID = $keepcmid
@@ -192,41 +215,29 @@ def mergeNodes(request, driver):
         CMName:'discard',
         `.*`: 'combine'} })
         YIELD node
-        with node
-        unwind node as a
-        with a
-        MATCH (a)<-[r:USES]-(:DATASET)
-        unwind keys(r) as property
-        return distinct property
+        return node.CMID as CMID
         """
 
 # add in properties for anything that is a parent type node
-        result = session.run(query, keepcmid=keepcmid, deletecmid=deletecmid)
-        properties = [dict(record) for record in result]
-        result = session.run(
-            "match (m:PROPERTY) where m.relationship is not null return m.property as property")
-        contextProps = [dict(record) for record in result]
-        contextProps = [item['property'] for item in contextProps]
-
-        # make sure the second EC tie is combined
-        # call the processUSES function
-        for prop in properties:
-            property = prop['property']
-            if property in contextProps or property == "parentContext":
-                results = results + [f"updating {property} with new CMID"]
-                replaceProperty(cmid=keepcmid, property=property,
-                                old=deletecmid, new=keepcmid, driver=driver)
+        merged = getQuery(query, driver, keepcmid=keepcmid, deletecmid=deletecmid, type = "list")
+        if not keepcmid in merged:
+            raise Exception(f"Failed to merge {deletecmid} into {keepcmid}")
 
         # create deleted node and relationship
         query = """
-        unwind $keepcmid as keepcmid unwind $deletecmid as deletecmid 
+        unwind $keepcmid as keepcmid 
+        unwind $deletecmid as deletecmid 
         match (new {CMID: keepcmid}) 
-        create (del:DELETED {CMID: deletecmid}) set del.log = [toString(date()) + ": merged " + deletecmid + " into " + keepcmid] 
+        create (del:DELETED {CMID: deletecmid}) 
         with new, del 
         create (del)-[:IS]->(new)
+        return elementId(del) as delID
         """
 
-        session.run(query, keepcmid=keepcmid, deletecmid=deletecmid)
+        delID = getQuery(query = query, driver = driver, keepcmid=keepcmid, deletecmid=deletecmid, type = "list")
+
+        createLog(id=delID, type="node",
+                  log=f"deleted {deletecmid} and merged into {keepcmid}", user=user, driver=driver)
 
         # combine EC USES ties
 
@@ -235,23 +246,23 @@ def mergeNodes(request, driver):
             unwind $cmid as cmid 
             match (:DATASET {CMID: "SD11"})-[r:USES]->({CMID: cmid}) 
             with collect(r) as rels 
-            call apoc.do.when(id(head(rels)) in $relID,"call apoc.refactor.mergeRelationships(rels,{properties: {Key: 'discard', language: 'discard',`.*`: 'combine'}}) yield rel 
+            call apoc.do.when(elementId(head(rels)) in $relID,"call apoc.refactor.mergeRelationships(rels,{properties: {Key: 'discard', language: 'discard',`.*`: 'combine'}}) yield rel 
             return count(*) as first","call apoc.refactor.mergeRelationships(rels,{properties: {Key: 'overwrite', language: 'overwrite',`.*`: 'combine'}}) yield rel 
             return count(*) as second",{rels:rels}) yield value 
             return value
             """
 
-            session.run(query, cmid=keepcmid, relID=relID)
+            getQuery(query = query, driver = driver, cmid=keepcmid, relID=relID)
 
         # need to update USES ties
 
-        id = session.run(
-            "unwind $keepcmid as cmid match (n {CMID: cmid}) return id(n) as id", keepcmid=keepcmid)
-        id = [item['id'] for item in id]
-        id = unlist(id)
+        id = getQuery(
+            "unwind $keepcmid as cmid match (n {CMID: cmid}) return elementId(n) as id", driver = driver, keepcmid=keepcmid, type = "list")
         results = results + ["id is:", id]
         createLog(id=id, type="node",
                   log=f"merged {deletecmid} into {keepcmid}", user=user, driver=driver)
+
+        processUSES(database = database, CMID=keepcmid, user="0")
 
         results = results + \
             [f"Completed combining {deletecmid} into {keepcmid}"]

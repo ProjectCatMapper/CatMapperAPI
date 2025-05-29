@@ -14,8 +14,10 @@ from collections.abc import Iterable
 import json
 
 
-def getQuery(query, driver, params=None, type="dict"):
+def getQuery(query, driver, params=None, type="dict", **kwargs):
     try:
+        params = params or {}
+        params.update(kwargs)
         with driver.session() as session:
             result = session.run(query, params)
             if type == "dict":
