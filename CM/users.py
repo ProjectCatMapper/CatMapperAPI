@@ -78,10 +78,13 @@ def login(database, user, password):
         return f"verification failed: {str(e)}", 500
 
 
-def verifyUser(user, pwd):
+def verifyUser(user, pwd, role=None):
     try:
         driver = getDriver("userdb")
-        query = "match (u:USER {userid: toString($user),password: $pwd, access: 'enabled'}) return 'verified' as verified"
+        if role == "admin":
+            query = "match (u:USER {userid: toString($user),password: $pwd, access: 'enabled', role: 'admin'}) return 'verified' as verified"
+        else:
+            query = "match (u:USER {userid: toString($user),password: $pwd, access: 'enabled'}) return 'verified' as verified"
         result = getQuery(query, driver, params={
                           'user': user, 'pwd': pwd}, type='list')
         return result[0]
@@ -89,7 +92,7 @@ def verifyUser(user, pwd):
         return f"Error verifying user: {e}", 500
 
 
-def enableUser(database, process, userid, approver):
+def enableUser(process, userid, approver):
 
     driver = getDriver('userdb')
 
@@ -102,7 +105,7 @@ def enableUser(database, process, userid, approver):
         query = f"""
 unwind $userids as id
 with toString(id) as id
-match (u {{access: 'new', userid: id}}) where '{database}' in u.database 
+match (u {{userid: id}})
 set u.access = 'enabled', u.log = u.log + [toString(datetime()) + ": access approved by {approver}"]
 return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
 """
@@ -110,9 +113,9 @@ return u.userid as userid, u.first as first, u.last as last, u.email as email, u
 
     else:
         query = f"""
-match (u {{access: 'new'}}) where '{database}' in u.database
+match (u {{access: 'pending'}})
 return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
 """
         result = getQuery(query, driver)
 
-        return result
+    return result
