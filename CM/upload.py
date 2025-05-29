@@ -424,8 +424,8 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             updateLog(f"log/{user}uploadProgress.txt", error_message, write="a")
         raise
 
-
-def updateProperty(links, database, user, updateType, propertyType="USES"):
+# function to update or replace properties of USES ties or nodes
+def updateProperty(df, database, user, updateType, propertyType="USES"):
     try:
         # double checking for errors, if in future we call this function elsewhere outside this pipeline
         if not updateType in ["overwrite", "update"]:
@@ -435,34 +435,34 @@ def updateProperty(links, database, user, updateType, propertyType="USES"):
 
         if propertyType == "USES":
             requiredCols = ["datasetID", "CMID", "Key"]
-        elif propertyType == "DATASET":
+        elif propertyType == "NODE":
             requiredCols = ["CMID"]
         else:
             raise Exception("Invalid propertyType")
 
         for required in requiredCols:
-            if required not in links.columns:
+            if required not in df.columns:
                 raise ValueError(f"Missing required column {required}")
 
-        vars = links.drop(
-            columns=[col for col in requiredCols if col in links.columns]
+        vars = df.drop(
+            columns=[col for col in requiredCols if col in df.columns]
         ).columns.tolist()
 
         # log update
         if updateType == "update":
-            links["log"] = links.apply(
+            df["log"] = df.apply(
                 lambda row: f"{time.strftime('%Y-%m-%dT%H:%M:%SZ')} user {user}: updated properties {', '.join([str(var) for var in vars])}",
                 axis=1,
             )
         else:
-            links["log"] = links.apply(
+            df["log"] = df.apply(
                 lambda row: f"{time.strftime('%Y-%m-%dT%H:%M:%SZ')} user {user}: overwrote properties {', '.join([str(var) for var in vars])}",
                 axis=1,
             )
 
-        vars = links.drop(
-            columns=[col for col in requiredCols if col in links.columns]
-        ).columns.tolist()
+        # vars = df.drop(
+        #     columns=[col for col in requiredCols if col in df.columns]
+        # ).columns.tolist()
 
         query = """
 match (n:METADATA:PROPERTY)
@@ -490,6 +490,15 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
         keys = ", ".join(keys)
 
+        old_keys = ", ".join([f"`{var}`: r.{var}" for var in vars])
+        get_old_vals_query = f"""
+        UNWIND $rows AS row
+        MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}})
+        RETURN elementId(r) AS relID, b.CMID AS CMID, row.Key AS Key, row.datasetID AS datasetID,
+            {{ {old_keys} }} AS oldVals
+        """
+        old_values = getQuery(query=get_old_vals_query, driver=driver, params={"rows": df.to_dict(orient="records")})
+
         # Query branching based on uses ties or node properties
         if propertyType == "USES":
             q = f"""
@@ -497,28 +506,66 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}})
             WITH row, r, b
             SET {keys}, r.status = "update"
-            RETURN elementId(b) as nodeID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, row.parent as parent, row.parentContext as parentContext
+            RETURN elementId(b) as nodeID,elementId(r) as relID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, row.parent as parent, row.parentContext as parentContext
             """
         else:
             q = f"""
             UNWIND $rows AS row
-            MATCH (r:DATASET {{CMID: row.CMID}})
+            MATCH (r {{CMID: row.CMID}})
             SET {keys}, r.status = "update"
             RETURN elementId(r) as nodeID, r.CMID as CMID
             """
 
-        links_dict = links.to_dict(orient="records")
+        df_dict = df.to_dict(orient="records")
 
-        result = getQuery(query=q, driver=driver, params={"rows": links_dict})
+        result = getQuery(query=q, driver=driver, params={"rows": df_dict})
 
-        if "geoCoords" in links.columns:
+        logs = []
+
+        for old_row in old_values:
+            rel_id = old_row["relID"]
+            old_vals = old_row["oldVals"]
+
+            input_row = next(
+                (r for r in df_dict
+                if r.get("Key") == old_row.get("Key") and
+                    r.get("CMID") == old_row.get("CMID") and
+                    (propertyType != "USES" or r.get("datasetID") == old_row.get("datasetID"))),
+                {}
+            )
+
+            changes = []
+
+            if updateType == "overwrite":
+                var = vars[0]
+                old_val = old_vals.get(var, "")
+                new_val = input_row.get(var, "")
+                changes.append(f'changed "{var}" from "{old_val}" to "{new_val}"')
+
+            elif updateType == "update":
+                for var in vars:
+                    new_val = input_row.get(var, "")
+                    changes.append(f'added "{var}" with value "{new_val}"')
+
+            logs.append("; ".join(changes))
+                
+        if updateType == "overwrite":
+            createLog(
+                id=[row["relID"] for row in result],
+                type="relation",
+                log=logs,
+                user=user,
+                driver=driver,
+            )
+
+        if "geoCoords" in df.columns:
             updateLog(
                 f"log/{user}uploadProgress.txt", "Updating geo coordinates", write="a"
             )
-            CMIDs = links["CMID"].unique()
+            CMIDs = df["CMID"].unique()
             correct_geojson(CMID=CMIDs, database=database)
 
-        return {"result": result, "links": links_dict}
+        return {"result": result, "df": df_dict}
     except Exception as e:
         return f"Error: {str(e)}"
 
@@ -1097,7 +1144,7 @@ def input_Nodes_Uses(
 
     if "eventType" in dataset.columns:
 
-        valid_event_types = {"SPLIT", "MERGED", "SPLITMERGE", "HIERARCHY", "BECAME", ""}
+        valid_event_types = {"SPLIT", "MERGED", "SPLITMERGE", "HIERARCHY", "FOLLOWS", ""}
 
         invalid_event_types = dataset.loc[
             ~dataset["eventType"].isin(valid_event_types), ["eventType"]

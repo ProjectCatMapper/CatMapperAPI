@@ -26,6 +26,8 @@ def createLog(id, type, log, user, driver):
         for single_id, single_log in zip(id, log)
     ]
 
+    print(rows)
+
     if type == "node":
         query = """
         UNWIND $rows AS row
