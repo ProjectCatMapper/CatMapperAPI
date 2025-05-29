@@ -92,10 +92,10 @@ def catm():
     # custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
         qSamples = '''
    UNWIND $cmid AS cmid
-MATCH (a)<-[r:USES]-(d:DATASET)
+MATCH (a:CATEGORY)<-[r:USES]-(d:DATASET)
 WHERE a.CMID = cmid
 
-WITH a, d, r, d.project AS Source, d.CMID AS datasetID, d.DatasetVersion AS Version
+WITH a, d, r, coalesce(d.project,d.CMName) AS Source, d.CMID AS datasetID, d.DatasetVersion AS Version
 
 WITH a, d, r, Source, datasetID, Version,
      COLLECT(DISTINCT r.categoryType) AS allCTypes
@@ -135,7 +135,7 @@ RETURN
     Population AS `Population est.`,
     `Sample size` AS `Sample size`,
     Source AS `Source`,
-    'https://catmapper.org/' + $database + '/' + datasetID AS `link2`,
+    'https://catmapper.org/' + tolower($database) + '/' + datasetID AS `link2`,
     Version,
     cType,
     Link
@@ -1223,6 +1223,9 @@ def getAdminEdit():
         else:
             raise Exception("invalid request method")
         database = unlist(data.get('database'))
+        if database is None:
+            raise Exception("Database not specified")
+        driver = getDriver(database)
         fun = unlist(data.get('fun'))
         user = unlist(data.get('user'))
         pwd = unlist(data.get('pwd'))
@@ -1234,15 +1237,17 @@ def getAdminEdit():
             credentials = login(database, user, pwd)
             if isinstance(credentials, dict) and credentials.get('role') == "admin":
                 validated = True
+                user = credentials.get('userid')
         if not validated:
             raise Exception("User not authorized")
 
-        driver = getDriver(database)
         result = "Nothing returned"
         # if fun == "getUSESrels":
         #     result = getUSESrels(request,driver)
         if fun == "mergeNodes":
-            result = mergeNodes(request, driver)
+            keepcmid = unlist(data.get('keepcmid'))
+            deletecmid = unlist(data.get('deletecmid'))
+            result = mergeNodes(keepcmid,deletecmid,user,database)
         elif fun == "addIndexes":
             result = addIndexes(driver)
         elif fun == "processUSES":
@@ -1858,50 +1863,39 @@ def updateNewUsers():
     try:
         data = request.get_data()
         data = json.loads(data)
-        database = unlist(data.get('database'))
         credentials = unlist(data.get('credentials'))
         process = unlist(data.get('process'))
         userid = data.get('userid')
-        if database.lower() == "sociomap":
-            database = "SocioMap"
-        elif database.lower() == "archamap":
-            database = "ArchaMap"
-        else:
-            raise Exception("database must be 'SocioMap' or 'ArchaMap'")
-
-        if isinstance(credentials, dict):
-            pass
-        else:
-            credentials = json.loads(credentials)
-
-        if unlist(credentials.get("role")) != "admin":
-            raise Exception("Error: User is not an admin")
-
-        verified = verifyUser(unlist(credentials.get(
-            "userid")), unlist(credentials.get("key")))
-
+        credentials = unlist(credentials)
+    
+        verified = verifyUser(credentials.get(
+            "userid"), credentials.get("key"), "admin")
+        
         if verified != "verified":
             raise Exception("Error: User is not verified")
 
-        approver = unlist(credentials.get("userid"))
+        approver = credentials.get("userid")
 
-        result = enableUser(database=database, process=process,
+        result = enableUser(process=process,
                             userid=userid, approver=approver)
+        
+        if isinstance(result, list): 
 
-        users = [user for user in result if user.get("email")]
-        mail = Mail()
+            users = [user for user in result if user.get("email")]
+            if len(users) > 0:
+                mail = Mail()
 
-        for user in users:
-            body = f"""
-Hello {user.get("first")} {user.get("last")},
+                for user in users:
+                    body = f"""
+        Hello {user.get("first")} {user.get("last")},
 
-Your registration has been approved. You can now access the {'and '.join(user.get("database"))} database. Please see catmapper.org/help or email support@catmapper.org for any questions.
+        Your registration has been approved. You can now access the CatMapper applications. Please see catmapper.org/help or email support@catmapper.org for any questions.
 
-Best,
-CatMapper Team
-            """
-            sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
-                "email"), 'admin@catmapper.org'], body=body, sender="admin@catmapper.org")
+        Best,
+        CatMapper Team
+                    """
+                    sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
+                        "email"), 'admin@catmapper.org'], body=body, sender="admin@catmapper.org")
 
         return result
     except Exception as e:
@@ -1951,6 +1945,8 @@ def download_zip(hash_id):
     else:
         abort(404, description=f"{file_path} not found")
 
+app.add_url_rule('/logs/<database>/<CMID>', 'getLogs',
+                 getLogs, methods=['GET'])
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)
