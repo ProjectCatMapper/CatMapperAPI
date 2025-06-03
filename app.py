@@ -35,26 +35,28 @@ def catm():
     database = request.args.get('database')
 
     driver = getDriver(database)
-
-    relnames = []
-    relations = ["USES", "CONTAINS", "DISTRICT_OF",
-                 "LANGUOID_OF", "RELIGION_OF"]
-    q = "match (a) where a.CMID = '"+cmid + \
-        "' return elementId(a) as id,labels(a) as label"
-    # q = '''unwind $cmid as cmid unwind $relation as relation match (a)-[r]-(b) where a.CMID = cmid and type(r) = relation with b unwind labels(b) as l with l where not l = 'CATEGORY' return distinct l as label'''
     session = driver.session()
-    labels = session.run(q)
-    labels = labels.data()
-    if labels:
-        labels = str(labels[0]['label'][-1])
-    else:
-        labels = ""
-    q = "MATCH (n:"+labels+" {CMID:'"+cmid + \
-        "'})-[r]-(n1) RETURN DISTINCT TYPE(r) as label"
-    rel_name = session.run(q).data()
-    for i in rel_name:
-        if i['label'] in relations:
-            relnames.append(i['label'])
+
+    # this query gets the labels for the node
+    # q = "match (a) where a.CMID = '"+cmid + \
+    #     "' return elementId(a) as id,labels(a) as label"
+    # labels = session.run(q)
+    # labels = labels.data()
+    # if labels:
+    #     labels = str(labels[0]['label'][-1])
+    # else:
+    #     labels = ""
+
+    '''Gets the list of relations for the node'''
+    relnames = []
+    visible_relations = ["USES", "CONTAINS", "DISTRICT_OF",
+                         "LANGUOID_OF", "RELIGION_OF", "PERIOD_OF", "CULTURE_OF", "POLITY_OF"]
+    q = "MATCH (n)-[r]-(n1) WHERE n.CMID='"+cmid + \
+        "' RETURN DISTINCT TYPE(r) as relation_name"
+    node_relation_types = session.run(q).data()
+    for i in node_relation_types:
+        if i['relation_name'] in visible_relations:
+            relnames.append(i['relation_name'])
     driver.close()
 
     driver = getDriver(database)
@@ -214,7 +216,7 @@ ORDER BY Domain
 
     polygons = getPolygon(cmid, driver)
     points = getPoints(cmid, driver)
-    dataset_points = getDatasetPoints(cmid,driver)
+    dataset_points = getDatasetPoints(cmid, driver)
 
     transformed_points = []
 
@@ -271,7 +273,7 @@ ORDER BY Domain
 
     with open('data.json', 'w', encoding='utf-8') as f:
         json.dump(points, f, ensure_ascii=False, indent=4)
-    
+
     with open('data1.json', 'w', encoding='utf-8') as f:
         json.dump(transformed_points, f, ensure_ascii=False, indent=4)
 
@@ -355,28 +357,13 @@ ORDER BY Domain
         if info[0]['Location'][-2:-1] == ",":
             info[0]['Location'] = info[0]['Location'][:-2].strip()
 
-    # if "Date range" in info[0]:
-    #     if info[0]["Date range"] == "-":
-    #         del info[0]["Date range"]
-    
-    # for obj in samples:
-    #     ystart = obj.get("ystart")
-    #     yend = obj.get("yend")
-    #     if ystart is None and yend is None:
-    #         obj["time_span_2"] = None
-    #     else:
-    #         obj["time_span_2"] = f"{ystart}-{yend}"
-    #     obj.pop("ystart", None)
-    #     obj.pop("yend", None)
-
-
     return jsonify({
         "info": info[0],
         "samples": samples,
         "categories": categories,
         "polygons": polygons,
         "points": points,
-        "datasetpoints" : transformed_points,
+        "datasetpoints": transformed_points,
         "relnames": relnames,
         "polysource": polysources,
         "badsources": bad_sources
@@ -1247,7 +1234,7 @@ def getAdminEdit():
         if fun == "mergeNodes":
             keepcmid = unlist(data.get('keepcmid'))
             deletecmid = unlist(data.get('deletecmid'))
-            result = mergeNodes(keepcmid,deletecmid,user,database)
+            result = mergeNodes(keepcmid, deletecmid, user, database)
         elif fun == "addIndexes":
             result = addIndexes(driver)
         elif fun == "processUSES":
@@ -1867,10 +1854,10 @@ def updateNewUsers():
         process = unlist(data.get('process'))
         userid = data.get('userid')
         credentials = unlist(credentials)
-    
+
         verified = verifyUser(credentials.get(
             "userid"), credentials.get("key"), "admin")
-        
+
         if verified != "verified":
             raise Exception("Error: User is not verified")
 
@@ -1878,8 +1865,8 @@ def updateNewUsers():
 
         result = enableUser(process=process,
                             userid=userid, approver=approver)
-        
-        if isinstance(result, list): 
+
+        if isinstance(result, list):
 
             users = [user for user in result if user.get("email")]
             if len(users) > 0:
@@ -1915,6 +1902,9 @@ app.add_url_rule('/routines/<routine>/<database>', 'get_routines',
 app.add_url_rule('/admin/query/<database>', 'getRouteQuery',
                  getRouteQuery, methods=['POST'])
 
+app.add_url_rule('/CSVURLs/<database>', 'get_backup_csv_urls_route',
+                 get_backup_csv_urls_route, methods=['GET'])
+
 
 @app.route("/download/test", methods=["GET"])
 def test_download():
@@ -1944,6 +1934,7 @@ def download_zip(hash_id):
         return send_from_directory(TMP_DIR, filename, as_attachment=True)
     else:
         abort(404, description=f"{file_path} not found")
+
 
 app.add_url_rule('/logs/<database>/<CMID>', 'getLogs',
                  getLogs, methods=['GET'])
