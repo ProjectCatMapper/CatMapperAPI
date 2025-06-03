@@ -20,7 +20,7 @@ def get_routines(routine, database):
             CMID = request.args.get('CMID')
             result = processUSES(database=database, CMID=CMID)
         elif fun == "backup2CSV":
-            result = backup2CSV(database, mail)
+            result = backup2CSV(database)
         elif fun == "getBadJSON":
             result = getBadJSON(database, mail)
         elif fun == "getBadCMID":
