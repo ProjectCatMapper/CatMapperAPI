@@ -101,23 +101,51 @@ def checkDomains(data, database):
 def backup2CSV(database, mail=None):
     try:
         driver = getDriver(database)
-        query = """
-            with 'match (d:DATASET) unwind keys(d) as property return distinct id(d) as nodeID, property, d[property] as value' as query CALL apoc.export.csv.query(query, '/backups/datasetNodes.csv', {})
+
+        results = [database]
+        query_datasets = """
+            with 'match (d:DATASET) unwind keys(d) as property return distinct elementId(d) as nodeID, property, d[property] as value' as query CALL apoc.export.csv.query(query, '/backups/download/datasetNodes_' + toString(date()) + '.csv', {})
             YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
             RETURN count(*);
         """
 
-        result = getQuery(query, driver)
-        print(result)
+        datasets = getQuery(query_datasets, driver)
+        results.append(datasets)
 
-        query2 = """
-            with 'match (n:CATEGORY)<-[r:USES]-(d:DATASET) unwind keys(r) as property return distinct id(r) as relID, n.CMID as CMID, n.CMName as CMName, d.CMName as dataset, d.CMID as datasetID, property, r[property] as value order by CMName' as query CALL apoc.export.csv.query(query, '/backups/USESties.csv', {})
+        query_CATEGORIES = """
+            with 'match (d:CATEGORY) unwind keys(d) as property return distinct elementId(d) as nodeID, property, d[property] as value' as query CALL apoc.export.csv.query(query, '/backups/download/categoryNodes_' + toString(date()) + '.csv', {})
+            YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
+            RETURN count(*);
+        """
+
+        CATEGORIES = getQuery(query_CATEGORIES, driver)
+        results.append(CATEGORIES)
+
+        query_USES = """
+            with 'match (n:CATEGORY)<-[r:USES]-(d:DATASET) 
+            unwind keys(r) as property with n,r,d, property where not property = "logID" return distinct elementId(r) as relID, n.CMID as CMID, n.CMName as CMName, d.CMName as dataset, d.CMID as datasetID, property, r[property] as value order by CMName' as query CALL apoc.export.csv.query(query, '/backups/download/USESties_' + toString(date()) + '.csv', {})
             YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
             RETURN count(*);
             """
 
-        result2 = getQuery(query2, driver)
-        # print(result2)
+        USES = getQuery(query_USES, driver)
+        results.append(USES)
+
+        query_DELETED = """
+            with 'match (d:DELETED) optional match (d)-[:IS]-(now) unwind keys(d) as property return distinct elementId(d) as nodeID, elementId(now) as newNodeID, d.CMID as CMID, now.CMID as newCMID' as query CALL apoc.export.csv.query(query, '/backups/download/deletedNodes_' + toString(date()) + '.csv', {})
+            YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
+            RETURN count(*);
+            """
+        DELETED = getQuery(query_DELETED, driver)
+        results.append(DELETED)
+
+        # query_LOGS = """
+        #     with 'match (l:LOG) unwind keys(l) as property return distinct elementId(l) as nodeID, property, l[property] as value' as query CALL apoc.export.csv.query(query, '/backups/download/logs_' + toString(date()) + '.csv', {})
+        #     YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
+        #     RETURN count(*);
+        # """
+        # LOGS = getQuery(query_LOGS, driver)
+        # print(LOGS)
 
         if mail:
             sendEmail(mail, subject="Weekly CSV Backup", recipients=[

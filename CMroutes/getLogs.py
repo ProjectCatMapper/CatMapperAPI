@@ -8,7 +8,7 @@ def getLogs(database, CMID):
         return "Database connection failed."
     
     query = """
-    MATCH (a {CMID: $CMID})<-[:HAS_LOG]-(log:LOG)
+    MATCH (a {CMID: $CMID})-[:HAS_LOG]->(log:LOG)
     return "node" as log_type, elementId(log) as ID, log.user as user, log.action as action, log.timestamp as timestamp
     order by timestamp desc
     UNION ALL
