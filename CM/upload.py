@@ -897,15 +897,6 @@ def input_Nodes_Uses(
             except (ValueError, TypeError):
                 return f"Longitude for CMID {row['datasetID']} is not a valid number."
 
-    """ Robert - handled above, please verify."""
-    # if "eventDate" in dataset.columns:
-    #     updateLog(f"log/{user}uploadProgress.txt", f"checking eventDate", write="a")
-    #     dataset["eventDate"] = pd.to_numeric(
-    #         dataset["eventDate"], errors="coerce"
-    #     ).astype(
-    #         "Int64"
-    #     )  # Use 'Int64' to support NaNs
-
     """ Replaces nan/NA values with None and then replaces all none with "" """
     """ Also converts everything to string """
     dataset = dataset.replace({np.nan: None, pd.NA: None})
@@ -1431,30 +1422,6 @@ def input_Nodes_Uses(
             else:
                 dataset = combine_properties(dataset, ["datasetID", "Key"])
 
-    # updating the format of the mention columns.
-    if (
-        "yearStart" in dataset.columns
-        or "yearEnd" in dataset.columns
-        or "recordStart" in dataset.columns
-        or "recordEnd" in dataset.columns
-        or "sampleSize" in dataset.columns
-    ):
-        updateLog(
-            f"log/{user}uploadProgress.txt", "updating integer columns", write="a"
-        )
-        date_columns = [
-            "yearStart",
-            "yearEnd",
-            "recordStart",
-            "recordEnd",
-            "sampleSize",
-        ]
-        for col in date_columns:
-            if col in dataset.columns:
-                dataset[col] = dataset[col].apply(
-                    lambda x: x if pd.isna(x) or x == "" else str(int(float(x)))
-                )
-
     """End of error checking and data pre-processing. Begin batch upload."""
 
     sq = range(0, len(dataset), batchSize)
@@ -1550,24 +1517,19 @@ def input_Nodes_Uses(
                 newly_created_nodes = createNodes(nodes, database, user=user, uniqueID=uniqueID)
                 newly_created_nodes = pd.DataFrame(newly_created_nodes)
                 newly_created_nodes = newly_created_nodes.astype(str)
-                print(newly_created_nodes)
                 sub_dataset = sub_dataset.astype(str)
-                print(sub_dataset)
-                join_cols = list(set(sub_dataset.columns.intersection(newly_created_nodes.columns)))
+                #join_cols = list(set(sub_dataset.columns.intersection(newly_created_nodes.columns)))
                 dataset_match = sub_dataset.merge(
                             newly_created_nodes[["importID", "CMID"]],
                             on="importID",
                             how="left",
                             suffixes=('', '_new')
                         )
-                print(dataset_match)
                 dataset_match["CMID"] = dataset_match["CMID"].where(
                                 dataset_match["CMID"].astype(str).str.strip() != '',
                                 dataset_match["CMID_new"]
                             )
                 dataset_match = dataset_match.drop(columns=["CMID_new"])
-                print(dataset_match)
-
             else:
                 dataset_match = sub_dataset.copy()
 
