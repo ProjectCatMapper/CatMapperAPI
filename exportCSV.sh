@@ -17,5 +17,8 @@ echo "$response"
 
 chmod -R 777 /mnt/storage/app/db/sociomap1/backups;
 chmod -R 777 /mnt/storage/app/db/archamap1/backups;
+
+
+
 sudo -u rjbischo aws s3 sync /mnt/storage/app/db/sociomap1/backups/download s3://sociomap-backups/sociomap1-backups/download/ --acl public-read;
 sudo -u rjbischo aws s3 sync /mnt/storage/app/db/archamap1/backups/download s3://sociomap-backups/archamap-backups/download/ --acl public-read;
