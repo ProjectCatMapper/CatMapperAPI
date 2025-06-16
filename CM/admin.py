@@ -128,8 +128,24 @@ def addCMNametoName(cmid, driver):
     except Exception as e:
         return str(e), 500
 
-# function to merge nodes
+def moveUSESValidate(relid, database):
+    
+    driver = getDriver(database)
 
+    query = """
+    match (p:CATEGORY)<-[r:USES]-(d:DATASET)
+    where elementId(r) = $relid
+    match (p)<-[r2:USES]-(d)
+    with p,d, collect(r2) as rels, count(*) as n
+    where n > 1
+    with p,d
+    match (p)-[rel]->(c:CATEGORY)<-[r3:USES]-(d)
+    where not isEmpty([i in keys(r3) where p.CMID in r3[i]])
+    return c.CMID as childCMID, c.CMName as childCMName, r3.Key as childKey, type(rel) as relationship
+    """
+    result = getQuery(query, driver, params={"relid": relid})
+
+    return result
 
 def mergeNodes(keepcmid,deletecmid,user,database):
     """
@@ -288,3 +304,4 @@ def addIndexes(driver):
         return "Completed"
     except Exception as e:
         return str(e), 500
+
