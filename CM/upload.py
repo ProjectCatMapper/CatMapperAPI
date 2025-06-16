@@ -120,51 +120,46 @@ def updateLog(f, txt, write="a"):
     except Exception as e:
         print(e)
 
+def add_to_names_for_dataset(row):
+        # Extract base names as a list
+        if pd.isna(row["names"]):
+            names_list = []
+        elif ";" in row["names"]:
+            names_list = [name.strip() for name in row["names"].split(";") if name.strip()]
+        else:
+            names_list = [row["names"].strip()]
 
-def createNodes(df, database, user, uniqueID=None):
+        # Append CMID, shortName, and DatasetCitation if they exist
+        for col in ["CMID", "shortName", "DatasetCitation"]:
+            val = row.get(col)
+            if pd.notna(val):
+                names_list.append(str(val).strip())
+        
+        return names_list
+
+def createNodes(df, database,isDataset, user, uniqueID=None):
     try:
 
         driver = getDriver(database)
 
-        labels = getQuery(
-            "MATCH (l:LABEL) return l.label as label", driver, type="list"
-        )
-
         df = df.copy()
 
-        if "label" in df.columns:
-            if "DATASET" in df["label"].values:
-                isDataset = True
-            else:
-                isDataset = False
-        else:
-            raise Exception("Error: label column is required.")
-
-        if "CATEGORY" in df["label"].values:
-            raise Exception("Error: label must be more specific than CATEGORY")
-
-        if not all(label in labels for label in df["label"].unique()):
-            raise Exception("Error: label is not valid. Maybe check the spelling")
-
+        isDataset = isDataset
+          
         idlabel = "CATEGORY"
+        # creating names column form existing CMID,shortName and DatasetCitation
         if isDataset:
             required = ["CMName", "label", "DatasetCitation", "shortName"]
+            if "names" not in df.columns:
+                df["names"] = None
+            df["names"] = df.apply(add_to_names_for_dataset, axis=1)
             idlabel = "DATASET"
         else:
             required = ["CMName", "label"]
             df["label"] = df["label"].apply(lambda x: f"CATEGORY:{x}")
 
-        missing = [column for column in required if column not in df.columns]
-        if missing:
-            raise Exception(
-                f"Error: missing required columns to create new node: {missing}"
-            )
-
-        # if not all(column in df.columns for column in required):
-        #     raise Exception(
-        #         "Error: missing required columns to create new node.")
-
         # ad-hoc column for row recognition on query return
+        #check with robert
         if not uniqueID in df.columns or uniqueID is None:
             getQuery(
                 "MATCH (c) where not c.uniqueID is null set c.uniqueID = NULL", driver
@@ -747,7 +742,8 @@ def input_Nodes_Uses(
     geocode=False,
     batchSize=1000,
 ):
-
+    
+    
     updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write="w")
 
     if user is None:
@@ -773,6 +769,8 @@ def input_Nodes_Uses(
 
     dataset_dup = dataset.copy(deep=True)
     dataset_for_results = dataset.copy(deep=True)
+    dataset_for_results = dataset_for_results.astype(str)
+    dataset_for_results["importID"] = dataset_for_results.index + 1
 
     # trim whitespace
     dataset = dataset.applymap(lambda x: x.strip() if isinstance(x, str) else x)
@@ -793,6 +791,8 @@ def input_Nodes_Uses(
         raise ValueError(
             f"database must be either 'SocioMap' or 'ArchaMap', but value was '{database}'"
         )
+    
+    driver = getDriver(database)
 
     updateLog(f"log/{user}uploadProgress.txt", f"working on data validation", write="a")
 
@@ -828,15 +828,17 @@ def input_Nodes_Uses(
     if isDataset:
         if uploadOption == "add_node":
             required = ["CMName", "label", "shortName", "DatasetCitation"]
-        else:
+        elif uploadOption == "node_add" or uploadOption == "node_replace":
             required = ["CMID"]
     else:
         if uploadOption == "add_node":
             required = ["CMName", "Name", "label", "Key", "datasetID"]
         elif uploadOption == "add_uses":
             required = ["Name", "CMID", "Key", "datasetID", "label"]
-        else:
+        elif uploadOption == "update_add" or uploadOption == "update_replace":
             required = ["CMID", "Key", "datasetID"]
+        elif uploadOption == "node_replace":
+            required = ["CMID"]
     column_names = required + nodeProperties + linkProperties
 
     # Remove None values
@@ -851,6 +853,22 @@ def input_Nodes_Uses(
     if len(errors) > 0:
         updateLog(f"log/{user}uploadProgress.txt", "\n".join(errors), write="a")
         raise ValueError("\n".join(errors))
+        
+    #checking label validity
+    if "label" in column_names:
+
+        labels = getQuery(
+            "MATCH (l:LABEL) return l.label as label", driver, type="list"
+        )
+
+        print(dataset["label"].unique())
+
+        if not all(label in labels for label in dataset["label"].unique()):
+            raise Exception("Error: label is not valid. Maybe check the spelling")
+                
+        if "CATEGORY" in dataset["label"].values:
+            raise Exception("Error: label must be more specific than CATEGORY")
+        
 
     """Numeric checks"""
 
@@ -905,14 +923,13 @@ def input_Nodes_Uses(
     dataset = dataset.replace({"nan": "", "<NA>": "", "None": ""})
 
     data_dict = dataset.to_dict(orient="records")
-    driver = getDriver(database)
 
     """ CMID checks """
 
     # checks for all CMIDS to be either category or dataset
-    cmids = dataset["CMID"].astype(str)[(dataset["CMID"] != '')]
-
     if "CMID" in dataset.columns:
+        cmids = dataset["CMID"].astype(str)[(dataset["CMID"] != '')]
+
         if (
             not cmids.str.startswith(("SD", "AD")).all()
             and not cmids.str.startswith(("SM", "AM")).all()
@@ -944,15 +961,22 @@ def input_Nodes_Uses(
             RETURN row.value AS value, COUNT(n) AS count
             """
             rows_to_check = []
+            seen_values = set()
             for row in data_dict:
                 if row.get(i):
                     if i in multi_value_columns:
                         values = [
                             val.strip() for val in row[i].split(";") if val.strip()
                         ]
-                        rows_to_check.extend([{"value": v} for v in values])
+                        #rows_to_check.extend([{"value": v} for v in values])
                     else:
-                        rows_to_check.append({"value": str(row[i])})
+                        #rows_to_check.append({"value": str(row[i])})
+                        values = [str(row[i])]
+            
+                    for v in values:
+                        if v not in seen_values:
+                            seen_values.add(v)
+                            rows_to_check.append({"value": v})
 
             if not rows_to_check:
                 continue
@@ -985,7 +1009,7 @@ def input_Nodes_Uses(
                         )
 
                     raise ValueError(" ".join(message_parts))
-
+                
     # checking if label of CMID in spreadsheet matches label in database
     if "label" in dataset.columns and "CMID" in dataset.columns:
         updateLog(
@@ -1472,6 +1496,7 @@ def input_Nodes_Uses(
 
             sub_dataset = sub_dataset.fillna("")
 
+            #list of column names - required + nodeproperties +uniqueID
             node_columns = ["CMName", uniqueID, "label"] + nodeProperties
             node_columns = [col for col in node_columns if col in sub_dataset.columns]
             node_columns = list(dict.fromkeys(node_columns))
@@ -1514,22 +1539,24 @@ def input_Nodes_Uses(
                     "Adding nodes with columns: " + ", ".join(nodes.columns),
                     write="a",
                 )
-                newly_created_nodes = createNodes(nodes, database, user=user, uniqueID=uniqueID)
+                newly_created_nodes = createNodes(nodes, database,isDataset, user=user, uniqueID=uniqueID)
                 newly_created_nodes = pd.DataFrame(newly_created_nodes)
                 newly_created_nodes = newly_created_nodes.astype(str)
                 sub_dataset = sub_dataset.astype(str)
                 #join_cols = list(set(sub_dataset.columns.intersection(newly_created_nodes.columns)))
                 dataset_match = sub_dataset.merge(
-                            newly_created_nodes[["importID", "CMID"]],
+                            newly_created_nodes[["importID", "CMID", "nodeID"]],
                             on="importID",
                             how="left",
                             suffixes=('', '_new')
                         )
-                dataset_match["CMID"] = dataset_match["CMID"].where(
-                                dataset_match["CMID"].astype(str).str.strip() != '',
-                                dataset_match["CMID_new"]
-                            )
-                dataset_match = dataset_match.drop(columns=["CMID_new"])
+                
+                if "CMID_new" in dataset_match.columns:
+                    dataset_match["CMID"] = dataset_match["CMID"].where(
+                                    dataset_match["CMID"].astype(str).str.strip() != '',
+                                    dataset_match["CMID_new"]
+                                )
+                    dataset_match = dataset_match.drop(columns=["CMID_new"])
             else:
                 dataset_match = sub_dataset.copy()
 
@@ -1735,7 +1762,6 @@ def input_Nodes_Uses(
                     result = createUSES(
                         links=links, database=database, user=user, create="MERGE"
                     )
-                    print(result)
                 if isinstance(result, str):
                     updateLog(f"log/{user}uploadProgress.txt", result, write="a")
                     raise ValueError(result)
@@ -1874,18 +1900,52 @@ def input_Nodes_Uses(
     final_result = final_result.dropna(axis=1, how="any")
     final_result = final_result.dropna(how="all").reset_index(drop=True).copy()
 
-    cols = list({x for x in column_names if x in dataset_for_results.columns})
-    cols = list({x for x in cols if x in final_result.columns})
+    if uploadOption == "add_node":
 
-    dataset_for_results = dataset_for_results[cols]
+        final_result = add_error_column(final_result, user)
+        final_result = final_result.fillna("")
+        final_result = final_result.drop_duplicates()
 
-    final_result = pd.merge(dataset_for_results, final_result, how="left", on=cols)
+        """with open(f"log/{user}uploadProgress.txt", 'a') as f:
+            f.write("Completed dataset upload\n")"""
 
-    final_result = add_error_column(final_result, user)
-    final_result = final_result.fillna("")
-    final_result = final_result.drop_duplicates()
+        return final_result
+    
+    elif uploadOption == "node_replace" or uploadOption == "node_add":
 
-    """with open(f"log/{user}uploadProgress.txt", 'a') as f:
-        f.write("Completed dataset upload\n")"""
+        dataset_for_results = dataset_for_results.rename(columns={col: f"{col}_input" for col in dataset_for_results.columns if col != "importID"})
 
-    return final_result
+        final_result = final_result.rename(columns={col: f"{col}_new" for col in final_result.columns if col != "importID"})
+
+        final_result = pd.merge(dataset_for_results, final_result, how="left", on="CMID")
+
+        final_result = add_error_column(final_result, user)
+        final_result = final_result.fillna("")
+        final_result = final_result.drop_duplicates()
+
+        """with open(f"log/{user}uploadProgress.txt", 'a') as f:
+            f.write("Completed dataset upload\n")"""
+
+        return final_result
+    
+    else:
+
+        #cols = list({x for x in column_names if x in dataset_for_results.columns})
+        #cols = list({x for x in cols if x in final_result.columns})
+
+        #dataset_for_results = dataset_for_results[cols]
+
+        dataset_for_results = dataset_for_results.rename(columns={col: f"{col}_input" for col in dataset_for_results.columns if col != "importID"})
+
+        final_result = final_result.rename(columns={col: f"{col}_new" for col in final_result.columns if col != "importID"})
+
+        final_result = pd.merge(dataset_for_results, final_result, how="left", on=["CMID","Key","Dataset"])
+
+        final_result = add_error_column(final_result, user)
+        final_result = final_result.fillna("")
+        final_result = final_result.drop_duplicates()
+
+        """with open(f"log/{user}uploadProgress.txt", 'a') as f:
+            f.write("Completed dataset upload\n")"""
+
+        return final_result

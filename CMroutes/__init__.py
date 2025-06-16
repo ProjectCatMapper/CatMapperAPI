@@ -1,5 +1,5 @@
 from .test_routes import *
-from .merge_routes import *
+from .admin_routes import *
 from .routines import *
 from .query import *
 from .getLogs import *

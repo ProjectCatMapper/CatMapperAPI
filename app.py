@@ -997,7 +997,6 @@ def getSearch():
             limit,
             query
         )
-        print(result)
         return result
 
     except Exception as e:
@@ -1866,7 +1865,7 @@ def updateNewUsers():
         result = enableUser(process=process,
                             userid=userid, approver=approver)
 
-        if isinstance(result, list):
+        if isinstance(result, list) and process == "approve":
 
             users = [user for user in result if user.get("email")]
             if len(users) > 0:
@@ -1938,6 +1937,9 @@ def download_zip(hash_id):
 
 app.add_url_rule('/logs/<database>/<CMID>', 'getLogs',
                  getLogs, methods=['GET'])
+
+app.add_url_rule('/admin/moveUSESValidate/<database>/<relid>', 'get_moveUSESValidate',
+                 get_moveUSESValidate, methods=['GET'])
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)

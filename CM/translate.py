@@ -21,11 +21,7 @@ def search(
     if domain == "AREA":
         domain = "DISTRICT"
 
-    print("check0")
-
     driver = getDriver(database)
-
-    print("check1")
 
     if term:
         term = term.strip()
@@ -220,8 +216,6 @@ def search(
 
     cypher_query = qStart + qDomain + qUnique + qCountryFilter + \
         qContext + qYear + qLimit + qCountry + qReturn
-
-    print("hi")
 
     if query != 'true':
         data = getQuery(cypher_query, driver, params={
