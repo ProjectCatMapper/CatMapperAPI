@@ -203,6 +203,7 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         updateLog(
             f"log/{user}uploadProgress.txt", "Creating variable clauses", write="a"
         )
+        print(vars)
         set_clause = ", ".join([f"a.{var} = row.{var}" for var in vars])
 
         return_clause = ", ".join([f"a.{var} as {var}" for var in vars])
@@ -736,6 +737,7 @@ def input_Nodes_Uses(
     formatKey=False,
     nodeProperties=None,
     linkProperties=None,
+    optionalProperties = None,
     user=None,
     addDistrict=False,
     addRecordYear=False,
@@ -1539,6 +1541,7 @@ def input_Nodes_Uses(
                     "Adding nodes with columns: " + ", ".join(nodes.columns),
                     write="a",
                 )
+                print(nodes.info())
                 newly_created_nodes = createNodes(nodes, database,isDataset, user=user, uniqueID=uniqueID)
                 newly_created_nodes = pd.DataFrame(newly_created_nodes)
                 newly_created_nodes = newly_created_nodes.astype(str)
