@@ -71,3 +71,5 @@ chmod -R 777 /mnt/storage/app/db/archamap1/backups;
 chmod -R 777 /mnt/storage/app/db/sociomap1/backups;
 
 chmod -R 777 /mnt/storage/app/GISdb/backups;
+
+/mnt/storage/app/CatMapperAPI/syncBackups.sh;
