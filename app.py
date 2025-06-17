@@ -542,6 +542,7 @@ def upload_API():
         data = request.get_data()
         data = json.loads(data)
         df = data.get("df")
+        print(df)
         database = unlist(data.get("database"))
         formData = unlist(data.get("formData"))
         label = formData["domain"]
@@ -556,7 +557,9 @@ def upload_API():
         CMID = formData["cmidColumn"]
         Key = formData["keyColumn"]
 
-        linkProperties = data.get("linkContext")
+        linkProperties = data.get("allContext")
+        print(linkProperties)
+        optionalProperties = linkProperties
         if not linkProperties:
             linkProperties = None
 
@@ -599,6 +602,7 @@ def upload_API():
                 formatKey=False,
                 nodeProperties=nodeProperties,
                 linkProperties=linkProperties,
+                optionalProperties = optionalProperties,
                 user=user,
                 addDistrict=addDistrict,
                 addRecordYear=addRecordYear,
@@ -637,7 +641,7 @@ def upload_API():
         if isinstance(response, pd.DataFrame):
             n = len(response)
             response_dict = response.to_dict(orient='records')
-            return {"message": f"Upload completed for {n} row(s)", "file": response_dict}
+            return jsonify({"message": f"Upload completed for {n} row(s)", "file": response_dict})
         # else:
         #     return "Error!! Check your file."
 
