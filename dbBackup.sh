@@ -8,6 +8,7 @@ if [ "$#" -eq 0 ]; then
     run_sociomap=1
     run_archamap=1
     run_gisdb=1
+    run_userdb=1
 else
     # Parameter provided, check which section to run
     case "$1" in
@@ -31,11 +32,7 @@ fi
 if [ "$run_sociomap" -eq 1 ]; then
     docker stop sociomap1;
 
-    docker run --interactive --rm \
-        -v /mnt/storage/app/db/sociomap1/data:/var/lib/neo4j/data  \
-        -v /mnt/storage/app/db/sociomap1/backups:/var/lib/neo4j/backups \
-        neo4j/neo4j-admin:5.26.0-community-debian \
-        neo4j-admin database dump neo4j --to-path=backups --overwrite-destination=true;
+    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/db/sociomap1/backups/neo4j-backup.tar.zst /mnt/storage/app/db/sociomap1/data
 
     docker start sociomap1;
 fi
@@ -44,11 +41,7 @@ fi
 if [ "$run_archamap" -eq 1 ]; then
     docker stop archamap1;
 
-    docker run --interactive --rm \
-        -v /mnt/storage/app/db/archamap1/data:/var/lib/neo4j/data  \
-        -v /mnt/storage/app/db/archamap1/backups:/var/lib/neo4j/backups \
-    neo4j/neo4j-admin:5.26.0-community-debian \
-    neo4j-admin database dump neo4j --to-path=backups --overwrite-destination=true;
+    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/db/archamap1/backups/neo4j-backup.tar.zst /mnt/storage/app/db/archamap1/data
 
     docker start archamap1;
 fi
@@ -57,14 +50,20 @@ fi
 if [ "$run_gisdb" -eq 1 ]; then
     docker stop gisdb;
 
-    docker run --interactive --rm \
-        -v /mnt/storage/app/GISdb/data:/var/lib/neo4j/data  \
-        -v /mnt/storage/app/GISdb/backups:/var/lib/neo4j/backups \
-    neo4j/neo4j-admin:5.26.0-community-debian \
-    neo4j-admin database dump neo4j --to-path=backups --overwrite-destination=true;
+    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/GISdb/backups/neo4j-backup.tar.zst /mnt/storage/app/GISdb/data
 
     docker start gisdb;
 fi
+
+# userdb
+if [ "$run_gisdb" -eq 1 ]; then
+    docker stop userdb;
+
+    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/userdb/backups/neo4j-backup.tar.zst /mnt/storage/app/userdb/data
+
+    docker start userdb;
+fi
+
 
 sleep 10
 chmod -R 777 /mnt/storage/app/db/archamap1/backups;
@@ -73,4 +72,6 @@ chmod -R 777 /mnt/storage/app/db/sociomap1/backups;
 
 chmod -R 777 /mnt/storage/app/GISdb/backups;
 
-/mnt/storage/app/CatMapperAPI/syncBackups.sh;
+chmod -R 777 /mnt/storage/app/userdb/backups;
+
+sudo -u rjbischo /mnt/storage/app/CatMapperAPI/syncBackups.sh;

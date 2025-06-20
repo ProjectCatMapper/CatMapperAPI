@@ -8,3 +8,5 @@ aws s3 sync /mnt/storage/app/db/archamap1/backups/ s3://catmapper/backups/archam
 
 aws s3 sync /mnt/storage/app/GISdb/backups/ s3://catmapper/backups/gisdb/;
 
+aws s3 sync /mnt/storage/app/userdb/backups/ s3://catmapper/backups/userdb/;
+
