@@ -500,7 +500,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             UNWIND $rows AS row
             MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}})
             WITH row, r, b
-            SET {keys}, r.status = "update"
+            SET {keys}, r.status = 'update'
             RETURN elementId(b) as nodeID,elementId(r) as relID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, {return_props}
             """
         else:
@@ -608,6 +608,8 @@ def combine_names_and_altNames(df, name_col, alt_name_col):
 
 
 def to_geojson_point(coordinates):
+
+    print(coordinates)
 
     if len(coordinates) == 1:
         coordinates = coordinates[0]
@@ -721,6 +723,31 @@ def process_parent_context_element(element):
 
     except ValueError:
         return None
+    
+#cleans parentContext json strings and removes parentcontext if parent is the only component
+    
+def filter_dict(d):
+    filtered_dict = ""
+    try:
+        d = json.loads(d)
+
+        if pd.isna(d.get("parent", None)) or d.get("parent", "") == "":
+            filtered_dict = ""
+        else:
+            filtered_dict = {
+            k: v
+            for k, v in d.items()
+            if pd.notna(v) and v != ""
+            }
+
+            # If 'parent' is the only key remaining, return an empty string
+            if list(filtered_dict.keys()) == ["parent"]:
+                filtered_dict = ""
+        
+    except json.JSONDecodeError:
+        return ""
+    
+    return filtered_dict
 
 
 def input_Nodes_Uses(
@@ -761,10 +788,11 @@ def input_Nodes_Uses(
     
     dataset = pd.DataFrame(dataset)
 
-    dataset_dup = dataset.copy(deep=True)
     dataset_for_results = dataset.copy(deep=True)
-    dataset_for_results = dataset_for_results.astype(str)
     dataset_for_results["importID"] = dataset_for_results.index + 1
+    dataset_for_results = dataset_for_results.astype(str)
+    if "CMID" in dataset_for_results.columns:
+        dataset_for_results['CMID'] = dataset_for_results['CMID'].replace('nan', '')
 
     # trim whitespace
     dataset = dataset.applymap(lambda x: x.strip() if isinstance(x, str) else x)
@@ -804,7 +832,6 @@ def input_Nodes_Uses(
         )
 
     # defining node and link properties based on METADATA types
-    print(optionalProperties)
     
     node_query = "MATCH (p:PROPERTY) WHERE p.type='node' RETURN p.property as property"
     
@@ -902,6 +929,12 @@ def input_Nodes_Uses(
         for idx, row in invalid_rows.iterrows():
             invalid_values.append((col, idx, row["col"]))
 
+    # Convert numeric columns to integers if they are valid
+    for col in columns_to_check:
+        if col in dataset.columns:
+            dataset[col] = dataset[col].apply(
+                lambda x: x if pd.isna(x) or x == '' else str(int(float(x))))
+
     if {"latitude", "longitude", "datasetID"}.issubset(dataset.columns):
         for index, row in dataset.iterrows():
             try:
@@ -925,6 +958,7 @@ def input_Nodes_Uses(
     # dataset = dataset.replace({None, ""})
     dataset = dataset.replace({"nan": "", "<NA>": "", "None": ""})
 
+    #data_dict is created as a “records” data dictionary from dataset for the purpose of error checking.
     data_dict = dataset.to_dict(orient="records")
 
     """ CMID checks """
@@ -971,9 +1005,7 @@ def input_Nodes_Uses(
                         values = [
                             val.strip() for val in row[i].split(";") if val.strip()
                         ]
-                        #rows_to_check.extend([{"value": v} for v in values])
                     else:
-                        #rows_to_check.append({"value": str(row[i])})
                         values = [str(row[i])]
             
                     for v in values:
@@ -1433,17 +1465,17 @@ def input_Nodes_Uses(
             linkProperties.append(group)
         linkProperties = list(set(linkProperties))
     
-    if "geoCoords" in dataset.columns:
-        column_names.remove("latitude")
-        column_names.remove("longitude")
-        column_names.append("geoCoords")
+    # if "geoCoords" in dataset.columns:
+    #     column_names.remove("latitude")
+    #     column_names.remove("longitude")
+    #     column_names.append("geoCoords")
     
-    if "parentContext" in dataset.columns:
-        column_names.append("parentContext")
-        if 'eventType' in column_names:
-            column_names.remove("eventType")
-        if 'eventDate' in column_names:
-            column_names.remove("eventDate")
+    # if "parentContext" in dataset.columns:
+    #     column_names.append("parentContext")
+    #     if 'eventType' in column_names:
+    #         column_names.remove("eventType")
+    #     if 'eventDate' in column_names:
+    #         column_names.remove("eventDate")
     
 
     # adhoc ID used for joining and filtering output purposes.
@@ -1452,7 +1484,86 @@ def input_Nodes_Uses(
     uniqueID = "importID"
     dataset["importID"] = dataset.index + 1
 
-    # Combining columns and merging rows
+    # if user chooses to upload district and recordyear information from dataset
+    if addDistrict:
+        updateLog(
+            f"log/{user}uploadProgress.txt", "Adding districts", write="a"
+        )
+        matches = getQuery(
+            params={"rows": dataset[["datasetID"]]},
+            q="DISTRICT QUERY",
+            database=database,
+            user="1",
+        )
+        if not matches.empty:
+            dataset = dataset.merge(matches, on="datasetID", how="left")
+            linkProperties.append("country")
+
+    if addRecordYear:
+        updateLog(
+            f"log/{user}uploadProgress.txt", "Adding record year", write="a"
+        )
+        matches = getQuery(
+            params={"rows": dataset[["datasetID"]]},
+            q="RECORD_YEAR QUERY",
+            driver=driver,
+        )
+        if not matches.empty:
+            dataset = dataset.merge(matches, on="datasetID", how="left")
+            linkProperties.append("recordStart")
+    
+    if "Name" in linkProperties and "altNames" in linkProperties:
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "Combining names and alternate names",
+            write="a",
+        )
+        dataset = combine_names_and_altNames(dataset, "Name", "altNames")
+        
+    #cleans parentContext json strings
+    dataset["parentContext"] = dataset["parentContext"].apply(filter_dict)
+
+    # Dataframe store data as objects by default, hence we need to convert back
+    # to a JSON string for processing.
+    # Step 1: Apply json.dumps to convert dictionaries to JSON strings
+    dataset["parentContext"] = dataset["parentContext"].apply(
+        lambda x: (
+            json.dumps(x, ensure_ascii=False)
+            if isinstance(x, dict)
+            else x
+        )
+    )
+
+    # Step 2: Remove square brackets if present in strings
+    dataset["parentContext"] = dataset["parentContext"].apply(
+        lambda x: (
+            re.sub(r"\[|\]", "", x) if isinstance(x, str) else x
+        )
+    )
+
+    # Step 3: Unnest data (apply to each row)
+    # dataset = dataset.explode("parentContext").reset_index(
+    #     drop=True
+    # )
+
+    # Step 4: Handle missing parent values by setting parentContext to None where parent is NaN
+    # dataset["parentContext"] = dataset.apply(
+    #     lambda row: (
+    #         None if pd.isna(row["parent"]) else row["parentContext"]
+    #     ),
+    #     axis=1,
+    # )
+
+    # Step 5: Drop 'eventDate' and 'eventType' columns if they exist
+    dataset = dataset.drop(
+        columns=[
+            col
+            for col in ["eventDate", "eventType"]
+            if col in dataset.columns
+        ]
+    )
+
+     # Combining columns and merging rows
     if "CMID" in dataset.columns and (
         not "parentContext" in dataset.columns or "geoCoords" in dataset.columns
     ):
@@ -1461,8 +1572,17 @@ def input_Nodes_Uses(
                 dataset = combine_properties(dataset, ["CMID", "datasetID", "Key"])
             else:
                 dataset = combine_properties(dataset, ["datasetID", "Key"])
+    
+    if linkProperties is not None and "geoCoords" in linkProperties:
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "updating geo coordinates",
+            write="a",
+        )
+        dataset["geoCoords"] = dataset["geoCoords"].apply(convert_coordinates)
 
     """End of error checking and data pre-processing. Begin batch upload."""
+    pd.set_option('display.max_columns', None)
 
     sq = range(0, len(dataset), batchSize)
 
@@ -1481,39 +1601,7 @@ def input_Nodes_Uses(
                 f"uploading {s} to {max_row} of {len(dataset)}",
                 write="a",
             )
-
-            # if user chooses to upload district and recordyear information from dataset
-            if addDistrict:
-                updateLog(
-                    f"log/{user}uploadProgress.txt", "Adding districts", write="a"
-                )
-                matches = getQuery(
-                    params={"rows": sub_dataset[["datasetID"]]},
-                    q="DISTRICT QUERY",
-                    database=database,
-                    user="1",
-                )
-                if not matches.empty:
-                    sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
-                    linkProperties.append("country")
-
-            if addRecordYear:
-                updateLog(
-                    f"log/{user}uploadProgress.txt", "Adding record year", write="a"
-                )
-                matches = getQuery(
-                    params={"rows": sub_dataset[["datasetID"]]},
-                    q="RECORD_YEAR QUERY",
-                    driver=driver,
-                )
-                if not matches.empty:
-                    sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
-                    linkProperties.append("recordStart")
-
-            #
             sub_dataset = sub_dataset.fillna("")
-
-            print("...........................")
 
             '''Begin node creation'''
 
@@ -1523,7 +1611,6 @@ def input_Nodes_Uses(
             else:
                 node_columns = ["CMName","label","importID"] + nodeProperties
             
-            #node_columns = [i for i in column_names.columns if i not in ["Key", "datasetID"]] + ["importID"]
             nodes = pd.DataFrame()
 
             if uploadOption == "add_node":
@@ -1535,20 +1622,6 @@ def input_Nodes_Uses(
                     nodes = sub_dataset[sub_dataset["CMID"] == ""][node_columns].drop_duplicates()
             
             if not nodes.empty:
-                # if uploadOption == "add_uses":
-                #     if "CMName" in dataset_dup.columns:
-                #         cm_mapping = dataset_dup["CMName"].reset_index()
-                #         cm_mapping["importID"] = cm_mapping["index"] + 1
-                #         cm_mapping = cm_mapping[["importID", "CMName"]]
-
-                #         # Ensure importID types match
-                #         cm_mapping["importID"] = cm_mapping["importID"].astype(str)
-                #         nodes["importID"] = nodes["importID"].astype(str)
-
-                #         # Merge onto nodes
-                #         nodes = nodes.merge(cm_mapping, on="importID", how="left")
-                #         nodes.drop("CMName_y", axis=1, inplace=True)
-                #         nodes.rename(columns={"CMName_x": "CMName"}, inplace=True)
                 updateLog(
                     f"log/{user}uploadProgress.txt",
                     "Adding nodes with columns: " + ", ".join(nodes.columns),
@@ -1572,6 +1645,20 @@ def input_Nodes_Uses(
                                     dataset_match["CMID_new"]
                                 )
                     dataset_match = dataset_match.drop(columns=["CMID_new"])
+
+                    dataset_for_results = dataset_for_results.merge(
+                            newly_created_nodes[["importID", "CMID"]],
+                            on="importID",
+                            how="left",
+                            suffixes=('', '_new')
+                        )
+                    
+                    dataset_for_results["CMID"] = dataset_for_results["CMID"].where(
+                                    dataset_for_results["CMID"].astype(str).str.strip() != '',
+                                    dataset_for_results["CMID_new"]
+                                )
+                    
+                    dataset_for_results = dataset_for_results.drop(columns=["CMID_new"])
             else:
                 dataset_match = sub_dataset.copy()
 
@@ -1601,132 +1688,55 @@ def input_Nodes_Uses(
 
                 '''Start of grouping variables processing'''
 
-                if "Name" in links.columns and "altNames" in links.columns:
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "Combining names and alternate names",
-                        write="a",
-                    )
-                    links = combine_names_and_altNames(links, "Name", "altNames")
-
-                if linkProperties is not None and "geoCoords" in linkProperties:
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "updating geo coordinates",
-                        write="a",
-                    )
-                    # return links
-                    links["geoCoords"] = links["geoCoords"].apply(convert_coordinates)
-
                 if "parentContext" in linkProperties:
-                    updatePC = True
-                    test = links[links["parentContext"].notna()]["parentContext"]
-                    if not test.empty:
-                        first_row_value = test.iloc[0]
-                        val = first_row_value.split("; ")[0]
-
+                    
                     updateLog(
                         f"log/{user}uploadProgress.txt",
                         "updating parentContext",
                         write="a",
                     )
-                    if updatePC:
 
-                        def filter_dict(d):
-                            filtered_dict = ""
-                            try:
-                                d = json.loads(d)
-                                filtered_dict = {
-                                    k: v
-                                    for k, v in d.items()
-                                    if pd.notna(v) and v != ""
-                                }
-                                # If 'parent' is the only key remaining, return an empty string
-                                if list(filtered_dict.keys()) == ["parent"]:
-                                    filtered_dict = ""
-                            except json.JSONDecodeError:
-                                return ""
+                    sub_links = links.copy()
 
-                            return filtered_dict
+                    # Step 6: Group by 'datasetID', 'CMID', and 'Key'
+                    # grouped_links = sub_links.groupby(["datasetID", "CMID", "Key"])
 
-                        sub_links = links.copy()
+                    # print(grouped_links)
 
-                        sub_links["parentContext"] = sub_links["parentContext"].apply(
-                            filter_dict
-                        )
+                    # # Step 7: Combine lists of parentContext and parent, keeping their JSON representations intact
+                    # sub_links = grouped_links.agg(
+                    #     {
+                    #         "parentContext": lambda x: list(x),
+                    #         "parent": lambda x: list(x),
+                    #     }
+                    # ).reset_index()
 
-                        # Step 1: Convert parentContext dictionary to a JSON string
-                        # Apply json.dumps to convert dictionaries to JSON strings
-                        sub_links["parentContext"] = sub_links["parentContext"].apply(
-                            lambda x: (
-                                json.dumps(x, ensure_ascii=False)
-                                if isinstance(x, dict)
-                                else x
-                            )
-                        )
+                    # print(sub_links)
 
-                        # Step 2: Remove square brackets if present in strings
-                        sub_links["parentContext"] = sub_links["parentContext"].apply(
-                            lambda x: (
-                                re.sub(r"\[|\]", "", x) if isinstance(x, str) else x
-                            )
-                        )
+                    # # Step 8: Convert lists of JSON strings to a semicolon-separated string
+                    # for index, row in sub_links.iterrows():
+                    #     sub_links.at[index, "parentContext"] = (
+                    #         process_parent_context_element(row["parentContext"])
+                    #     )
+                    #     sub_links.at[index, "parent"] = (
+                    #         process_parent_context_element(row["parent"])
+                    #     )
+                    
+                    # print(sub_links)
 
-                        # Step 3: Unnest data (apply to each row)
-                        sub_links = sub_links.explode("parentContext").reset_index(
-                            drop=True
-                        )
+                    # # Step 9: Merge the grouped data back into the original DataFrame
+                    # links = links.drop(columns=["parentContext", "parent"]).copy()
+                    # links = pd.merge(
+                    #     links,
+                    #     sub_links,
+                    #     on=["datasetID", "CMID", "Key"],
+                    #     how="left",
+                    # )
 
-                        # Step 4: Handle missing parent values by setting parentContext to None where parent is NaN
-                        sub_links["parentContext"] = sub_links.apply(
-                            lambda row: (
-                                None if pd.isna(row["parent"]) else row["parentContext"]
-                            ),
-                            axis=1,
-                        )
-
-                        # Step 5: Drop 'eventDate' and 'eventType' columns if they exist
-                        sub_links = sub_links.drop(
-                            columns=[
-                                col
-                                for col in ["eventDate", "eventType"]
-                                if col in sub_links.columns
-                            ]
-                        )
-
-                        # Step 6: Group by 'datasetID', 'CMID', and 'Key'
-                        grouped_links = sub_links.groupby(["datasetID", "CMID", "Key"])
-
-                        # Step 7: Combine lists of parentContext and parent, keeping their JSON representations intact
-                        sub_links = grouped_links.agg(
-                            {
-                                "parentContext": lambda x: list(x),
-                                "parent": lambda x: list(x),
-                            }
-                        ).reset_index()
-
-                        # Step 8: Convert lists of JSON strings to a semicolon-separated string
-                        for index, row in sub_links.iterrows():
-                            sub_links.at[index, "parentContext"] = (
-                                process_parent_context_element(row["parentContext"])
-                            )
-                            sub_links.at[index, "parent"] = (
-                                process_parent_context_element(row["parent"])
-                            )
-
-                        # Step 9: Merge the grouped data back into the original DataFrame
-                        links = links.drop(columns=["parentContext", "parent"]).copy()
-                        links = pd.merge(
-                            links,
-                            sub_links,
-                            on=["datasetID", "CMID", "Key"],
-                            how="left",
-                        )
-
-                    # Replace values that do not contain 'eventDate' or 'eventType' with an empty string
-                    links["parentContext"] = links["parentContext"].apply(
-                        lambda x: x if "eventDate" in x or "eventType" in x else ""
-                    )
+                    # # Replace values that do not contain 'eventDate' or 'eventType' with an empty string
+                    # links["parentContext"] = links["parentContext"].apply(
+                    #     lambda x: x if "eventDate" in x or "eventType" in x else ""
+                    # )
 
                 updateLog(
                     f"log/{user}uploadProgress.txt", str(links.columns), write="a"
@@ -1739,7 +1749,6 @@ def input_Nodes_Uses(
                 else:
                     required_for_operation = required
 
-                # link_cols = ['datasetID', 'CMID', 'Key'] + linkProperties
                 link_cols = required_for_operation + linkProperties
                 link_cols = list(set(link_cols))
                 link_cols = [col for col in link_cols if col in links.columns]
@@ -1756,7 +1765,6 @@ def input_Nodes_Uses(
                         user=user,
                         updateType="overwrite",
                     )
-                    print(result)
                 elif uploadOption == "update_add":
                     updateLog(
                         f"log/{user}uploadProgress.txt", "Updating property", write="a"
@@ -1767,14 +1775,12 @@ def input_Nodes_Uses(
                         user=user,
                         updateType="update",
                     )
-                    print(result)
                 elif uploadOption == "add_node" or uploadOption == "add_uses":
                     updateLog(
                         f"log/{user}uploadProgress.txt",
                         "Adding new USES relationships",
                         write="a",
                     )
-                    # link_cols.append("label")
                     links = links[link_cols]
                     result = createUSES(
                         links=links, database=database, user=user, create="MERGE"
@@ -1789,8 +1795,10 @@ def input_Nodes_Uses(
                     write="a",
                 )
                 try:
-                    # ask robert
+                    # Clean up functions from USES ties
                     cmid_values = [link["CMID"] for link in result["result"]]
+
+                    # checks if all CMIDs have been returned from USES tie creation
                     if len(cmid_values) < len(result["result"]):
                         missing_links = [
                             link for link in result["result"] if "CMID" not in link
@@ -1803,6 +1811,7 @@ def input_Nodes_Uses(
                         "adding CMName to Name parameter",
                         write="a",
                     )
+                    # adds CMName to the Name parameter if missing
                     addCMNameRel(database, CMID=cmid_values)
                     updateLog(
                         f"log/{user}uploadProgress.txt",
@@ -1911,9 +1920,6 @@ def input_Nodes_Uses(
     # final_result has one column per property which was changed, 
     # it should contain CMID, Key, Dataset (need to be verified)
 
-    # drops columns with the same name if present
-    #final_result = final_result.loc[:, ~final_result.columns.duplicated()]
-    #final_result = final_result.drop_duplicates()
     # drops rows which only have null entries
     final_result = final_result.dropna(axis=1, how="any")
     final_result = final_result.dropna(how="all").reset_index(drop=True).copy()
@@ -1924,12 +1930,12 @@ def input_Nodes_Uses(
 
     if uploadOption == "add_node":
 
-        #final_result = add_error_column(final_result, user)
+        desired_order = []
         
         """with open(f"log/{user}uploadProgress.txt", 'a') as f:
             f.write("Completed dataset upload\n")"""
 
-        return final_result
+        return final_result,desired_order
     
     elif uploadOption == "node_replace" or uploadOption == "node_add":
 
@@ -1937,30 +1943,30 @@ def input_Nodes_Uses(
 
         final_result = final_result.rename(columns={col: f"{col}_new" for col in final_result.columns if col not in ["importID", "CMID"]})
 
+        desired_order = ['CMID'] + [col for col in dataset_for_results.columns.tolist() + final_result.columns.tolist() if col != 'CMID']
+
         final_result = pd.merge(dataset_for_results, final_result, how="left", on="CMID")
 
         final_result = final_result.drop_duplicates(subset='importID', keep='first')
-
-        #final_result = add_error_column(final_result, user)
         
         """with open(f"log/{user}uploadProgress.txt", 'a') as f:
             f.write("Completed dataset upload\n")"""
 
-        return final_result
+        return final_result,desired_order
     
     else:
         dataset_for_results = dataset_for_results.rename(columns={col: f"{col}_input" for col in dataset_for_results.columns if col not in ["importID", "CMID","Key","datasetID","nodeID","relID"]})
 
         final_result = final_result.rename(columns={col: f"{col}_new" for col in final_result.columns if col not in ["importID", "CMID","Key","datasetID","nodeID","relID"]})
 
+        desired_order = ['CMID',"Key","datasetID"] + [col for col in dataset_for_results.columns.tolist() + final_result.columns.tolist() if col not in ['CMID',"Key","datasetID"]]
+
         final_result = pd.merge(dataset_for_results, final_result, how="left", on=["CMID","Key","datasetID"])
 
         final_result = final_result.drop_duplicates(subset='importID', keep='first')
         final_result = final_result.fillna("")
 
-        #final_result = add_error_column(final_result, user)
-
         """with open(f"log/{user}uploadProgress.txt", 'a') as f:
             f.write("Completed dataset upload\n")"""
 
-        return final_result
+        return final_result,desired_order

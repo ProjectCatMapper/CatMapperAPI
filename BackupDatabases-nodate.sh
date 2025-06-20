@@ -34,11 +34,12 @@ if [ "$run_sociomap" -eq 1 ]; then
     docker run --interactive --rm \
         -v /mnt/storage/app/db/sociomap1/data:/var/lib/neo4j/data  \
         -v /mnt/storage/app/db/sociomap1/backups:/var/lib/neo4j/backups \
-    neo4j/neo4j-admin:5-community \
+        neo4j/neo4j-admin:5.26.0-community-debian \
         neo4j-admin database dump neo4j --to-path=backups --overwrite-destination=true;
 
     docker start sociomap1;
 fi
+
 # ArchaMap
 if [ "$run_archamap" -eq 1 ]; then
     docker stop archamap1;
@@ -46,7 +47,7 @@ if [ "$run_archamap" -eq 1 ]; then
     docker run --interactive --rm \
         -v /mnt/storage/app/db/archamap1/data:/var/lib/neo4j/data  \
         -v /mnt/storage/app/db/archamap1/backups:/var/lib/neo4j/backups \
-    neo4j/neo4j-admin:5-community \
+    neo4j/neo4j-admin:5.26.0-community-debian \
     neo4j-admin database dump neo4j --to-path=backups --overwrite-destination=true;
 
     docker start archamap1;
@@ -59,7 +60,7 @@ if [ "$run_gisdb" -eq 1 ]; then
     docker run --interactive --rm \
         -v /mnt/storage/app/GISdb/data:/var/lib/neo4j/data  \
         -v /mnt/storage/app/GISdb/backups:/var/lib/neo4j/backups \
-    neo4j/neo4j-admin:5-community \
+    neo4j/neo4j-admin:5.26.0-community-debian \
     neo4j-admin database dump neo4j --to-path=backups --overwrite-destination=true;
 
     docker start gisdb;

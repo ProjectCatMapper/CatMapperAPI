@@ -542,7 +542,6 @@ def upload_API():
         data = request.get_data()
         data = json.loads(data)
         df = data.get("df")
-        print(df)
         database = unlist(data.get("database"))
         formData = unlist(data.get("formData"))
         label = formData["domain"]
@@ -558,7 +557,6 @@ def upload_API():
         Key = formData["keyColumn"]
 
         linkProperties = data.get("allContext")
-        print(linkProperties)
         optionalProperties = linkProperties
         if not linkProperties:
             linkProperties = None
@@ -595,7 +593,7 @@ def upload_API():
                     nodeProperties = linkProperties
                     linkProperties = None
 
-            response = input_Nodes_Uses(
+            response,desired_order = input_Nodes_Uses(
                 dataset=df,
                 database=database,
                 uploadOption=uploadOption,
@@ -625,7 +623,7 @@ def upload_API():
                       Key: "Key", altNames: "altNames"}, inplace=True)
             df = df.to_dict(orient='records')
             # return {"Name":Name, "CMID":CMID,"altNames":altNames,"Key":Key,"user":user,"overwriteProperties":overwriteProperties,"updateProperties":updateProperties,"addDistrict":addDistrict,"addRecordYear":addRecordYear}
-            response = input_Nodes_Uses(
+            response,desired_order = input_Nodes_Uses(
                 dataset=df,
                 database=database,
                 uploadOption="add_uses",
@@ -641,7 +639,7 @@ def upload_API():
         if isinstance(response, pd.DataFrame):
             n = len(response)
             response_dict = response.to_dict(orient='records')
-            return jsonify({"message": f"Upload completed for {n} row(s)", "file": response_dict})
+            return jsonify({"message": f"Upload completed for {n} row(s)", "file": response_dict,"order":desired_order})
         # else:
         #     return "Error!! Check your file."
 
