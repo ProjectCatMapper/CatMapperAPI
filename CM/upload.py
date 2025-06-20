@@ -507,7 +507,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             UNWIND $rows AS row
             MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}})
             WITH row, r, b
-            SET {keys}, r.status = "update"
+            SET {keys}, r.status = 'update'
             RETURN elementId(b) as nodeID,elementId(r) as relID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, row.parent as parent, row.parentContext as parentContext
             """
         else:
@@ -1909,10 +1909,13 @@ def input_Nodes_Uses(
         final_result = final_result.fillna("")
         final_result = final_result.drop_duplicates()
 
+        desired_order = []
+
+
         """with open(f"log/{user}uploadProgress.txt", 'a') as f:
             f.write("Completed dataset upload\n")"""
 
-        return final_result
+        return final_result,desired_order
     
     elif uploadOption == "node_replace" or uploadOption == "node_add":
 
@@ -1925,11 +1928,12 @@ def input_Nodes_Uses(
         final_result = add_error_column(final_result, user)
         final_result = final_result.fillna("")
         final_result = final_result.drop_duplicates()
+        desired_order = []
 
         """with open(f"log/{user}uploadProgress.txt", 'a') as f:
             f.write("Completed dataset upload\n")"""
 
-        return final_result
+        return final_result,desired_order
     
     else:
 
@@ -1947,8 +1951,9 @@ def input_Nodes_Uses(
         final_result = add_error_column(final_result, user)
         final_result = final_result.fillna("")
         final_result = final_result.drop_duplicates()
+        desired_order=[]
 
         """with open(f"log/{user}uploadProgress.txt", 'a') as f:
             f.write("Completed dataset upload\n")"""
 
-        return final_result
+        return final_result,desired_order
