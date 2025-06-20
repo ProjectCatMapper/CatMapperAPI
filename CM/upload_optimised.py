@@ -1519,49 +1519,50 @@ def input_Nodes_Uses(
             write="a",
         )
         dataset = combine_names_and_altNames(dataset, "Name", "altNames")
-        
-    #cleans parentContext json strings
-    dataset["parentContext"] = dataset["parentContext"].apply(filter_dict)
 
-    # Dataframe store data as objects by default, hence we need to convert back
-    # to a JSON string for processing.
-    # Step 1: Apply json.dumps to convert dictionaries to JSON strings
-    dataset["parentContext"] = dataset["parentContext"].apply(
-        lambda x: (
-            json.dumps(x, ensure_ascii=False)
-            if isinstance(x, dict)
-            else x
+    if "parentContext" in dataset.columns: 
+        #cleans parentContext json strings
+        dataset["parentContext"] = dataset["parentContext"].apply(filter_dict)
+
+        # Dataframe store data as objects by default, hence we need to convert back
+        # to a JSON string for processing.
+        # Step 1: Apply json.dumps to convert dictionaries to JSON strings
+        dataset["parentContext"] = dataset["parentContext"].apply(
+            lambda x: (
+                json.dumps(x, ensure_ascii=False)
+                if isinstance(x, dict)
+                else x
+            )
         )
-    )
 
-    # Step 2: Remove square brackets if present in strings
-    dataset["parentContext"] = dataset["parentContext"].apply(
-        lambda x: (
-            re.sub(r"\[|\]", "", x) if isinstance(x, str) else x
+        # Step 2: Remove square brackets if present in strings
+        dataset["parentContext"] = dataset["parentContext"].apply(
+            lambda x: (
+                re.sub(r"\[|\]", "", x) if isinstance(x, str) else x
+            )
         )
-    )
 
-    # Step 3: Unnest data (apply to each row)
-    # dataset = dataset.explode("parentContext").reset_index(
-    #     drop=True
-    # )
+        # Step 3: Unnest data (apply to each row)
+        # dataset = dataset.explode("parentContext").reset_index(
+        #     drop=True
+        # )
 
-    # Step 4: Handle missing parent values by setting parentContext to None where parent is NaN
-    # dataset["parentContext"] = dataset.apply(
-    #     lambda row: (
-    #         None if pd.isna(row["parent"]) else row["parentContext"]
-    #     ),
-    #     axis=1,
-    # )
+        # Step 4: Handle missing parent values by setting parentContext to None where parent is NaN
+        # dataset["parentContext"] = dataset.apply(
+        #     lambda row: (
+        #         None if pd.isna(row["parent"]) else row["parentContext"]
+        #     ),
+        #     axis=1,
+        # )
 
-    # Step 5: Drop 'eventDate' and 'eventType' columns if they exist
-    dataset = dataset.drop(
-        columns=[
-            col
-            for col in ["eventDate", "eventType"]
-            if col in dataset.columns
-        ]
-    )
+        # Step 5: Drop 'eventDate' and 'eventType' columns if they exist
+        dataset = dataset.drop(
+            columns=[
+                col
+                for col in ["eventDate", "eventType"]
+                if col in dataset.columns
+            ]
+        )
 
      # Combining columns and merging rows
     if "CMID" in dataset.columns and (
