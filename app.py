@@ -11,7 +11,6 @@ from CMroutes import *
 
 app = create_app()
 
-
 @app.route("/")
 def root():
     headers = {'Content-Type': 'text/html'}
