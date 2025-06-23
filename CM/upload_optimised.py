@@ -29,8 +29,10 @@ data = [
 df = pd.DataFrame(data)
 
 
-def is_valid_integer_float(value):
+def is_valid_integer(value):
     try:
+        if pd.isna(value):
+            value = ""
         if value == "":
             return True
         num = float(value)
@@ -916,7 +918,8 @@ def input_Nodes_Uses(
 
     invalid_values = {}
     for col in columns_to_check:
-        invalid_rows = dataset[~dataset[col].apply(is_valid_integer_float)]
+        dataset[col] = dataset[col].fillna("")
+        invalid_rows = dataset[~dataset[col].apply(is_valid_integer)]
         if not invalid_rows.empty:
             invalid_values[col] = invalid_rows[[col]].values.flatten()
 
@@ -927,7 +930,7 @@ def input_Nodes_Uses(
     for col in columns_to_check:
         invalid_rows = dataset[~dataset[col].apply(is_valid_float)]
         for idx, row in invalid_rows.iterrows():
-            invalid_values.append((col, idx, row["col"]))
+            invalid_values.append((col, idx, row[col]))
 
     # Convert numeric columns to integers if they are valid
     for col in columns_to_check:
