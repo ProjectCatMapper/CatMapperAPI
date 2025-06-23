@@ -996,7 +996,7 @@ def getSearch():
             limit,
             query
         )
-        return result
+        return jsonify(result)
 
     except Exception as e:
         return str(e), 500
@@ -1805,22 +1805,20 @@ def getProgress():
 @app.route('/test', methods=['GET'])
 def test():
 
-    # database = request.args.get('database')
+    database = request.args.get('database')
+    data = search(
+        database,
+        "Yoruba",
+        "Name",
+        "CATEGORY",
+        "",
+        "",
+        "",
+        "",
+        100,
+        "false")
 
-    # driver = getDriver(database)
-    # session = driver.session()
-    # data = session.run("match (c) return count(*) as count")
-
-    # data = [dict(record) for record in data]
-
-    return {
-        'Zebra': ['Row1_Zebra', 'Row2_Zebra', 'Row3_Zebra'],
-        'Apple': ['Row1_Apple', 'Row2_Apple', 'Row3_Apple'],
-        'Mountain': ['Row1_Mountain', 'Row2_Mountain', 'Row3_Mountain'],
-        'Sunflower': ['Row1_Sunflower', 'Row2_Sunflower', 'Row3_Sunflower'],
-        'Kite': ['Row1_Kite', 'Row2_Kite', 'Row3_Kite']
-    }
-
+    return data
 
 @app.route('/mergeDatasets', methods=['GET'])
 def getMergeDatasets():
