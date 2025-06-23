@@ -1,8 +1,5 @@
 import pandas as pd
 from .utils import *
-# import jsonify
-from flask import jsonify
-
 
 def search(
         database,
@@ -48,16 +45,16 @@ def search(
                 raise Exception("context must be a valid CMID")
 
     if country is not None:
-        if country == "null":
+        if country == "null" or country == "":
             country = None
         else:
             if re.search("^SM|^SD|^AD|^AM", country) is None:
                 raise Exception("country must be a valid CMID")
 
-    if yearStart == "null":
+    if yearStart == "null" or yearStart == "":
         yearStart = None
 
-    if yearEnd == "null":
+    if yearEnd == "null" or yearEnd == "":
         yearEnd = None
 
     try:
@@ -221,7 +218,7 @@ def search(
         data = getQuery(cypher_query, driver, params={
                         "term": term, "context": context, "country": country, "yearStart": yearStart, "yearEnd": yearEnd})
 
-        return jsonify(data)
+        return data
     else:
         return ({"query": cypher_query, "parameters": [{"term": term, "context": context, "country": country, "domain": domain, "yearStart": yearStart, "yearEnd": yearEnd}]})
 
