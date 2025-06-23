@@ -32,7 +32,7 @@ fi
 if [ "$run_sociomap" -eq 1 ]; then
     docker stop sociomap1;
 
-    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/db/sociomap1/backups/neo4j-backup.tar.zst /mnt/storage/app/db/sociomap1/data
+    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/db/sociomap1/backups/neo4j-backup.tar.zst -C /mnt/storage/app/db/sociomap1 data
 
     docker start sociomap1;
 fi
@@ -41,7 +41,7 @@ fi
 if [ "$run_archamap" -eq 1 ]; then
     docker stop archamap1;
 
-    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/db/archamap1/backups/neo4j-backup.tar.zst /mnt/storage/app/db/archamap1/data
+    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/db/archamap1/backups/neo4j-backup.tar.zst -C /mnt/storage/app/db/archamap1 data
 
     docker start archamap1;
 fi
@@ -50,7 +50,7 @@ fi
 if [ "$run_gisdb" -eq 1 ]; then
     docker stop gisdb;
 
-    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/GISdb/backups/neo4j-backup.tar.zst /mnt/storage/app/GISdb/data
+    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/GISdb/backups/neo4j-backup.tar.zst -C /mnt/storage/app/GISdb data
 
     docker start gisdb;
 fi
@@ -59,7 +59,7 @@ fi
 if [ "$run_gisdb" -eq 1 ]; then
     docker stop userdb;
 
-    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/userdb/backups/neo4j-backup.tar.zst /mnt/storage/app/userdb/data
+    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/userdb/backups/neo4j-backup.tar.zst -C /mnt/storage/app/userdb data
 
     docker start userdb;
 fi
