@@ -92,7 +92,7 @@ def verifyUser(user, pwd, role=None):
         return f"Error verifying user: {e}", 500
 
 
-def enableUser(process, userid, approver):
+def enableUser(database, process, userid, approver):
 
     driver = getDriver('userdb')
 

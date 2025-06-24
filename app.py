@@ -976,6 +976,8 @@ def getSearch():
         property = request.args.get('property')
         if property == "CatMapper ID (CMID)":
             property = "CMID"
+        if property == "CatMapper ID (CMID)":
+            property = "CMID"
         domain = request.args.get('domain')
         yearStart = request.args.get('yearStart')
         yearEnd = request.args.get('yearEnd')
@@ -1861,6 +1863,21 @@ def updateNewUsers():
 
         result = enableUser(process=process,
                             userid=userid, approver=approver)
+
+        users = [user for user in result if user.get("email")]
+        mail = Mail()
+
+        for user in users:
+            body = f"""
+Hello {user.get("first")} {user.get("last")},
+
+Your registration has been approved. You can now access the {'and '.join(user.get("database"))} database. Please see catmapper.org/help or email support@catmapper.org for any questions.
+
+Best,
+CatMapper Team
+            """
+            sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
+                "email"), 'admin@catmapper.org'], body=body, sender=os.getenv("mail_default"))
 
         if isinstance(result, list) and process == "approve":
 
