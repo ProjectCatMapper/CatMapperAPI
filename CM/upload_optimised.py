@@ -29,6 +29,7 @@ data = [
 df = pd.DataFrame(data)
 
 
+#Returns boolean if input is integer
 def is_valid_integer(value):
     try:
         if pd.isna(value):
@@ -40,7 +41,7 @@ def is_valid_integer(value):
     except (ValueError, TypeError):
         return False
 
-
+#Returns boolean if input is float
 def is_valid_float(value):
     try:
         if value == "":
@@ -50,70 +51,12 @@ def is_valid_float(value):
     except (ValueError, TypeError):
         return False
 
+#Returns invalid rows where End years are lesser than Start years
+def get_invalid_ranges(df, col1, col2):   
+    invalid_mask = (~df[col2].isna()) & (df[col2] != '') & (df[col2] < df[col1])
+    return df[invalid_mask][[col1, col2]]
 
-def is_valid_cmid(column, value, database, label):
-    if not isinstance(value, str):
-        return False
-
-    if label == "":
-        error_message = "Missing label value"
-        raise ValueError(error_message)
-
-    if column == "datasetID" or (
-        label == "DATASET" and (column == "CMID" or column == "parent")
-    ):
-
-        data_patterns = {"SocioMap": r"SD\d+", "ArchaMap": r"AD\d+"}
-
-        data_pattern = data_patterns.get(database)
-
-        if not data_pattern:
-            return False
-
-        if not re.match(data_pattern, value):
-            return False
-    else:
-        patterns = {"SocioMap": r"^SM\d+$", "ArchaMap": r"^AM\d+$"}
-
-        # future - for all selected columns do this for Link properties.
-        if column == "parent" and value == "":
-            return True
-
-        pattern = patterns.get(database)
-
-        if not pattern:
-            return False
-
-        # Split the value by semicolons and trim spaces from each part
-        split_values = [part.strip() for part in value.split(";")]
-
-        for part in split_values:
-            if not re.match(pattern, part):
-                return False
-
-        # if "label" == "DATASET":
-        #     if database == "sociomap" and not value.startswith("SD"):
-        #         return False
-        #     if database == "archamap" and not value.startswith("AD"):
-        #         return False
-
-    return True
-
-
-def add_error_column(df, user):
-    if "nodeID" not in df.columns:
-        updateLog(
-            f"log/{user}uploadProgress.txt",
-            "nodeID not found in final_results",
-            write="a",
-        )
-        raise Exception("Error: nodeID not found in final_results")
-
-    # Add the "Error" column based on the condition
-    df["Error"] = df["nodeID"].apply(lambda x: "CMID not found" if pd.isna(x) else "")
-    return df
-
-
+#writes the log text to console and also saves logs to text file.
 def updateLog(f, txt, write="a"):
     print(txt)
     try:
@@ -122,6 +65,8 @@ def updateLog(f, txt, write="a"):
     except Exception as e:
         print(e)
 
+#Creates names property for new dataset node that combines shortName, CMName, and DatasetCitation, names
+#May need to apply for functions 5 and 6
 def add_to_names_for_dataset(row):
         # Extract base names as a list
         if pd.isna(row["names"]):
@@ -132,13 +77,14 @@ def add_to_names_for_dataset(row):
             names_list = [row["names"].strip()]
 
         # Append CMID, shortName, and DatasetCitation if they exist
-        for col in ["CMID", "shortName", "DatasetCitation"]:
+        for col in ["CMName", "shortName", "DatasetCitation"]:
             val = row.get(col)
             if pd.notna(val):
                 names_list.append(str(val).strip())
         
         return names_list
 
+#Creates new nodes for functions 1 and 2
 def createNodes(df, database,isDataset, user, uniqueID=None):
     try:
 
@@ -148,31 +94,31 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
 
         isDataset = isDataset
 
+       #For datasets, compiles shortName, CMName, datasetCitation, and names 
+       # into names property for searching
         if isDataset:
             if "names" not in df.columns:
                 df["names"] = None
             df["names"] = df.apply(add_to_names_for_dataset, axis=1)
 
+        #Assigns appropriate label(s) to node, adding CATEGORY if the label is a CATEGORY domain.
         idlabel = "CATEGORY"
         if isDataset:
-            required = ["CMName", "label", "DatasetCitation", "shortName"]
             idlabel = "DATASET"
         else:
-            required = ["CMName", "label"]
             df["label"] = df["label"].apply(lambda x: f"CATEGORY:{x}")
 
-        # ad-hoc column for row recognition on query return
-        #check with robert
+        # check for uniqueID
         if not uniqueID in df.columns or uniqueID is None:
-            getQuery(
-                "MATCH (c) where not c.uniqueID is null set c.uniqueID = NULL", driver
-            )
-            distinct_nodes = df.drop_duplicates(subset="CMName")
-            if len(distinct_nodes) != len(df):
-                raise Exception("Error: there must be a unique name for each new node.")
-            else:
-                df["uniqueID"] = df.index
+            raise Exception("Error: there must be a uniqueID.")
+        else: 
+            # make sure there is a uniqueId for each row of the dataset
+            if len(df[uniqueID].unique()) != len(df):
+                raise Exception(
+                    f"Error: {uniqueID} must be unique for each row, but found duplicates."
+                )
 
+        #Creates new nodes and assigns new_id to database
         updateLog(f"log/{user}uploadProgress.txt", "getting new ID", write="a")
         newID = getAvailableID(
             new_id="CMID", label=idlabel, n=len(df), database=database
@@ -183,8 +129,11 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         updateLog(
             f"log/{user}uploadProgress.txt", "Converting variables to string", write="a"
         )
+
         df = df.astype(str)
 
+        # We get all columns that need to be set as properties for nodes, excludes label and uniqueID
+        # This is useful when determining valid columns coming from the API, not relevant to UI.
         vars = [
             col for col in df.columns if "label" not in col and "uniqueID" not in col
         ]
@@ -200,7 +149,7 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
 
         if missing_vars:
             raise Exception(
-                f"Error: The following vars are not in properties: {', '.join(missing_vars)}"
+                f"Error: The following columns are not in properties: {', '.join(missing_vars)}"
             )
 
         updateLog(
@@ -230,12 +179,6 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         updateLog(f"log/{user}uploadProgress.txt", "Running query", write="a")
         results = getQuery(query=q, driver=driver, params={"rows": rows})
 
-        # check to see if this is correct and necessary
-        if isinstance(results, dict):
-            updateLog(f"log/{user}uploadProgress.txt", "Query successful", write="a")
-        else:
-            updateLog(f"log/{user}uploadProgress.txt", str(results), write="a")
-
         results_df = pd.DataFrame(results)
 
         updateLog(f"log/{user}uploadProgress.txt", "Updating log", write="a")
@@ -259,8 +202,8 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         updateLog(f"log/{user}uploadProgress.txt", str(e), write="a")
         raise
 
-
-def createUSES(links, database, user, create="MERGE"):
+#Creates uses ties for nodes created in functions 1 and 2
+def createUSES(links, database, user):
     try:
         start_time = time.time()
         if "datasetID" not in links.columns or "CMID" not in links.columns:
@@ -271,38 +214,26 @@ def createUSES(links, database, user, create="MERGE"):
 
         links = links.copy()
 
-        # Split 'datasetID' and 'CMID' on "; " and trim whitespace change to properties not datasetID and to -- maybe update combineProperties function in Neo4j to automatically split using a separator
-        # links['datasetID'] = links['datasetID'].apply(lambda x: x.split('; ') if isinstance(x, str) else []).apply(lambda x: [item.strip() for item in x]).apply(lambda x: '; '.join(x))
-        # links['CMID'] = links['CMID'].apply(lambda x: x.split('; ') if isinstance(x, str) else []).apply(lambda x: [item.strip() for item in x]).apply(lambda x: '; '.join(x))
-
         # Database connection assumed via driver
         driver = getDriver(database)
-
-        # if 'label' not in links.columns:
-        #     raise ValueError("Must have 'label' column")
-
-        if create.lower() not in ["merge", "create"]:
-            raise ValueError("create must be either 'merge' or 'create'")
-
+        
+        # check with robert
+        # TO DO - check for duplicate triplets
         # Remove duplicates
         links = links.drop_duplicates()
 
-        # Fetch properties from the database
+        # We get all columns that need to be set as properties for realtionships
+        # This is useful when determining valid columns coming from the API, not relevant to UI.
         db_properties = getQuery(
             "MATCH (p:PROPERTY) WHERE p.type = 'relationship' RETURN p.property AS property",
             driver,
         )
         db_properties_list = [item["property"] for item in db_properties]
-        existing_columns = list(set(db_properties_list) & set(links.columns.tolist()))
-        updateLog(
-            f"log/{user}uploadProgress.txt", ", ".join(existing_columns), write="a"
-        )
-        links = links.loc[:, ~links.columns.duplicated()].copy()
-        links[existing_columns] = links[existing_columns].applymap(
-            lambda x: (
-                re.sub(r"[\t\n\r\f\v]", "", x).strip() if isinstance(x, str) else x
+        missing_cols = [var for var in links.columns.tolist() if var not in db_properties_list and var not in ["CMID","datasetID"]]
+        if missing_cols:
+            raise Exception(
+                f"Error: The following columns are not in properties: {', '.join(missing_cols)}"
             )
-        )
 
         # Convert all values to strings and replace NaN with empty strings
         links = links.fillna("").astype(str)
@@ -334,7 +265,16 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
         # Combine the keys into a single string for the Cypher query
         keys_string = ", ".join(keys)
-        return_clause_string = ", ".join(return_clause)
+
+        items = [k.split('=')[0].strip() for k in keys_string.split(',') if '=' in k]
+
+        # Format each property as: r.prop AS prop
+        return_props = (
+            items[0] + f" AS {items[0].split('.')[-1]}"
+            if len(items) == 1
+            else ', '.join([f"{item} AS {item.split('.')[-1]}" for item in items])
+        )
+        #return_clause_string = ", ".join(return_clause)
 
         onCreate = "" if create.lower() == "create" else "ON CREATE "
 
@@ -343,9 +283,9 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         UNWIND $rows AS row
         MATCH (a:DATASET) WHERE row.datasetID = a.CMID
         MATCH (b:CATEGORY) WHERE row.CMID = b.CMID
-        {create} (a)-[r:USES {{Key: row['Key']}}]->(b)
+        MERGE (a)-[r:USES {{Key: row['Key']}}]->(b)
         {onCreate}SET r.status = 'update', {keys_string}
-        RETURN elementId(b) AS nodeID, elementId(r) as relID, r.Key as Key, a.CMID as datasetID, b.CMID as CMID, {return_clause_string}
+        RETURN elementId(b) AS nodeID, elementId(r) as relID, r.Key as Key, a.CMID as datasetID, b.CMID as CMID, {return_props}
         """
 
         # Get the number of relationships before adding
@@ -424,7 +364,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         raise
 
 
-# function to update or replace properties of USES ties or nodes
+# function to update or replace properties of USES ties or nodes, (functions 3 and 4)
 def updateProperty(df, database, user, updateType, propertyType="USES"):
     try:
         # double checking for errors, if in future we call this function elsewhere outside this pipeline
@@ -572,7 +512,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
     except Exception as e:
         return f"Error: {str(e)}"
 
-
+#collapses rows by the group_by_cols variable and joins properties from seperate rows by ;
 def combine_properties(df, group_by_cols):
 
     def combine_column(column):
@@ -590,7 +530,7 @@ def combine_properties(df, group_by_cols):
 
     return grouped_df
 
-
+#When functions 1-4 have altNames, this combines altNames with Name
 def combine_names_and_altNames(df, name_col, alt_name_col):
     df["Name"] = df.apply(
         lambda row: "; ".join(
@@ -602,16 +542,11 @@ def combine_names_and_altNames(df, name_col, alt_name_col):
         ),
         axis=1,
     )
-    print(df["Name"])
     return df
 
-
-# todo: add lat long out of range check? RJB
-
-
+#converts the coordinates into a Point or a  MultiPoint format
+#when it encounters multiple points in the same entry, makes its a Multipoint
 def to_geojson_point(coordinates):
-
-    print(coordinates)
 
     if len(coordinates) == 1:
         coordinates = coordinates[0]
@@ -651,7 +586,7 @@ def to_geojson_point(coordinates):
     # Convert the dictionary to a GeoJSON string
     return json.dumps(geojson_dict)
 
-
+# parses the coordinates and passes it to the above function
 def convert_coordinates(geo):
     # Return "NA" if geo is None or the string "NA"
     if geo in (None, ""):
@@ -692,7 +627,7 @@ def convert_coordinates(geo):
         # Catch any unexpected errors and return "NA"
         return ""
 
-
+# for complex properties, groups component properties by the superLabel into a single complex property
 def create_grouped_columns(row, grouped_columns):
     grouped_data = {}
 
@@ -709,25 +644,8 @@ def create_grouped_columns(row, grouped_columns):
             grouped_data[group] = json.dumps(group_data)  # Store as a JSON string
 
     return grouped_data
-
-
-def process_parent_context_element(element):
-    try:
-        # If element is a list, process the list and return a semicolon-separated string
-        if isinstance(element, list):
-            return "; ".join(list2character(item) for item in element)
-        # If element is a string, return the string itself
-        elif isinstance(element, str):
-            return element
-        # If element is None or any other type, return None
-        else:
-            return None
-
-    except ValueError:
-        return None
     
 #cleans parentContext json strings and removes parentcontext if parent is the only component
-    
 def filter_dict(d):
     filtered_dict = ""
     try:
@@ -790,17 +708,7 @@ def input_Nodes_Uses(
     
     dataset = pd.DataFrame(dataset)
 
-    dataset_for_results = dataset.copy(deep=True)
-    dataset_for_results["importID"] = dataset_for_results.index + 1
-    dataset_for_results = dataset_for_results.astype(str)
-    if "CMID" in dataset_for_results.columns:
-        dataset_for_results['CMID'] = dataset_for_results['CMID'].replace('nan', '')
-
-    # trim whitespace
-    dataset = dataset.applymap(lambda x: x.strip() if isinstance(x, str) else x)
-
-    dataset = dataset.dropna(how="all").reset_index(drop=True).copy()
-
+    #database must be either SocioMap or ArchaMap
     if database.lower() == "sociomap":
         database = "SocioMap"
     elif database.lower() == "archamap":
@@ -812,10 +720,29 @@ def input_Nodes_Uses(
     
     driver = getDriver(database)
 
+    # adhoc ID used for joining and filtering output purposes.
+    updateLog(f"log/{user}uploadProgress.txt", "Creating import ID", write="a")
+    getQuery("MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL", driver)
+    uniqueID = "importID"
+    dataset["importID"] = dataset.index + 1
+
+    #dataset_for_results is copy of original input used to merge into upload status download spreadsheet
+    #importID used for remerging newly created CMIDs to appropriate row in dataset.
+    dataset_for_results = dataset.copy(deep=True)
+    dataset_for_results = dataset_for_results.astype(str)
+    if "CMID" in dataset_for_results.columns:
+        dataset_for_results['CMID'] = dataset_for_results['CMID'].replace('nan', '')
+
+    # trim whitespace
+    dataset = dataset.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+
+    dataset = dataset.dropna(how="all").reset_index(drop=True).copy()
+
     updateLog(f"log/{user}uploadProgress.txt", f"working on data validation", write="a")
 
     # Determines if the upload is for Categories or datasets
-
+    # Input is dataset if: 1) label is DATASET (function 1), or 
+    # 2) all CMIDs have dataset format (functions 5,6)
     isDataset = False
     if "label" in dataset.columns:
         if dataset["label"].iloc[0] == "DATASET":
@@ -851,6 +778,11 @@ def input_Nodes_Uses(
     """ Error checking starts here """
     """............................"""
 
+    # checks for duplicate columns
+    duplicates = dataset.columns[dataset.columns.duplicated()]
+    if not duplicates.empty:
+        raise ValueError("Duplicate column names found:", duplicates.tolist())
+
     """checks if all required columns are present"""
 
     updateLog(f"log/{user}uploadProgress.txt", "checking column names", write="a")
@@ -862,6 +794,8 @@ def input_Nodes_Uses(
             required = ["CMName", "label", "shortName", "DatasetCitation"]
         elif uploadOption == "node_add" or uploadOption == "node_replace":
             required = ["CMID"]
+        else:
+            raise ValueError("Invalid upload option")
     else:
         if uploadOption == "add_node":
             required = ["CMName", "Name", "label", "Key", "datasetID"]
@@ -871,6 +805,8 @@ def input_Nodes_Uses(
             required = ["CMID", "Key", "datasetID"]
         elif uploadOption == "node_replace":
             required = ["CMID"]
+        else:
+            raise ValueError("Invalid upload option")
     column_names = required + nodeProperties + linkProperties
 
     # Remove None values
@@ -904,6 +840,8 @@ def input_Nodes_Uses(
 
     """Numeric checks"""
 
+    # checks if the following column values are integer
+    #Dan. Should simply have this info in the metadata nodes and do a query to get them?
     columns_to_check = [
         "sampleSize",
         "yearStart",
@@ -922,49 +860,74 @@ def input_Nodes_Uses(
         invalid_rows = dataset[~dataset[col].apply(is_valid_integer)]
         if not invalid_rows.empty:
             invalid_values[col] = invalid_rows[[col]].values.flatten()
-
-    columns_to_check = ["populationEstimate", "latitude", "longitude"]
-
-    columns_to_check = [col for col in columns_to_check if col in linkProperties]
-
-    for col in columns_to_check:
-        invalid_rows = dataset[~dataset[col].apply(is_valid_float)]
-        for idx, row in invalid_rows.iterrows():
-            invalid_values.append((col, idx, row[col]))
-
+    
+    if invalid_values:
+        error_msg = "Invalid integer values found:\n"
+        for col, values in invalid_values.items():
+            error_msg += f" - Column '{col}': {values}\n"
+        raise ValueError(error_msg)
+            
     # Convert numeric columns to integers if they are valid
     for col in columns_to_check:
         if col in dataset.columns:
             dataset[col] = dataset[col].apply(
                 lambda x: x if pd.isna(x) or x == '' else str(int(float(x))))
+    
+    # checks if following column values are float values
+    #Dan. Should simply have this info in the metadata nodes and do a query to get them?
+    columns_to_check = ["populationEstimate", "latitude", "longitude"]
 
-    if {"latitude", "longitude", "datasetID"}.issubset(dataset.columns):
+    columns_to_check = [col for col in columns_to_check if col in linkProperties]
+
+    invalid_values = {}
+    for col in columns_to_check:
+        invalid_rows = dataset[~dataset[col].apply(is_valid_float)]
+        if not invalid_rows.empty:
+            invalid_values[col] = invalid_rows[[col]].values.flatten()
+    
+    if invalid_values:
+        error_msg = "Invalid float values found:\n"
+        for col, values in invalid_values.items():
+            error_msg += f" - Column '{col}': {values}\n"
+        raise ValueError(error_msg)
+    
+    # # checks for year validities
+    # if "recordEnd" in dataset.columns:
+    #     invalid_rows = get_invalid_ranges(dataset, "recordStart", "recordEnd")
+    #     if not invalid_rows.empty:
+    #         raise ValueError(f"Found {len(invalid_rows)} invalid rows where 'recordEnd' < 'recordStart'")
+    
+    # if "yearEnd" in dataset.columns:
+    #     invalid_rows = get_invalid_ranges(dataset, "yearStart", "yearEnd")
+    #     if not invalid_rows.empty:
+    #         raise ValueError(f"Found {len(invalid_rows)} invalid rows where 'yearEnd' < 'yearStart'")
+        
+    #Confirms that all latitude and longitudes are in range
+    if {"latitude", "longitude"}.issubset(dataset.columns):
         for index, row in dataset.iterrows():
             try:
                 lat = float(row["latitude"])
                 if lat < -90 or lat > 90:
-                    return f"Latitude for CMID {row['datasetID']} illogical."
+                    return f"Latitude at row {index} is illogical (value: {lat})."
             except (ValueError, TypeError):
-                return f"Latitude for CMID {row['datasetID']} is not a valid number."
+                return f"Latitude at row {index} is not a valid number (value: {row['latitude']})."
 
             try:
                 lon = float(row["longitude"])
                 if lon < -180 or lon > 180:
-                    return f"Longitude for CMID {row['datasetID']} illogical."
+                    return f"Longitude at row {index} is illogical (value: {lon})."
             except (ValueError, TypeError):
-                return f"Longitude for CMID {row['datasetID']} is not a valid number."
+                return f"Longitude at row {index} is not a valid number (value: {row['longitude']})."
 
     """ Replaces nan/NA values with None and then replaces all none with "" """
     """ Also converts everything to string """
     dataset = dataset.replace({np.nan: None, pd.NA: None})
     dataset = dataset.astype(str)
-    # dataset = dataset.replace({None, ""})
     dataset = dataset.replace({"nan": "", "<NA>": "", "None": ""})
 
+    """ CMID checks """
     #data_dict is created as a “records” data dictionary from dataset for the purpose of error checking.
     data_dict = dataset.to_dict(orient="records")
-
-    """ CMID checks """
 
     # checks for all CMIDS to be either category or dataset
     if "CMID" in dataset.columns:
@@ -976,6 +939,9 @@ def input_Nodes_Uses(
         ):
             raise ValueError("Category or Dataset CMIDs cant be mixed.")
 
+    """Checks for existence of CMID values in the database."""
+
+    #Dan. Should simply have this info in the metadata nodes and do a query to get them?
     multi_value_columns = [
         "language",
         "district",
@@ -987,8 +953,6 @@ def input_Nodes_Uses(
         "polity",
     ]
     error_columns = ["CMID", "datasetID"] + multi_value_columns
-
-    """Checks for existence of CMID values in the database."""
 
     for i in error_columns:
         if i in dataset.columns:
@@ -1049,6 +1013,9 @@ def input_Nodes_Uses(
                     raise ValueError(" ".join(message_parts))
                 
     # checking if label of CMID in spreadsheet matches label in database
+    # 1) label for CMID in property matches property
+    # 2) label for CMID for parent matches label of child. 
+    # 3) label for CMID in CMID column matches label
     if "label" in dataset.columns and "CMID" in dataset.columns:
         updateLog(
             f"log/{user}uploadProgress.txt",
@@ -1133,7 +1100,8 @@ def input_Nodes_Uses(
                             parent_labels.append(record["parent_labels"])
                             child_labels.append(record["child_labels"])
 
-                    required_labels = {"LANGUOID", "RELIGION", "ETHNICITY", "DISTRICT"}
+                    #Dan Use a query to retrieve the values instead
+                    required_labels = {"LANGUOID", "RELIGION", "ETHNICITY", "DISTRICT", "BIOTA","POLITY","OCCUPATION","VARIABLE","CERAMIC","PROJECTILE_POINT","CULTURE","STONE","PERIOD"}
 
                     def validate_labels(parent_labels, child_labels):
                         for idx, (i, j) in enumerate(zip(parent_labels, child_labels)):
@@ -1345,8 +1313,8 @@ def input_Nodes_Uses(
         merged_df = pd.merge(dataset, updated_data, on="CMID", how="left")
 
         return merged_df
-
-
+    
+    # checks for the existence of CMID, key and datasetID triplets in the database for function 3 and 4
     if uploadOption == "update_add" or uploadOption == "update_replace":
         error_query = """
     UNWIND $rows AS row
@@ -1366,50 +1334,17 @@ def input_Nodes_Uses(
                 raise ValueError(
                     f"Error: Invalid CMID or Key or datasetID for {missing}"
                 )
-
-    columns_to_check = ["parent", "CMID"]
-    invalid_entries = []
-
-    for column in columns_to_check:
-        if column in dataset.columns:
-            updateLog(
-                f"log/{user}uploadProgress.txt",
-                f"checking column {column} for invalid CMID",
-                write="a",
-            )
-
-            if uploadOption == "add_node" or "label" in dataset.columns:
-                continue
-            elif (
-                uploadOption == "add_uses"
-                or uploadOption == "update_add"
-                or uploadOption == "update_replace"
-            ):
-                dataset["label"] = "CATEGORY"
-            elif uploadOption == "node_add" or uploadOption == "node_replace":
-                dataset["label"] = "DATASET"
-            else:
-                error_message = "Cannot determine upload method."
-                raise ValueError(error_message)
-
-            invalid_entries_for_column = dataset.loc[
-                ~dataset.apply(
-                    lambda row: is_valid_cmid(
-                        column, row[column], database, row.get("label", "")
-                    ),
-                    axis=1,
-                ),
-                column,
-            ]
-
-            for idx, row in invalid_entries_for_column.items():
-                invalid_entries.append((column, idx, row))
-
-    if invalid_entries:
-        error_message = "Invalid entries found:\n" + "\n".join(
-            [f"Row {idx}, Column '{col}': {val}" for col, idx, val in invalid_entries]
-        )
-        raise ValueError(error_message)
+            
+    if uploadOption == "add_node" or "label" in dataset.columns:
+        pass
+    elif (
+        uploadOption == "add_uses"
+        or uploadOption == "update_add"
+        or uploadOption == "update_replace"
+    ):
+        dataset["label"] = "CATEGORY"
+    elif uploadOption == "node_add" or uploadOption == "node_replace":
+        dataset["label"] = "DATASET"
 
     if formatKey is True:
         dataset = createKey(dataset, "Key").copy()
@@ -1423,6 +1358,7 @@ def input_Nodes_Uses(
         write="a",
     )
 
+    # prevents adding shortName if the node has the property
     if isDataset and uploadOption == "add_node":
         query = "unwind $rows as row match (d:DATASET {shortName: row.shortName}) return d.shortName as shortName"
         shortNames = getQuery(
@@ -1440,12 +1376,20 @@ def input_Nodes_Uses(
 
     '''Data pre-processing starts'''
 
+    # removes the mentioned control characters and trailing\leading spaces from each cell in the dataframe
+    dataset[dataset.columns] = dataset[dataset.columns].applymap(
+        lambda x: (
+            re.sub(r"[\t\n\r\f\v]", "", x).strip() if isinstance(x, str) else x
+        )
+    )
+
     dataset = dataset.dropna(axis=1, how="all")
 
     properties = getPropertiesMetadata(driver)
     properties = pd.DataFrame(properties)
 
     # Grouping linkproperties for a common super label.
+    # for complex properties, groups component properties by the superLabel into a single complex property
     if not isDataset:
         updateLog(
             f"log/{user}uploadProgress.txt", "Combining paired properties", write="a"
@@ -1467,26 +1411,7 @@ def input_Nodes_Uses(
         for group in grouped_columns["group"].unique():
             linkProperties.append(group)
         linkProperties = list(set(linkProperties))
-    
-    # if "geoCoords" in dataset.columns:
-    #     column_names.remove("latitude")
-    #     column_names.remove("longitude")
-    #     column_names.append("geoCoords")
-    
-    # if "parentContext" in dataset.columns:
-    #     column_names.append("parentContext")
-    #     if 'eventType' in column_names:
-    #         column_names.remove("eventType")
-    #     if 'eventDate' in column_names:
-    #         column_names.remove("eventDate")
-    
-
-    # adhoc ID used for joining and filtering output purposes.
-    updateLog(f"log/{user}uploadProgress.txt", "Creating import ID", write="a")
-    getQuery("MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL", driver)
-    uniqueID = "importID"
-    dataset["importID"] = dataset.index + 1
-
+       
     # if user chooses to upload district and recordyear information from dataset
     if addDistrict:
         updateLog(
@@ -1523,8 +1448,8 @@ def input_Nodes_Uses(
         )
         dataset = combine_names_and_altNames(dataset, "Name", "altNames")
 
+    #cleans parentContext json strings by removing parentContext if no parent or no eventData or eventType
     if "parentContext" in dataset.columns: 
-        #cleans parentContext json strings
         dataset["parentContext"] = dataset["parentContext"].apply(filter_dict)
 
         # Dataframe store data as objects by default, hence we need to convert back
@@ -1539,26 +1464,14 @@ def input_Nodes_Uses(
         )
 
         # Step 2: Remove square brackets if present in strings
+        # Sometimes jsons can be represented as lists, and this converts json lists to strings
         dataset["parentContext"] = dataset["parentContext"].apply(
             lambda x: (
                 re.sub(r"\[|\]", "", x) if isinstance(x, str) else x
             )
         )
 
-        # Step 3: Unnest data (apply to each row)
-        # dataset = dataset.explode("parentContext").reset_index(
-        #     drop=True
-        # )
-
-        # Step 4: Handle missing parent values by setting parentContext to None where parent is NaN
-        # dataset["parentContext"] = dataset.apply(
-        #     lambda row: (
-        #         None if pd.isna(row["parent"]) else row["parentContext"]
-        #     ),
-        #     axis=1,
-        # )
-
-        # Step 5: Drop 'eventDate' and 'eventType' columns if they exist
+        # Step 3: Drop 'eventDate' and 'eventType' columns if they exist
         dataset = dataset.drop(
             columns=[
                 col
@@ -1568,6 +1481,15 @@ def input_Nodes_Uses(
         )
 
      # Combining columns and merging rows
+     # Dan. Creates a new dataset where rows with the same datasetID, Key and CMID are combined.
+     # Dan. Is having a CMID column sufficient?
+     # Dan. Let's walk through how this works.  Specifically, what are the conditions when sepcific things happen.
+     # Dan. Specifications (what it should be): 1) Function 1, all rows are a new node (even if they have the same Key
+     # Dan. 2) for functions 3, 4, each datasetID, Key, CMID triplet define a unique row
+     # Dan. 3) for function 2, for rows with CMID values, CMID, Key and datasetID define a unique row.  For rows with
+     # Dan.   no value for CMID, then rows are defined by unique combinations of datasetiD and Key
+     # Dan. 4) for function 5,6 each CMID defines a unique row (but do we ever need multiple rows for the same CMID?
+     #check with robert
     if "CMID" in dataset.columns and (
         not "parentContext" in dataset.columns or "geoCoords" in dataset.columns
     ):
@@ -1577,6 +1499,7 @@ def input_Nodes_Uses(
             else:
                 dataset = combine_properties(dataset, ["datasetID", "Key"])
     
+    #convert geoCoords to the Point and Multipoint formats
     if linkProperties is not None and "geoCoords" in linkProperties:
         updateLog(
             f"log/{user}uploadProgress.txt",
@@ -1586,16 +1509,12 @@ def input_Nodes_Uses(
         dataset["geoCoords"] = dataset["geoCoords"].apply(convert_coordinates)
 
     """End of error checking and data pre-processing. Begin batch upload."""
-    pd.set_option('display.max_columns', None)
 
     sq = range(0, len(dataset), batchSize)
 
     try:
         final_result = pd.DataFrame()
         dataset_match = pd.DataFrame()
-
-        # check CMID, and datasetID, country, district, parent, language, religion, for SocioMap
-        # CMID, datasetID, period, country, district, parent, for ArchaMap
 
         for s in sq:
             sub_dataset = dataset.iloc[s : s + batchSize].copy()
@@ -1636,6 +1555,10 @@ def input_Nodes_Uses(
                 newly_created_nodes = pd.DataFrame(newly_created_nodes)
                 newly_created_nodes = newly_created_nodes.astype(str)
                 sub_dataset = sub_dataset.astype(str)
+
+                #Merge CMIDs for new nodes back into sub_dataset. New merged dataset is called dataset_match
+                #If function 2, then also add new CMIDs into dataset_for_results
+                #Dan. Why not just add new CMIDS into dataset_for_results for function 1 as well?
                 dataset_match = sub_dataset.merge(
                             newly_created_nodes[["importID", "CMID", "nodeID"]],
                             on="importID",
@@ -1668,6 +1591,7 @@ def input_Nodes_Uses(
 
             '''Ending Node creation process.'''
 
+            #Begin USES tie creation process.
             link_columns = [
                 "datasetID",
                 "CMName",
@@ -1680,7 +1604,7 @@ def input_Nodes_Uses(
             link_columns = [col for col in link_columns if col in dataset_match.columns]
             link_columns = list(dict.fromkeys(link_columns))
 
-            #For category nodes, add USES relationships for function 1 and 2?
+            #For category nodes, add USES relationships for function 1 and 2
             if not isDataset:
                 updateLog(
                     f"log/{user}uploadProgress.txt",
@@ -1688,66 +1612,7 @@ def input_Nodes_Uses(
                     write="a",
                 )
 
-                links = dataset_match[link_columns].drop_duplicates().copy()
-
-                '''Start of grouping variables processing'''
-
-                if "parentContext" in linkProperties:
-                    
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "updating parentContext",
-                        write="a",
-                    )
-
-                    sub_links = links.copy()
-
-                    # Step 6: Group by 'datasetID', 'CMID', and 'Key'
-                    # grouped_links = sub_links.groupby(["datasetID", "CMID", "Key"])
-
-                    # print(grouped_links)
-
-                    # # Step 7: Combine lists of parentContext and parent, keeping their JSON representations intact
-                    # sub_links = grouped_links.agg(
-                    #     {
-                    #         "parentContext": lambda x: list(x),
-                    #         "parent": lambda x: list(x),
-                    #     }
-                    # ).reset_index()
-
-                    # print(sub_links)
-
-                    # # Step 8: Convert lists of JSON strings to a semicolon-separated string
-                    # for index, row in sub_links.iterrows():
-                    #     sub_links.at[index, "parentContext"] = (
-                    #         process_parent_context_element(row["parentContext"])
-                    #     )
-                    #     sub_links.at[index, "parent"] = (
-                    #         process_parent_context_element(row["parent"])
-                    #     )
-                    
-                    # print(sub_links)
-
-                    # # Step 9: Merge the grouped data back into the original DataFrame
-                    # links = links.drop(columns=["parentContext", "parent"]).copy()
-                    # links = pd.merge(
-                    #     links,
-                    #     sub_links,
-                    #     on=["datasetID", "CMID", "Key"],
-                    #     how="left",
-                    # )
-
-                    # # Replace values that do not contain 'eventDate' or 'eventType' with an empty string
-                    # links["parentContext"] = links["parentContext"].apply(
-                    #     lambda x: x if "eventDate" in x or "eventType" in x else ""
-                    # )
-
-                updateLog(
-                    f"log/{user}uploadProgress.txt", str(links.columns), write="a"
-                )
-
-                '''End of grouping variables processing'''
-
+                #Now that CMID has been created for add_node, need include CMID as required column.
                 if uploadOption == "add_node":
                     required_for_operation = required + ["CMID"]
                 else:
@@ -1787,7 +1652,7 @@ def input_Nodes_Uses(
                     )
                     links = links[link_cols]
                     result = createUSES(
-                        links=links, database=database, user=user, create="MERGE"
+                        links=links, database=database, user=user
                     )
                 if isinstance(result, str):
                     updateLog(f"log/{user}uploadProgress.txt", result, write="a")
@@ -1803,6 +1668,7 @@ def input_Nodes_Uses(
                     cmid_values = [link["CMID"] for link in result["result"]]
 
                     # checks if all CMIDs have been returned from USES tie creation
+                    # check with robert
                     if len(cmid_values) < len(result["result"]):
                         missing_links = [
                             link for link in result["result"] if "CMID" not in link
@@ -1851,6 +1717,7 @@ def input_Nodes_Uses(
                     write="a",
                 )
 
+            #if its a dataset
             else:
                 required_for_operation = required + ["CMID"]
                 node_columns = list(set(required_for_operation + nodeProperties))
