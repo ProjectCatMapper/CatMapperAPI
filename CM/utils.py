@@ -19,7 +19,7 @@ def getQuery(query, driver, params=None, type="dict", **kwargs):
         params = params or {}
         params.update(kwargs)
         with driver.session() as session:
-            result = session.run(query, params)
+            result = session.run(query, params)      
             if type == "dict":
                 result = [dict(record) for record in result]
             elif type == "list":
