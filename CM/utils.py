@@ -95,22 +95,19 @@ def getDriver(database):
         config.read('config.ini')
         user = config['DB']['user']
         pwd = config['DB']['pwd']
-
-        if str.lower(database) == "sociomap":
-            driver = GraphDatabase.driver(config['DB']['uriSM'], auth=(
-                user, pwd))
-        elif str.lower(database) == "archamap":
-            driver = GraphDatabase.driver(config['DB']['uriAM'], auth=(
-                user, pwd))
-        elif str.lower(database) == "gisdb":
-            driver = GraphDatabase.driver(config['DB']['uriG'], auth=(
-                user, pwd))
-        elif str.lower(database) == "userdb":
-            driver = GraphDatabase.driver(config['DB']['uriU'], auth=(
-                user, pwd))
-        else:
+        database = str.lower(database)
+        if not database in config['DB']:
+            raise ValueError(
+                f"Database must be 'SocioMap', 'ArchaMap', 'gisdb', or 'userdb', but database is {database}")
+        uri = config['DB'][database]
+        configOpt='DB'
+        if not testConnection():
+            configOpt = 'OFFLINE'
+        if not testConnection(configOpt=configOpt, database=database):
             raise Exception(
-                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
+                f"Database connection failed for {database}. Please check your configuration.")
+        driver = GraphDatabase.driver(config[configOpt][uri], auth=(
+                user, pwd))
 
         return driver
 
@@ -335,6 +332,29 @@ def pivot_property_value_columns(filepath):
 
     # Save the resulting DataFrame
     df_wide.to_csv(filepath, index=False)
+
+
+def testConnection(configOpt="DB",database="SocioMap"):
+    """
+    Test the connection to the specified database.
+    """
+    try:
+        from configparser import ConfigParser
+        config = ConfigParser()
+        config.read('config.ini')
+        user = config['DB']['user']
+        pwd = config['DB']['pwd']
+        database = str.lower(database)
+        uri = config['DB'][database]  # Default to SocioMap URI
+        driver = GraphDatabase.driver(config[configOpt][uri], auth=(
+                user, pwd))
+        with driver.session() as session:
+            result = session.run("RETURN 1")
+            success = result.single()[0] == 1
+        driver.close()
+        return success
+    except Exception as e:
+        return False
 
 if __name__ == "__main__":
     import argparse
