@@ -276,7 +276,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         )
         #return_clause_string = ", ".join(return_clause)
 
-        onCreate = "" if create.lower() == "create" else "ON CREATE "
+        onCreate = "ON CREATE "
 
         # Create Cypher query for adding relationships
         q = f"""
@@ -370,6 +370,9 @@ def updateProperty(df, database, user, updateType, propertyType="USES"):
         # double checking for errors, if in future we call this function elsewhere outside this pipeline
         if not updateType in ["overwrite", "update"]:
             raise Exception("type must be update or overwrite.")
+        
+        if "importID" in df.columns:
+            df = df.drop("importID")
 
         driver = getDriver(database)
 
@@ -415,12 +418,21 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         keys = ", ".join(keys)
 
         old_keys = ", ".join([f"`{var}`: r.{var}" for var in vars])
-        get_old_vals_query = f"""
-        UNWIND $rows AS row
-        MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}})
-        RETURN elementId(r) AS relID, b.CMID AS CMID, row.Key AS Key, row.datasetID AS datasetID,
-            {{ {old_keys} }} AS oldVals
-        """
+
+        if propertyType == "USES":
+            get_old_vals_query = f"""
+            UNWIND $rows AS row
+            MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}})
+            RETURN elementId(r) AS relID, b.CMID AS CMID, row.Key AS Key, row.datasetID AS datasetID,
+                {{ {old_keys} }} AS oldVals
+            """
+        else:
+            get_old_vals_query = f"""
+            UNWIND $rows AS row
+            MATCH (n {{CMID: row.CMID}})
+            RETURN elementId(n) AS nodeID, n.CMID AS CMID,{{ {old_keys} }} AS oldVals
+            """
+
         old_values = getQuery(
             query=get_old_vals_query,
             driver=driver,
@@ -459,47 +471,83 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
         logs = []
 
-        for old_row in old_values:
-            rel_id = old_row["relID"]
-            old_vals = old_row["oldVals"]
-
-            input_row = next(
-                (
-                    r
-                    for r in df_dict
-                    if r.get("Key") == old_row.get("Key")
-                    and r.get("CMID") == old_row.get("CMID")
-                    and (
-                        propertyType != "USES"
-                        or r.get("datasetID") == old_row.get("datasetID")
-                    )
-                ),
-                {},
-            )
-
-            changes = []
-
-            if updateType == "overwrite":
-                var = vars[0]
-                old_val = old_vals.get(var, "")
-                new_val = input_row.get(var, "")
-                changes.append(f'changed "{var}" from "{old_val}" to "{new_val}"')
-
-            elif updateType == "update":
-                for var in vars:
-                    new_val = input_row.get(var, "")
-                    changes.append(f'added "{var}" with value "{new_val}"')
-
-            logs.append("; ".join(changes))
-
         if propertyType == "USES":
+
+            for old_row in old_values:
+                old_vals = old_row["oldVals"]
+
+                input_row = next(
+                    (
+                        r
+                        for r in df_dict
+                        if r.get("Key") == old_row.get("Key")
+                        and r.get("CMID") == old_row.get("CMID")
+                        and (
+                            propertyType != "USES"
+                            or r.get("datasetID") == old_row.get("datasetID")
+                        )
+                    ),
+                    {},
+                )
+
+                changes = []
+
+                if updateType == "overwrite":
+                    var = vars[0]
+                    old_val = old_vals.get(var, "")
+                    new_val = input_row.get(var, "")
+                    changes.append(f'changed "{var}" from "{old_val}" to "{new_val}"')
+
+                elif updateType == "update":
+                    for var in vars:
+                        new_val = input_row.get(var, "")
+                        changes.append(f'added "{var}" with value "{new_val}"')
+
+                logs.append("; ".join(changes))
+
+                createLog(
+                    id=[row["relID"] for row in result],
+                    type="relation",
+                    log=logs,
+                    user=user,
+                    driver=driver,
+                )
+
+        else:
+
+            node_logs= []
+            for old_row in old_values:
+                old_vals = old_row["oldVals"]
+
+                input_row = next(
+                    (r for r in df_dict if r.get("CMID") == old_row.get("CMID")), {}
+                )
+
+                changes = []
+                
+                if updateType == "update":
+                    for var in vars:
+                        new_val = input_row.get(var, "")
+                        changes.append(f'added "{var}" with value "{new_val}"')
+
+                elif updateType == "overwrite":
+                    old_val = old_vals.get(vars[0], "")
+                    new_val = input_row.get(vars[0], "")
+                    changes.append(
+                        f'changed "{vars[0]}" from "{old_val}" to "{new_val}"'
+                    )
+
+
+                node_logs.append("; ".join(changes))
+
             createLog(
-                id=[row["relID"] for row in result],
-                type="relation",
-                log=logs,
+                id=[row["nodeID"] for row in result],
+                type="node",
+                log=node_logs,
                 user=user,
                 driver=driver,
             )
+
 
         if "geoCoords" in df.columns:
             updateLog(
@@ -508,7 +556,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             CMIDs = df["CMID"].unique()
             correct_geojson(CMID=CMIDs, database=database)
 
-        return {"result": result, "df": df_dict}
+        return result
     except Exception as e:
         return f"Error: {str(e)}"
 
@@ -927,6 +975,7 @@ def input_Nodes_Uses(
 
     """ CMID checks """
     #data_dict is created as a “records” data dictionary from dataset for the purpose of error checking.
+    # also used for functions 5 and 6
     data_dict = dataset.to_dict(orient="records")
 
     # checks for all CMIDS to be either category or dataset
@@ -1101,19 +1150,20 @@ def input_Nodes_Uses(
                             child_labels.append(record["child_labels"])
 
                     #Dan Use a query to retrieve the values instead
-                    required_labels = {"LANGUOID", "RELIGION", "ETHNICITY", "DISTRICT", "BIOTA","POLITY","OCCUPATION","VARIABLE","CERAMIC","PROJECTILE_POINT","CULTURE","STONE","PERIOD"}
+                    all_group_labels = {"LANGUOID", "RELIGION", "ETHNICITY", "DISTRICT", "BIOTA","POLITY","OCCUPATION","VARIABLE","CERAMIC","PROJECTILE_POINT","CULTURE","STONE","PERIOD","GENERIC"}
 
                     def validate_labels(parent_labels, child_labels):
                         for idx, (i, j) in enumerate(zip(parent_labels, child_labels)):
-                            value_has_required = required_labels.intersection(set(i))
-                            cmid_has_required = required_labels.intersection(set(j))
+                            singular_parent_grouplabel = all_group_labels.intersection(set(i))
+                            singular_child_grouplabel = all_group_labels.intersection(set(j))
 
-                            if value_has_required != cmid_has_required:
-                                raise ValueError(
-                                    f"Mismatch at row {idx}: Parent node labels dont match that of the child node.\n"
-                                    f"Parent Labels: {i}\n"
-                                    f"Child Labels: {j}"
-                                )
+                            if "GENERIC" not in singular_parent_grouplabel:
+                                if singular_parent_grouplabel != singular_child_grouplabel:
+                                    raise ValueError(
+                                        f"Mismatch at row {idx}: Parent node labels dont match that of the child node.\n"
+                                        f"Parent Labels: {i}\n"
+                                        f"Child Labels: {j}"
+                                    )
 
                     validate_labels(parent_labels, child_labels)
 
@@ -1154,9 +1204,9 @@ def input_Nodes_Uses(
 
         from functools import reduce
 
-        updated_dfs = []  # Store updated data for each property
+        updated_dfs = []
 
-        old_keys = ", ".join([f"`{var}`: n.{var}" for var in linkProperties])
+        old_keys = ", ".join([f"`{var}`: n.{var}" for var in nodeProperties])
         get_old_vals_query = f"""
         UNWIND $rows AS row
         MATCH (n {{CMID: row.CMID}})
@@ -1169,7 +1219,7 @@ def input_Nodes_Uses(
             query=get_old_vals_query, driver=driver, params={"rows": data_dict}
         )
 
-        for prop in linkProperties:  # Loop through each property
+        for prop in nodeProperties:  # Loop through each property
             update_query = """
                 UNWIND $rows AS row
                 MATCH (n {CMID: row.CMID})
@@ -1224,7 +1274,7 @@ def input_Nodes_Uses(
 
             changes = []
 
-            for var in linkProperties:
+            for var in nodeProperties:
                 new_val = input_row.get(var, "")
                 changes.append(f'added "{var}" with value "{new_val}"')
 
@@ -1249,9 +1299,9 @@ def input_Nodes_Uses(
         return merged_df
 
     if uploadOption == "node_replace":
-        linkProperties = linkProperties[0]
+        nodeProperties = nodeProperties[0]
 
-        old_keys = ", ".join([f"`{var}`: n.{var}" for var in [linkProperties]])
+        old_keys = ", ".join([f"`{var}`: n.{var}" for var in [nodeProperties]])
         get_old_vals_query = f"""
         UNWIND $rows AS row
         MATCH (n {{CMID: row.CMID}})
@@ -1272,7 +1322,7 @@ def input_Nodes_Uses(
         results = getQuery(
             query=update_query,
             driver=driver,
-            params={"rows": data_dict, "prop": linkProperties},
+            params={"rows": data_dict, "prop": nodeProperties},
         )
 
         for old_row in old_values:
@@ -1284,10 +1334,10 @@ def input_Nodes_Uses(
 
             changes = []
 
-            old_val = old_vals.get(linkProperties, "")
-            new_val = input_row.get(linkProperties, "")
+            old_val = old_vals.get(nodeProperties, "")
+            new_val = input_row.get(nodeProperties, "")
             changes.append(
-                f'changed "{linkProperties}" from "{old_val}" to "{new_val}"'
+                f'changed "{nodeProperties}" from "{old_val}" to "{new_val}"'
             )
 
             node_logs.append("; ".join(changes))
@@ -1304,7 +1354,7 @@ def input_Nodes_Uses(
             [
                 {
                     "CMID": record["CMID"],
-                    "updated_" + linkProperties: record["updated_value"],
+                    "updated_" + nodeProperties: record["updated_value"],
                 }
                 for record in results
             ]
@@ -1510,6 +1560,8 @@ def input_Nodes_Uses(
 
     """End of error checking and data pre-processing. Begin batch upload."""
 
+    '''Start batch processing for functions 1 to 4'''
+
     sq = range(0, len(dataset), batchSize)
 
     try:
@@ -1604,8 +1656,10 @@ def input_Nodes_Uses(
             link_columns = [col for col in link_columns if col in dataset_match.columns]
             link_columns = list(dict.fromkeys(link_columns))
 
+            links = dataset_match[link_columns].drop_duplicates().copy()
+
             #For category nodes, add USES relationships for function 1 and 2
-            if not isDataset:
+            if uploadOption != "node_add" or uploadOption!= "node_replace":
                 updateLog(
                     f"log/{user}uploadProgress.txt",
                     "Adding USES relationships",
@@ -1717,7 +1771,7 @@ def input_Nodes_Uses(
                     write="a",
                 )
 
-            #if its a dataset
+            #For function 5 and 6
             else:
                 required_for_operation = required + ["CMID"]
                 node_columns = list(set(required_for_operation + nodeProperties))
@@ -1728,38 +1782,38 @@ def input_Nodes_Uses(
                 if uploadOption == "node_replace":
                     updateLog(
                         f"log/{user}uploadProgress.txt",
-                        "overwriting Dataset properties",
+                        "overwriting Node properties",
                         write="a",
                     )
-                    updateProperty(
+                    result = updateProperty(
                         nodes,
                         database=database,
                         user=user,
                         updateType="overwrite",
-                        propertyType="DATASET",
+                        propertyType="NODE",
                     )
                 elif uploadOption == "node_add":
                     updateLog(
                         f"log/{user}uploadProgress.txt",
-                        "updating dataset properties",
+                        "updating Node properties",
                         write="a",
                     )
-                    updateProperty(
+                    result = updateProperty(
                         nodes,
                         database=database,
                         user=user,
                         updateType="update",
-                        propertyType="DATASET",
+                        propertyType="NODE",
                     )
 
                 updateLog(
                     f"log/{user}uploadProgress.txt",
-                    "processing Dataset properties",
+                    "processing Node properties",
                     write="a",
                 )
                 cmids = dataset_match["CMID"].unique()
                 processDATASETs(database=database, user=user, CMID=cmids)
-                final_result = pd.concat([final_result, dataset_match], axis=0)
+                final_result = pd.concat([final_result, result], axis=0)
 
             if uniqueID == "importID":
                 getQuery(
