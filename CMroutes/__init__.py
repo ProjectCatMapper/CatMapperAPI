@@ -2,12 +2,8 @@ from .test_routes import *
 from .admin_routes import *
 from .routines import *
 from .query import *
-from .getLogs import *
-from .getDownloads import *
-
 from flask import Flask, abort, send_from_directory
 from .extensions import *
-
 import os
 from flask_cors import CORS
 from configparser import ConfigParser
