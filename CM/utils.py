@@ -12,26 +12,17 @@ from flask import abort
 import itertools
 from collections.abc import Iterable
 import json
-import json
 
 
-def getQuery(query, driver, params=None, type="dict", **kwargs):
 def getQuery(query, driver, params=None, type="dict", **kwargs):
     try:
         params = params or {}
         params.update(kwargs)
-        params = params or {}
-        params.update(kwargs)
         with driver.session() as session:
-            result = session.run(query, params)      
+            result = session.run(query, params)
             if type == "dict":
                 result = [dict(record) for record in result]
             elif type == "list":
-                result = list(itertools.chain.from_iterable(
-                    record.values() for record in result))
-            elif type == "df":
-                result = pd.DataFrame([dict(record) for record in result])
-            else:
                 result = list(itertools.chain.from_iterable(
                     record.values() for record in result))
             elif type == "df":
@@ -43,8 +34,6 @@ def getQuery(query, driver, params=None, type="dict", **kwargs):
     except Exception as e:
         raise RuntimeError(f"An error occurred: {e}")
 
-        raise RuntimeError(f"An error occurred: {e}")
-
 
 def unlist(l):
     if isinstance(l, list):
@@ -52,14 +41,11 @@ def unlist(l):
     return l
 
 
-
 def isValidCMID(cmid, driver):
-
 
     query = "unwind $cmid as cmid match (c) where c.CMID = cmid return c.CMID as cmid, true as exists"
 
     with driver.session() as session:
-        result = session.run(query, cmid=cmid)
         result = session.run(query, cmid=cmid)
         result = [dict(record) for record in result]
         driver.close()
@@ -79,14 +65,10 @@ n.metaType as metaType, n.search as search,
 n.translation as translation
 """
         data = getQuery(query=query, driver=driver)
-        data = getQuery(query=query, driver=driver)
         return data
-
 
     except Exception as e:
         return str(e), 500
-
-
 
 
 def getLabelsMetadata(driver):
@@ -98,17 +80,12 @@ return n.label as label, n.groupLabel as groupLabel,
 n.relationship as relationship, n.public as public, 
 n.default as default, n.description as description, 
 n.displayName as displayName, n.remove as remove, n.color as color  
-n.displayName as displayName, n.remove as remove, n.color as color  
 """
-        data = getQuery(query=query, driver=driver)
         data = getQuery(query=query, driver=driver)
         return data
 
-
     except Exception as e:
         return str(e), 500
-
-
 
 
 def getDriver(database):
@@ -119,36 +96,19 @@ def getDriver(database):
         user = config['DB']['user']
         pwd = config['DB']['pwd']
 
-        from configparser import ConfigParser
-        config = ConfigParser()
-        config.read('config.ini')
-        user = config['DB']['user']
-        pwd = config['DB']['pwd']
-
         if str.lower(database) == "sociomap":
-            driver = GraphDatabase.driver(config['DB']['uriSM'], auth=(
-                user, pwd))
             driver = GraphDatabase.driver(config['DB']['uriSM'], auth=(
                 user, pwd))
         elif str.lower(database) == "archamap":
             driver = GraphDatabase.driver(config['DB']['uriAM'], auth=(
                 user, pwd))
-            driver = GraphDatabase.driver(config['DB']['uriAM'], auth=(
-                user, pwd))
         elif str.lower(database) == "gisdb":
-            driver = GraphDatabase.driver(config['DB']['uriG'], auth=(
-                user, pwd))
             driver = GraphDatabase.driver(config['DB']['uriG'], auth=(
                 user, pwd))
         elif str.lower(database) == "userdb":
             driver = GraphDatabase.driver(config['DB']['uriU'], auth=(
                 user, pwd))
-            driver = GraphDatabase.driver(config['DB']['uriU'], auth=(
-                user, pwd))
         else:
-            raise Exception(
-                f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
-
             raise Exception(
                 f"must specify database as 'SocioMap' or 'ArchaMap', but database is {database}")
 
@@ -160,18 +120,12 @@ def getDriver(database):
 
 
 def validateCols(df, required):
-        abort(500, description=f"An unexpected error occurred: {str(e)}")
-
-
-def validateCols(df, required):
     missing = [col for col in df.columns if col not in required]
 
     if len(missing) > 0:
         return f"Missing the following required column(s): {missing}\n"
     else:
         return True
-
-
 
 
 def cleanCMID(cmid):
@@ -196,13 +150,10 @@ def cleanCMID(cmid):
 
 
 def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database="SocioMap"):
-
-def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database="SocioMap"):
     print(database)
 
     if database.lower() == 'sociomap':
         database = 'SocioMap'
-    elif database.lower() == 'archamap':
     elif database.lower() == 'archamap':
         database = 'ArchaMap'
     elif database.lower() == 'gisdb':
@@ -210,8 +161,6 @@ def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database="SocioMap"):
     elif database.lower() == 'userdb':
         database = 'userdb'
     else:
-        raise ValueError(
-            f"Database must be 'SocioMap', 'ArchaMap', 'gisdb', or 'userdb', but database is {database}")
         raise ValueError(
             f"Database must be 'SocioMap', 'ArchaMap', 'gisdb', or 'userdb', but database is {database}")
 
@@ -233,7 +182,6 @@ def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database="SocioMap"):
     RETURN new_id + 1 as new_id
     '''
 
-    newID = getQuery(query, driver, type="list")
     newID = getQuery(query, driver, type="list")
     newID = newID[0]
 
@@ -260,24 +208,8 @@ def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database="SocioMap"):
             newID = [f"{prefix}D{x}" for x in newID]
         else:
             newID = [f"{prefix}M{x}" for x in newID]
-    prefix = ''
-    if database == "SocioMap":
-        prefix = "S"
-    elif database == "ArchaMap":
-        prefix = "A"
-    elif database == "gisdb":
-        prefix = "gis"
-
-    if database == "gisdb":
-        newID = [f"{prefix}{x}" for x in newID]
-    else:
-        if label == "DATASET":
-            newID = [f"{prefix}D{x}" for x in newID]
-        else:
-            newID = [f"{prefix}M{x}" for x in newID]
 
     return newID
-
 
 
 def list2character(col):
@@ -290,7 +222,6 @@ def list2character(col):
     # Otherwise, convert it to a string
     else:
         return str(col)
-
 
 
 def flattenList(input_data):
@@ -306,114 +237,6 @@ def flattenList(input_data):
         return flat_list
     else:
         return [input_data]
-
-
-def is_valid_json(json_string):
-    try:
-        json.loads(json_string)
-        return True
-    except json.JSONDecodeError:
-        return False
-
-
-def flatten_json(json_obj, parent_key='', sep='_'):
-    flat_dict = {}
-    for key, value in json_obj.items():
-        new_key = key if parent_key else key
-        if isinstance(value, dict):
-            flat_dict.update(flatten_json(value, new_key, sep=sep))
-        else:
-            flat_dict[new_key] = value
-    return flat_dict
-
-
-def custom_sort(elem):
-    if elem == 'CONTAINS':
-        return 0
-    elif elem == 'DISTRICT_OF':
-        return 1
-    elif elem == 'USES':
-        return 2
-    else:
-        return 3
-
-import ast
-
-def pivot_property_value_columns(filepath):
-    """
-    Loads a CSV, expands list-like strings in the 'value' column,
-    filters out unwanted 'property' values, pivots the table wider,
-    and overwrites the original file.
-
-    Parameters:
-        filepath (str): Path to the input CSV file.
-    """
-
-    # Check if file exists
-    if not os.path.isfile(filepath):
-        raise FileNotFoundError(f"File not found: {filepath}")
-
-    # Load CSV
-    df = pd.read_csv(filepath)
-
-    # Check required columns
-    required_cols = {'property', 'value'}
-    if not required_cols.issubset(df.columns):
-        raise ValueError(f"Missing required columns: {required_cols - set(df.columns)}")
-
-    # Function to safely parse list-like strings
-    def parse_list(val):
-        try:
-            parsed = ast.literal_eval(val)
-            if isinstance(parsed, list):
-                return parsed
-            return [parsed]
-        except:
-            return [val]
-
-    # Filter out unwanted properties
-    ignore_props = {'log', 'logID', 'geoPolygon', 'names'}
-    df_filtered = df[~df['property'].isin(ignore_props)].copy()
-
-    # Convert stringified lists to actual lists
-    df_filtered['value'] = df_filtered['value'].apply(parse_list)
-
-    # Fill NaNs to prevent explode/join issues
-    df_filtered.fillna('', inplace=True)
-
-    # Convert list columns to semicolon-separated strings
-    for col in df_filtered.columns:
-        if df_filtered[col].apply(lambda x: isinstance(x, list)).any():
-            df_filtered[col] = df_filtered[col].apply(
-                lambda x: '; '.join(map(str, x)) if isinstance(x, list) else x
-            )
-
-    # Identify index columns (all except 'property' and 'value')
-    index_cols = [col for col in df_filtered.columns if col not in ['property', 'value']]
-
-    # Pivot to wide format
-    df_wide = df_filtered.pivot_table(
-        index=index_cols,
-        columns='property',
-        values='value',
-        aggfunc=lambda x: ', '.join(x.astype(str))  # join duplicates
-    ).reset_index()
-
-    df_wide.columns.name = None  # Remove column name from pivot
-    df_wide.fillna('', inplace=True)  # Replace NaNs with empty strings
-
-    # Save the resulting DataFrame
-    df_wide.to_csv(filepath, index=False)
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Pivot CSV based on 'property' and 'value' columns.")
-    parser.add_argument("filepath", help="Path to the CSV file to process.")
-    args = parser.parse_args()
-
-    pivot_property_value_columns(args.filepath)
-    print(f"Processed and saved: {args.filepath}")
 
 
 def is_valid_json(json_string):

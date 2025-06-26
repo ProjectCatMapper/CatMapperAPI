@@ -423,7 +423,7 @@ def addCMNameRel(database, CMID=None):
         except:
             return "Error", 500
 
-
+#when dataset properties, parent or district are changed, this function creates or fixes contextual ties.
 def processDATASETs(database, CMID=None, user="0"):
     try:
 
