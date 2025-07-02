@@ -202,7 +202,7 @@ def getBadCMID(database, mail=None):
                         deleted, on="badCMID", how="left", suffixes=("", "_new"))
 
                 if mail is not None:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix="_badCMID.xlsx", dir="/tmpapi") as tmpfile:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix="_badCMID.xlsx", dir="/tmp") as tmpfile:
                         fp1 = tmpfile.name
                         results.to_excel(fp1, index=False)
                     sendEmail(mail, subject=f"Bad CMIDs for {database}", recipients=[
@@ -227,7 +227,7 @@ def getMultipleLabels(database, mail=None):
         if isinstance(results, pd.DataFrame) and not results.empty:
 
             if mail is not None:
-                with tempfile.NamedTemporaryFile(delete=False, suffix="_multipleLabels.xlsx", dir="/tmpapi") as tmpfile:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_multipleLabels.xlsx", dir="/tmp") as tmpfile:
                     fp1 = tmpfile.name
                     results.to_excel(fp1, index=False)
                 sendEmail(mail, subject=f"Multiple Labels for {database}", recipients=[
@@ -244,9 +244,9 @@ def getMultipleLabels(database, mail=None):
 
 def getBadJSON(database, mail=None):
     try:
-        fd, fp1 = tempfile.mkstemp(suffix="_geoCoords.xlsx", dir="/tmpapi")
+        fd, fp1 = tempfile.mkstemp(suffix="_geoCoords.xlsx", dir="/tmp")
         os.close(fd)
-        fd, fp2 = tempfile.mkstemp(suffix="_parentContext.xlsx", dir="/tmpapi")
+        fd, fp2 = tempfile.mkstemp(suffix="_parentContext.xlsx", dir="/tmp")
         os.close(fd)
         results1 = validateJSON(
             database=database, property='geoCoords', path=fp1)
@@ -308,7 +308,7 @@ def getBadDomains(database, mail=None):
             bad_labels = pd.DataFrame(columns=["CMID", "CMName", "label"])
         if isinstance(bad_labels, pd.DataFrame) and not bad_labels.empty:
             if mail is not None:
-                with tempfile.NamedTemporaryFile(delete=False, suffix="_bad_labels.xlsx", dir="/tmpapi") as tmpfile:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_bad_labels.xlsx", dir="/tmp") as tmpfile:
                     fp1 = tmpfile.name
                     bad_labels.to_excel(fp1, index=False)
                 sendEmail(mail, subject=f"Bad Labels for {database}", recipients=[
@@ -319,7 +319,7 @@ def getBadDomains(database, mail=None):
 
         if isinstance(missing_category, pd.DataFrame) and not missing_category.empty:
             if mail is not None:
-                with tempfile.NamedTemporaryFile(delete=False, suffix="_missing_category.xlsx", dir="/tmpapi") as tmpfile:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_missing_category.xlsx", dir="/tmp") as tmpfile:
                     fp1 = tmpfile.name
                     missing_category.to_excel(fp1, index=False)
                 sendEmail(mail, subject=f"Missing CATEGORY Label for {database}", recipients=[
@@ -330,7 +330,7 @@ def getBadDomains(database, mail=None):
 
         if isinstance(missing_dataset, pd.DataFrame) and not missing_dataset.empty:
             if mail is not None:
-                with tempfile.NamedTemporaryFile(delete=False, suffix="_missing_dataset.xlsx", dir="/tmpapi") as tmpfile:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_missing_dataset.xlsx", dir="/tmp") as tmpfile:
                     fp1 = tmpfile.name
                     missing_dataset.to_excel(fp1, index=False)
                 sendEmail(mail, subject=f"Missing DATASET Label for {database}", recipients=[
@@ -378,7 +378,7 @@ def getBadRelations(database, mail=None):
 
         if isinstance(results, pd.DataFrame) and not results.empty:
             if mail is not None:
-                with tempfile.NamedTemporaryFile(delete=False, suffix="_bad_relationship_labels.xlsx", dir="/tmpapi") as tmpfile:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_bad_relationship_labels.xlsx", dir="/tmp") as tmpfile:
                     fp1 = tmpfile.name
                     results.to_excel(fp1, index=False)
                 sendEmail(mail, subject=f"Bad Relationship Label for {database}", recipients=[
@@ -408,7 +408,7 @@ def CMNameNotInName(database, mail=None):
             updateAltNames(driver, CMID=cmids)
 
             if mail is not None:
-                with tempfile.NamedTemporaryFile(delete=False, suffix="_BadCMNames.xlsx", dir="/tmpapi") as tmpfile:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_BadCMNames.xlsx", dir="/tmp") as tmpfile:
                     fp1 = tmpfile.name
                     cmids = pd.DataFrame(cmids)
                     cmids.columns = ["CMID"]
