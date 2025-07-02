@@ -10,3 +10,4 @@ lib64/*
 .gpg
 pyvenv.cfg
 tmp/*
+*.pyc
