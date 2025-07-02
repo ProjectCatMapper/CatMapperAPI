@@ -556,10 +556,7 @@ def upload_API():
         CMID = formData["cmidColumn"]
         Key = formData["keyColumn"]
 
-        linkProperties = data.get("allContext")
-        optionalProperties = linkProperties
-        if not linkProperties:
-            linkProperties = None
+        optionalProperties = data.get("allContext")
 
         if data.get("addoptions")["district"] == False:
             addDistrict = False
@@ -587,19 +584,11 @@ def upload_API():
                 else:
                     key_cols[key] = None
 
-            nodeProperties = None
-            if 'label' in dfpd.columns:
-                if dfpd['label'][0] == "DATASET":
-                    nodeProperties = linkProperties
-                    linkProperties = None
-
             response,desired_order = input_Nodes_Uses(
                 dataset=df,
                 database=database,
                 uploadOption=uploadOption,
                 formatKey=False,
-                nodeProperties=nodeProperties,
-                linkProperties=linkProperties,
                 optionalProperties = optionalProperties,
                 user=user,
                 addDistrict=addDistrict,
@@ -628,8 +617,7 @@ def upload_API():
                 database=database,
                 uploadOption="add_uses",
                 formatKey=True,
-                nodeProperties=None,
-                linkProperties=None,
+                optionalProperties = optionalProperties,
                 user=user,
                 addDistrict=False,
                 addRecordYear=False,

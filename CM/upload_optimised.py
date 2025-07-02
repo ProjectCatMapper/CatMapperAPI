@@ -66,7 +66,7 @@ def updateLog(f, txt, write="a"):
         print(e)
 
 #Creates names property for new dataset node that combines shortName, CMName, and DatasetCitation, names
-#May need to apply for functions 5 and 6
+#Dan need to apply for functions 5 and 6
 def add_to_names_for_dataset(row):
         # Extract base names as a list
         if pd.isna(row["names"]):
@@ -76,7 +76,7 @@ def add_to_names_for_dataset(row):
         else:
             names_list = [row["names"].strip()]
 
-        # Append CMID, shortName, and DatasetCitation if they exist
+        # Append CMName, shortName, and DatasetCitation if they exist
         for col in ["CMName", "shortName", "DatasetCitation"]:
             val = row.get(col)
             if pd.notna(val):
@@ -132,6 +132,7 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
 
         df = df.astype(str)
 
+        # Checks that all columns in df represent valid CatMapper node properties.
         # We get all columns that need to be set as properties for nodes, excludes label and uniqueID
         # This is useful when determining valid columns coming from the API, not relevant to UI.
         vars = [
@@ -203,25 +204,20 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         raise
 
 #Creates uses ties for nodes created in functions 1 and 2
+#Currently relies on checks for duplicate rows from the main function,
+#if used independently in the future, may need more precise internal error handling.
 def createUSES(links, database, user):
     try:
         start_time = time.time()
-        if "datasetID" not in links.columns or "CMID" not in links.columns:
-            raise ValueError("Must have 'datasetID' and 'CMID' columns")
-
-        if "Key" not in links.columns:
-            raise ValueError("Must have 'Key' column")
+        if "datasetID" not in links.columns or "CMID" not in links.columns or "Key" not in links.columns:
+            raise ValueError("Must have 'datasetID','CMID' and 'Key' columns")
 
         links = links.copy()
 
         # Database connection assumed via driver
         driver = getDriver(database)
-        
-        # check with robert
-        # TO DO - check for duplicate triplets
-        # Remove duplicates
-        links = links.drop_duplicates()
 
+        # Checks that all columns in links represent valid CatMapper relationship properties.        
         # We get all columns that need to be set as properties for realtionships
         # This is useful when determining valid columns coming from the API, not relevant to UI.
         db_properties = getQuery(
@@ -229,7 +225,7 @@ def createUSES(links, database, user):
             driver,
         )
         db_properties_list = [item["property"] for item in db_properties]
-        missing_cols = [var for var in links.columns.tolist() if var not in db_properties_list and var not in ["CMID","datasetID"]]
+        missing_cols = [var for var in links.columns.tolist() if var not in db_properties_list and var not in ["CMID","datasetID","CMName"]]
         if missing_cols:
             raise Exception(
                 f"Error: The following columns are not in properties: {', '.join(missing_cols)}"
@@ -238,7 +234,7 @@ def createUSES(links, database, user):
         # Convert all values to strings and replace NaN with empty strings
         links = links.fillna("").astype(str)
 
-        # Select the appropriate columns based on the relationship type
+        #Removes required properties that either aren't added to uses tie (datasetID, CMID, CMName) or are added separately (Key)
         vars = links.columns.difference(["datasetID", "CMID", "Key", "CMName"])
 
         query = """
@@ -263,32 +259,31 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
             return_clause.append(f"row.{var} as {var}")
 
-        # Combine the keys into a single string for the Cypher query
+        # Combine the cypher code (called keys) for each property into a single string for the Cypher query
         keys_string = ", ".join(keys)
 
         items = [k.split('=')[0].strip() for k in keys_string.split(',') if '=' in k]
 
-        # Format each property as: r.prop AS prop
+        # Format each property as: r.prop AS prop - so the query works correctly - for return
         return_props = (
             items[0] + f" AS {items[0].split('.')[-1]}"
             if len(items) == 1
             else ', '.join([f"{item} AS {item.split('.')[-1]}" for item in items])
         )
-        #return_clause_string = ", ".join(return_clause)
 
         onCreate = "ON CREATE "
 
-        # Create Cypher query for adding relationships
+        # Create Cypher query for adding USES ties
         q = f"""
         UNWIND $rows AS row
         MATCH (a:DATASET) WHERE row.datasetID = a.CMID
         MATCH (b:CATEGORY) WHERE row.CMID = b.CMID
         MERGE (a)-[r:USES {{Key: row['Key']}}]->(b)
         {onCreate}SET r.status = 'update', {keys_string}
-        RETURN elementId(b) AS nodeID, elementId(r) as relID, r.Key as Key, a.CMID as datasetID, b.CMID as CMID, {return_props}
+        RETURN elementId(b) AS nodeID, elementId(r) as relID, r.Key as Key, a.CMID as datasetID, b.CMID as CMID,b.CMName as CMName, {return_props}
         """
 
-        # Get the number of relationships before adding
+        # Get the number of USES ties before adding
         nRels = getQuery(
             "MATCH ()-[r]->() RETURN count(*) AS count", driver, type="list"
         )
@@ -296,9 +291,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         # Execute the query and return results
         updateLog(f"log/{user}uploadProgress.txt", "Uploading new USES ties", write="a")
         links.to_csv(f"log/{user}uploadProgress.csv")
-        # updateLog(f"log/{user}uploadProgress.txt", ", ".join(links.columns.values), write = 'a')
         links_dict = links.to_dict(orient="records")
-        # updateLog(f"log/{user}uploadProgress.txt", jsonify(links_dict), write = 'a')
         result = getQuery(q, driver, params={"rows": links_dict})
 
         if isinstance(result, dict):
@@ -364,9 +357,10 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         raise
 
 
-# function to update or replace properties of USES ties or nodes, (functions 3 and 4)
-def updateProperty(df, database, user, updateType, propertyType="USES"):
+# function to update or replace properties of USES ties or nodes, (functions 3 to 6)
+def updateProperty(df,isDataset, database, user, updateType, propertyType="USES"):
     try:
+        print(df)
         # double checking for errors, if in future we call this function elsewhere outside this pipeline
         if not updateType in ["overwrite", "update"]:
             raise Exception("type must be update or overwrite.")
@@ -386,11 +380,12 @@ def updateProperty(df, database, user, updateType, propertyType="USES"):
         for required in requiredCols:
             if required not in df.columns:
                 raise ValueError(f"Missing required column {required}")
-
+            
         vars = df.drop(
             columns=[col for col in requiredCols if col in df.columns]
         ).columns.tolist()
 
+        # this code builds the cypher query
         query = """
 match (n:METADATA:PROPERTY)
 return n.property as property, n.type as type,
@@ -403,22 +398,26 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         metaTypeDict = {item["property"]: item["metaType"] for item in metaTypes}
 
         keys = []
+
+        if propertyType == "USES":
+            node_or_tie = "r"
+        elif propertyType == "NODE":
+            node_or_tie = "n"
         for var in vars:
             # Get the metaType for the given property
             metaType = metaTypeDict.get(var)
             if updateType == "overwrite" and var != "log":
                 keys.append(
-                    f"r.{var} = custom.formatProperties(['',row.{var}],'{metaType}',';')[0].prop"
+                    f"{node_or_tie}.{var} = custom.formatProperties(['',row.{var}],'{metaType}',';')[0].prop"
                 )
             else:
                 keys.append(
-                    f"r.{var} = custom.formatProperties([r.{var},row.{var}],'{metaType}',';')[0].prop"
+                    f"{node_or_tie}.{var} = custom.formatProperties([{node_or_tie}.{var},row.{var}],'{metaType}',';')[0].prop"
                 )
+            old_keys = ", ".join([f"`{var}`: {node_or_tie}.{var}" for var in vars])
 
         keys = ", ".join(keys)
-
-        old_keys = ", ".join([f"`{var}`: r.{var}" for var in vars])
-
+      
         if propertyType == "USES":
             get_old_vals_query = f"""
             UNWIND $rows AS row
@@ -426,7 +425,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             RETURN elementId(r) AS relID, b.CMID AS CMID, row.Key AS Key, row.datasetID AS datasetID,
                 {{ {old_keys} }} AS oldVals
             """
-        else:
+        elif propertyType == "NODE":
             get_old_vals_query = f"""
             UNWIND $rows AS row
             MATCH (n {{CMID: row.CMID}})
@@ -441,12 +440,14 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
         items = [k.split('=')[0].strip() for k in keys.split(',') if '=' in k]
 
-        # Format each property as: r.prop AS prop
+        # Format each property as: r.prop AS prop - for cypher query
         return_props = (
             items[0] + f" AS {items[0].split('.')[-1]}"
             if len(items) == 1
             else ', '.join([f"{item} AS {item.split('.')[-1]}" for item in items])
         )
+
+        print(keys)
 
         # Query branching based on uses ties or node properties
         if propertyType == "USES":
@@ -457,12 +458,12 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             SET {keys}, r.status = 'update'
             RETURN elementId(b) as nodeID,elementId(r) as relID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, {return_props}
             """
-        else:
+        elif propertyType == "NODE":
             q = f"""
             UNWIND $rows AS row
-            MATCH (r {{CMID: row.CMID}})
-            SET {keys}, r.status = "update"
-            RETURN elementId(r) as nodeID, r.CMID as CMID
+            MATCH (n {{CMID: row.CMID}})
+            SET {keys}, n.status = "update"
+            RETURN elementId(n) as nodeID, n.CMID as CMID
             """
 
         df_dict = df.to_dict(orient="records")
@@ -471,6 +472,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
         logs = []
 
+        # this section logs accordingly based on propertyType
         if propertyType == "USES":
 
             for old_row in old_values:
@@ -513,7 +515,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
                     driver=driver,
                 )
 
-        else:
+        elif propertyType == "NODE":
 
             node_logs= []
             for old_row in old_values:
@@ -556,7 +558,10 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             CMIDs = df["CMID"].unique()
             correct_geojson(CMID=CMIDs, database=database)
 
-        return result
+        # this format is how it is recieved at the function call, dont remove or alter.
+        # df_dict is for direct API call returns.
+        # ask robert
+        return {"result": result, "df": df_dict}
     except Exception as e:
         return f"Error: {str(e)}"
 
@@ -717,14 +722,34 @@ def filter_dict(d):
     
     return filtered_dict
 
+def is_non_empty(x):
+    return pd.notna(x) and str(x).strip() != ''
+
+#Checks whether labels in parent_labels have same group_label as labels in child_labels.arguments must be lists
+def validate_labels(all_group_labels,parent_labels, child_labels):
+    for idx, (i, j) in enumerate(zip(parent_labels, child_labels)):
+        print(i)
+        print(j)
+        singular_parent_grouplabel = all_group_labels.intersection(set(i))
+        singular_child_grouplabel = all_group_labels.intersection(set(j))
+        
+        print(singular_parent_grouplabel)
+        print(singular_child_grouplabel)
+
+        if "GENERIC" not in singular_parent_grouplabel:
+            if singular_parent_grouplabel != singular_child_grouplabel:
+                raise ValueError(
+                    f"Mismatch at row {idx}: Parent node labels dont match that of the child node.\n"
+                    f"Parent Labels: {i}\n"
+                    f"Child Labels: {j}"
+                )
+
 
 def input_Nodes_Uses(
     dataset,
     database,
     uploadOption,
     formatKey=False,
-    nodeProperties=None,
-    linkProperties=None,
     optionalProperties=None,
     user=None,
     addDistrict=False,
@@ -775,7 +800,6 @@ def input_Nodes_Uses(
     dataset["importID"] = dataset.index + 1
 
     #dataset_for_results is copy of original input used to merge into upload status download spreadsheet
-    #importID used for remerging newly created CMIDs to appropriate row in dataset.
     dataset_for_results = dataset.copy(deep=True)
     dataset_for_results = dataset_for_results.astype(str)
     if "CMID" in dataset_for_results.columns:
@@ -807,7 +831,7 @@ def input_Nodes_Uses(
         updateLog(
             f"log/{user}uploadProgress.txt", "upload is for CATEGORY nodes", write="a"
         )
-
+        
     # defining node and link properties based on METADATA types
     
     node_query = "MATCH (p:PROPERTY) WHERE p.type='node' RETURN p.property as property"
@@ -825,6 +849,22 @@ def input_Nodes_Uses(
     """............................"""
     """ Error checking starts here """
     """............................"""
+
+    # When eventType or eventDate have non-empty values, there can only be one parent in that row  
+    if "eventType" in dataset.columns or "eventDate" in dataset.columns:
+        # Create boolean mask for rows where A or B are non-empty
+        mask = dataset['eventType'].apply(is_non_empty) | dataset['eventDate'].apply(is_non_empty)
+
+        # Find violations: rows where C contains ';' and A or B is non-empty
+        invalid_rows = dataset.loc[mask & dataset['parent'].str.contains(';', na=False)]
+
+        if not invalid_rows.empty:
+            raise ValueError(f"When eventType or eventDate have non-empty values, there can only be one parent in that row:\n{invalid_rows}")
+
+    # check if any optional property columns are completely empty
+    for i in optionalProperties:
+        if dataset[i].replace("",pd.NA).isna().all():
+            raise ValueError(f"{dataset[i]} has all empty values")
 
     # checks for duplicate columns
     duplicates = dataset.columns[dataset.columns.duplicated()]
@@ -994,6 +1034,7 @@ def input_Nodes_Uses(
     multi_value_columns = [
         "language",
         "district",
+        "District",
         "country",
         "religion",
         "parent",
@@ -1100,10 +1141,11 @@ def input_Nodes_Uses(
                 if row.get(i):
                     values = [val.strip() for val in row[i].split(";") if val.strip()]
                     rows_to_check.extend([{"value": v} for v in values])
-
+            
             if not rows_to_check:
                 continue
 
+            # checks for validity of non-parent labels
             if i != "parent":
 
                 if i == "country":
@@ -1128,45 +1170,62 @@ def input_Nodes_Uses(
                         f"Error: Wrong labels in database for column '{i}': {wrong_labels}"
                     )
             else:
+                all_group_labels = {"LANGUOID", "RELIGION", "ETHNICITY", "DISTRICT", "BIOTA","POLITY","OCCUPATION","VARIABLE","CERAMIC","PROJECTILE_POINT","CULTURE","STONE","PERIOD","GENERIC"}
+
                 if uploadOption == "add_node":
-                    continue
+                    child_column = "label"
                 else:
-                    query = """
-                    UNWIND keys($rows) AS cmid
-                    MATCH (n {CMID: cmid})
-                    MATCH (m {CMID: $rows[cmid]})
-                    RETURN labels(n) AS parent_labels, labels(m) AS child_labels
-                    """
+                    child_column = "CMID"
 
-                    parent_labels = []
-                    child_labels = []
+                combined = []
+                
+                for _, row in dataset.iterrows():
+                    child_value = row[child_column]
+                    parent_values = str(row['parent']).split(';')
+                    
+                    for i in parent_values:
+                        i = i.strip()
+                        if i:  # skip empty strings
+                            combined.append((child_value, i))
 
-                    combine = dict(zip(dataset["CMID"], rows_to_check))
+                dict_with_index = {i: {child_column: a, 'parent': b} for i, (a, b) in enumerate(combined)}
 
-                    with driver.session() as session:
-                        results = session.run(query, rows=combine)
-                        for record in results:
-                            parent_labels.append(record["parent_labels"])
-                            child_labels.append(record["child_labels"])
+                query = """
+                        MATCH (n)
+                        WHERE n.CMID IN $rows
+                        RETURN n.CMID as CMID, labels(n) AS labels
+                        """
 
-                    #Dan Use a query to retrieve the values instead
-                    all_group_labels = {"LANGUOID", "RELIGION", "ETHNICITY", "DISTRICT", "BIOTA","POLITY","OCCUPATION","VARIABLE","CERAMIC","PROJECTILE_POINT","CULTURE","STONE","PERIOD","GENERIC"}
+                parent_values = list({row['parent'] for row in dict_with_index.values()})
+                child_values = list({row[child_column] for row in dict_with_index.values()})
 
-                    def validate_labels(parent_labels, child_labels):
-                        for idx, (i, j) in enumerate(zip(parent_labels, child_labels)):
-                            singular_parent_grouplabel = all_group_labels.intersection(set(i))
-                            singular_child_grouplabel = all_group_labels.intersection(set(j))
+                with driver.session() as session:
+                    result = session.run(query, rows=parent_values)
+                    parent_dict = {record["CMID"]: record["labels"] for record in result}
 
-                            if "GENERIC" not in singular_parent_grouplabel:
-                                if singular_parent_grouplabel != singular_child_grouplabel:
-                                    raise ValueError(
-                                        f"Mismatch at row {idx}: Parent node labels dont match that of the child node.\n"
-                                        f"Parent Labels: {i}\n"
-                                        f"Child Labels: {j}"
-                                    )
+                    if uploadOption != "add_node":
+                        result= session.run(query,rows=child_values)
+                        child_dict = {record["CMID"]: record["labels"] for record in result}
 
-                    validate_labels(parent_labels, child_labels)
+                for idx, row in dict_with_index.items():
+                        row['parent_label'] = parent_dict.get(row['parent'], [])
 
+                if uploadOption == "add_node":
+                    for idx, row in dict_with_index.items():
+                        row['child_label'] = [row['label']]
+                else:
+                    for idx, row in dict_with_index.items():
+                        row['child_label'] = child_dict.get(row['CMID'], [])
+                    
+                parent_labels = []
+                child_labels = []
+                
+                for row in dict_with_index.values():
+                    parent_labels.append(row["parent_label"])
+                    child_labels.append(row['child_label'])
+                                    
+                validate_labels(all_group_labels,parent_labels, child_labels)
+    
     # checks if the eventType value is valid
 
     if "eventType" in dataset.columns:
@@ -1199,170 +1258,6 @@ def input_Nodes_Uses(
 
     if "eventType" in dataset.columns and "eventDate" not in dataset.columns:
         dataset["eventDate"] = np.nan
-
-    if uploadOption == "node_add":
-
-        from functools import reduce
-
-        updated_dfs = []
-
-        old_keys = ", ".join([f"`{var}`: n.{var}" for var in nodeProperties])
-        get_old_vals_query = f"""
-        UNWIND $rows AS row
-        MATCH (n {{CMID: row.CMID}})
-        RETURN elementId(n) AS nodeID, n.CMID AS CMID,{{ {old_keys} }} AS oldVals
-        """
-
-        node_logs = []
-
-        old_values = getQuery(
-            query=get_old_vals_query, driver=driver, params={"rows": data_dict}
-        )
-
-        for prop in nodeProperties:  # Loop through each property
-            update_query = """
-                UNWIND $rows AS row
-                MATCH (n {CMID: row.CMID})
-                CALL apoc.create.setProperty(n, $prop,
-                    CASE
-                        WHEN n[$prop] IS NULL THEN
-                            CASE
-                                WHEN apoc.meta.cypher.types(row[$prop]) = "STRING" THEN [row[$prop]]
-                                ELSE row[$prop]
-                            END
-                        WHEN apoc.meta.cypher.types(n[$prop]) = "STRING" THEN
-                            CASE
-                                WHEN apoc.meta.cypher.types(row[$prop]) = "STRING" THEN [n[$prop], row[$prop]]
-                                ELSE [n[$prop]] + row[$prop]
-                            END
-                        ELSE n[$prop] +
-                            CASE
-                                WHEN apoc.meta.cypher.types(row[$prop]) = "STRING" THEN [row[$prop]]
-                                ELSE row[$prop]
-                            END
-                    END
-                ) YIELD node
-                RETURN elementId(n) as nodeID,node.CMID AS CMID, node[$prop] AS updated_value
-                """
-
-            results = getQuery(
-                query=update_query,
-                driver=driver,
-                params={"rows": data_dict, "prop": prop},
-            )
-
-            updated_data = pd.DataFrame(
-                [
-                    {
-                        "CMID": record["CMID"],
-                        "nodeID": record["nodeID"],
-                        f"updated_{prop}": record["updated_value"],
-                    }
-                    for record in results
-                ]
-            )
-
-            # Store each updated DataFrame
-            updated_dfs.append(updated_data)
-
-        for old_row in old_values:
-            old_vals = old_row["oldVals"]
-
-            input_row = next(
-                (r for r in data_dict if r.get("CMID") == old_row.get("CMID")), {}
-            )
-
-            changes = []
-
-            for var in nodeProperties:
-                new_val = input_row.get(var, "")
-                changes.append(f'added "{var}" with value "{new_val}"')
-
-            node_logs.append("; ".join(changes))
-
-        createLog(
-            id=[row["nodeID"] for row in updated_dfs],
-            type="node",
-            log=node_logs,
-            user=user,
-            driver=driver,
-        )
-
-        # Merge all updated DataFrames together on CMID
-        if updated_dfs:
-            merged_updates = reduce(
-                lambda left, right: pd.merge(left, right, on="CMID", how="outer"),
-                updated_dfs,
-            )
-            merged_df = pd.merge(dataset, merged_updates, on="CMID", how="left")
-
-        return merged_df
-
-    if uploadOption == "node_replace":
-        nodeProperties = nodeProperties[0]
-
-        old_keys = ", ".join([f"`{var}`: n.{var}" for var in [nodeProperties]])
-        get_old_vals_query = f"""
-        UNWIND $rows AS row
-        MATCH (n {{CMID: row.CMID}})
-        RETURN elementId(n) AS nodeID, n.CMID AS CMID,{{ {old_keys} }} AS oldVals
-        """
-
-        node_logs = []
-
-        old_values = getQuery(
-            query=get_old_vals_query, driver=driver, params={"rows": data_dict}
-        )
-
-        update_query = """UNWIND $rows AS row
-                MATCH (n {CMID: row.CMID})
-                CALL apoc.create.setProperty(n, $prop, row[$prop]) YIELD node
-                RETURN elementId(n) as nodeID,n.CMID AS CMID, n[$prop] AS updated_value"""
-
-        results = getQuery(
-            query=update_query,
-            driver=driver,
-            params={"rows": data_dict, "prop": nodeProperties},
-        )
-
-        for old_row in old_values:
-            old_vals = old_row["oldVals"]
-
-            input_row = next(
-                (r for r in data_dict if r.get("CMID") == old_row.get("CMID")), {}
-            )
-
-            changes = []
-
-            old_val = old_vals.get(nodeProperties, "")
-            new_val = input_row.get(nodeProperties, "")
-            changes.append(
-                f'changed "{nodeProperties}" from "{old_val}" to "{new_val}"'
-            )
-
-            node_logs.append("; ".join(changes))
-
-        createLog(
-            id=[row["nodeID"] for row in results],
-            type="node",
-            log=node_logs,
-            user=user,
-            driver=driver,
-        )
-
-        updated_data = pd.DataFrame(
-            [
-                {
-                    "CMID": record["CMID"],
-                    "updated_" + nodeProperties: record["updated_value"],
-                }
-                for record in results
-            ]
-        )
-
-        merged_df = pd.merge(dataset, updated_data, on="CMID", how="left")
-
-        return merged_df
     
     # checks for the existence of CMID, key and datasetID triplets in the database for function 3 and 4
     if uploadOption == "update_add" or uploadOption == "update_replace":
@@ -1461,7 +1356,7 @@ def input_Nodes_Uses(
         for group in grouped_columns["group"].unique():
             linkProperties.append(group)
         linkProperties = list(set(linkProperties))
-       
+           
     # if user chooses to upload district and recordyear information from dataset
     if addDistrict:
         updateLog(
@@ -1530,25 +1425,27 @@ def input_Nodes_Uses(
             ]
         )
 
-     # Combining columns and merging rows
-     # Dan. Creates a new dataset where rows with the same datasetID, Key and CMID are combined.
-     # Dan. Is having a CMID column sufficient?
-     # Dan. Let's walk through how this works.  Specifically, what are the conditions when sepcific things happen.
-     # Dan. Specifications (what it should be): 1) Function 1, all rows are a new node (even if they have the same Key
-     # Dan. 2) for functions 3, 4, each datasetID, Key, CMID triplet define a unique row
-     # Dan. 3) for function 2, for rows with CMID values, CMID, Key and datasetID define a unique row.  For rows with
-     # Dan.   no value for CMID, then rows are defined by unique combinations of datasetiD and Key
-     # Dan. 4) for function 5,6 each CMID defines a unique row (but do we ever need multiple rows for the same CMID?
-     #check with robert
-    if "CMID" in dataset.columns and (
-        not "parentContext" in dataset.columns or "geoCoords" in dataset.columns
-    ):
-        if "datasetID" in dataset.columns and "Key" in dataset.columns:
-            if "CMID" in dataset.columns:
-                dataset = combine_properties(dataset, ["CMID", "datasetID", "Key"])
-            else:
-                dataset = combine_properties(dataset, ["datasetID", "Key"])
+    #For function 1, each row creates a new node
+    #For function 2, each row without a CMID creates a new node.  All rows with a CMID are grouped by the CMID, datasetID, key triplet
+    #For function 3 & 4, all rows are grouped by the CMID, datasetID, key triplet.
+    #For function 5 & 6, any rows with the same CMID will operate on the same CMID
+
+    if "CMID" in dataset.columns:     
+        if (dataset['CMID'] == "").any():
+            print("I am in")
+            mask = dataset['CMID'].isna() | (dataset['CMID'].astype(str).str.strip() == '')
+
+            # Step 2: Generate increasing numbers starting from 1
+            fill_values = range(1, mask.sum() + 1)
+
+            # Step 3: Assign those numbers to the empty cells
+            dataset.loc[mask, 'CMID'] = [f"auto_{i}" for i in fill_values]
     
+        if uploadOption == "update_add" or uploadOption == "update_replace" or uploadOption == "add_uses":
+            dataset = combine_properties(dataset, ["CMID", "datasetID", "Key"])
+        
+        dataset['CMID'] = dataset['CMID'].replace(to_replace=r'^auto_\d+$', value='', regex=True)
+        
     #convert geoCoords to the Point and Multipoint formats
     if linkProperties is not None and "geoCoords" in linkProperties:
         updateLog(
@@ -1560,7 +1457,7 @@ def input_Nodes_Uses(
 
     """End of error checking and data pre-processing. Begin batch upload."""
 
-    '''Start batch processing for functions 1 to 4'''
+    '''Start batch processing for functions 1 to 6'''
 
     sq = range(0, len(dataset), batchSize)
 
@@ -1581,11 +1478,13 @@ def input_Nodes_Uses(
             '''Begin node creation'''
 
             #You cant use non-node properties to create Nodes
+            #This restricts columns to node properties (and importID).
             if isDataset:
                 node_columns = ["CMName", "label", "shortName", "DatasetCitation","importID"] + nodeProperties
             else:
                 node_columns = ["CMName","label","importID"] + nodeProperties
-            
+
+            #nodes will contain rows for nodes that need to be created.            
             nodes = pd.DataFrame()
 
             if uploadOption == "add_node":
@@ -1656,16 +1555,10 @@ def input_Nodes_Uses(
             link_columns = [col for col in link_columns if col in dataset_match.columns]
             link_columns = list(dict.fromkeys(link_columns))
 
-            links = dataset_match[link_columns].drop_duplicates().copy()
+            links = dataset_match[link_columns].copy()
 
-            #For category nodes, add USES relationships for function 1 and 2
-            if uploadOption != "node_add" or uploadOption!= "node_replace":
-                updateLog(
-                    f"log/{user}uploadProgress.txt",
-                    "Adding USES relationships",
-                    write="a",
-                )
-
+            #For functions 1 to 4, creates USES ties or updates USES ties
+            if uploadOption in ["add_node","add_uses","update_add","update_replace"]:
                 #Now that CMID has been created for add_node, need include CMID as required column.
                 if uploadOption == "add_node":
                     required_for_operation = required + ["CMID"]
@@ -1679,21 +1572,23 @@ def input_Nodes_Uses(
                 if uploadOption == "update_replace":
                     updateLog(
                         f"log/{user}uploadProgress.txt",
-                        "Overwriting property",
+                        "Overwriting USES property",
                         write="a",
                     )
                     result = updateProperty(
                         links[link_cols],
+                        isDataset,
                         database=database,
                         user=user,
                         updateType="overwrite",
                     )
                 elif uploadOption == "update_add":
                     updateLog(
-                        f"log/{user}uploadProgress.txt", "Updating property", write="a"
+                        f"log/{user}uploadProgress.txt", "Updating USES property", write="a"
                     )
                     result = updateProperty(
                         links[link_cols],
+                        isDataset,
                         database=database,
                         user=user,
                         updateType="update",
@@ -1718,17 +1613,13 @@ def input_Nodes_Uses(
                     write="a",
                 )
                 try:
-                    # Clean up functions from USES ties
-                    cmid_values = [link["CMID"] for link in result["result"]]
+                    # Checks that CMIDs returned from result equal inputted CMIDs
+                    # This is helpful for addCMNameRel and updateAltNames
+                    cmids_from_result = [link["CMID"] for link in result["result"]]
 
-                    # checks if all CMIDs have been returned from USES tie creation
-                    # check with robert
-                    if len(cmid_values) < len(result["result"]):
-                        missing_links = [
-                            link for link in result["result"] if "CMID" not in link
-                        ]
+                    if set(cmids_from_result) != set(links["CMID"]):
                         raise KeyError(
-                            f"Missing 'CMID' in {len(missing_links)} link(s): {missing_links}"
+                            f"These inputted CMIDs have not been returned in result: {set(links['CMID']) - set(cmids_from_result)}"
                         )
                     updateLog(
                         f"log/{user}uploadProgress.txt",
@@ -1736,16 +1627,10 @@ def input_Nodes_Uses(
                         write="a",
                     )
                     # adds CMName to the Name parameter if missing
-                    addCMNameRel(database, CMID=cmid_values)
+                    addCMNameRel(database, CMID=cmids_from_result)
                     updateLog(
                         f"log/{user}uploadProgress.txt",
                         "updating alternate names",
-                        write="a",
-                    )
-                    updateAltNames(driver, CMID=cmid_values)
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "updated alternate names",
                         write="a",
                     )
                 except KeyError as e:
@@ -1755,15 +1640,6 @@ def input_Nodes_Uses(
                         write="a",
                     )
                     continue
-
-                updateLog(
-                    f"log/{user}uploadProgress.txt", "combining results", write="a"
-                )
-                result = pd.DataFrame(result["result"])
-                final_result = pd.concat([final_result, result], axis=0)
-                updateLog(
-                    f"log/{user}uploadProgress.txt", "results combined", write="a"
-                )
 
                 updateLog(
                     f"log/{user}uploadProgress.txt",
@@ -1787,6 +1663,7 @@ def input_Nodes_Uses(
                     )
                     result = updateProperty(
                         nodes,
+                        isDataset,
                         database=database,
                         user=user,
                         updateType="overwrite",
@@ -1800,6 +1677,7 @@ def input_Nodes_Uses(
                     )
                     result = updateProperty(
                         nodes,
+                        isDataset,
                         database=database,
                         user=user,
                         updateType="update",
@@ -1813,7 +1691,16 @@ def input_Nodes_Uses(
                 )
                 cmids = dataset_match["CMID"].unique()
                 processDATASETs(database=database, user=user, CMID=cmids)
-                final_result = pd.concat([final_result, result], axis=0)
+            
+            #Appending result of batch to previous batch results
+            updateLog(
+                    f"log/{user}uploadProgress.txt", "combining results", write="a"
+                )
+            result = pd.DataFrame(result["result"])
+            final_result = pd.concat([final_result, result], axis=0)
+            updateLog(
+                f"log/{user}uploadProgress.txt", "results combined", write="a"
+            )
 
             if uniqueID == "importID":
                 getQuery(
