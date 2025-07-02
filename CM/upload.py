@@ -1,11 +1,8 @@
 """upload.py"""
-"""upload.py"""
 
 from .utils import *
 from .USES import *
 from .keys import *
-from .GIS import *
-from .log import *
 from .GIS import *
 from .log import *
 import json
@@ -20,17 +17,6 @@ import warnings
 
 warnings.simplefilter("error", UserWarning)
 
-warnings.simplefilter("error", UserWarning)
-
-data = [
-    {
-        "CMID": "test-1",
-        "datasetID": "SD11",
-        "Key": "test-1",
-        "geoCoords": "yep",
-        "yearStart": 2011,
-    }
-]
 data = [
     {
         "CMID": "test-1",
@@ -54,126 +40,7 @@ def is_valid_integer_float(value):
 
 
 def is_valid_float(value):
-
-def is_valid_integer_float(value):
     try:
-        if value == "":
-            return True
-        num = float(value)
-        return num.is_integer()
-    except (ValueError, TypeError):
-        return False
-
-
-def is_valid_float(value):
-    try:
-        if value == "":
-            return True
-        float(value)
-        return True
-    except (ValueError, TypeError):
-        return False
-
-
-def is_valid_cmid(column, value, database, label):
-    if not isinstance(value, str):
-        return False
-
-    if label == "":
-        error_message = "Missing label value"
-        raise ValueError(error_message)
-
-    if column == "datasetID" or (
-        label == "DATASET" and (column == "CMID" or column == "parent")
-    ):
-
-        data_patterns = {"SocioMap": r"SD\d+", "ArchaMap": r"AD\d+"}
-
-        data_pattern = data_patterns.get(database)
-
-        if not data_pattern:
-            return False
-
-        if not re.match(data_pattern, value):
-            return False
-    else:
-        patterns = {"SocioMap": r"^SM\d+$", "ArchaMap": r"^AM\d+$"}
-
-        # future - for all selected columns do this for Link properties.
-        if column == "parent" and value == "":
-            return True
-
-        pattern = patterns.get(database)
-
-        if not pattern:
-            return False
-
-        # Split the value by semicolons and trim spaces from each part
-        split_values = [part.strip() for part in value.split(";")]
-
-        for part in split_values:
-            if not re.match(pattern, part):
-                return False
-
-        # if "label" == "DATASET":
-        #     if database == "sociomap" and not value.startswith("SD"):
-        #         return False
-        #     if database == "archamap" and not value.startswith("AD"):
-        #         return False
-
-    return True
-
-
-def add_error_column(df, user):
-    if "nodeID" not in df.columns:
-        updateLog(
-            f"log/{user}uploadProgress.txt",
-            "nodeID not found in final_results",
-            write="a",
-        )
-        raise Exception("Error: nodeID not found in final_results")
-
-    # Add the "Error" column based on the condition
-    df["Error"] = df["nodeID"].apply(lambda x: "CMID not found" if pd.isna(x) else "")
-    return df
-
-
-def updateLog(f, txt, write="a"):
-    print(txt)
-    try:
-        with open(f, write) as file:
-            file.write(txt + "\n")
-    except Exception as e:
-        print(e)
-
-def add_to_names_for_dataset(row):
-        # Extract base names as a list
-        if pd.isna(row["names"]):
-            names_list = []
-        elif ";" in row["names"]:
-            names_list = [name.strip() for name in row["names"].split(";") if name.strip()]
-        else:
-            names_list = [row["names"].strip()]
-
-        # Append CMID, shortName, and DatasetCitation if they exist
-        for col in ["CMID", "shortName", "DatasetCitation"]:
-            val = row.get(col)
-            if pd.notna(val):
-                names_list.append(str(val).strip())
-        
-        return names_list
-
-def createNodes(df, database,isDataset, user, uniqueID=None):
-    try:
-
-        driver = getDriver(database)
-
-        df = df.copy()
-
-        isDataset = isDataset
-          
-        idlabel = "CATEGORY"
-        # creating names column form existing CMID,shortName and DatasetCitation
         if value == "":
             return True
         float(value)
@@ -287,24 +154,10 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
                 df["names"] = None
             df["names"] = df.apply(add_to_names_for_dataset, axis=1)
             idlabel = "DATASET"
-            required = ["CMName", "label", "DatasetCitation", "shortName"]
-            if "names" not in df.columns:
-                df["names"] = None
-            df["names"] = df.apply(add_to_names_for_dataset, axis=1)
-            idlabel = "DATASET"
         else:
             required = ["CMName", "label"]
             df["label"] = df["label"].apply(lambda x: f"CATEGORY:{x}")
-            required = ["CMName", "label"]
-            df["label"] = df["label"].apply(lambda x: f"CATEGORY:{x}")
 
-        # ad-hoc column for row recognition on query return
-        #check with robert
-        if not uniqueID in df.columns or uniqueID is None:
-            getQuery(
-                "MATCH (c) where not c.uniqueID is null set c.uniqueID = NULL", driver
-            )
-            distinct_nodes = df.drop_duplicates(subset="CMName")
         # ad-hoc column for row recognition on query return
         #check with robert
         if not uniqueID in df.columns or uniqueID is None:
@@ -316,12 +169,7 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
                 raise Exception("Error: there must be a unique name for each new node.")
             else:
                 df["uniqueID"] = df.index
-                df["uniqueID"] = df.index
 
-        updateLog(f"log/{user}uploadProgress.txt", "getting new ID", write="a")
-        newID = getAvailableID(
-            new_id="CMID", label=idlabel, n=len(df), database=database
-        )
         updateLog(f"log/{user}uploadProgress.txt", "getting new ID", write="a")
         newID = getAvailableID(
             new_id="CMID", label=idlabel, n=len(df), database=database
@@ -332,21 +180,12 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         updateLog(
             f"log/{user}uploadProgress.txt", "Converting variables to string", write="a"
         )
-        updateLog(
-            f"log/{user}uploadProgress.txt", "Converting variables to string", write="a"
-        )
         df = df.astype(str)
 
         vars = [
             col for col in df.columns if "label" not in col and "uniqueID" not in col
         ]
-        vars = [
-            col for col in df.columns if "label" not in col and "uniqueID" not in col
-        ]
 
-        properties = getQuery(
-            "MATCH (p:PROPERTY) return p.property as property", driver, type="list"
-        )
         properties = getQuery(
             "MATCH (p:PROPERTY) return p.property as property", driver, type="list"
         )
@@ -368,17 +207,11 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         set_clause = ", ".join([f"a.{var} = row.{var}" for var in vars])
 
         return_clause = ", ".join([f"a.{var} as {var}" for var in vars])
-        return_clause = ", ".join([f"a.{var} as {var}" for var in vars])
 
-        updateLog(f"log/{user}uploadProgress.txt", "Creating query", write="a")
         updateLog(f"log/{user}uploadProgress.txt", "Creating query", write="a")
         q = f"""
         unwind $rows as row
-        unwind $rows as row
         call apoc.cypher.doIt('
-        MERGE (a:' + row.label + ' {{{uniqueID}: row.{uniqueID}}})
-        ON CREATE SET
-        {set_clause}
         MERGE (a:' + row.label + ' {{{uniqueID}: row.{uniqueID}}})
         ON CREATE SET
         {set_clause}
@@ -386,23 +219,9 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         {{row: row}}) yield value
         with value.a as a
         return distinct elementId(a) as nodeID,
-        {{row: row}}) yield value
-        with value.a as a
-        return distinct elementId(a) as nodeID,
         {return_clause}
         """
 
-        rows = df.to_dict(orient="records")
-        updateLog(f"log/{user}uploadProgress.txt", q, write="a")
-
-        updateLog(f"log/{user}uploadProgress.txt", "Running query", write="a")
-        results = getQuery(query=q, driver=driver, params={"rows": rows})
-
-        # check to see if this is correct and necessary
-        if isinstance(results, dict):
-            updateLog(f"log/{user}uploadProgress.txt", "Query successful", write="a")
-        else:
-            updateLog(f"log/{user}uploadProgress.txt", str(results), write="a")
         rows = df.to_dict(orient="records")
         updateLog(f"log/{user}uploadProgress.txt", q, write="a")
 
@@ -434,50 +253,22 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         )
 
         return results_df
-        updateLog(f"log/{user}uploadProgress.txt", "Updating log", write="a")
-
-        log_entries = results_df[vars + ["nodeID"]].to_dict(orient="records")
-
-        createLog(
-            id=results_df["nodeID"].tolist(),
-            type="node",
-            log=[
-                "created node with "
-                + ", ".join([f"{k}: {str(v)}" for k, v in row.items() if k != "nodeID"])
-                for row in log_entries
-            ],
-            user=user,
-            driver=driver,
-        )
-
-        return results_df
     except Exception as e:
         updateLog(f"log/{user}uploadProgress.txt", str(e), write="a")
         raise
-        updateLog(f"log/{user}uploadProgress.txt", str(e), write="a")
-        raise
 
-
-def createUSES(links, database, user, create="MERGE"):
 
 def createUSES(links, database, user, create="MERGE"):
     try:
         start_time = time.time()
         if "datasetID" not in links.columns or "CMID" not in links.columns:
             raise ValueError("Must have 'datasetID' and 'CMID' columns")
-        if "datasetID" not in links.columns or "CMID" not in links.columns:
-            raise ValueError("Must have 'datasetID' and 'CMID' columns")
 
-        if "Key" not in links.columns:
         if "Key" not in links.columns:
             raise ValueError("Must have 'Key' column")
 
-
         links = links.copy()
 
-        # Split 'datasetID' and 'CMID' on "; " and trim whitespace change to properties not datasetID and to -- maybe update combineProperties function in Neo4j to automatically split using a separator
-        # links['datasetID'] = links['datasetID'].apply(lambda x: x.split('; ') if isinstance(x, str) else []).apply(lambda x: [item.strip() for item in x]).apply(lambda x: '; '.join(x))
-        # links['CMID'] = links['CMID'].apply(lambda x: x.split('; ') if isinstance(x, str) else []).apply(lambda x: [item.strip() for item in x]).apply(lambda x: '; '.join(x))
         # Split 'datasetID' and 'CMID' on "; " and trim whitespace change to properties not datasetID and to -- maybe update combineProperties function in Neo4j to automatically split using a separator
         # links['datasetID'] = links['datasetID'].apply(lambda x: x.split('; ') if isinstance(x, str) else []).apply(lambda x: [item.strip() for item in x]).apply(lambda x: '; '.join(x))
         # links['CMID'] = links['CMID'].apply(lambda x: x.split('; ') if isinstance(x, str) else []).apply(lambda x: [item.strip() for item in x]).apply(lambda x: '; '.join(x))
@@ -487,10 +278,7 @@ def createUSES(links, database, user, create="MERGE"):
 
         # if 'label' not in links.columns:
         #     raise ValueError("Must have 'label' column")
-        # if 'label' not in links.columns:
-        #     raise ValueError("Must have 'label' column")
 
-        if create.lower() not in ["merge", "create"]:
         if create.lower() not in ["merge", "create"]:
             raise ValueError("create must be either 'merge' or 'create'")
 
@@ -513,33 +301,14 @@ def createUSES(links, database, user, create="MERGE"):
                 re.sub(r"[\t\n\r\f\v]", "", x).strip() if isinstance(x, str) else x
             )
         )
-        db_properties = getQuery(
-            "MATCH (p:PROPERTY) WHERE p.type = 'relationship' RETURN p.property AS property",
-            driver,
-        )
-        db_properties_list = [item["property"] for item in db_properties]
-        existing_columns = list(set(db_properties_list) & set(links.columns.tolist()))
-        updateLog(
-            f"log/{user}uploadProgress.txt", ", ".join(existing_columns), write="a"
-        )
-        links = links.loc[:, ~links.columns.duplicated()].copy()
-        links[existing_columns] = links[existing_columns].applymap(
-            lambda x: (
-                re.sub(r"[\t\n\r\f\v]", "", x).strip() if isinstance(x, str) else x
-            )
-        )
 
         # Convert all values to strings and replace NaN with empty strings
         links = links.fillna("").astype(str)
 
         # Select the appropriate columns based on the relationship type
         vars = links.columns.difference(["datasetID", "CMID", "Key", "CMName"])
-        vars = links.columns.difference(["datasetID", "CMID", "Key", "CMName"])
 
         query = """
-match (n:METADATA:PROPERTY)
-return n.property as property, n.type as type,
-n.relationship as relationship, n.description as description,
 match (n:METADATA:PROPERTY)
 return n.property as property, n.type as type,
 n.relationship as relationship, n.description as description,
@@ -548,21 +317,10 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
         metaTypes = getQuery(query, driver)
         metaTypeDict = {item["property"]: item["metaType"] for item in metaTypes}
-        metaTypeDict = {item["property"]: item["metaType"] for item in metaTypes}
 
         keys = []
         return_clause = []
-        return_clause = []
         for var in vars:
-            # Get the metaType for the given property
-            metaType = metaTypeDict.get(var)
-
-            keys.append(
-                f"r.{var} = custom.formatProperties(['',row.{var}],'{metaType}',';')[0].prop"
-            )
-
-            return_clause.append(f"row.{var} as {var}")
-
             # Get the metaType for the given property
             metaType = metaTypeDict.get(var)
 
@@ -575,7 +333,6 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         # Combine the keys into a single string for the Cypher query
         keys_string = ", ".join(keys)
         return_clause_string = ", ".join(return_clause)
-        return_clause_string = ", ".join(return_clause)
 
         onCreate = "" if create.lower() == "create" else "ON CREATE "
 
@@ -584,11 +341,8 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         UNWIND $rows AS row
         MATCH (a:DATASET) WHERE row.datasetID = a.CMID
         MATCH (b:CATEGORY) WHERE row.CMID = b.CMID
-        MATCH (a:DATASET) WHERE row.datasetID = a.CMID
-        MATCH (b:CATEGORY) WHERE row.CMID = b.CMID
         {create} (a)-[r:USES {{Key: row['Key']}}]->(b)
         {onCreate}SET r.status = 'update', {keys_string}
-        RETURN elementId(b) AS nodeID, elementId(r) as relID, a.datasetID as datasetID, b.CMID as CMID, {return_clause_string}
         RETURN elementId(b) AS nodeID, elementId(r) as relID, a.datasetID as datasetID, b.CMID as CMID, {return_clause_string}
         """
 
@@ -596,22 +350,8 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         nRels = getQuery(
             "MATCH ()-[r]->() RETURN count(*) AS count", driver, type="list"
         )
-        nRels = getQuery(
-            "MATCH ()-[r]->() RETURN count(*) AS count", driver, type="list"
-        )
 
         # Execute the query and return results
-        updateLog(f"log/{user}uploadProgress.txt", "Uploading new USES ties", write="a")
-        links.to_csv(f"log/{user}uploadProgress.csv")
-        # updateLog(f"log/{user}uploadProgress.txt", ", ".join(links.columns.values), write = 'a')
-        links_dict = links.to_dict(orient="records")
-        # updateLog(f"log/{user}uploadProgress.txt", jsonify(links_dict), write = 'a')
-        result = getQuery(q, driver, params={"rows": links_dict})
-
-        if isinstance(result, dict):
-            updateLog(f"log/{user}uploadProgress.txt", "Query successful", write="a")
-        else:
-            updateLog(f"log/{user}uploadProgress.txt", str(result), write="a")
         updateLog(f"log/{user}uploadProgress.txt", "Uploading new USES ties", write="a")
         links.to_csv(f"log/{user}uploadProgress.csv")
         # updateLog(f"log/{user}uploadProgress.txt", ", ".join(links.columns.values), write = 'a')
@@ -652,47 +392,12 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
         )
 
         updateLog(f"log/{user}uploadProgress.txt", " test 3 ", write="a")
-        CMIDs = [item["CMID"] for item in result]
-        updateAltNames(driver, CMIDs)
-
-        updateLog(
-            f"log/{user}uploadProgress.txt", "adding logs to USES ties", write="a"
-        )
-        updateLog(f"log/{user}uploadProgress.txt", ", ".join(vars), write="a")
-        result_df = pd.DataFrame(result)
-        createLog(
-            id=result_df["relID"].tolist(),
-            type="relation",
-            log=[
-                "created relationship with "
-                + ", ".join(
-                    [
-                        f"{k}: str({v})"
-                        for k, v in row.items()
-                        if not k in ["nodeID", "relID"]
-                    ]
-                )
-                for row in result
-            ],
-            user=user,
-            driver=driver,
-        )
-
-        updateLog(f"log/{user}uploadProgress.txt", " test 3 ", write="a")
 
         # Get the number of relationships after adding
         nRels2 = getQuery(
             "MATCH ()-[r]->() RETURN count(*) AS count", driver, type="list"
         )
-        nRels2 = getQuery(
-            "MATCH ()-[r]->() RETURN count(*) AS count", driver, type="list"
-        )
         new_rels = nRels2[0] - nRels[0]
-        updateLog(
-            f"log/{user}uploadProgress.txt",
-            f"Number of new relationships in database: {new_rels}",
-            write="a",
-        )
         updateLog(
             f"log/{user}uploadProgress.txt",
             f"Number of new relationships in database: {new_rels}",
@@ -705,18 +410,11 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             f"Elapsed time: {int(end_time - start_time)} seconds",
             write="a",
         )
-        updateLog(
-            f"log/{user}uploadProgress.txt",
-            f"Elapsed time: {int(end_time - start_time)} seconds",
-            write="a",
-        )
 
-        return {"result": result, "links": links_dict}
         return {"result": result, "links": links_dict}
 
     except Exception as e:
         if isinstance(e, tuple):
-            error_message = ", ".join(map(str, e))
             error_message = ", ".join(map(str, e))
         else:
             error_message = str(e)
@@ -882,32 +580,23 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
 def combine_properties(df, group_by_cols):
 
-
     def combine_column(column):
         if isinstance(column, list):
             return "; ".join(
                 sorted(set([str(x).strip() for x in column if pd.notna(x)]))
             )
-            return "; ".join(
-                sorted(set([str(x).strip() for x in column if pd.notna(x)]))
-            )
         return column
 
-
     grouped_df = df.groupby(group_by_cols, as_index=False).agg(lambda x: x.tolist())
-
 
     for col in grouped_df.columns:
         if col not in group_by_cols:
             grouped_df[col] = grouped_df[col].apply(combine_column)
 
-
     return grouped_df
 
 
-
 def combine_names_and_altNames(df, name_col, alt_name_col):
-    df["Name"] = df.apply(
     df["Name"] = df.apply(
         lambda row: "; ".join(
             filter(
@@ -917,21 +606,9 @@ def combine_names_and_altNames(df, name_col, alt_name_col):
             )
         ),
         axis=1,
-            filter(
-                pd.notna,
-                [row[name_col]]
-                + ([row[alt_name_col]] if pd.notna(row[alt_name_col]) else []),
-            )
-        ),
-        axis=1,
     )
     print(df["Name"])
-    print(df["Name"])
     return df
-
-
-# todo: add lat long out of range check? RJB
-
 
 
 # todo: add lat long out of range check? RJB
@@ -946,14 +623,11 @@ def to_geojson_point(coordinates):
         if math.isnan(latitude) or math.isnan(longitude):
             return None  # Or some other fallback value
 
-
         # round
         latitude = round(latitude, 4)
         longitude = round(longitude, 4)
 
-
         # Create the GeoJSON dictionary
-        geojson_dict = {"type": "Point", "coordinates": [longitude, latitude]}
         geojson_dict = {"type": "Point", "coordinates": [longitude, latitude]}
     elif len(coordinates) > 1:
         lats = []
@@ -964,34 +638,25 @@ def to_geojson_point(coordinates):
             if math.isnan(latitude) or math.isnan(longitude):
                 return None
 
-                return None
-
             # round
             latitude = round(latitude, 4)
             longitude = round(longitude, 4)
             lats.append(latitude)
             longs.append(longitude)
 
-
         geojson_dict = {
             "type": "MultiPoint",
-            "coordinates": [[longs[i], lats[i]] for i in range(len(lats))],
             "coordinates": [[longs[i], lats[i]] for i in range(len(lats))],
         }
     else:
         return ""
 
-
     # Convert the dictionary to a GeoJSON string
     return json.dumps(geojson_dict)
 
 
-
 def convert_coordinates(geo):
     # Return "NA" if geo is None or the string "NA"
-    if geo in (None, ""):
-        return ""
-
     if geo in (None, ""):
         return ""
 
@@ -1000,19 +665,13 @@ def convert_coordinates(geo):
         if isinstance(geo, str):
             # Split the string by semicolons to handle multiple JSON objects
             geo_entries = geo.split(";")
-            geo_entries = geo.split(";")
             coordinates = []
-
 
             for entry in geo_entries:
                 entry = entry.strip()  # Remove any leading/trailing spaces
                 try:
                     # Parse each JSON string to a dictionary
                     geo_dict = json.loads(entry)
-
-                    lat = geo_dict.get("latitude")
-                    lon = geo_dict.get("longitude")
-
 
                     lat = geo_dict.get("latitude")
                     lon = geo_dict.get("longitude")
@@ -1025,47 +684,34 @@ def convert_coordinates(geo):
                 except json.JSONDecodeError:
                     continue  # Skip invalid JSON entries
 
-
             if coordinates:
                 coordinates = to_geojson_point(coordinates)
                 return coordinates
 
-
         # If geo is not a string or no valid coordinates found, return "NA"
-        return ""
-
         return ""
 
     except Exception:
         # Catch any unexpected errors and return "NA"
         return ""
 
-        return ""
-
 
 def create_grouped_columns(row, grouped_columns):
     grouped_data = {}
 
-
     # Iterate over each unique group (e.g., 'parentContext', 'geoCoords')
     for group in grouped_columns["group"].unique():
-    for group in grouped_columns["group"].unique():
         # Find the columns that belong to this group
-        group_cols = grouped_columns[grouped_columns["group"] == group]["property"]
-
         group_cols = grouped_columns[grouped_columns["group"] == group]["property"]
 
         # Collect the non-null values from these columns into a dictionary
         group_data = {col: row[col] for col in group_cols if pd.notna(row[col])}
 
-
         # Store this as a separate column for each group
         if group_data:  # Only add if there are valid entries
             grouped_data[group] = json.dumps(group_data)  # Store as a JSON string
 
-
     return grouped_data
-
 
 
 def process_parent_context_element(element):
@@ -1073,14 +719,12 @@ def process_parent_context_element(element):
         # If element is a list, process the list and return a semicolon-separated string
         if isinstance(element, list):
             return "; ".join(list2character(item) for item in element)
-            return "; ".join(list2character(item) for item in element)
         # If element is a string, return the string itself
         elif isinstance(element, str):
             return element
         # If element is None or any other type, return None
         else:
             return None
-
 
     except ValueError:
         return None
@@ -1123,28 +767,6 @@ def input_Nodes_Uses(
     else:
         raise ValueError("Error: invalid upload option'")
 
-    
-    updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write="w")
-
-    if user is None:
-        raise ValueError("Error: user must be specified")
-
-    if uploadOption in [
-        "add_node",
-        "add_uses",
-        "update_add",
-        "update_replace",
-        "node_add",
-        "node_replace",
-    ]:
-        updateLog(
-            f"log/{user}uploadProgress.txt",
-            f"upload option is {uploadOption}",
-            write="a",
-        )
-    else:
-        raise ValueError("Error: invalid upload option'")
-
     dataset = pd.DataFrame(dataset)
 
     dataset_dup = dataset.copy(deep=True)
@@ -1157,21 +779,7 @@ def input_Nodes_Uses(
 
     if nodeProperties is None:
         nodeProperties = []
-    dataset_dup = dataset.copy(deep=True)
-    dataset_for_results = dataset.copy(deep=True)
-    dataset_for_results = dataset_for_results.astype(str)
-    dataset_for_results["importID"] = dataset_for_results.index + 1
 
-    # trim whitespace
-    dataset = dataset.applymap(lambda x: x.strip() if isinstance(x, str) else x)
-
-    if nodeProperties is None:
-        nodeProperties = []
-
-    if linkProperties is None:
-        linkProperties = []
-
-    dataset = dataset.dropna(how="all").reset_index(drop=True).copy()
     if linkProperties is None:
         linkProperties = []
 
@@ -1182,135 +790,6 @@ def input_Nodes_Uses(
     elif database.lower() == "archamap":
         database = "ArchaMap"
     else:
-        raise ValueError(
-            f"database must be either 'SocioMap' or 'ArchaMap', but value was '{database}'"
-        )
-    
-    driver = getDriver(database)
-
-    updateLog(f"log/{user}uploadProgress.txt", f"working on data validation", write="a")
-
-    # Determines if the upload is for Categories or datasets
-
-    isDataset = False
-    if "label" in dataset.columns:
-        if dataset["label"].iloc[0] == "DATASET":
-            isDataset = True
-    elif "CMID" in dataset.columns:
-        if dataset["CMID"].astype(str).str.startswith(("SD", "AD")).all():
-            isDataset = True
-
-    if isDataset:
-        updateLog(
-            f"log/{user}uploadProgress.txt", "upload is for DATASET nodes", write="a"
-        )
-    else:
-        updateLog(
-            f"log/{user}uploadProgress.txt", "upload is for CATEGORY nodes", write="a"
-        )
-
-    """............................"""
-    """ Error checking starts here """
-    """............................"""
-
-    """checks if all required columns are present"""
-
-    updateLog(f"log/{user}uploadProgress.txt", "checking column names", write="a")
-
-    column_names = []
-    required = []
-    if isDataset:
-        if uploadOption == "add_node":
-            required = ["CMName", "label", "shortName", "DatasetCitation"]
-        elif uploadOption == "node_add" or uploadOption == "node_replace":
-            required = ["CMID"]
-    else:
-        if uploadOption == "add_node":
-            required = ["CMName", "Name", "label", "Key", "datasetID"]
-        elif uploadOption == "add_uses":
-            required = ["Name", "CMID", "Key", "datasetID", "label"]
-        elif uploadOption == "update_add" or uploadOption == "update_replace":
-            required = ["CMID", "Key", "datasetID"]
-        elif uploadOption == "node_replace":
-            required = ["CMID"]
-    column_names = required + nodeProperties + linkProperties
-
-    # Remove None values
-    column_names = [col for col in column_names if col is not None]
-
-    errors = [
-        f"{col} must be in dataset"
-        for col in column_names
-        if col not in dataset.columns
-    ]
-
-    if len(errors) > 0:
-        updateLog(f"log/{user}uploadProgress.txt", "\n".join(errors), write="a")
-        raise ValueError("\n".join(errors))
-        
-    #checking label validity
-    if "label" in column_names:
-
-        labels = getQuery(
-            "MATCH (l:LABEL) return l.label as label", driver, type="list"
-        )
-
-        print(dataset["label"].unique())
-
-        if not all(label in labels for label in dataset["label"].unique()):
-            raise Exception("Error: label is not valid. Maybe check the spelling")
-                
-        if "CATEGORY" in dataset["label"].values:
-            raise Exception("Error: label must be more specific than CATEGORY")
-        
-
-    """Numeric checks"""
-
-    columns_to_check = [
-        "sampleSize",
-        "yearStart",
-        "yearEnd",
-        "recordStart",
-        "recordEnd",
-        "eventDate",
-        "yearPublished",
-    ]
-
-    columns_to_check = [col for col in columns_to_check if col in linkProperties]
-
-    invalid_values = {}
-    for col in columns_to_check:
-        invalid_rows = dataset[~dataset[col].apply(is_valid_integer_float)]
-        if not invalid_rows.empty:
-            invalid_values[col] = invalid_rows[[col]].values.flatten()
-
-    columns_to_check = ["populationEstimate", "latitude", "longitude"]
-
-    columns_to_check = [col for col in columns_to_check if col in linkProperties]
-
-    for col in columns_to_check:
-        invalid_rows = dataset[~dataset[col].apply(is_valid_float)]
-        for idx, row in invalid_rows.iterrows():
-            invalid_values.append((col, idx, row["col"]))
-
-    if {"latitude", "longitude", "datasetID"}.issubset(dataset.columns):
-        for index, row in dataset.iterrows():
-            try:
-                lat = float(row["latitude"])
-                if lat < -90 or lat > 90:
-                    return f"Latitude for CMID {row['datasetID']} illogical."
-            except (ValueError, TypeError):
-                return f"Latitude for CMID {row['datasetID']} is not a valid number."
-
-            try:
-                lon = float(row["longitude"])
-                if lon < -180 or lon > 180:
-                    return f"Longitude for CMID {row['datasetID']} illogical."
-            except (ValueError, TypeError):
-                return f"Longitude for CMID {row['datasetID']} is not a valid number."
-
-    """ Replaces nan/NA values with None and then replaces all none with "" """
-    """ Also converts everything to string """
         raise ValueError(
             f"database must be either 'SocioMap' or 'ArchaMap', but value was '{database}'"
         )
@@ -1926,507 +1405,12 @@ def input_Nodes_Uses(
     '''Data pre-processing starts'''
 
     dataset = dataset.dropna(axis=1, how="all")
-    # dataset = dataset.replace({None, ""})
-    dataset = dataset.replace({"nan": "", "<NA>": "", "None": ""})
-
-    data_dict = dataset.to_dict(orient="records")
-
-    """ CMID checks """
-
-    # checks for all CMIDS to be either category or dataset
-    if "CMID" in dataset.columns:
-        cmids = dataset["CMID"].astype(str)[(dataset["CMID"] != '')]
-
-        if (
-            not cmids.str.startswith(("SD", "AD")).all()
-            and not cmids.str.startswith(("SM", "AM")).all()
-        ):
-            raise ValueError("Category or Dataset CMIDs cant be mixed.")
-
-    multi_value_columns = [
-        "language",
-        "district",
-        "country",
-        "religion",
-        "parent",
-        "period",
-        "culture",
-        "polity",
-    ]
-    error_columns = ["CMID", "datasetID"] + multi_value_columns
-
-    """Checks for existence of CMID values in the database."""
-
-    for i in error_columns:
-        if i in dataset.columns:
-            updateLog(
-                f"log/{user}uploadProgress.txt", f"validating column {i}", write="a"
-            )
-            query = """
-            UNWIND $rows AS row
-            OPTIONAL MATCH (n {CMID: row.value})
-            RETURN row.value AS value, COUNT(n) AS count
-            """
-            rows_to_check = []
-            seen_values = set()
-            for row in data_dict:
-                if row.get(i):
-                    if i in multi_value_columns:
-                        values = [
-                            val.strip() for val in row[i].split(";") if val.strip()
-                        ]
-                        #rows_to_check.extend([{"value": v} for v in values])
-                    else:
-                        #rows_to_check.append({"value": str(row[i])})
-                        values = [str(row[i])]
-            
-                    for v in values:
-                        if v not in seen_values:
-                            seen_values.add(v)
-                            rows_to_check.append({"value": v})
-
-            if not rows_to_check:
-                continue
-
-            with driver.session() as session:
-                results = session.run(query, rows=rows_to_check)
-                missing_values = [r["value"] for r in results.data() if r["count"] == 0]
-
-            if missing_values:
-                if i == "datasetID":
-                    raise ValueError(
-                        f"Please confirm the following datasetID(s) are correct and try again: {', '.join(missing_values)}."
-                    )
-                else:
-                    no_prefix = [
-                        v
-                        for v in missing_values
-                        if not any(v.startswith(p) for p in ["AM", "AD", "SM", "SD"])
-                    ]
-                    with_prefix = [v for v in missing_values if v not in no_prefix]
-
-                    message_parts = []
-                    if no_prefix:
-                        message_parts.append(
-                            f"Please use valid CatMapper IDs for: {', '.join(no_prefix)}."
-                        )
-                    if with_prefix:
-                        message_parts.append(
-                            f"Please check CatMapper IDs for: {', '.join(with_prefix)} and try again."
-                        )
-
-                    raise ValueError(" ".join(message_parts))
-                
-    # checking if label of CMID in spreadsheet matches label in database
-    if "label" in dataset.columns and "CMID" in dataset.columns:
-        updateLog(
-            f"log/{user}uploadProgress.txt",
-            f"checking if label column matches CMID column",
-            write="a",
-        )
-        if uploadOption == "add_node" and "parent" in dataset.columns:
-            combine = dict(zip(dataset["parent"], dataset["label"]))
-        else:
-            combine = dict(zip(dataset["CMID"], dataset["label"]))
-        query = """
-        UNWIND keys($rows) AS cmid
-        MATCH (n:CATEGORY {CMID: cmid})
-        where not $rows[cmid] in labels(n)
-        RETURN n.CMID AS CMID
-        LIMIT 1
-        """
-        with driver.session() as session:
-            term_mismatch = session.run(query, rows=combine)
-            mismatch = term_mismatch.single()
-
-        if mismatch:
-            raise ValueError(
-                f"Label provided in file doesnt match for CMID: {mismatch['CMID']}"
-            )
-
-    # checks if CMIDs in a property have appropriate labels in the database
-    # checks if the parent CMID label matches the child CMID label
-    for i in multi_value_columns:
-        if i in dataset.columns:
-            rows_to_check = []
-            for row in data_dict:
-                if row.get(i):
-                    values = [val.strip() for val in row[i].split(";") if val.strip()]
-                    rows_to_check.extend([{"value": v} for v in values])
-
-            if not rows_to_check:
-                continue
-
-            if i != "parent":
-
-                if i == "country":
-                    check_label = "DISTRICT"
-                elif i == "language":
-                    check_label = "LANGUOID"
-                else:
-                    check_label = i.upper()
-
-                query = """UNWIND $rows AS row
-                        MATCH (n:CATEGORY {CMID: row.value})
-                        WHERE NOT $label IN labels(n)
-                        RETURN row.value AS value
-                        """
-
-                with driver.session() as session:
-                    results = session.run(query, rows=rows_to_check, label=check_label)
-                    wrong_labels = [r["value"] for r in results.data()]
-
-                if wrong_labels:
-                    raise ValueError(
-                        f"Error: Wrong labels in database for column '{i}': {wrong_labels}"
-                    )
-            else:
-                if uploadOption == "add_node":
-                    continue
-                else:
-                    query = """
-                    UNWIND keys($rows) AS cmid
-                    MATCH (n {CMID: cmid})
-                    MATCH (m {CMID: $rows[cmid]})
-                    RETURN labels(n) AS parent_labels, labels(m) AS child_labels
-                    """
-
-                    parent_labels = []
-                    child_labels = []
-
-                    combine = dict(zip(dataset["CMID"], rows_to_check))
-
-                    with driver.session() as session:
-                        results = session.run(query, rows=combine)
-                        for record in results:
-                            parent_labels.append(record["parent_labels"])
-                            child_labels.append(record["child_labels"])
-
-                    required_labels = {"LANGUOID", "RELIGION", "ETHNICITY", "DISTRICT"}
-
-                    def validate_labels(parent_labels, child_labels):
-                        for idx, (i, j) in enumerate(zip(parent_labels, child_labels)):
-                            value_has_required = required_labels.intersection(set(i))
-                            cmid_has_required = required_labels.intersection(set(j))
-
-                            if value_has_required != cmid_has_required:
-                                raise ValueError(
-                                    f"Mismatch at row {idx}: Parent node labels dont match that of the child node.\n"
-                                    f"Parent Labels: {i}\n"
-                                    f"Child Labels: {j}"
-                                )
-
-                    validate_labels(parent_labels, child_labels)
-
-    # checks if the eventType value is valid
-
-    if "eventType" in dataset.columns:
-
-        valid_event_types = {
-            "SPLIT",
-            "MERGED",
-            "SPLITMERGE",
-            "HIERARCHY",
-            "FOLLOWS",
-            "",
-        }
-
-        invalid_event_types = dataset.loc[
-            ~dataset["eventType"].isin(valid_event_types), ["eventType"]
-        ]
-
-        invalid_event_entries = []
-        for idx, row in invalid_event_types.iterrows():
-            invalid_event_entries.append(("eventType", idx, row["eventType"]))
-
-        if invalid_event_entries:
-            error_message = "Invalid 'eventType' values found:\n" + "\n".join(
-                [
-                    f"Row {idx}, Column '{col}': {val}"
-                    for col, idx, val in invalid_event_entries
-                ]
-            )
-            raise ValueError(error_message)
-
-    if "eventType" in dataset.columns and "eventDate" not in dataset.columns:
-        dataset["eventDate"] = np.nan
-
-    if uploadOption == "node_add":
-
-        from functools import reduce
-
-        updated_dfs = []  # Store updated data for each property
-
-        old_keys = ", ".join([f"`{var}`: n.{var}" for var in linkProperties])
-        get_old_vals_query = f"""
-        UNWIND $rows AS row
-        MATCH (n {{CMID: row.CMID}})
-        RETURN elementId(n) AS nodeID, n.CMID AS CMID,{{ {old_keys} }} AS oldVals
-        """
-
-        node_logs = []
-
-        old_values = getQuery(
-            query=get_old_vals_query, driver=driver, params={"rows": data_dict}
-        )
-
-        for prop in linkProperties:  # Loop through each property
-            update_query = """
-                UNWIND $rows AS row
-                MATCH (n {CMID: row.CMID})
-                CALL apoc.create.setProperty(n, $prop,
-                    CASE
-                        WHEN n[$prop] IS NULL THEN
-                            CASE
-                                WHEN apoc.meta.cypher.types(row[$prop]) = "STRING" THEN [row[$prop]]
-                                ELSE row[$prop]
-                            END
-                        WHEN apoc.meta.cypher.types(n[$prop]) = "STRING" THEN
-                            CASE
-                                WHEN apoc.meta.cypher.types(row[$prop]) = "STRING" THEN [n[$prop], row[$prop]]
-                                ELSE [n[$prop]] + row[$prop]
-                            END
-                        ELSE n[$prop] +
-                            CASE
-                                WHEN apoc.meta.cypher.types(row[$prop]) = "STRING" THEN [row[$prop]]
-                                ELSE row[$prop]
-                            END
-                    END
-                ) YIELD node
-                RETURN elementId(n) as nodeID,node.CMID AS CMID, node[$prop] AS updated_value
-                """
-
-            results = getQuery(
-                query=update_query,
-                driver=driver,
-                params={"rows": data_dict, "prop": prop},
-            )
-
-            updated_data = pd.DataFrame(
-                [
-                    {
-                        "CMID": record["CMID"],
-                        "nodeID": record["nodeID"],
-                        f"updated_{prop}": record["updated_value"],
-                    }
-                    for record in results
-                ]
-            )
-
-            # Store each updated DataFrame
-            updated_dfs.append(updated_data)
-
-        for old_row in old_values:
-            old_vals = old_row["oldVals"]
-
-            input_row = next(
-                (r for r in data_dict if r.get("CMID") == old_row.get("CMID")), {}
-            )
-
-            changes = []
-
-            for var in linkProperties:
-                new_val = input_row.get(var, "")
-                changes.append(f'added "{var}" with value "{new_val}"')
-
-            node_logs.append("; ".join(changes))
-
-        createLog(
-            id=[row["nodeID"] for row in updated_dfs],
-            type="node",
-            log=node_logs,
-            user=user,
-            driver=driver,
-        )
-
-        # Merge all updated DataFrames together on CMID
-        if updated_dfs:
-            merged_updates = reduce(
-                lambda left, right: pd.merge(left, right, on="CMID", how="outer"),
-                updated_dfs,
-            )
-            merged_df = pd.merge(dataset, merged_updates, on="CMID", how="left")
-
-        return merged_df
-
-    if uploadOption == "node_replace":
-        linkProperties = linkProperties[0]
-
-        old_keys = ", ".join([f"`{var}`: n.{var}" for var in [linkProperties]])
-        get_old_vals_query = f"""
-        UNWIND $rows AS row
-        MATCH (n {{CMID: row.CMID}})
-        RETURN elementId(n) AS nodeID, n.CMID AS CMID,{{ {old_keys} }} AS oldVals
-        """
-
-        node_logs = []
-
-        old_values = getQuery(
-            query=get_old_vals_query, driver=driver, params={"rows": data_dict}
-        )
-
-        update_query = """UNWIND $rows AS row
-                MATCH (n {CMID: row.CMID})
-                CALL apoc.create.setProperty(n, $prop, row[$prop]) YIELD node
-                RETURN elementId(n) as nodeID,n.CMID AS CMID, n[$prop] AS updated_value"""
-
-        results = getQuery(
-            query=update_query,
-            driver=driver,
-            params={"rows": data_dict, "prop": linkProperties},
-        )
-
-        for old_row in old_values:
-            old_vals = old_row["oldVals"]
-
-            input_row = next(
-                (r for r in data_dict if r.get("CMID") == old_row.get("CMID")), {}
-            )
-
-            changes = []
-
-            old_val = old_vals.get(linkProperties, "")
-            new_val = input_row.get(linkProperties, "")
-            changes.append(
-                f'changed "{linkProperties}" from "{old_val}" to "{new_val}"'
-            )
-
-            node_logs.append("; ".join(changes))
-
-        createLog(
-            id=[row["nodeID"] for row in results],
-            type="node",
-            log=node_logs,
-            user=user,
-            driver=driver,
-        )
-
-        updated_data = pd.DataFrame(
-            [
-                {
-                    "CMID": record["CMID"],
-                    "updated_" + linkProperties: record["updated_value"],
-                }
-                for record in results
-            ]
-        )
-
-        merged_df = pd.merge(dataset, updated_data, on="CMID", how="left")
-
-        return merged_df
-
-
-    if uploadOption == "update_add" or uploadOption == "update_replace":
-        error_query = """
-    UNWIND $rows AS row
-    OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
-    RETURN row.CMID AS CMID, row.datasetID AS datasetID, row.Key AS Key, COUNT(r) AS rel_count
-    """
-
-        with driver.session() as session:
-            results = session.run(error_query, rows=data_dict)
-            missing = [
-                (r["CMID"], r["datasetID"], r["Key"])
-                for r in results.data()
-                if r["rel_count"] == 0
-            ]
-
-            if missing:
-                raise ValueError(
-                    f"Error: Invalid CMID or Key or datasetID for {missing}"
-                )
-
-    columns_to_check = ["parent", "CMID"]
-    invalid_entries = []
-
-    for column in columns_to_check:
-        if column in dataset.columns:
-            updateLog(
-                f"log/{user}uploadProgress.txt",
-                f"checking column {column} for invalid CMID",
-                write="a",
-            )
-
-            if uploadOption == "add_node" or "label" in dataset.columns:
-                continue
-            elif (
-                uploadOption == "add_uses"
-                or uploadOption == "update_add"
-                or uploadOption == "update_replace"
-            ):
-                dataset["label"] = "CATEGORY"
-            elif uploadOption == "node_add" or uploadOption == "node_replace":
-                dataset["label"] = "DATASET"
-            else:
-                error_message = "Cannot determine upload method."
-                raise ValueError(error_message)
-
-            invalid_entries_for_column = dataset.loc[
-                ~dataset.apply(
-                    lambda row: is_valid_cmid(
-                        column, row[column], database, row.get("label", "")
-                    ),
-                    axis=1,
-                ),
-                column,
-            ]
-
-            for idx, row in invalid_entries_for_column.items():
-                invalid_entries.append((column, idx, row))
-
-    if invalid_entries:
-        error_message = "Invalid entries found:\n" + "\n".join(
-            [f"Row {idx}, Column '{col}': {val}" for col, idx, val in invalid_entries]
-        )
-        raise ValueError(error_message)
-
-    if formatKey is True:
-        dataset = createKey(dataset, "Key").copy()
-
-    if geocode is True:
-        raise Exception("Error: geocode must be False")
-
-    updateLog(
-        f"log/{user}uploadProgress.txt",
-        "checking whether upload is for DATASET nodes",
-        write="a",
-    )
-
-    if isDataset and uploadOption == "add_node":
-        query = "unwind $rows as row match (d:DATASET {shortName: row.shortName}) return d.shortName as shortName"
-        shortNames = getQuery(
-            query,
-            driver,
-            params={"rows": dataset[["shortName"]].to_dict(orient="records")},
-            type="list",
-        )
-        if len(shortNames) > 0:
-            raise ValueError(
-                "Error: shortName already exists for: " + ", ".join(shortNames)
-            )
-        
-    '''Error checking ends here'''
-
-    '''Data pre-processing starts'''
-
-    dataset = dataset.dropna(axis=1, how="all")
 
     properties = getPropertiesMetadata(driver)
     properties = pd.DataFrame(properties)
 
     # Grouping linkproperties for a common super label.
-    # Grouping linkproperties for a common super label.
     if not isDataset:
-        updateLog(
-            f"log/{user}uploadProgress.txt", "Combining paired properties", write="a"
-        )
-        paired = properties.merge(
-            pd.DataFrame({"property": dataset.columns}), on="property"
-        )
-        grouped_columns = paired[paired["group"].notna()][["property", "group"]]
-        grouped_dict = dataset.apply(
-            lambda row: create_grouped_columns(row, grouped_columns), axis=1
-        )
         updateLog(
             f"log/{user}uploadProgress.txt", "Combining paired properties", write="a"
         )
@@ -2442,32 +1426,8 @@ def input_Nodes_Uses(
         columns_to_drop = grouped_columns[grouped_columns["property"] != "parent"][
             "property"
         ].tolist()
-        columns_to_drop = grouped_columns[grouped_columns["property"] != "parent"][
-            "property"
-        ].tolist()
         # Drop the columns from dataset, keeping the 'parent' column
         dataset = dataset.drop(columns=columns_to_drop).copy()
-        for group in grouped_columns["group"].unique():
-            linkProperties.append(group)
-        linkProperties = list(set(linkProperties))
-
-    # adhoc ID used for joining and filtering output purposes.
-    updateLog(f"log/{user}uploadProgress.txt", "Creating import ID", write="a")
-    getQuery("MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL", driver)
-    uniqueID = "importID"
-    dataset["importID"] = dataset.index + 1
-
-    # Combining columns and merging rows
-    if "CMID" in dataset.columns and (
-        not "parentContext" in dataset.columns or "geoCoords" in dataset.columns
-    ):
-        if "datasetID" in dataset.columns and "Key" in dataset.columns:
-            if "CMID" in dataset.columns:
-                dataset = combine_properties(dataset, ["CMID", "datasetID", "Key"])
-            else:
-                dataset = combine_properties(dataset, ["datasetID", "Key"])
-
-    """End of error checking and data pre-processing. Begin batch upload."""
         for group in grouped_columns["group"].unique():
             linkProperties.append(group)
         linkProperties = list(set(linkProperties))
@@ -2499,21 +1459,9 @@ def input_Nodes_Uses(
         # check CMID, and datasetID, country, district, parent, language, religion, for SocioMap
         # CMID, datasetID, period, country, district, parent, for ArchaMap
 
-
-        # check CMID, and datasetID, country, district, parent, language, religion, for SocioMap
-        # CMID, datasetID, period, country, district, parent, for ArchaMap
-
         for s in sq:
             sub_dataset = dataset.iloc[s : s + batchSize].copy()
-            sub_dataset = dataset.iloc[s : s + batchSize].copy()
             max_row = len(sub_dataset) - 1 + s
-            updateLog(
-                f"log/{user}uploadProgress.txt",
-                f"uploading {s} to {max_row} of {len(dataset)}",
-                write="a",
-            )
-
-            # if user chooses to upload district and recordyear information from dataset
             updateLog(
                 f"log/{user}uploadProgress.txt",
                 f"uploading {s} to {max_row} of {len(dataset)}",
@@ -2531,18 +1479,7 @@ def input_Nodes_Uses(
                     database=database,
                     user="1",
                 )
-                updateLog(
-                    f"log/{user}uploadProgress.txt", "Adding districts", write="a"
-                )
-                matches = getQuery(
-                    params={"rows": sub_dataset[["datasetID"]]},
-                    q="DISTRICT QUERY",
-                    database=database,
-                    user="1",
-                )
                 if not matches.empty:
-                    sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
-                    linkProperties.append("country")
                     sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
                     linkProperties.append("country")
 
@@ -2555,48 +1492,15 @@ def input_Nodes_Uses(
                     q="RECORD_YEAR QUERY",
                     driver=driver,
                 )
-                updateLog(
-                    f"log/{user}uploadProgress.txt", "Adding record year", write="a"
-                )
-                matches = getQuery(
-                    params={"rows": sub_dataset[["datasetID"]]},
-                    q="RECORD_YEAR QUERY",
-                    driver=driver,
-                )
                 if not matches.empty:
                     sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
                     linkProperties.append("recordStart")
-                    sub_dataset = sub_dataset.merge(matches, on="datasetID", how="left")
-                    linkProperties.append("recordStart")
 
             sub_dataset = sub_dataset.fillna("")
-            sub_dataset = sub_dataset.fillna("")
 
-            #list of column names - required + nodeproperties +uniqueID
-            node_columns = ["CMName", uniqueID, "label"] + nodeProperties
             #list of column names - required + nodeproperties +uniqueID
             node_columns = ["CMName", uniqueID, "label"] + nodeProperties
             node_columns = [col for col in node_columns if col in sub_dataset.columns]
-            node_columns = list(dict.fromkeys(node_columns))
-
-            nodes = pd.DataFrame()
-            if isDataset and not "CMID" in sub_dataset.columns:
-                upload_cols = list(
-                    set(
-                        ["CMName", "shortName", "DatasetCitation", uniqueID, "label"]
-                        + nodeProperties
-                    )
-                )
-                upload_cols = [col for col in upload_cols if col in sub_dataset.columns]
-                nodes = sub_dataset[upload_cols].drop_duplicates()
-            elif not isDataset:
-                if "Name" and "CMID" in sub_dataset.columns:
-                    nodes = sub_dataset[sub_dataset["CMID"] == ""][
-                        node_columns
-                    ].drop_duplicates()
-                elif "Name" in sub_dataset.columns:
-                    nodes = sub_dataset[node_columns]
-
             node_columns = list(dict.fromkeys(node_columns))
 
             nodes = pd.DataFrame()
@@ -2657,32 +1561,7 @@ def input_Nodes_Uses(
                                 )
                     dataset_match = dataset_match.drop(columns=["CMID_new"])
             else:
-                #join_cols = list(set(sub_dataset.columns.intersection(newly_created_nodes.columns)))
-                dataset_match = sub_dataset.merge(
-                            newly_created_nodes[["importID", "CMID", "nodeID"]],
-                            on="importID",
-                            how="left",
-                            suffixes=('', '_new')
-                        )
-                
-                if "CMID_new" in dataset_match.columns:
-                    dataset_match["CMID"] = dataset_match["CMID"].where(
-                                    dataset_match["CMID"].astype(str).str.strip() != '',
-                                    dataset_match["CMID_new"]
-                                )
-                    dataset_match = dataset_match.drop(columns=["CMID_new"])
-            else:
                 dataset_match = sub_dataset.copy()
-
-            link_columns = [
-                "datasetID",
-                "CMName",
-                "CMID",
-                "Name",
-                "altNames",
-                "Key",
-                "label",
-            ] + linkProperties
 
             link_columns = [
                 "datasetID",
@@ -2695,14 +1574,8 @@ def input_Nodes_Uses(
             ] + linkProperties
             link_columns = [col for col in link_columns if col in dataset_match.columns]
             link_columns = list(dict.fromkeys(link_columns))
-            link_columns = list(dict.fromkeys(link_columns))
 
             if not isDataset:
-                updateLog(
-                    f"log/{user}uploadProgress.txt",
-                    "Adding USES relationships",
-                    write="a",
-                )
                 updateLog(
                     f"log/{user}uploadProgress.txt",
                     "Adding USES relationships",
@@ -2725,22 +1598,7 @@ def input_Nodes_Uses(
                         "updating geo coordinates",
                         write="a",
                     )
-                if "Name" in links.columns and "altNames" in links.columns:
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "Combining names and alternate names",
-                        write="a",
-                    )
-                    links = combine_names_and_altNames(links, "Name", "altNames")
-
-                if linkProperties is not None and "geoCoords" in linkProperties:
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "updating geo coordinates",
-                        write="a",
-                    )
                     # return links
-                    links["geoCoords"] = links["geoCoords"].apply(convert_coordinates)
                     links["geoCoords"] = links["geoCoords"].apply(convert_coordinates)
 
                 if "parentContext" in linkProperties:
@@ -2759,42 +1617,9 @@ def input_Nodes_Uses(
                         "updating parentContext",
                         write="a",
                     )
-                if "parentContext" in linkProperties:
-                    updatePC = True
-                    test = links[links["parentContext"].notna()]["parentContext"]
-                    if not test.empty:
-                        # first_row_value = test.loc[0, 'parentContext']
-                        first_row_value = test.iloc[0]
-                        val = first_row_value.split("; ")[0]
-                        # if is_valid_json(val):
-                        #     updateLog(f"log/{user}uploadProgress.txt", "parentContext is already formatted", write = 'a')
-                        #     updatePC = False
-
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "updating parentContext",
-                        write="a",
-                    )
                     # return links
                     if updatePC:
-                    if updatePC:
 
-                        def filter_dict(d):
-                            filtered_dict = ""
-                            try:
-                                d = json.loads(d)
-                                filtered_dict = {
-                                    k: v
-                                    for k, v in d.items()
-                                    if pd.notna(v) and v != ""
-                                }
-                                # If 'parent' is the only key remaining, return an empty string
-                                if list(filtered_dict.keys()) == ["parent"]:
-                                    filtered_dict = ""
-                            except json.JSONDecodeError:
-                                return ""
-
-                            return filtered_dict
                         def filter_dict(d):
                             filtered_dict = ""
                             try:
@@ -2813,27 +1638,13 @@ def input_Nodes_Uses(
                             return filtered_dict
 
                         sub_links = links.copy()
-                        sub_links = links.copy()
 
-                        # sub_links['parentContext'] = sub_links['parentContext'].apply(lambda x: json.loads(x))
                         # sub_links['parentContext'] = sub_links['parentContext'].apply(lambda x: json.loads(x))
 
                         sub_links["parentContext"] = sub_links["parentContext"].apply(
                             filter_dict
                         )
-                        sub_links["parentContext"] = sub_links["parentContext"].apply(
-                            filter_dict
-                        )
 
-                        # Step 1: Convert parentContext dictionary to a JSON string
-                        # Apply json.dumps to convert dictionaries to JSON strings
-                        sub_links["parentContext"] = sub_links["parentContext"].apply(
-                            lambda x: (
-                                json.dumps(x, ensure_ascii=False)
-                                if isinstance(x, dict)
-                                else x
-                            )
-                        )
                         # Step 1: Convert parentContext dictionary to a JSON string
                         # Apply json.dumps to convert dictionaries to JSON strings
                         sub_links["parentContext"] = sub_links["parentContext"].apply(
@@ -2850,29 +1661,12 @@ def input_Nodes_Uses(
                                 re.sub(r"\[|\]", "", x) if isinstance(x, str) else x
                             )
                         )
-                        # Step 2: Remove square brackets if present in strings
-                        sub_links["parentContext"] = sub_links["parentContext"].apply(
-                            lambda x: (
-                                re.sub(r"\[|\]", "", x) if isinstance(x, str) else x
-                            )
-                        )
 
                         # Step 3: Unnest data (apply to each row)
                         sub_links = sub_links.explode("parentContext").reset_index(
                             drop=True
                         )
-                        # Step 3: Unnest data (apply to each row)
-                        sub_links = sub_links.explode("parentContext").reset_index(
-                            drop=True
-                        )
 
-                        # Step 4: Handle missing parent values by setting parentContext to None where parent is NaN
-                        sub_links["parentContext"] = sub_links.apply(
-                            lambda row: (
-                                None if pd.isna(row["parent"]) else row["parentContext"]
-                            ),
-                            axis=1,
-                        )
                         # Step 4: Handle missing parent values by setting parentContext to None where parent is NaN
                         sub_links["parentContext"] = sub_links.apply(
                             lambda row: (
@@ -2889,27 +1683,10 @@ def input_Nodes_Uses(
                                 if col in sub_links.columns
                             ]
                         )
-                        # Step 5: Drop 'eventDate' and 'eventType' columns if they exist
-                        sub_links = sub_links.drop(
-                            columns=[
-                                col
-                                for col in ["eventDate", "eventType"]
-                                if col in sub_links.columns
-                            ]
-                        )
 
                         # Step 6: Group by 'datasetID', 'CMID', and 'Key'
                         grouped_links = sub_links.groupby(["datasetID", "CMID", "Key"])
-                        # Step 6: Group by 'datasetID', 'CMID', and 'Key'
-                        grouped_links = sub_links.groupby(["datasetID", "CMID", "Key"])
 
-                        # Step 7: Combine lists of parentContext and parent, keeping their JSON representations intact
-                        sub_links = grouped_links.agg(
-                            {
-                                "parentContext": lambda x: list(x),
-                                "parent": lambda x: list(x),
-                            }
-                        ).reset_index()
                         # Step 7: Combine lists of parentContext and parent, keeping their JSON representations intact
                         sub_links = grouped_links.agg(
                             {
@@ -2926,41 +1703,7 @@ def input_Nodes_Uses(
                             sub_links.at[index, "parent"] = (
                                 process_parent_context_element(row["parent"])
                             )
-                        # Step 8: Convert lists of JSON strings to a semicolon-separated string
-                        for index, row in sub_links.iterrows():
-                            sub_links.at[index, "parentContext"] = (
-                                process_parent_context_element(row["parentContext"])
-                            )
-                            sub_links.at[index, "parent"] = (
-                                process_parent_context_element(row["parent"])
-                            )
 
-                        # Step 9: Merge the grouped data back into the original DataFrame
-                        links = links.drop(columns=["parentContext", "parent"]).copy()
-                        links = pd.merge(
-                            links,
-                            sub_links,
-                            on=["datasetID", "CMID", "Key"],
-                            how="left",
-                        )
-
-                    # Replace values that do not contain 'eventDate' or 'eventType' with an empty string
-                    links["parentContext"] = links["parentContext"].apply(
-                        lambda x: x if "eventDate" in x or "eventType" in x else ""
-                    )
-
-                updateLog(
-                    f"log/{user}uploadProgress.txt", str(links.columns), write="a"
-                )
-
-                if uploadOption == "add_node":
-                    required_for_operation = required + ["CMID"]
-                else:
-                    required_for_operation = required
-
-                # link_cols = ['datasetID', 'CMID', 'Key'] + linkProperties
-                link_cols = required_for_operation + linkProperties
-                link_cols = list(set(link_cols))
                         # Step 9: Merge the grouped data back into the original DataFrame
                         links = links.drop(columns=["parentContext", "parent"]).copy()
                         links = pd.merge(
@@ -3011,36 +1754,7 @@ def input_Nodes_Uses(
                         user=user,
                         updateType="update",
                     )
-
-                if uploadOption == "update_replace":
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "Overwriting property",
-                        write="a",
-                    )
-                    result = updateProperty(
-                        links[link_cols],
-                        database=database,
-                        user=user,
-                        updateType="overwrite",
-                    )
-                elif uploadOption == "update_add":
-                    updateLog(
-                        f"log/{user}uploadProgress.txt", "Updating property", write="a"
-                    )
-                    result = updateProperty(
-                        links[link_cols],
-                        database=database,
-                        user=user,
-                        updateType="update",
-                    )
                 else:
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "Adding new USES relationships",
-                        write="a",
-                    )
-                    # link_cols.append("label")
                     updateLog(
                         f"log/{user}uploadProgress.txt",
                         "Adding new USES relationships",
@@ -3054,18 +1768,7 @@ def input_Nodes_Uses(
                 if isinstance(result, str):
                     updateLog(f"log/{user}uploadProgress.txt", result, write="a")
                     raise ValueError(result)
-                    result = createUSES(
-                        links=links, database=database, user=user, create="MERGE"
-                    )
-                if isinstance(result, str):
-                    updateLog(f"log/{user}uploadProgress.txt", result, write="a")
-                    raise ValueError(result)
 
-                updateLog(
-                    f"log/{user}uploadProgress.txt",
-                    "Processing returned CMIDs",
-                    write="a",
-                )
                 updateLog(
                     f"log/{user}uploadProgress.txt",
                     "Processing returned CMIDs",
@@ -3097,37 +1800,7 @@ def input_Nodes_Uses(
                         "updated alternate names",
                         write="a",
                     )
-                    cmid_values = [link["CMID"] for link in result["result"]]
-                    if len(cmid_values) < len(result["result"]):
-                        missing_links = [
-                            link for link in result["result"] if "CMID" not in link
-                        ]
-                        raise KeyError(
-                            f"Missing 'CMID' in {len(missing_links)} link(s): {missing_links}"
-                        )
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "adding CMName to Name parameter",
-                        write="a",
-                    )
-                    addCMNameRel(database, CMID=cmid_values)
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "updating alternate names",
-                        write="a",
-                    )
-                    updateAltNames(driver, CMID=cmid_values)
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "updated alternate names",
-                        write="a",
-                    )
                 except KeyError as e:
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        f"Error updating alternate names: {e}",
-                        write="a",
-                    )
                     updateLog(
                         f"log/{user}uploadProgress.txt",
                         f"Error updating alternate names: {e}",
@@ -3150,21 +1823,6 @@ def input_Nodes_Uses(
                     write="a",
                 )
 
-                updateLog(
-                    f"log/{user}uploadProgress.txt", "combining results", write="a"
-                )
-                result = pd.DataFrame(result["result"])
-                final_result = pd.concat([final_result, result], axis=0)
-                updateLog(
-                    f"log/{user}uploadProgress.txt", "results combined", write="a"
-                )
-
-                updateLog(
-                    f"log/{user}uploadProgress.txt",
-                    "Completed updating USES relationships",
-                    write="a",
-                )
-
             else:
                 required_for_operation = required + ["CMID"]
                 node_columns = list(set(required_for_operation + nodeProperties))
@@ -3207,55 +1865,7 @@ def input_Nodes_Uses(
                 cmids = dataset_match["CMID"].unique()
                 processDATASETs(database=database, user=user, CMID=cmids)
                 final_result = pd.concat([final_result, dataset_match], axis=0)
-                required_for_operation = required + ["CMID"]
-                node_columns = list(set(required_for_operation + nodeProperties))
-                node_columns = [
-                    col for col in node_columns if col in dataset_match.columns
-                ]
-                nodes = dataset_match[node_columns].drop_duplicates()
-                if uploadOption == "node_replace":
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "overwriting Dataset properties",
-                        write="a",
-                    )
-                    updateProperty(
-                        nodes,
-                        database=database,
-                        user=user,
-                        updateType="overwrite",
-                        propertyType="DATASET",
-                    )
-                elif uploadOption == "node_add":
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "updating dataset properties",
-                        write="a",
-                    )
-                    updateProperty(
-                        nodes,
-                        database=database,
-                        user=user,
-                        updateType="update",
-                        propertyType="DATASET",
-                    )
 
-                updateLog(
-                    f"log/{user}uploadProgress.txt",
-                    "processing Dataset properties",
-                    write="a",
-                )
-                cmids = dataset_match["CMID"].unique()
-                processDATASETs(database=database, user=user, CMID=cmids)
-                final_result = pd.concat([final_result, dataset_match], axis=0)
-
-            if uniqueID == "importID":
-                getQuery(
-                    "MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL",
-                    driver=driver,
-                )
-
-            updateLog(f"log/{user}uploadProgress.txt", "End of batch", write="a")
             if uniqueID == "importID":
                 getQuery(
                     "MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL",
@@ -3268,18 +1878,15 @@ def input_Nodes_Uses(
         try:
             if isinstance(e, tuple):
                 error_message = ", ".join(map(str, e))
-                error_message = ", ".join(map(str, e))
             else:
                 error_message = str(e)
             warnings.warn(error_message)
-            with open(f"log/{user}uploadProgress.txt", "a") as f:
             with open(f"log/{user}uploadProgress.txt", "a") as f:
                 f.write(f"Error: {error_message}\n")
 
             # Return None
         except Exception as internal_error:
             warnings.warn(f"Failed to process the exception: {internal_error}")
-            with open(f"log/{user}uploadProgress.txt", "a") as f:
             with open(f"log/{user}uploadProgress.txt", "a") as f:
                 f.write(f"Failed to process the exception: {internal_error}\n")
         return None
