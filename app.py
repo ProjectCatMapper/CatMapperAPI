@@ -11,7 +11,6 @@ from CMroutes import *
 
 app = create_app()
 
-
 @app.route("/")
 def root():
     headers = {'Content-Type': 'text/html'}
@@ -967,6 +966,8 @@ def getSearch():
         property = request.args.get('property')
         if property == "CatMapper ID (CMID)":
             property = "CMID"
+        if property == "CatMapper ID (CMID)":
+            property = "CMID"
         domain = request.args.get('domain')
         yearStart = request.args.get('yearStart')
         yearEnd = request.args.get('yearEnd')
@@ -987,7 +988,7 @@ def getSearch():
             limit,
             query
         )
-        return result
+        return jsonify(result)
 
     except Exception as e:
         return str(e), 500
@@ -1796,22 +1797,20 @@ def getProgress():
 @app.route('/test', methods=['GET'])
 def test():
 
-    # database = request.args.get('database')
+    database = request.args.get('database')
+    data = search(
+        database,
+        "Yoruba",
+        "Name",
+        "CATEGORY",
+        "",
+        "",
+        "",
+        "",
+        100,
+        "false")
 
-    # driver = getDriver(database)
-    # session = driver.session()
-    # data = session.run("match (c) return count(*) as count")
-
-    # data = [dict(record) for record in data]
-
-    return {
-        'Zebra': ['Row1_Zebra', 'Row2_Zebra', 'Row3_Zebra'],
-        'Apple': ['Row1_Apple', 'Row2_Apple', 'Row3_Apple'],
-        'Mountain': ['Row1_Mountain', 'Row2_Mountain', 'Row3_Mountain'],
-        'Sunflower': ['Row1_Sunflower', 'Row2_Sunflower', 'Row3_Sunflower'],
-        'Kite': ['Row1_Kite', 'Row2_Kite', 'Row3_Kite']
-    }
-
+    return data
 
 @app.route('/mergeDatasets', methods=['GET'])
 def getMergeDatasets():
@@ -1854,6 +1853,21 @@ def updateNewUsers():
 
         result = enableUser(process=process,
                             userid=userid, approver=approver)
+
+        users = [user for user in result if user.get("email")]
+        mail = Mail()
+
+        for user in users:
+            body = f"""
+Hello {user.get("first")} {user.get("last")},
+
+Your registration has been approved. You can now access the {'and '.join(user.get("database"))} database. Please see catmapper.org/help or email support@catmapper.org for any questions.
+
+Best,
+CatMapper Team
+            """
+            sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
+                "email"), 'admin@catmapper.org'], body=body, sender=os.getenv("mail_default"))
 
         if isinstance(result, list) and process == "approve":
 
