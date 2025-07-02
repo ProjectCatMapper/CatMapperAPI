@@ -93,7 +93,6 @@ return count(*) as count
 
 def updateLabels(driver, CMID=None):
     try:
-
         if CMID is not None:
             print("setting CATEGORY label on CMID")
             getQuery(
@@ -102,8 +101,11 @@ def updateLabels(driver, CMID=None):
             print("setting CATEGORY label for all")
             getQuery(
                 "match (a)<-[:USES]-(:DATASET) set a:CATEGORY return count(*)", driver)
+            
 
         if CMID is not None:
+            print(CMID)
+
             query = """
             unwind $cmid as cmid
             match (a:CATEGORY {CMID: cmid})<-[r:USES]-(:DATASET)
@@ -114,9 +116,25 @@ def updateLabels(driver, CMID=None):
             """
             result = getQuery(query=query, driver=driver,
                               params={"cmid": CMID}, type='list')
+            
+            # adds grouplabels to nodes
+            labels = getQuery(
+                'match (l:LABEL) where l.public = "TRUE" and not l.label = "CATEGORY" return distinct l.label as label, l.groupLabel as group', driver)
+            labels = pd.DataFrame(labels)
 
+            for i in range(len(labels)):
+                label = labels.loc[i, 'label']
+                group = labels.loc[i, 'group']
+                query = f"""
+                    unwind $cmid as cmid
+                    match (d:DATASET)-[r:USES]->(c:{label}) 
+                    WHERE c.CMID = cmid
+                    set c:{group}
+                    return count(*)
+                """
+                result2 = getQuery(query=query, driver=driver,params={"cmid": CMID}, type='list')
+            
         else:
-
             query = """
             match (a:CATEGORY)<-[r:USES]-(:DATASET)
             where r.label is not null
@@ -126,6 +144,7 @@ def updateLabels(driver, CMID=None):
             """
             result = getQuery(query=query, driver=driver, type='list')
 
+            # adds grouplabels to nodes
             labels = getQuery(
                 'match (l:LABEL) where l.public = "TRUE" and not l.label = "CATEGORY" return distinct l.label as label, l.groupLabel as group', driver)
             labels = pd.DataFrame(labels)
@@ -140,6 +159,7 @@ def updateLabels(driver, CMID=None):
                 """
                 result2 = getQuery(query=query, driver=driver, type='list')
 
+            # getting node labels not present in it's group labels or labels from it's USES ties and removing them.
             groupLabels = getQuery(
                 'match (l:LABEL) where l.public = "TRUE" and not l.label = "CATEGORY" return distinct l.groupLabel as label', driver, type='list')
 
@@ -416,6 +436,8 @@ def addCMNameRel(database, CMID=None):
             user="0",
             driver=driver,
         )
+        
+        updateAltNames(driver, CMID=CMID)
 
     except Exception as e:
         try:
