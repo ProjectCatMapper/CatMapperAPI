@@ -305,3 +305,6 @@ def addIndexes(driver):
     except Exception as e:
         return str(e), 500
 
+def add_edit_delete_Node(database,user,input):
+    pass
+
