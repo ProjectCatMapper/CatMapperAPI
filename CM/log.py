@@ -3,7 +3,8 @@ import re
 from datetime import datetime
 
 
-def createLog(id, type, log, user, driver):
+def createLog(id, type, log, user, driver,isDataset = False):
+    print("inside create Log")
     # Ensure both id and log are lists of the same length
     if isinstance(log, str):
         log = [log]
@@ -26,19 +27,24 @@ def createLog(id, type, log, user, driver):
         for single_id, single_log in zip(id, log)
     ]
 
+    if isDataset:
+        search_label = "DATASET"
+    else:
+        search_label = "CATEGORY"
+    
     if type == "node":
-        query = """
+        query = f"""
         UNWIND $rows AS row
-        MATCH (l) WHERE elementId(l) = row.id
-        MERGE (log:LOG {timestamp: row.timestamp, action: row.action})
+        MATCH (l:{search_label}) WHERE elementId(l) = row.id
+        CREATE (log:LOG {{timestamp: row.timestamp, action: row.action}})
         SET log.user = row.user
-        MERGE (l)-[:HAS_LOG]->(log)
+        CREATE (l)-[:HAS_LOG]->(log)
         """
     elif type == "relation":
         query = """
         UNWIND $rows AS row
-        MATCH ()-[l]->() WHERE elementId(l) = row.id
-        MERGE (log:LOG {timestamp: row.timestamp, action: row.action})
+        MATCH ()-[l:USES]->() WHERE elementId(l) = row.id
+        CREATE (log:LOG {timestamp: row.timestamp, action: row.action})
         SET log.user = row.user
         SET l.logID = custom.formatProperties([l.logID, elementId(log)], 'list', ';')[0].prop
         """

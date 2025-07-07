@@ -306,5 +306,121 @@ def addIndexes(driver):
         return str(e), 500
 
 def add_edit_delete_Node(database,user,input):
-    pass
+    changeNodeID = input.get('changeNodeID')
+    changeNodeOptions = input.get('changeNodeOptions')
+    changeNodeValue = input.get('changeNodeValue')
+    addOrEditNode = input.get('addOrEditNode')
+
+    if not changeNodeID or not addOrEditNode:
+        return
+
+    label = CMgetLabel(CMID=changeNodeID, con=con)[0]
+
+    # Get prior value
+    priorValQuery = f"""
+        MATCH (a {{CMID: '{changeNodeID}'}})
+        RETURN a.{changeNodeOptions} AS val
+    """
+    priorVal = CMCypherQuery(con=con, query=priorValQuery)
+
+    if addOrEditNode == "delete":
+        if label == "DATASET" and changeNodeOptions in ["District", "parent"]:
+            if changeNodeOptions == "District":
+                q = f"""
+                    MATCH (a {{CMID: '{changeNodeID}'}})<-[r:DISTRICT_OF]-(c:DISTRICT)
+                    DELETE r
+                """
+                CMCypherQuery(con=con, query=q)
+            if changeNodeOptions == "parent":
+                q = f"""
+                    MATCH (a {{CMID: '{changeNodeID}'}})<-[r:CONTAINS]-(c:DATASET)
+                    DELETE r
+                """
+                CMCypherQuery(con=con, query=q)
+
+        q = f"""
+            MATCH (a {{CMID: '{changeNodeID}'}})
+            SET a.{changeNodeOptions} = NULL
+        """
+        CMCypherQuery(con=con, query=q)
+
+    else:  # edit or add
+        if label == "DATASET" and changeNodeOptions in ["District", "parent"]:
+            q = f"""
+                MATCH (a {{CMID: '{changeNodeID}'}})
+                SET a.{changeNodeOptions} = split($id, ' || ')
+            """
+            CMCypherQuery(con=con, query=q, parameters={'id': changeNodeValue})
+
+            if changeNodeOptions == "District":
+                refKeyQuery = f"""
+                    MATCH (a {{CMID: '{changeNodeID}'}})
+                    OPTIONAL MATCH (a)<-[r:DISTRICT_OF]-(c:DISTRICT)
+                    DELETE r
+                    RETURN a.shortName AS shortName
+                """
+                refKey = CMCypherQuery(con=con, query=refKeyQuery)
+                if not refKey.empty:
+                    refKeyVal = refKey['shortName'].iloc[0]
+                    from_values = changeNodeValue.split(' || ')
+                    links = []
+                    for from_val in from_values:
+                        links.append({
+                            'from': from_val,
+                            'to': changeNodeID,
+                            'referenceKey': refKeyVal,
+                            'label': "DATASET"
+                        })
+                    CMaddRelations(
+                        links=links,
+                        properties="CMID",
+                        relationship="DISTRICT_OF",
+                        user=user,
+                        con=con
+                    )
+
+            if changeNodeOptions == "parent":
+                refKeyQuery = f"""
+                    MATCH (a {{CMID: '{changeNodeID}'}})
+                    OPTIONAL MATCH (a)<-[r:CONTAINS]-(c:DATASET)
+                    DELETE r
+                    RETURN a.shortName AS shortName
+                """
+                refKey = CMCypherQuery(con=con, query=refKeyQuery)
+                if not refKey.empty:
+                    refKeyVal = refKey['shortName'].iloc[0]
+                    from_values = changeNodeValue.split(' || ')
+                    links = []
+                    for from_val in from_values:
+                        links.append({
+                            'from': from_val,
+                            'to': changeNodeID,
+                            'referenceKey': refKeyVal,
+                            'label': "DATASET"
+                        })
+                    CMaddRelations(
+                        links=links,
+                        properties="CMID",
+                        relationship="CONTAINS",
+                        user=user,
+                        con=con
+                    )
+        else:
+            q = f"""
+                MATCH (a {{CMID: '{changeNodeID}'}})
+                SET a.{changeNodeOptions} = $id
+            """
+            CMCypherQuery(con=con, query=q, parameters={'id': changeNodeValue})
+
+            if changeNodeOptions == "CMName":
+                try:
+                    CMaddCMNameRel(CMID=changeNodeID, user=user, con=con)
+                except Exception as e:
+                    print(f"CMaddCMNameRel failed: {e}")
+
+    new_val = "NULL" if addOrEditNode == "delete" else changeNodeValue
+    log_msg = f"updated CMID {changeNodeID} {changeNodeOptions} from {priorVal} to {new_val}"
+    CMlog(id=changeNodeID, type="node", log=log_msg, user=user, con=con)
+    CMnotification("updated successfully")
+
 

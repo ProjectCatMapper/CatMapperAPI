@@ -493,6 +493,20 @@ return count(*)
 """
         getQuery(query, driver=driver, params={"CMID": CMID})
 
+        query = f'''{q1}
+                    MATCH (n:DATASET {q2})
+                    WHERE n.ID = id
+                    SET n.names = 
+                        apoc.coll.toSet(
+                            CASE 
+                            WHEN exists(n.names) THEN n.names + [n.CMname, n.shortName, n.datasetCitation]
+                            ELSE [n.CMname, n.shortName, n.datasetCitation]
+                            END
+                        )
+                    RETURN n.ID, n.names'''
+
+        getQuery(query, driver=driver, params={"CMID": CMID})
+
     except Exception as e:
         try:
             return str(e), 500

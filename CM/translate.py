@@ -12,7 +12,7 @@ def search(
         country,
         limit,
         query):
-
+    
     if domain == "ANY DOMAIN":
         domain = "CATEGORY"
     if domain == "AREA":
@@ -33,7 +33,10 @@ def search(
         domain = None
 
     if domain is None:
-        domain = "CATEGORY"
+        domain = "ALL NODES"
+
+    if domain == "ALL NODES":
+        domain = "ALLNODES"
 
     # need to add check to make sure property is valid and domain is valid
 
@@ -86,6 +89,7 @@ def search(
 
     if property is None and term is not None:
         raise Exception("Must specify a property (e.g., Name, CMID, or Key)")
+    
 
     # Define the Cypher query
 
@@ -101,35 +105,51 @@ def search(
     """
 
     elif property == "Name":
-        if domain != "DATASET":
-            qStart = f"""
-    call {{with $term as term
-    call db.index.fulltext.queryNodes('{domain}', '"' + term +'"') yield node return node
-    union with $term as term
-    call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term)) yield node return node
-    union with $term as term
-    call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term) + '~') yield node return node}}
-    with node as a
-    with a, a.names as nameList
-    with a, nameList,  [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText($term))] as scores
-    with a, nameList, scores, apoc.coll.min(scores) as score
-    with a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
-    """
+        qStart = f"""
+            call {{with $term as term
+            call db.index.fulltext.queryNodes('{domain}', '"' + term +'"') yield node return node
+            union with $term as term
+            call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term)) yield node return node
+            union with $term as term
+            call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term) + '~') yield node return node}}
+            with node as a
+            with a, a.names as nameList
+            with a, nameList,  [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText($term))] as scores
+            with a, nameList, scores, apoc.coll.min(scores) as score
+            with a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
+            """
+    
+        
+    #     if domain != "DATASET":
+    #         qStart = f"""
+    # call {{with $term as term
+    # call db.index.fulltext.queryNodes('{domain}', '"' + term +'"') yield node return node
+    # union with $term as term
+    # call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term)) yield node return node
+    # union with $term as term
+    # call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term) + '~') yield node return node}}
+    # with node as a
+    # with a, a.names as nameList
+    # with a, nameList,  [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText($term))] as scores
+    # with a, nameList, scores, apoc.coll.min(scores) as score
+    # with a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
+    # """
 
-        else:
-            qStart = f"""
-    call {{with $term as term
-    call db.index.fulltext.queryNodes('{domain}', '"' + term +'"') yield node return node
-    union with $term as term
-    call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term))  yield node return node
-    union with $term as term
-    call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term) + '~') yield node return node}}
-    with node as a
-    with a, [a.CMName, a.shortName, a.DatasetCitation] as nameList
-    with a, nameList, [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText($term))] as scores
-    with a, nameList, scores, apoc.coll.min(scores) as score
-    with a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
-    """
+    #     else:
+    #         qStart = f"""
+    # call {{with $term as term
+    # call db.index.fulltext.queryNodes('{domain}', '"' + term +'"') yield node return node
+    # union with $term as term
+    # call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term))  yield node return node
+    # union with $term as term
+    # call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term) + '~') yield node return node}}
+    # with node as a
+    # with a, [a.CMName, a.shortName, a.DatasetCitation] as nameList
+    # with a, nameList, [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText($term))] as scores
+    # with a, nameList, scores, apoc.coll.min(scores) as score
+    # with a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
+    # """
+
     elif property == "CMID":
         qStart = """
     match (a) where a.CMID = $term
@@ -144,8 +164,10 @@ def search(
     """
 
     # filter by domain
-
-    qDomain = f" where '{domain}' in labels(a) "
+    if domain != "ALLNODES":
+        qDomain = f" where '{domain}' in labels(a) "
+    else:
+        qDomain = ""
 
     qUnique = """
     with a, collect(matching) as matchingL, 
@@ -178,18 +200,23 @@ def search(
         # filter by year
     if yearStart is not None:
         if domain == "DATASET":
-            qYear = f"""
-    call {{with a where not a.ApplicableYears is null with a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
-    else a.ApplicableYears end as yearMatch, range(toInteger('{yearStart}'),toInteger('{yearEnd}')) as years
-    with a, years, [i in apoc.coll.toSet(apoc.coll.flatten(collect(coalesce(yearMatch,"")),true))) | toInteger(i)] as yearMatch 
-    where not isEmpty([i in yearMatch where toInteger(i) in years]) return a as node}}
-    with node as a, matching, score
-    """
+             qYear = f"""
+                    call {{ with a with a, toInteger('{yearStart}') AS inputYearStart,toInteger('{yearEnd}') AS inputYearEnd 
+                    match (a:DATASET) where a.recordStart IS NOT NULL AND a.recordStart <> ''
+                    AND a.recordEnd IS NOT NULL AND a.recordEnd <> '' 
+                    WITH a, toInteger(a.recordStart) AS rStart,toInteger(a.recordEnd) AS rEnd,inputYearStart, inputYearEnd
+                    WHERE rStart >= inputYearStart AND rEnd <= inputYearEnd return a as node}}
+                    with node as a, matching, score order by score desc
+                    """
+        elif domain == "ALLNODES":
+            qYear = " "
         else:
             qYear = f"""
-    call {{ with a with a, range(toInteger('{yearStart}'),toInteger('{yearEnd}')) as inputYears 
-    match (a)<-[r:USES]-(:DATASET) where r.yearStart is not null and not isEmpty(r.yearStart) with a, inputYears, range(apoc.coll.min([i in apoc.coll.flatten(collect(r.yearStart),true) | 
-    toInteger(i)]), apoc.coll.max(custom.getYear(collect(r.yearEnd)))) as years where not isEmpty([i in inputYears where i in years]) return a as node}}
+    call {{ with a with a, toInteger('{yearStart}') AS inputYearStart,toInteger('{yearEnd}') AS inputYearEnd 
+    match (a)<-[r:USES]-(:DATASET) where r.recordStart IS NOT NULL AND r.recordStart <> ''
+    AND r.recordEnd IS NOT NULL AND r.recordEnd <> '' 
+    WITH a, toInteger(r.recordStart) AS rStart,toInteger(r.recordEnd) AS rEnd,inputYearStart, inputYearEnd
+    WHERE rStart >= inputYearStart AND rEnd <= inputYearEnd return a as node}}
     with node as a, matching, score order by score desc
     """
     else:
@@ -213,7 +240,9 @@ def search(
 
     cypher_query = qStart + qDomain + qUnique + qCountryFilter + \
         qContext + qYear + qLimit + qCountry + qReturn
-
+    
+    print(cypher_query)
+    
     if query != 'true':
         data = getQuery(cypher_query, driver, params={
                         "term": term, "context": context, "country": country, "yearStart": yearStart, "yearEnd": yearEnd})
