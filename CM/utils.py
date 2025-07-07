@@ -264,3 +264,25 @@ def custom_sort(elem):
         return 2
     else:
         return 3
+
+def testConnection(configOpt="DB",database="SocioMap"):
+    """
+    Test the connection to the specified database.
+    """
+    try:
+        from configparser import ConfigParser
+        config = ConfigParser()
+        config.read('config.ini')
+        user = config['DB']['user']
+        pwd = config['DB']['pwd']
+        database = str.lower(database)
+        uri = config['DB'][database]  # Default to SocioMap URI
+        driver = GraphDatabase.driver(config[configOpt][uri], auth=(
+                user, pwd))
+        with driver.session() as session:
+            result = session.run("RETURN 1")
+            success = result.single()[0] == 1
+        driver.close()
+        return success
+    except Exception as e:
+        return False
