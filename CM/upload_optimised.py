@@ -67,22 +67,22 @@ def updateLog(f, txt, write="a"):
 
 #Creates names property for new dataset node that combines shortName, CMName, and DatasetCitation, names
 #Dan need to apply for functions 5 and 6
-def add_to_names_for_dataset(row):
-        # Extract base names as a list
-        if pd.isna(row["names"]):
-            names_list = []
-        elif ";" in row["names"]:
-            names_list = [name.strip() for name in row["names"].split(";") if name.strip()]
-        else:
-            names_list = [row["names"].strip()]
+# def add_to_names_for_dataset(row):
+#         # Extract base names as a list
+#         if pd.isna(row["names"]):
+#             names_list = []
+#         elif ";" in row["names"]:
+#             names_list = [name.strip() for name in row["names"].split(";") if name.strip()]
+#         else:
+#             names_list = [row["names"].strip()]
 
-        # Append CMName, shortName, and DatasetCitation if they exist
-        for col in ["CMName", "shortName", "DatasetCitation"]:
-            val = row.get(col)
-            if pd.notna(val):
-                names_list.append(str(val).strip())
+#         # Append CMName, shortName, and DatasetCitation if they exist
+#         for col in ["CMName", "shortName", "DatasetCitation"]:
+#             val = row.get(col)
+#             if pd.notna(val):
+#                 names_list.append(str(val).strip())
         
-        return names_list
+#         return names_list
 
 #Creates new nodes for functions 1 and 2
 def createNodes(df, database,isDataset, user, uniqueID=None):
@@ -96,10 +96,10 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
 
        #For datasets, compiles shortName, CMName, datasetCitation, and names 
        # into names property for searching
-        if isDataset:
-            if "names" not in df.columns:
-                df["names"] = None
-            df["names"] = df.apply(add_to_names_for_dataset, axis=1)
+        # if isDataset:
+        #     if "names" not in df.columns:
+        #         df["names"] = None
+        #     df["names"] = df.apply(add_to_names_for_dataset, axis=1)
 
         #Assigns appropriate label(s) to node, adding CATEGORY if the label is a CATEGORY domain.
         idlabel = "CATEGORY"
@@ -360,7 +360,6 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 # function to update or replace properties of USES ties or nodes, (functions 3 to 6)
 def updateProperty(df,isDataset, database, user, updateType, propertyType="USES"):
     try:
-        print(df)
         # double checking for errors, if in future we call this function elsewhere outside this pipeline
         if not updateType in ["overwrite", "update"]:
             raise Exception("type must be update or overwrite.")
@@ -395,14 +394,19 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
         # getting metatypes for properties
         metaTypes = getQuery(query, driver)
-        metaTypeDict = {item["property"]: item["metaType"] for item in metaTypes}
-
-        keys = []
-
         if propertyType == "USES":
+            filteredItems = [item for item in metaTypes if item["type"] == "relationship"]
             node_or_tie = "r"
         elif propertyType == "NODE":
+            filteredItems = [item for item in metaTypes if item["type"] == "node"]
             node_or_tie = "n"
+
+        metaTypeDict = {item["property"]: item["metaType"] for item in filteredItems}
+
+        keys = []
+        print(node_or_tie)
+        print(vars)
+         
         for var in vars:
             # Get the metaType for the given property
             metaType = metaTypeDict.get(var)
@@ -414,7 +418,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
                 keys.append(
                     f"{node_or_tie}.{var} = custom.formatProperties([{node_or_tie}.{var},row.{var}],'{metaType}',';')[0].prop"
                 )
-            old_keys = ", ".join([f"`{var}`: {node_or_tie}.{var}" for var in vars])
+        old_keys = ", ".join([f"`{var}`: COALESCE({node_or_tie}.{var}, 'None')" for var in vars])
 
         keys = ", ".join(keys)
       
@@ -431,12 +435,16 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             MATCH (n {{CMID: row.CMID}})
             RETURN elementId(n) AS nodeID, n.CMID AS CMID,{{ {old_keys} }} AS oldVals
             """
+        
+        print("Stage 0")
 
         old_values = getQuery(
             query=get_old_vals_query,
             driver=driver,
             params={"rows": df.to_dict(orient="records")},
         )
+
+        print("Stage 1")
 
         items = [k.split('=')[0].strip() for k in keys.split(',') if '=' in k]
 
@@ -447,7 +455,6 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             else ', '.join([f"{item} AS {item.split('.')[-1]}" for item in items])
         )
 
-        print(keys)
 
         # Query branching based on uses ties or node properties
         if propertyType == "USES":
@@ -468,7 +475,11 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
         df_dict = df.to_dict(orient="records")
 
+        print("Stage 2")
+
         result = getQuery(query=q, driver=driver, params={"rows": df_dict})
+
+        print("Stage 3")
 
         logs = []
 
@@ -507,13 +518,14 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
 
                 logs.append("; ".join(changes))
 
-                createLog(
-                    id=[row["relID"] for row in result],
-                    type="relation",
-                    log=logs,
-                    user=user,
-                    driver=driver,
-                )
+            createLog(
+                id=[row["relID"] for row in result],
+                type="relation",
+                log=logs,
+                user=user,
+                driver=driver,
+                isDataset = isDataset
+            )
 
         elif propertyType == "NODE":
 
@@ -548,6 +560,7 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
                 log=node_logs,
                 user=user,
                 driver=driver,
+                isDataset = isDataset
             )
 
 
@@ -1049,9 +1062,18 @@ def input_Nodes_Uses(
             updateLog(
                 f"log/{user}uploadProgress.txt", f"validating column {i}", write="a"
             )
-            query = """
+
+            search_label = "CATEGORY"
+
+            if isDataset and (i == "CMID" or  i == "parent"):
+                search_label = "DATASET"
+            
+            if i == "datasetID":
+                search_label = "DATASET"
+
+            query = f"""
             UNWIND $rows AS row
-            OPTIONAL MATCH (n {CMID: row.value})
+            OPTIONAL MATCH (n:{search_label} {{CMID: row.value}})
             RETURN row.value AS value, COUNT(n) AS count
             """
             rows_to_check = []
@@ -1689,6 +1711,8 @@ def input_Nodes_Uses(
                     "processing Node properties",
                     write="a",
                 )
+                
+            if isDataset:
                 cmids = dataset_match["CMID"].unique()
                 processDATASETs(database=database, user=user, CMID=cmids)
             
