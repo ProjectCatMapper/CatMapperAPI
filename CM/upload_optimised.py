@@ -237,14 +237,15 @@ def createUSES(links, database, user):
         #Removes required properties that either aren't added to uses tie (datasetID, CMID, CMName) or are added separately (Key)
         vars = links.columns.difference(["datasetID", "CMID", "Key", "CMName"])
 
-        query = """
-match (n:METADATA:PROPERTY)
-return n.property as property, n.type as type,
-n.relationship as relationship, n.description as description,
-n.display as display, n.group as group, n.metaType as metaType, n.search as search, n.translation as translation
-"""
+        # query = """
+        #     match (n:METADATA:PROPERTY)
+        #     return n.property as property, n.type as type,
+        #     n.relationship as relationship, n.description as description,
+        #     n.display as display, n.group as group, n.metaType as metaType, n.search as search, n.translation as translation
+        #     """
 
-        metaTypes = getQuery(query, driver)
+        # metaTypes = getQuery(query, driver)
+        metaTypes = getPropertiesMetadata(driver)
         metaTypeDict = {item["property"]: item["metaType"] for item in metaTypes}
 
         keys = []
@@ -379,21 +380,25 @@ def updateProperty(df,isDataset, database, user, updateType, propertyType="USES"
         for required in requiredCols:
             if required not in df.columns:
                 raise ValueError(f"Missing required column {required}")
-            
+                        
         vars = df.drop(
             columns=[col for col in requiredCols if col in df.columns]
         ).columns.tolist()
 
+        if not vars:
+            raise ValueError("One of the selected properties is not a property of USES ties. Hence it cannot be uploaded.")
+
         # this code builds the cypher query
-        query = """
-match (n:METADATA:PROPERTY)
-return n.property as property, n.type as type,
-n.relationship as relationship, n.description as description,
-n.display as display, n.group as group, n.metaType as metaType, n.search as search, n.translation as translation
-"""
+        #query = """
+        #    match (n:PROPERTY)
+        #   return n.property as property, n.type as type,
+        #       n.relationship as relationship, n.description as description,
+        #    n.display as display, n.metaType as metaType,n.translation as translation
+        #    """
 
         # getting metatypes for properties
-        metaTypes = getQuery(query, driver)
+        #metaTypes = getQuery(query, driver)
+        metaTypes = getPropertiesMetadata(driver)
         if propertyType == "USES":
             filteredItems = [item for item in metaTypes if item["type"] == "relationship"]
             node_or_tie = "r"
@@ -462,14 +467,14 @@ n.display as display, n.group as group, n.metaType as metaType, n.search as sear
             UNWIND $rows AS row
             MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}})
             WITH row, r, b
-            SET {keys}, r.status = 'update'
+            SET r.status = 'update', {keys}
             RETURN elementId(b) as nodeID,elementId(r) as relID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, {return_props}
             """
         elif propertyType == "NODE":
             q = f"""
             UNWIND $rows AS row
             MATCH (n {{CMID: row.CMID}})
-            SET {keys}, n.status = "update"
+            SET n.status = "update", {keys}
             RETURN elementId(n) as nodeID, n.CMID as CMID
             """
 
@@ -741,18 +746,16 @@ def is_non_empty(x):
 #Checks whether labels in parent_labels have same group_label as labels in child_labels.arguments must be lists
 def validate_labels(all_group_labels,parent_labels, child_labels):
     for idx, (i, j) in enumerate(zip(parent_labels, child_labels)):
-        print(i)
-        print(j)
         singular_parent_grouplabel = all_group_labels.intersection(set(i))
         singular_child_grouplabel = all_group_labels.intersection(set(j))
-        
+
         print(singular_parent_grouplabel)
         print(singular_child_grouplabel)
-
+        
         if "GENERIC" not in singular_parent_grouplabel:
             if singular_parent_grouplabel != singular_child_grouplabel:
                 raise ValueError(
-                    f"Mismatch at row {idx}: Parent node labels dont match that of the child node.\n"
+                    f"Mismatch at row {idx+1}: Parent node labels dont match that of the child node.\n"
                     f"Parent Labels: {i}\n"
                     f"Child Labels: {j}"
                 )
@@ -770,7 +773,7 @@ def input_Nodes_Uses(
     geocode=False,
     batchSize=1000,
 ):
-    
+   
     updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write="w")
 
     if user is None:
@@ -932,8 +935,10 @@ def input_Nodes_Uses(
 
         print(dataset["label"].unique())
 
-        if not all(label in labels for label in dataset["label"].unique()):
-            raise Exception("Error: label is not valid. Maybe check the spelling")
+        invalid_labels = [label for label in dataset["label"].unique() if label not in labels]
+        if invalid_labels:
+            raise Exception(f"Error: label is not valid. Maybe check the spelling. Make sure you are in the right platform. Invalid labels: {invalid_labels}")
+
                 
         if "CATEGORY" in dataset["label"].values:
             raise Exception("Error: label must be more specific than CATEGORY")
@@ -1123,39 +1128,63 @@ def input_Nodes_Uses(
                         )
 
                     raise ValueError(" ".join(message_parts))
-                
-    # checking if label of CMID in spreadsheet matches label in database
-    # 1) label for CMID in property matches property
-    # 2) label for CMID for parent matches label of child. 
-    # 3) label for CMID in CMID column matches label
-    if "label" in dataset.columns and "CMID" in dataset.columns:
+                               
+    #adding Grouplabels into the dataset
+    if "label" in dataset.columns:
         updateLog(
             f"log/{user}uploadProgress.txt",
-            f"checking if label column matches CMID column",
+            f"adding grouplabel to dataset",
             write="a",
         )
-        if uploadOption == "add_node" and "parent" in dataset.columns:
-            combine = dict(zip(dataset["parent"], dataset["label"]))
-        else:
-            combine = dict(zip(dataset["CMID"], dataset["label"]))
+
+        distinct_labels = dataset['label'].dropna().unique().tolist()
+
         query = """
-        UNWIND keys($rows) AS cmid
-        MATCH (n:CATEGORY {CMID: cmid})
-        where not $rows[cmid] in labels(n)
-        RETURN n.CMID AS CMID
-        LIMIT 1
+        UNWIND $labels AS labelValue
+        MATCH (n:LABEL)
+        WHERE n.label = labelValue
+        RETURN labelValue, n.groupLabel AS groupLabel
         """
+
         with driver.session() as session:
-            term_mismatch = session.run(query, rows=combine)
-            mismatch = term_mismatch.single()
+            result = session.run(query, labels=distinct_labels)
+        
+            label_to_grouplabel = {record['labelValue']: record['groupLabel'] for record in result}
 
-        if mismatch:
-            raise ValueError(
-                f"Label provided in file doesnt match for CMID: {mismatch['CMID']}"
+            dataset['groupLabel'] = dataset['label'].map(label_to_grouplabel)
+                        
+    # checking if Grouplabel of CMID in spreadsheet matches Grouplabel in database
+    # 1) Grouplabel for CMID in CMID column matches Grouplabel
+    if uploadOption == "add_uses":
+        if "label" in dataset.columns and "CMID" in dataset.columns:
+            updateLog(
+                f"log/{user}uploadProgress.txt",
+                f"checking if label column matches CMID column",
+                write="a",
             )
+            if uploadOption == "add_node" and "parent" in dataset.columns:
+                combine = dict(zip(dataset["parent"], dataset["groupLabel"]))
+            else:
+                combine = dict(zip(dataset["CMID"], dataset["groupLabel"]))
+                    
+            query = """
+            UNWIND keys($rows) AS cmid
+            MATCH (n:CATEGORY {CMID: cmid})
+            where not $rows[cmid] in labels(n)
+            RETURN n.CMID AS CMID
+            LIMIT 1
+            """
+            with driver.session() as session:
+                term_mismatch = session.run(query, rows=combine)
+                mismatch = term_mismatch.single()
 
-    # checks if CMIDs in a property have appropriate labels in the database
-    # checks if the parent CMID label matches the child CMID label
+            if mismatch:
+                raise ValueError(
+                    f"Label provided in file doesnt match the labels in the database for CMID: {mismatch['CMID']}"
+                )
+
+    # 2) Grouplabel for CMID in property matches property
+    # 3) Grouplabel for CMID for parent matches Grouplabel of child. 
     for i in multi_value_columns:
         if i in dataset.columns:
             rows_to_check = []
@@ -1192,7 +1221,9 @@ def input_Nodes_Uses(
                         f"Error: Wrong labels in database for column '{i}': {wrong_labels}"
                     )
             else:
-                all_group_labels = {"LANGUOID", "RELIGION", "ETHNICITY", "DISTRICT", "BIOTA","POLITY","OCCUPATION","VARIABLE","CERAMIC","PROJECTILE_POINT","CULTURE","STONE","PERIOD","GENERIC"}
+                all_group_labels = getQuery("MATCH (n:LABEL) RETURN DISTINCT n.groupLabel AS groupLabel", driver, type="dict")
+
+                all_group_labels = {item['groupLabel'] for item in all_group_labels}
 
                 if uploadOption == "add_node":
                     child_column = "label"
@@ -1245,7 +1276,7 @@ def input_Nodes_Uses(
                 for row in dict_with_index.values():
                     parent_labels.append(row["parent_label"])
                     child_labels.append(row['child_label'])
-                                    
+                                                    
                 validate_labels(all_group_labels,parent_labels, child_labels)
     
     # checks if the eventType value is valid
@@ -1579,8 +1610,8 @@ def input_Nodes_Uses(
 
             links = dataset_match[link_columns].copy()
 
-            #For functions 1 to 4, creates USES ties or updates USES ties
-            if uploadOption in ["add_node","add_uses","update_add","update_replace"]:
+            #For functions 1 to 4 Categories, creates USES ties or updates USES ties
+            if not isDataset and uploadOption in ["add_node","add_uses","update_add","update_replace"]:
                 #Now that CMID has been created for add_node, need include CMID as required column.
                 if uploadOption == "add_node":
                     required_for_operation = required + ["CMID"]
@@ -1669,8 +1700,8 @@ def input_Nodes_Uses(
                     write="a",
                 )
 
-            #For function 5 and 6
-            else:
+            #For function 5 and 6. Categories and Datasets
+            if uploadOption in ["node_replace","node_add"]:
                 required_for_operation = required + ["CMID"]
                 node_columns = list(set(required_for_operation + nodeProperties))
                 node_columns = [
@@ -1714,14 +1745,21 @@ def input_Nodes_Uses(
                 
             if isDataset:
                 cmids = dataset_match["CMID"].unique()
+                print(cmids)
                 processDATASETs(database=database, user=user, CMID=cmids)
             
-            #Appending result of batch to previous batch results
+            #Appending result of batch to previous batch results (final_result)
             updateLog(
                     f"log/{user}uploadProgress.txt", "combining results", write="a"
                 )
-            result = pd.DataFrame(result["result"])
-            final_result = pd.concat([final_result, result], axis=0)
+            
+            #since function 1 for datasets doesnt create results, use dataset_for_results from node creation            
+            if isDataset and uploadOption == "add_node":
+                final_result = pd.concat([final_result, dataset_for_results], axis=0)
+            else:
+                result = pd.DataFrame(result["result"])
+                final_result = pd.concat([final_result, result], axis=0)
+
             updateLog(
                 f"log/{user}uploadProgress.txt", "results combined", write="a"
             )
