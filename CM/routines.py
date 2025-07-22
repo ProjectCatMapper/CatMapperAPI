@@ -46,50 +46,45 @@ def validateJSON(database, property='parentContext', path="/mnt/storage/app/tmp/
         return "Unable to validate JSON properties: " + str(e)
 
 
-def addLog(database):
+def checkDomains(database, mail=None):
     try:
         driver = getDriver(database)
         query = """
-        match ()-[r:USES]-() where r.log is null set r.log = custom.makeLog([],"0","added log property")
-        """
-        getQuery(query, driver)
-
-        query = """
-        match (c) where c.log is null set c.log = [custom.makeLog([],"0","added log property")]
-        """
-        getQuery(query, driver)
-
-        return "Completed"
-    except Exception as e:
-        return str(e)
-
-
-def checkDomains(data, database):
-    try:
-        if data is None:
-            data = False
-        elif data.lower() == "true":
-            data = True
-        else:
-            data = False
-        driver = getDriver(database)
-        query = """
-        match (n:CATEGORY)
+        match (n:CATEGORY)<-[r:USES]-(d:DATASET)
         where size(labels(n)) = 1
-        optional match (n)<-[r:USES]-(d:DATASET)
-        return "CATEGORY" as query, n.CMID as CMID, n.CMName as CMName, r.label as label, d.CMID as datasetID
+        return "CATEGORY" as query, n.CMID as CMID, n.CMName as CMName, r.label as subdomain, '' as domain, d.CMID as datasetID
         UNION ALL
-        match (n)
-        where isEmpty([i in labels(n) where i in ["DATASET","METADATA","USER","CATEGORY","DELETED"]])
-        optional match (n)<-[r:USES]-(d:DATASET)
-        return "MissingCATEGORY" as query,  n.CMID as CMID, n.CMName as CMName, r.label as label, d.CMID as datasetID
+        match (n)<-[r:USES]-(d:DATASET)
+        where not "CATEGORY" in labels(n)
+        return "MissingCATEGORY" as query,  n.CMID as CMID, n.CMName as CMName, r.label as subdomain, '' as domain, d.CMID as datasetID
+        UNION ALL
+        match (n:CATEGORY)<-[r:USES]-(d:DATASET)
+        where r.label is not null and apoc.meta.cypher.type(r.label) = "STRING" and not r.label in labels(n)
+        return "MissingSubDomain" as query, n.CMID as CMID, n.CMName as CMName, r.label as subdomain, '' as domain, d.CMID as datasetID
+        UNION ALL
+        match (p:LABEL)
+        WITH apoc.map.fromPairs([[p.label, p.groupLabel]]) AS m
+        WITH collect(m) AS labelGroupMap
+        match (n:CATEGORY)<-[r:USES]-(d:DATASET)
+        where r.label is not null and apoc.meta.cypher.type(r.label) = "STRING"
+        with n,r,d,labelGroupMap
+        unwind labelGroupMap as labelGroup
+        with n,r,d,labelGroup
+        where keys(labelGroup)[0] = r.label
+        with n,r,d,labelGroup
+        where not labelGroup[r.label] in labels(n)
+        return "MissingDomain" as query, n.CMID as CMID, n.CMName as CMName, r.label as subdomain, labelGroup[r.label] as domain, d.CMID as datasetID
         """
-        result = getQuery(query, driver)
-
-        if data:
-            return result
-        else:
-            return "Completed"
+        results = getQuery(query, driver, type ="df")
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            if mail is not None:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_missingDomains.xlsx", dir="/tmp") as tmpfile:
+                    fp1 = tmpfile.name
+                    results.to_excel(fp1, index=False)
+                sendEmail(mail, subject=f"Missing Domains for {database}", recipients=[
+                            "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+                
+        return results.to_dict(orient="records")
 
     except Exception as e:
         return str(e)

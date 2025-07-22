@@ -1,5 +1,18 @@
 #!/bin/bash
 
+api_url="https://catmapper.org/api/routines/processUSES/ArchaMap"
+
+response=$(curl -ks --max-time 600000 "Content-Type: application/json" "$api_url")
+
+echo "API Response for processUSES in ArchaMap:"
+echo "$response"
+
+api_url="https://catmapper.org/api/routines/processUSES/SocioMap"
+
+response=$(curl -ks --max-time 600000 "Content-Type: application/json" "$api_url")
+
+echo "API Response for processUSES in SocioMap:"
+echo "$response"
 
 api_url="https://catmapper.org/api/routines/checkDomains/ArchaMap"
 
@@ -13,20 +26,6 @@ api_url="https://catmapper.org/api/routines/checkDomains/SocioMap"
 response=$(curl -ks --max-time 600000 "Content-Type: application/json" "$api_url")
 
 echo "API Response for checkDomains in SocioMap:"
-echo "$response"
-
-api_url="https://catmapper.org/api/routines/processUSES/ArchaMap"
-
-response=$(curl -ks --max-time 600000 "Content-Type: application/json" "$api_url")
-
-echo "API Response for processUSES in ArchaMap:"
-echo "$response"
-
-api_url="https://catmapper.org/api/routines/processUSES/SocioMap"
-
-response=$(curl -ks --max-time 600000 "Content-Type: application/json" "$api_url")
-
-echo "API Response for processUSES in SocioMap:"
 echo "$response"
 
 api_url="https://catmapper.org/api/routines/getBadJSON/SocioMap"

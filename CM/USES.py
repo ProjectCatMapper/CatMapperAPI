@@ -4,10 +4,59 @@ from .utils import *
 from datetime import datetime
 from .log import createLog
 
+def mergeUSES(database, CMID, Key, datasetID, properties = None):
+    """
+    Merge USES relationships in the database.
 
-def mergeDupRelations(driver, CMID=None):
+    Parameters:
+    - database: The database connection object.
+    - CMID: The CMID to filter the relationships.
+    - Key: The key to filter the relationships.
+    - datasetID: The dataset ID to filter the relationships.
+    - properties: Optional; a list of properties to combine the relationships.
+
+    Returns:
+    - result: The result of the merge operation or an error message.
+    """
+    driver = getDriver(database)
+
+    if isinstance(CMID, list) and len(CMID) > 1:
+        raise ValueError("CMID must be a single value, not a list.")
+    if isinstance(Key, list) and len(Key) > 1:
+        raise ValueError("Key must be a single value, not a list.")
+    if isinstance(datasetID, list) and len(datasetID) > 1:
+        raise ValueError("datasetID must be a single value, not a list.")
+    if isinstance(properties, list) and len(properties) > 1:
+        raise ValueError("properties must be a single value, not a list.")
+    
+    CMID = unlist(CMID)
+    Key = unlist(Key)
+    datasetID = unlist(datasetID)
+    properties = unlist(properties)
+    
+    if properties is None:
+        properties = "{properties: {`.*`: 'combine'}}"
+        
+    query = f"""
+    match (:DATASET {{CMID: $datasetID}})-[r:USES {{Key: $Key}}]->(:CATEGORY {{CMID: $CMID}})
+    return count(r) as count
+    """
+    count = getQuery(query, driver=driver, params={"CMID": CMID, "Key": Key, "datasetID": datasetID}, type = 'list')
+
+    query = f"""
+    match (:DATASET {{CMID: $datasetID}})-[r:USES {{Key: $Key}}]->(:CATEGORY {{CMID: $CMID}})
+    with collect(r) as rels
+    call apoc.refactor.mergeRelationships(rels,{properties}) yield rel
+    return count(*) as count
+    """
+    result = getQuery(query, driver=driver, params={"CMID": CMID, "Key": Key, "datasetID": datasetID}, type = 'list')
+
+    return "Merged " + str(count[0]) + " relationship(s) into " + str(result[0]) + " relationship(s) for CMID " + f"'{CMID}' with Key '{Key}' and datasetID (CMID) '{datasetID}' using properties combined as {properties}" + "."
+        
+
+def mergeDupRelations(database, CMID=None):
     try:
-
+        driver = getDriver(database)
         if CMID is not None:
             qFiltera = "unwind $cmid as cmid"
             qFilterb = "a.CMID = cmid and"
@@ -33,8 +82,9 @@ return count(*) as count
         return result, 500
 
 
-def fixUsesRels(driver, property, relationship, CMID=None):
+def fixUsesRels(database, property, relationship, CMID=None):
     try:
+        driver = getDriver(database)
         if property in ["country", "district"]:
             qProp = "collect(distinct r.country) + collect(distinct r.district)"
         else:
@@ -91,99 +141,78 @@ return count(*) as count
         return result, 500
 
 
-def updateLabels(driver, CMID=None):
+def updateLabels(database, CMID=None):
     try:
+        driver = getDriver(database)
+        logs = []
         if CMID is not None:
-            print("setting CATEGORY label on CMID")
-            getQuery(
-                "unwind $CMID as cmid match (a {CMID: cmid})<-[:USES]-(:DATASET) set a:CATEGORY return count(*)", driver, params={"CMID": CMID})
+            msg = "setting CATEGORY label on CMID"
+            logs.append(msg)
+            count = getQuery(
+                "unwind $CMID as cmid match (c {CMID: cmid})<-[:USES]-(:DATASET) where not 'CATEGORY' in labels(c) set c:CATEGORY return count(distinct c)", driver, params={"CMID": CMID}, type = "list")
+            msg = f"Set CATEGORY label for {count[0]} nodes"
+            logs.append(msg)
         else:
-            print("setting CATEGORY label for all")
-            getQuery(
-                "match (a)<-[:USES]-(:DATASET) set a:CATEGORY return count(*)", driver)
+            msg = "setting CATEGORY label for all"
+            logs.append(msg)
+            count = getQuery(
+                "match (c)<-[:USES]-(:DATASET) where not 'CATEGORY' in labels(c) set c:CATEGORY return count(distinct c)", driver, type = "list")
+            msg = f"Set CATEGORY label for {count[0]} nodes"
+            logs.append(msg)
             
-
         if CMID is not None:
-            print(CMID)
-
-            query = """
-            unwind $cmid as cmid
-            match (a:CATEGORY {CMID: cmid})<-[r:USES]-(:DATASET)
-            where r.label is not null
-            WITH a, apoc.coll.toSet(apoc.coll.flatten(collect(distinct [r.label,"CATEGORY"]), true)) AS labels
-            CALL apoc.create.setLabels(a, labels) YIELD node
-            RETURN count(*)
-            """
-            result = getQuery(query=query, driver=driver,
-                              params={"cmid": CMID}, type='list')
-            
-            # adds grouplabels to nodes
-            labels = getQuery(
-                'match (l:LABEL) where l.public = "TRUE" and not l.label = "CATEGORY" return distinct l.label as label, l.groupLabel as group', driver)
-            labels = pd.DataFrame(labels)
-
-            for i in range(len(labels)):
-                label = labels.loc[i, 'label']
-                group = labels.loc[i, 'group']
-                query = f"""
-                    unwind $cmid as cmid
-                    match (d:DATASET)-[r:USES]->(c:{label}) 
-                    WHERE c.CMID = cmid
-                    set c:{group}
-                    return count(*)
-                """
-                result2 = getQuery(query=query, driver=driver,params={"cmid": CMID}, type='list')
-            
+            unwind = "unwind $cmid as cmid"
+            match = "{CMID: cmid}"
         else:
-            query = """
-            match (a:CATEGORY)<-[r:USES]-(:DATASET)
-            where r.label is not null
-            WITH a, apoc.coll.toSet(apoc.coll.flatten(collect(distinct [r.label,"CATEGORY"]), true)) AS labels
-            CALL apoc.create.setLabels(a, labels) YIELD node
-            RETURN count(*)
+            unwind = ""
+            match = ""
+
+        query = f"""
+        {unwind}
+        match (c:CATEGORY {match})<-[r:USES]-(:DATASET)
+        where r.label is not null
+        WITH c, apoc.coll.toSet(apoc.coll.flatten(collect(distinct [r.label,"CATEGORY"]), true)) AS labels
+        CALL apoc.create.setLabels(c, labels) YIELD node
+        RETURN count(distinct c)
+        """
+        if CMID is not None:
+            label_results = getQuery(query=query, driver=driver,
+                                params={"cmid": CMID}, type='list')
+        else:
+            label_results = getQuery(query=query, driver=driver, type='list')
+            
+        msg = f"Set labels for {label_results[0]} nodes"
+        logs.append(msg)
+
+        # adds grouplabels to nodes
+        labels = getQuery(
+            'match (l:LABEL) where l.public = "TRUE" and not l.label in ["CATEGORY","ALL NODES","ANY DOMAIN"] return distinct l.label as label, l.groupLabel as group', driver, type  = "df")
+
+        for i in range(len(labels)):
+            label = labels.loc[i, 'label']
+            group = labels.loc[i, 'group']
+            query = f"""
+                {unwind}
+                match (d:DATASET)-[r:USES]->(c:`{label}` {match}) 
+                set c:`{group}`
+                return count(distinct c)
             """
-            result = getQuery(query=query, driver=driver, type='list')
-
-            # adds grouplabels to nodes
-            labels = getQuery(
-                'match (l:LABEL) where l.public = "TRUE" and not l.label = "CATEGORY" return distinct l.label as label, l.groupLabel as group', driver)
-            labels = pd.DataFrame(labels)
-
-            for i in range(len(labels)):
-                label = labels.loc[i, 'label']
-                group = labels.loc[i, 'group']
-                query = f"""
-                    match (d:DATASET)-[r:USES]->(c:{label}) 
-                    set c:{group}
-                    return count(*)  
-                """
-                result2 = getQuery(query=query, driver=driver, type='list')
-
-            # getting node labels not present in it's group labels or labels from it's USES ties and removing them.
-            groupLabels = getQuery(
-                'match (l:LABEL) where l.public = "TRUE" and not l.label = "CATEGORY" return distinct l.groupLabel as label', driver, type='list')
-
-            for group in groupLabels:
-                query = f"""
-                    match (d:DATASET)-[r:USES]->(c:{group}) 
-                    with apoc.coll.toSet(apoc.coll.flatten(collect(r.label))) as rlabel, [i in labels(c) 
-                    where not i = "CATEGORY"] as label, c with c, [i in label where not i in rlabel and not i = "{group}"] as extra 
-                    where size(extra) > 0 
-                    call apoc.create.removeLabels(c,extra) yield node
-                    return count(*)  
-                """
-                result3 = getQuery(query=query, driver=driver, type='list')
-
-        return result
+            if CMID is not None:
+                group_results = getQuery(query=query, driver=driver,params={"cmid": CMID}, type='list')
+            else:
+                group_results = getQuery(query=query, driver=driver, type='list')
+            msg = f"Set group label {group} for {group_results[0]} nodes with label {label}"
+            logs.append(msg)
+        return logs
     except Exception as e:
         # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
         return result, 500
 
 
-def updateContains(driver, CMID=None):
+def updateContains(database, CMID=None):
     try:
-
+        driver = getDriver(database)
         if CMID is not None:
             qFiltera = "unwind $cmid as cmid"
             qFilterb = "where a.CMID = cmid"
@@ -257,9 +286,9 @@ def updateContains(driver, CMID=None):
         return result, 500
 
 
-def updateAltNames(driver, CMID=None):
+def updateAltNames(database, CMID=None):
     try:
-
+        driver = getDriver(database)
         if CMID is not None:
             qFiltera = "unwind $cmid as cmid"
             qFilterb = "where a.CMID = cmid"
@@ -289,17 +318,17 @@ def processUSES(database, CMID=None, user="0"):
         driver = getDriver(database)
         # Update alternative names
         print("updating alternate names")
-        updateAltNamesResults = updateAltNames(CMID=CMID, driver=driver)
+        updateAltNamesResults = updateAltNames(CMID=CMID, database=database)
 
         # Update labels
         print("updating labels")
         updateLabelsResults = "Not ran"
-        updateLabelsResults = updateLabels(CMID=CMID, driver=driver)
+        updateLabelsResults = updateLabels(CMID=CMID, database=database)
 
         # Fix duplicate relationships
         mergeDupRelationsResults = "Not ran"
         # if CMID is not None:
-        #     mergeDupRelationsResults = mergeDupRelations(CMID=CMID, driver = driver)
+        #     mergeDupRelationsResults = mergeDupRelations(CMID=CMID, database = database)
 
         # Update structural properties and referenceKeys
         properties = getPropertiesMetadata(driver=driver)
@@ -310,12 +339,12 @@ def processUSES(database, CMID=None, user="0"):
             print(f"{property} {relationship} {CMID}")
 
             r = fixUsesRels(CMID=CMID, property=property,
-                            relationship=relationship, driver=driver)
+                            relationship=relationship, database=database)
             propertiesResults.append(r)
 
         # Update contains relationships
         print("updating contains")
-        updateContainsResults = updateContains(CMID=CMID, driver=driver)
+        updateContainsResults = updateContains(CMID=CMID, database=database)
 
         return {"CMID": CMID, "mergeDupRelations": mergeDupRelationsResults, "properties": propertiesResults, "updateLabels": updateLabelsResults, "updateContains": updateContainsResults, "updateAltNames": updateAltNamesResults}
     except Exception as e:
@@ -493,9 +522,10 @@ return count(*)
 """
         getQuery(query, driver=driver, params={"CMID": CMID})
 
-        query = f'''{q1}
+        #updating dataset names
+
+        query = f"""{q1}
                     MATCH (n:DATASET {q2})
-                    WHERE n.ID = id
                     SET n.names = 
                         apoc.coll.toSet(
                             CASE 
@@ -503,7 +533,18 @@ return count(*)
                             ELSE [n.CMname, n.shortName, n.datasetCitation]
                             END
                         )
-                    RETURN n.ID, n.names'''
+                    RETURN n.names"""
+        
+        query =  f"""
+                    {q1}
+                    MATCH (n:DATASET {q2})
+                    WITH n,
+                    [x IN [n.CMname, n.shortName, n.DatasetCitation] WHERE x IS NOT NULL] AS newNames
+                    SET n.names = apoc.coll.toSet(
+                    (CASE WHEN n.names IS NOT NULL THEN n.names ELSE [] END) + newNames
+                    )
+                    RETURN n.names
+                    """
 
         getQuery(query, driver=driver, params={"CMID": CMID})
 
