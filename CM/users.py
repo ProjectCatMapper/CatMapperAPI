@@ -81,12 +81,14 @@ def login(database, user, password):
 def verifyUser(user, pwd, role=None):
     try:
         driver = getDriver("userdb")
+        print(user)
         if role == "admin":
             query = "match (u:USER {userid: toString($user),password: $pwd, access: 'enabled', role: 'admin'}) return 'verified' as verified"
         else:
             query = "match (u:USER {userid: toString($user),password: $pwd, access: 'enabled'}) return 'verified' as verified"
         result = getQuery(query, driver, params={
                           'user': user, 'pwd': pwd}, type='list')
+        print(result)
         return result[0]
     except Exception as e:
         return f"Error verifying user: {e}", 500
@@ -114,6 +116,7 @@ return u.userid as userid, u.first as first, u.last as last, u.email as email, u
     else:
         query = f"""
 match (u {{access: 'pending'}})
+WHERE "{database}" in u.database 
 return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
 """
         result = getQuery(query, driver)

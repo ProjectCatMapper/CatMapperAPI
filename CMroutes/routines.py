@@ -1,44 +1,44 @@
-from CM import *
-from flask_mail import Mail
+import inspect
 from flask import request
+from flask_mail import Mail
+import CM.routines as routines_module
+import CM.USES as uses_module
 
 mail = Mail()
 
-
 def get_routines(routine, database):
-    # this route will not be documented in swagger
-    # it is intended for automatic routines only
     try:
-        fun = routine
-        result = "Nothing returned"
-        if fun == "addLog":
-            result = addLog(database)
-        elif fun == "checkDomains":
-            data = unlist(request.args.get('data'))
-            result = checkDomains(data=data, database=database)
-        elif fun == "processUSES":
-            CMID = request.args.get('CMID')
-            result = processUSES(database=database, CMID=CMID)
-        elif fun == "backup2CSV":
-            result = backup2CSV(database, mail)
-        elif fun == "getBadJSON":
-            result = getBadJSON(database, mail)
-        elif fun == "getBadCMID":
-            result = getBadCMID(database, mail)
-        elif fun == "getMultipleLabels":
-            result = getMultipleLabels(database, mail)
-        elif fun == "getBadDomains":
-            result = getBadDomains(database, mail)
-        elif fun == "getBadRelations":
-            result = getBadRelations(database, mail)
-        elif fun == "CMNameNotInName":
-            result = CMNameNotInName(database, mail)
-        elif fun == "fixMetaTypes":
-            result = fixMetaTypes(database)
-        else:
-            result = "function not found"
-        return result
+        # Dynamically get function by name from the routines module
+        modules = [
+            routines_module,
+            uses_module
+        ]
+        func = None
+        for mod in modules:
+            if hasattr(mod, routine):
+                func = getattr(mod, routine)
+                break
+        if not callable(func):
+            return "function not found"
+
+        # Define available arguments
+        available_args = {
+            'database': database,
+            'mail': globals().get('mail'),  # or pass explicitly if preferred
+            'CMID': request.args.get('CMID'),
+            'datasetID': request.args.get('datasetID'),
+            'Key': request.args.get('Key'),
+            'properties': request.args.get('properties')
+        }
+
+        # Match args to function signature
+        sig = inspect.signature(func)
+        kwargs = {
+            k: v for k, v in available_args.items()
+            if k in sig.parameters
+        }
+
+        return func(**kwargs)
+
     except Exception as e:
-        # In case of an error, return an error response with an appropriate HTTP status code
-        result = str(e)
-        return result, 500
+        return str(e), 500

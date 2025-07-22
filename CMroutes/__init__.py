@@ -6,6 +6,9 @@ from .getDownloads import *
 from .getLogs import *
 from flask import Flask, abort, send_from_directory
 from .extensions import *
+from .getMetadata import *
+
+
 import os
 from flask_cors import CORS
 from configparser import ConfigParser

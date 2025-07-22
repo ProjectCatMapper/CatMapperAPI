@@ -10,6 +10,8 @@ from CM import *
 from CMroutes import *
 
 app = create_app()
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB
+
 
 @app.route("/")
 def root():
@@ -355,7 +357,7 @@ ORDER BY Domain
     if "Location" in info[0]:
         if info[0]['Location'][-2:-1] == ",":
             info[0]['Location'] = info[0]['Location'][:-2].strip()
-
+    
     return jsonify({
         "info": info[0],
         "samples": samples,
@@ -367,8 +369,7 @@ ORDER BY Domain
         "polysource": polysources,
         "badsources": bad_sources
     })
-
-
+        
 @app.route("/network", methods=['GET'])
 def net():
     p0 = request.args.get('value')
@@ -1160,6 +1161,80 @@ description: {intendedUse}
             # Default error message
             return jsonify({"error": "please contact admin@catmapper.org. Error:" + error_message}), 500
 
+@app.route("/admin_add_edit_delete_nodeproperties", methods=['GET'])
+def admin_nodeproperties():
+    CMID = request.args.get('CMID')
+    database = request.args.get('database')
+
+    driver = getDriver(database)
+    
+    # q captures the actual properties of a node
+    q = "MATCH (n) WHERE n.CMID = $cmid return properties(n) AS props"
+
+    # q1 captures relevant properties of node
+    if "CP" in CMID:
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'PROPERTY' in p.nodeType RETURN p.property as property"
+    elif "CL" in CMID:
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'LABEL' in p.nodeType RETURN p.property as property"
+    elif "D" in CMID:
+        q1= "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'DATASET' in p.nodeType RETURN p.property as property"
+    else:
+        q1= "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'CATEGORY' in p.nodeType RETURN p.property as property"
+
+
+    with driver.session() as session:
+        r = session.run(q,cmid=CMID).data()
+
+        if r == []:
+            return jsonify({"error":"Invalid CMID"})
+        
+        props = [k for k in r[0]['props'].keys()] if r else []
+    
+        # Run q1 to get allowed properties
+        allowed = session.run(q1).data()
+        allowed_props = {row['property'] for row in allowed}
+
+        r = {k:v for k,v in r[0]['props'].items() if k in allowed_props}
+        
+        # Filter props to only include allowed keys
+        r1 = [k for k in allowed_props if k not in props]
+
+    return jsonify({
+        "r":r,
+        "r1": r1,
+        "error": ""
+    })
+
+@app.route("/admin_add_edit_delete_usesproperties", methods=['GET'])
+def admin_usesproperties():
+    CMID = request.args.get('CMID')
+    database = request.args.get('database')
+
+    driver = getDriver(database)
+
+    q = "MATCH (n)<-[r:USES]-(d) WHERE n.CMID = $cmid RETURN n,r,d"
+
+    q1 = "MATCH (p:PROPERTY) WHERE p.type='relationship' RETURN p.property as property"
+
+
+    with driver.session() as session:
+        result = session.run(q,cmid=CMID)
+
+        records_list = []
+        for record in result:
+            n = dict(record["n"].items())
+            r = dict(record["r"].items())
+            d = dict(record["d"].items())
+            records_list.append((n, r, d))
+        
+        allowed = session.run(q1).data()
+        allowed_props = list({row['property'] for row in allowed})
+    
+    return {
+        "r":records_list,
+        "r1": allowed_props,
+        "error": ""
+    }
 
 @app.route('/admin', methods=['GET'])
 def getAdmin():
@@ -1182,7 +1257,6 @@ def getAdmin():
     """
     headers = {'Content-Type': 'text/html'}
     return make_response(render_template('admin.html'), 200, headers)
-
 
 @app.route('/admin/edit', methods=['GET', 'POST'])
 def getAdminEdit():
@@ -1207,16 +1281,24 @@ def getAdminEdit():
         user = unlist(data.get('user'))
         pwd = unlist(data.get('pwd'))
         apikey = unlist(data.get('apikey'))
-        validated = False
-        if apikey == apikeyEnv:
-            validated = True
-        if not validated:
-            credentials = login(database, user, pwd)
-            if isinstance(credentials, dict) and credentials.get('role') == "admin":
+        credentials = unlist(data.get("cred"))
+        input = unlist(data.get("input"))
+        if credentials:
+            verified = verifyUser(credentials.get(
+                "userid"), credentials.get("key"), "admin")
+            if verified != "verified":
+                raise Exception("Error: User is not verified")
+        else:
+            validated = False
+            if apikey == apikeyEnv:
                 validated = True
-                user = credentials.get('userid')
-        if not validated:
-            raise Exception("User not authorized")
+            if not validated:
+                credentials = login(database, user, pwd)
+                if isinstance(credentials, dict) and credentials.get('role') == "admin":
+                    validated = True
+                    user = credentials.get('userid')
+            if not validated:
+                raise Exception("User not authorized")
 
         result = "Nothing returned"
         # if fun == "getUSESrels":
@@ -1236,6 +1318,10 @@ def getAdminEdit():
             old = unlist(data.get('old'))
             new = unlist(data.get('new'))
             result = replaceProperty(cmid, property, old, new, database)
+        elif fun == "add/edit/delete node property":
+            result = add_edit_delete_Node(database,credentials.get("userid"),input)
+        elif fun == "add/edit/delete USES property":
+            result = add_edit_delete_USES(database,credentials.get("userid"),input)            
         else:
             raise Exception("Function does not exist")
         return result
@@ -1838,10 +1924,10 @@ def updateNewUsers():
     try:
         data = request.get_data()
         data = json.loads(data)
+        database = unlist(data.get('database'))
         credentials = unlist(data.get('credentials'))
         process = unlist(data.get('process'))
         userid = data.get('userid')
-        credentials = unlist(credentials)
 
         verified = verifyUser(credentials.get(
             "userid"), credentials.get("key"), "admin")
@@ -1851,23 +1937,23 @@ def updateNewUsers():
 
         approver = credentials.get("userid")
 
-        result = enableUser(process=process,
+        result = enableUser(database,process=process,
                             userid=userid, approver=approver)
+        
+#         users = [user for user in result if user.get("email")]
+#         mail = Mail()
 
-        users = [user for user in result if user.get("email")]
-        mail = Mail()
+#         for user in users:
+#             body = f"""
+# Hello {user.get("first")} {user.get("last")},
 
-        for user in users:
-            body = f"""
-Hello {user.get("first")} {user.get("last")},
+# Your registration has been approved. You can now access the {'and '.join(user.get("database"))} database. Please see catmapper.org/help or email support@catmapper.org for any questions.
 
-Your registration has been approved. You can now access the {'and '.join(user.get("database"))} database. Please see catmapper.org/help or email support@catmapper.org for any questions.
-
-Best,
-CatMapper Team
-            """
-            sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
-                "email"), 'admin@catmapper.org'], body=body, sender=os.getenv("mail_default"))
+# Best,
+# CatMapper Team
+#             """
+#             sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
+#                 "email"), 'admin@catmapper.org'], body=body, sender=os.getenv("mail_default"))
 
         if isinstance(result, list) and process == "approve":
 
@@ -1909,6 +1995,14 @@ app.add_url_rule('/CSVURLs/<database>', 'get_backup_csv_urls_route',
                  get_backup_csv_urls_route, methods=['GET'])
 
 
+app.add_url_rule('/metadata/domains/<database>', 'getDomains',
+                 getDomains, methods=['GET'])
+
+app.add_url_rule('/metadata/subdomains/<database>', 'getSubdomains',
+                 getSubdomains, methods=['GET'])
+
+app.add_url_rule('/metadata/domainDescriptions/<database>', 'getDomainDescriptions',
+                 getDomainDescriptions, methods=['GET'])
 @app.route("/download/test", methods=["GET"])
 def test_download():
 

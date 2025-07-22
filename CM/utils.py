@@ -60,8 +60,8 @@ def getPropertiesMetadata(driver):
 match (n:METADATA:PROPERTY) 
 return n.property as property, n.type as type, 
 n.relationship as relationship, n.description as description, 
-n.display as display, n.group as group, 
-n.metaType as metaType, n.search as search, 
+n.display as display,
+n.metaType as metaType,
 n.translation as translation
 """
         data = getQuery(query=query, driver=driver)
