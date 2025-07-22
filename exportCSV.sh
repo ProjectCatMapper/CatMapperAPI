@@ -1,19 +1,18 @@
-
 #!/bin/bash
 
-api_url="https://catmapper.org/api/routines/backup2CSV/ArchaMap"
+# api_url="https://catmapper.org/api/routines/backup2CSV/ArchaMap"
 
-response=$(curl -ks "Content-Type: application/json" "$api_url")
+# response=$(curl -ks "Content-Type: application/json" "$api_url")
 
-echo "API Response for backup CSV in ArchaMap:"
-echo "$response"
+# echo "API Response for backup CSV in ArchaMap:"
+# echo "$response"
 
-api_url="https://catmapper.org/api/routines/backup2CSV/SocioMap"
+# api_url="https://catmapper.org/api/routines/backup2CSV/SocioMap"
 
-response=$(curl -ks "Content-Type: application/json" "$api_url")
+# response=$(curl -ks "Content-Type: application/json" "$api_url")
 
-echo "API Response for backup CSV in ArchaMap:"
-echo "$response"
+# echo "API Response for backup CSV in ArchaMap:"
+# echo "$response"
 
 chmod -R 777 /mnt/storage/app/db/sociomap1/backups;
 chmod -R 777 /mnt/storage/app/db/archamap1/backups;
@@ -24,12 +23,13 @@ fp3="/mnt/storage/app/db/sociomap1/backups/download/categoryNodes_$(date +%Y-%m-
 fp4="/mnt/storage/app/db/archamap1/backups/download/categoryNodes_$(date +%Y-%m-%d).csv"
 fp5="/mnt/storage/app/db/sociomap1/backups/download/USESties_$(date +%Y-%m-%d).csv"
 fp6="/mnt/storage/app/db/archamap1/backups/download/USESties_$(date +%Y-%m-%d).csv"
-fp7="/mnt/storage/app/db/sociomap1/backups/download/deletedNodes_$(date +%Y-%m-%d).csv"
-fp8="/mnt/storage/app/db/archamap1/backups/download/deletedNodes_$(date +%Y-%m-%d).csv"
 
 echo "Pivoting CSV files"
-for fp in "$fp1" "$fp2" "$fp3" "$fp4" "$fp5" "$fp6" "$fp7" "$fp8"; do
-    python /mnt/storage/app/CatMapperAPI/pivotCSVs.py "$fp"
+source /opt/conda/etc/profile.d/conda.sh
+which conda
+conda info --envs
+for fp in "$fp1" "$fp2" "$fp3" "$fp4" "$fp5" "$fp6"; do
+    conda run -n global_api_env python /mnt/storage/app/CatMapperAPI/pivotCSVs.py "$fp"
 done
 
 echo "Syncing CSV files"

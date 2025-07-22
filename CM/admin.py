@@ -3,6 +3,7 @@
 from .utils import *
 from .log import createLog
 from .USES import processUSES
+from .USES import addCMNameRel,processDATASETs
 
 # This is a module for admin functions in CatMapper
 
@@ -195,7 +196,7 @@ def mergeNodes(keepcmid,deletecmid,user,database):
 
         # get EC relID
         query = """
-        unwind $cmid as cmid match (c {CMID: cmid})<-[r:USES]-(d:DATASET {CMID: "SD11"}) return elementId(r) as relID
+        unwind $cmid as cmid match (c:CATEGORY {CMID: cmid})<-[r:USES]-(d:DATASET {CMID: "SD11"}) return elementId(r) as relID
             """
 
         relID = getQuery(query, driver, params = {"cmid": keepcmid}, type = "list")
@@ -220,16 +221,22 @@ def mergeNodes(keepcmid,deletecmid,user,database):
             replaceProperty(cmid=cmids, property=property,
                             old=deletecmid, new=keepcmid, database=database)
 
+        # determine if the CMID is dataset or category
+        if len(keepcmid) > 1 and keepcmid[1] == "D":
+            domain = "DATASET"
+        else: 
+            domain = "CATEGORY"
+        
         # combine the nodes
 
-        query = """
-        match (a) where a.CMID = $keepcmid
-        match (b) where b.CMID = $deletecmid 
+        query = f"""
+        match (a:{domain} {{CMID: $keepcmid}})
+        match (b:{domain} {{CMID: $deletecmid}})
         WITH collect(a) + collect(b) AS nodes
-        CALL apoc.refactor.mergeNodes(nodes,{properties: {
+        CALL apoc.refactor.mergeNodes(nodes,{{properties: {{
         CMID:'discard',
         CMName:'discard',
-        `.*`: 'combine'} })
+        `.*`: 'combine'}} }})
         YIELD node
         return node.CMID as CMID
         """
@@ -240,11 +247,11 @@ def mergeNodes(keepcmid,deletecmid,user,database):
             raise Exception(f"Failed to merge {deletecmid} into {keepcmid}")
 
         # create deleted node and relationship
-        query = """
+        query = f"""
         unwind $keepcmid as keepcmid 
         unwind $deletecmid as deletecmid 
-        match (new {CMID: keepcmid}) 
-        create (del:DELETED {CMID: deletecmid}) 
+        match (new:{domain} {{CMID: keepcmid}}) 
+        create (del:DELETED {{CMID: deletecmid}}) 
         with new, del 
         create (del)-[:IS]->(new)
         return elementId(del) as delID
@@ -306,22 +313,33 @@ def addIndexes(driver):
         return str(e), 500
 
 def add_edit_delete_Node(database,user,input):
-    changeNodeID = input.get('changeNodeID')
-    changeNodeOptions = input.get('changeNodeOptions')
-    changeNodeValue = input.get('changeNodeValue')
-    addOrEditNode = input.get('addOrEditNode')
+    changeNodeID = input.get('s1_2')
+    changeNodeOptions = input.get('s1_7')
+    changeNodeValue = input.get('s1_3')
+    addOrEditNode = input.get('s1_1')
+
+    driver = getDriver(database)
 
     if not changeNodeID or not addOrEditNode:
         return
-
-    label = CMgetLabel(CMID=changeNodeID, con=con)[0]
+    
+    # label = CMgetLabel(CMID=changeNodeID, con=con)[0]
+    if changeNodeID[1] == "D":
+        label = "DATASET"
+    elif changeNodeID[1] == "M":
+        label = "CATEGORY"
+    elif changeNodeID[1] == "P":
+        label = "PROPERTY"
+    elif changeNodeID[1] == "L":
+        label = "LABEL"
 
     # Get prior value
     priorValQuery = f"""
         MATCH (a {{CMID: '{changeNodeID}'}})
         RETURN a.{changeNodeOptions} AS val
     """
-    priorVal = CMCypherQuery(con=con, query=priorValQuery)
+    #priorVal = CMCypherQuery(con=con, query=priorValQuery)
+    priorVal = getQuery(priorValQuery,driver=driver,type='list')
 
     if addOrEditNode == "delete":
         if label == "DATASET" and changeNodeOptions in ["District", "parent"]:
@@ -330,19 +348,22 @@ def add_edit_delete_Node(database,user,input):
                     MATCH (a {{CMID: '{changeNodeID}'}})<-[r:DISTRICT_OF]-(c:DISTRICT)
                     DELETE r
                 """
-                CMCypherQuery(con=con, query=q)
+                #CMCypherQuery(con=con, query=q)
+                getQuery(q,driver=driver)
             if changeNodeOptions == "parent":
                 q = f"""
                     MATCH (a {{CMID: '{changeNodeID}'}})<-[r:CONTAINS]-(c:DATASET)
                     DELETE r
                 """
-                CMCypherQuery(con=con, query=q)
+                #CMCypherQuery(con=con, query=q)
+                getQuery(q,driver=driver)
 
         q = f"""
             MATCH (a {{CMID: '{changeNodeID}'}})
             SET a.{changeNodeOptions} = NULL
         """
-        CMCypherQuery(con=con, query=q)
+        #CMCypherQuery(con=con, query=q)
+        getQuery(q,driver=driver)
 
     else:  # edit or add
         if label == "DATASET" and changeNodeOptions in ["District", "parent"]:
@@ -350,7 +371,8 @@ def add_edit_delete_Node(database,user,input):
                 MATCH (a {{CMID: '{changeNodeID}'}})
                 SET a.{changeNodeOptions} = split($id, ' || ')
             """
-            CMCypherQuery(con=con, query=q, parameters={'id': changeNodeValue})
+            #CMCypherQuery(con=con, query=q, parameters={'id': changeNodeValue})
+            getQuery(q,driver=driver,params={"id":changeNodeValue})
 
             if changeNodeOptions == "District":
                 refKeyQuery = f"""
@@ -359,7 +381,8 @@ def add_edit_delete_Node(database,user,input):
                     DELETE r
                     RETURN a.shortName AS shortName
                 """
-                refKey = CMCypherQuery(con=con, query=refKeyQuery)
+                #refKey = CMCypherQuery(con=con, query=refKeyQuery)
+                refKey = getQuery(refKeyQuery,driver=driver)
                 if not refKey.empty:
                     refKeyVal = refKey['shortName'].iloc[0]
                     from_values = changeNodeValue.split(' || ')
@@ -371,13 +394,6 @@ def add_edit_delete_Node(database,user,input):
                             'referenceKey': refKeyVal,
                             'label': "DATASET"
                         })
-                    CMaddRelations(
-                        links=links,
-                        properties="CMID",
-                        relationship="DISTRICT_OF",
-                        user=user,
-                        con=con
-                    )
 
             if changeNodeOptions == "parent":
                 refKeyQuery = f"""
@@ -386,7 +402,8 @@ def add_edit_delete_Node(database,user,input):
                     DELETE r
                     RETURN a.shortName AS shortName
                 """
-                refKey = CMCypherQuery(con=con, query=refKeyQuery)
+                #refKey = CMCypherQuery(con=con, query=refKeyQuery)
+                refKey = getQuery(refKeyQuery,driver=driver)
                 if not refKey.empty:
                     refKeyVal = refKey['shortName'].iloc[0]
                     from_values = changeNodeValue.split(' || ')
@@ -398,29 +415,50 @@ def add_edit_delete_Node(database,user,input):
                             'referenceKey': refKeyVal,
                             'label': "DATASET"
                         })
-                    CMaddRelations(
-                        links=links,
-                        properties="CMID",
-                        relationship="CONTAINS",
-                        user=user,
-                        con=con
-                    )
+                    # CMaddRelations(
+                    #     links=links,
+                    #     properties="CMID",
+                    #     relationship="CONTAINS",
+                    #     user=user,
+                    #     con=con
+                    # )
+            processDATASETs(database,CMID=changeNodeID,user=user)
         else:
             q = f"""
                 MATCH (a {{CMID: '{changeNodeID}'}})
                 SET a.{changeNodeOptions} = $id
             """
-            CMCypherQuery(con=con, query=q, parameters={'id': changeNodeValue})
+            #CMCypherQuery(con=con, query=q, parameters={'id': changeNodeValue})
+            getQuery(q,driver=driver,params={"id":changeNodeValue})
 
             if changeNodeOptions == "CMName":
                 try:
-                    CMaddCMNameRel(CMID=changeNodeID, user=user, con=con)
+                    #CMaddCMNameRel(CMID=changeNodeID, user=user, con=con)
+                    addCMNameRel(database,CMID=changeNodeID)
                 except Exception as e:
                     print(f"CMaddCMNameRel failed: {e}")
 
     new_val = "NULL" if addOrEditNode == "delete" else changeNodeValue
     log_msg = f"updated CMID {changeNodeID} {changeNodeOptions} from {priorVal} to {new_val}"
-    CMlog(id=changeNodeID, type="node", log=log_msg, user=user, con=con)
-    CMnotification("updated successfully")
+    #CMlog(id=changeNodeID, type="node", log=log_msg, user=user, con=con)
+    return "updated successfully"
+
+def add_edit_delete_USES(database,user,input):
+    changeNodeID = input.get('s1_2')
+    changeNodeOptions = input.get('s1_8')
+    changeNodeValue = input.get('s1_3')
+    addOrEditNode = input.get('s1_1')
+    indexValue = input.get('s1_7')
+    key = input.get('s1_4')[indexValue][1]["Key"]
+    datasetID = input.get('s1_4')[indexValue][2]["CMID"]
+
+    print(changeNodeID)
+    print(changeNodeOptions)
+    print(changeNodeValue)
+    print(addOrEditNode)
+    print(datasetID)
+    print(key)
+
+
 
 
