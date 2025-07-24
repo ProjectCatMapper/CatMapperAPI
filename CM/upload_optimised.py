@@ -140,7 +140,7 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         ]
 
         properties = getQuery(
-            "MATCH (p:PROPERTY) return p.property as property", driver, type="list"
+            "MATCH (p:PROPERTY) return p.CMName as property", driver, type="list"
         )
 
         missing_vars = [var for var in vars if var not in properties]
@@ -221,7 +221,7 @@ def createUSES(links, database, user):
         # We get all columns that need to be set as properties for realtionships
         # This is useful when determining valid columns coming from the API, not relevant to UI.
         db_properties = getQuery(
-            "MATCH (p:PROPERTY) WHERE p.type = 'relationship' RETURN p.property AS property",
+            "MATCH (p:PROPERTY) WHERE p.type = 'relationship' RETURN p.CMName AS property",
             driver,
         )
         db_properties_list = [item["property"] for item in db_properties]
@@ -483,6 +483,8 @@ def updateProperty(df,isDataset, database, user, updateType, propertyType="USES"
         print("Stage 2")
 
         result = getQuery(query=q, driver=driver, params={"rows": df_dict})
+
+        print(result)
 
         print("Stage 3")
 
@@ -850,13 +852,13 @@ def input_Nodes_Uses(
         
     # defining node and link properties based on METADATA types
     
-    node_query = "MATCH (p:PROPERTY) WHERE p.type='node' RETURN p.property as property"
+    node_query = "MATCH (p:PROPERTY) WHERE p.type='node' RETURN p.CMName as property"
     
     with driver.session() as session:
                 results = session.run(node_query)
                 nodeProperties = [record["property"] for record in results.data() if record["property"] in optionalProperties]
     
-    link_query = "MATCH (p:PROPERTY) WHERE p.type='relationship' RETURN p.property as property"
+    link_query = "MATCH (p:PROPERTY) WHERE p.type='relationship' RETURN p.CMName as property"
     
     with driver.session() as session:
                 results = session.run(link_query)
