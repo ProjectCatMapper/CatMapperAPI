@@ -58,10 +58,10 @@ def getPropertiesMetadata(driver):
 
         query = """
 match (n:METADATA:PROPERTY) 
-return n.property as property, n.type as type, 
+return n.CMName as property, n.type as type, 
 n.relationship as relationship, n.description as description, 
-n.display as display,
-n.metaType as metaType,
+n.display as display, n.group as group,
+n.metaType as metaType, n.search as search,
 n.translation as translation
 """
         data = getQuery(query=query, driver=driver)
@@ -75,8 +75,8 @@ def getLabelsMetadata(driver):
     try:
 
         query = """
-match (n:METADATA:LABEL) 
-return n.label as label, n.groupLabel as groupLabel, 
+match (n:LABEL) 
+return n.CMName as label, n.groupLabel as groupLabel, 
 n.relationship as relationship, n.public as public, 
 n.default as default, n.description as description, 
 n.displayName as displayName, n.remove as remove, n.color as color  

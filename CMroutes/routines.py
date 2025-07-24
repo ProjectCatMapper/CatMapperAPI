@@ -24,11 +24,15 @@ def get_routines(routine, database):
         # Define available arguments
         available_args = {
             'database': database,
-            'mail': globals().get('mail'),  # or pass explicitly if preferred
+            'mail': request.args.get('mail') or globals().get('mail'), 
             'CMID': request.args.get('CMID'),
             'datasetID': request.args.get('datasetID'),
             'Key': request.args.get('Key'),
-            'properties': request.args.get('properties')
+            'properties': request.args.get('properties') or None,
+            'dateStart': request.args.get('dateStart') or None,
+            'dateEnd': request.args.get('dateEnd') or None ,
+            'user': request.args.get('user') or None,
+            'action': request.args.get('action') or "created node",
         }
 
         # Match args to function signature
