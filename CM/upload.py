@@ -860,7 +860,7 @@ def input_Nodes_Uses(
     if "label" in column_names:
 
         labels = getQuery(
-            "MATCH (l:LABEL) return l.label as label", driver, type="list"
+            "MATCH (l:LABEL) return l.CMName as label", driver, type="list"
         )
 
         print(dataset["label"].unique())

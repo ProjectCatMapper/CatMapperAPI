@@ -3,7 +3,8 @@
 from .utils import *
 from .log import createLog
 from .USES import processUSES
-from .USES import addCMNameRel,processDATASETs
+from .USES import addCMNameRel,processDATASETs,waitingUSES
+from .upload_optimised import updateProperty
 
 # This is a module for admin functions in CatMapper
 
@@ -206,7 +207,7 @@ def mergeNodes(keepcmid,deletecmid,user,database):
 
         # replace the CMID in the USES relationships
         contextProps = getQuery(
-            "match (m:PROPERTY) where m.relationship is not null return m.property as property", driver, type = "list")
+            "match (m:PROPERTY) where m.relationship is not null return m.CMName as property", driver, type = "list")
         contextProps.append("parentContext") 
 
         cmids = getQuery(
@@ -302,7 +303,7 @@ def addIndexes(driver):
         // create index for each label that has a Name
         match (d:LABEL)
         where d.public = true or tolower(toString(d.public)) = "true"
-        with d.label as l
+        with d.CMName as l
         call apoc.cypher.runSchema('CREATE FULLTEXT INDEX ' + l + ' IF NOT EXISTS FOR (n:' + l + ') ON EACH [n.names]',{}) yield value return count(*);
         """
         with driver.session() as session:
@@ -444,20 +445,70 @@ def add_edit_delete_Node(database,user,input):
     return "updated successfully"
 
 def add_edit_delete_USES(database,user,input):
-    changeNodeID = input.get('s1_2')
-    changeNodeOptions = input.get('s1_8')
-    changeNodeValue = input.get('s1_3')
+    CMID = input.get('s1_2')
+    USES_property = input.get('s1_8')
+    new_property_value = input.get('s1_3')
     addOrEditNode = input.get('s1_1')
     indexValue = input.get('s1_7')
-    key = input.get('s1_4')[indexValue][1]["Key"]
-    datasetID = input.get('s1_4')[indexValue][2]["CMID"]
+    key = input.get('s1_4')[indexValue-1][1]["Key"]
+    datasetID = input.get('s1_4')[indexValue-1][2]["CMID"]
 
-    print(changeNodeID)
-    print(changeNodeOptions)
-    print(changeNodeValue)
-    print(addOrEditNode)
-    print(datasetID)
-    print(key)
+    data = {
+            'CMID': CMID,
+            'Key': key,
+            'datasetID': datasetID,
+            USES_property: new_property_value
+        }
+    
+    driver = getDriver(database)
+        
+    if CMID[1] == "D":
+        isDataset = True
+    elif CMID[1] == "M":
+        isDataset = False
+
+    df = pd.DataFrame([data])
+
+    if addOrEditNode == "edit" or addOrEditNode == "add":
+        updateProperty(df,isDataset,database,user,updateType = "overwrite", propertyType="USES")
+        waitingUSES(database)
+    elif addOrEditNode == "delete":
+        q = f"""
+                MATCH (a {{CMID: '{CMID}'}})<-[r:USES {{Key: '{key}'}}]-(d {{CMID: '{datasetID}'}})
+                REMOVE r.'{USES_property}'
+            """
+        result = getQuery(q,driver=driver)
+
+def createLabel(database,user,input):
+    driver = getDriver(database)
+
+    if input.get('s1_7') == "NA":
+        grouplabel = input.get('s1_2')
+    else:
+        grouplabel = input.get('s1_7')
+
+    q = f"""CREATE (n:METADATA:LABEL {{CMName:'{input.get('s1_2')}',groupLabel:'{grouplabel}',relationship:'{input.get('s1_3')}',description:'{input.get('s1_4')}',displayName:'{input.get('s1_5')}',color:'{input.get('s1_6')}'}})"""
+
+    result = getQuery(q,driver=driver)
+
+def deleteUSES(database,user,input):
+    driver = getDriver(database)
+
+    q = f"""MATCH (a {{CMID: '{input.get('s1_2')}'}})
+            DETACH DELETE a
+            """
+    
+    result = getQuery(q,driver=driver)
+    
+
+def deleteNode(database,user,input):
+    driver = getDriver(database)
+
+    q = f"""MATCH (a {{CMID: '{input.get('s1_2')}'}})
+            DETACH DELETE a
+            """
+    
+    result = getQuery(q,driver=driver)
 
 
 
