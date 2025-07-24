@@ -1173,13 +1173,13 @@ def admin_nodeproperties():
 
     # q1 captures relevant properties of node
     if "CP" in CMID:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'PROPERTY' in p.nodeType RETURN p.property as property"
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'PROPERTY' in p.nodeType RETURN p.CMName as property"
     elif "CL" in CMID:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'LABEL' in p.nodeType RETURN p.property as property"
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'LABEL' in p.nodeType RETURN p.CMName as property"
     elif "D" in CMID:
-        q1= "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'DATASET' in p.nodeType RETURN p.property as property"
+        q1= "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'DATASET' in p.nodeType RETURN p.CMName as property"
     else:
-        q1= "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'CATEGORY' in p.nodeType RETURN p.property as property"
+        q1= "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'CATEGORY' in p.nodeType RETURN p.CMName as property"
 
 
     with driver.session() as session:
@@ -1214,7 +1214,7 @@ def admin_usesproperties():
 
     q = "MATCH (n)<-[r:USES]-(d) WHERE n.CMID = $cmid RETURN n,r,d"
 
-    q1 = "MATCH (p:PROPERTY) WHERE p.type='relationship' RETURN p.property as property"
+    q1 = "MATCH (p:PROPERTY) WHERE p.type='relationship' RETURN p.CMName as property"
 
 
     with driver.session() as session:
@@ -1321,7 +1321,15 @@ def getAdminEdit():
         elif fun == "add/edit/delete node property":
             result = add_edit_delete_Node(database,credentials.get("userid"),input)
         elif fun == "add/edit/delete USES property":
-            result = add_edit_delete_USES(database,credentials.get("userid"),input)            
+            result = add_edit_delete_USES(database,credentials.get("userid"),input)  
+        elif fun == "merge nodes":
+            result = mergeNodes(input.get('s1_2'),input.get('s1_3'),credentials.get("userid"),database)
+        elif fun == "create new label":
+            result = createLabel(database,credentials.get("userid"),input)
+        elif fun == "delete node":
+            result = deleteNode(database,credentials.get("userid"),input)
+        elif fun == "delete USES relation":
+            result = deleteUSES(database,credentials.get("userid"),input)
         else:
             raise Exception("Function does not exist")
         return result
@@ -1361,7 +1369,7 @@ def getDataset():
 
         if domain != ["CATEGORY"]:
             labels = getQuery(
-                query="MATCH (l:LABEL) RETURN l.label AS label, l.groupLabel AS groupLabel", driver=driver)
+                query="MATCH (l:LABEL) RETURN l.CMName AS label, l.groupLabel AS groupLabel", driver=driver)
             labels = pd.DataFrame(labels)
             # Checking if any item in domain is in the groupLabel list
             if any(i in labels['groupLabel'].values for i in domain):
@@ -1817,8 +1825,8 @@ def getProgress():
 
         query = """
         match (l:LABEL)
-        where l.public = 'TRUE' and l.groupLabel = l.label and not l.label = "CATEGORY"
-        return l.label as label, l.displayName as newlabel
+        where l.public = 'TRUE' and l.groupLabel = l.CMName and not l.CMName = "CATEGORY"
+        return l.CMName as label, l.displayName as newlabel
         """
         domains = getQuery(query=query, driver=driver)
         domains = pd.DataFrame(domains)

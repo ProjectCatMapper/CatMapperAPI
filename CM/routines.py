@@ -9,7 +9,7 @@ from CM.USES import *
 import pandas as pd
 import json
 import tempfile
-
+from flask_mail import Mail
 
 def is_valid_json(json_string):
     try:
@@ -63,7 +63,7 @@ def checkDomains(database, mail=None):
         return "MissingSubDomain" as query, n.CMID as CMID, n.CMName as CMName, r.label as subdomain, '' as domain, d.CMID as datasetID
         UNION ALL
         match (p:LABEL)
-        WITH apoc.map.fromPairs([[p.label, p.groupLabel]]) AS m
+        WITH apoc.map.fromPairs([[p.CMName, p.groupLabel]]) AS m
         WITH collect(m) AS labelGroupMap
         match (n:CATEGORY)<-[r:USES]-(d:DATASET)
         where r.label is not null and apoc.meta.cypher.type(r.label) = "STRING"
@@ -77,7 +77,7 @@ def checkDomains(database, mail=None):
         """
         results = getQuery(query, driver, type ="df")
         if isinstance(results, pd.DataFrame) and not results.empty:
-            if mail is not None:
+            if isinstance(mail, Mail):
                 with tempfile.NamedTemporaryFile(delete=False, suffix="_missingDomains.xlsx", dir="/tmp") as tmpfile:
                     fp1 = tmpfile.name
                     results.to_excel(fp1, index=False)
@@ -142,7 +142,7 @@ def backup2CSV(database, mail=None):
         # LOGS = getQuery(query_LOGS, driver)
         # print(LOGS)
 
-        if mail:
+        if isinstance(mail, Mail):
             sendEmail(mail, subject="Weekly CSV Backup", recipients=[
                       "rjbischo@catmapper.org"], body="Weekly CSV backup completed.", sender=os.getenv("mail_default"))
 
@@ -196,7 +196,7 @@ def getBadCMID(database, mail=None):
                     results = results.merge(
                         deleted, on="badCMID", how="left", suffixes=("", "_new"))
 
-                if mail is not None:
+                if isinstance(mail, Mail):
                     with tempfile.NamedTemporaryFile(delete=False, suffix="_badCMID.xlsx", dir="/tmp") as tmpfile:
                         fp1 = tmpfile.name
                         results.to_excel(fp1, index=False)
@@ -221,7 +221,7 @@ def getMultipleLabels(database, mail=None):
 
         if isinstance(results, pd.DataFrame) and not results.empty:
 
-            if mail is not None:
+            if isinstance(mail, Mail):
                 with tempfile.NamedTemporaryFile(delete=False, suffix="_multipleLabels.xlsx", dir="/tmp") as tmpfile:
                     fp1 = tmpfile.name
                     results.to_excel(fp1, index=False)
@@ -250,7 +250,7 @@ def getBadJSON(database, mail=None):
 
         mailSent = "False"
 
-        if mail is not None:
+        if isinstance(mail, Mail):
             if len(results1) > 1:
                 sendEmail(mail, subject=f"Invalid geoCoords properties for {database}", recipients=[
                           "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
@@ -271,7 +271,7 @@ def getBadDomains(database, mail=None):
     try:
         driver = getDriver(database)
         labels = getQuery(
-            "match (l:LABEL) return l.label as label, l.groupLabel as groupLabel", driver, type="df")
+            "match (l:LABEL) return l.CMName as label, l.groupLabel as groupLabel", driver, type="df")
         groups = list(labels['groupLabel'].unique())
 
         matches = getQuery(
@@ -302,7 +302,7 @@ def getBadDomains(database, mail=None):
         else:
             bad_labels = pd.DataFrame(columns=["CMID", "CMName", "label"])
         if isinstance(bad_labels, pd.DataFrame) and not bad_labels.empty:
-            if mail is not None:
+            if isinstance(mail, Mail):
                 with tempfile.NamedTemporaryFile(delete=False, suffix="_bad_labels.xlsx", dir="/tmp") as tmpfile:
                     fp1 = tmpfile.name
                     bad_labels.to_excel(fp1, index=False)
@@ -313,7 +313,7 @@ def getBadDomains(database, mail=None):
             "match (c)<-[:USES]-(d:DATASET) where not 'CATEGORY' in labels(c) return c.CMID as CMID, c.CMName as CMName", driver, type="df")
 
         if isinstance(missing_category, pd.DataFrame) and not missing_category.empty:
-            if mail is not None:
+            if isinstance(mail, Mail):
                 with tempfile.NamedTemporaryFile(delete=False, suffix="_missing_category.xlsx", dir="/tmp") as tmpfile:
                     fp1 = tmpfile.name
                     missing_category.to_excel(fp1, index=False)
@@ -324,7 +324,7 @@ def getBadDomains(database, mail=None):
             "match (c)<-[:USES]-(d:DATASET) where not 'DATASET' in labels(d) return d.CMID as CMID, d.CMName as CMName", driver, type="df")
 
         if isinstance(missing_dataset, pd.DataFrame) and not missing_dataset.empty:
-            if mail is not None:
+            if isinstance(mail, Mail):
                 with tempfile.NamedTemporaryFile(delete=False, suffix="_missing_dataset.xlsx", dir="/tmp") as tmpfile:
                     fp1 = tmpfile.name
                     missing_dataset.to_excel(fp1, index=False)
@@ -372,7 +372,7 @@ def getBadRelations(database, mail=None):
         results = results.drop_duplicates()
 
         if isinstance(results, pd.DataFrame) and not results.empty:
-            if mail is not None:
+            if isinstance(mail, Mail):
                 with tempfile.NamedTemporaryFile(delete=False, suffix="_bad_relationship_labels.xlsx", dir="/tmp") as tmpfile:
                     fp1 = tmpfile.name
                     results.to_excel(fp1, index=False)
@@ -402,7 +402,7 @@ def CMNameNotInName(database, mail=None):
             addCMNameRel(database, CMID=cmids)
             updateAltNames(driver, CMID=cmids)
 
-            if mail is not None:
+            if isinstance(mail, Mail):
                 with tempfile.NamedTemporaryFile(delete=False, suffix="_BadCMNames.xlsx", dir="/tmp") as tmpfile:
                     fp1 = tmpfile.name
                     cmids = pd.DataFrame(cmids)
@@ -455,3 +455,128 @@ def fixMetaTypes(database):
     except Exception as e:
         result = str(e)
         return result, 500
+
+def noUSES(database, save=True, mail=None):
+    """
+    This function checks for categories that do not have any USES relationships with datasets.
+    Parameters:
+    - database: The name of the database to check.
+    - save: If True, saves the results to an Excel file.
+    Returns:
+    - A dictionary with the total count and a list of categories without USES relationships.
+    """
+    try:
+        driver = getDriver(database)
+        query = """
+        MATCH (c:CATEGORY)
+        WHERE NOT (c)<-[:USES]-(:DATASET)
+        RETURN c.CMID as CMID, c.CMName as CMName
+        """
+        results = getQuery(query, driver, type="df")
+
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            if save:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_no_uses.xlsx", dir="/tmp") as tmpfile:
+                    fp1 = tmpfile.name
+                    results.to_excel(fp1, index=False)
+                if isinstance(mail, Mail):
+                    sendEmail(mail, subject=f"No USES for {database}", recipients=[
+                            "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+
+        return {"Total": len(results), "No USES": results.to_dict(orient="records")}
+
+    except Exception as e:
+        result = str(e)
+        return result, 500
+    
+def checkUSES(database, save = True, mail=None):
+    """
+    This function checks for categories that have USES relationships with datasets but do not have a 'USES' relationship.
+    Parameters:
+    - database: The name of the database to check.
+    - save: If True, saves the results to an Excel file.
+    - mail: mail object used to send an email with the results.
+    Returns:
+    - A dictionary with the total count and a list of categories with USES relationships.
+    """
+    try:
+        driver = getDriver(database)
+        
+        # Check for missing label, Key, and Name in USES relationships
+        
+        query = """
+        MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+        where r.label is null or r.label = ''
+        RETURN "No label" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
+        UNION ALL
+        MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+        where r.Key is null or r.Key = ''
+        RETURN "No Key" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
+        UNION ALL
+        MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+        where not r.Key contains ": "
+        RETURN "Malformed Key" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
+        UNION ALL
+        MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+        where r.Name is null or r.Name = ''
+        RETURN "No Name" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
+        """
+        result = getQuery(query, driver, type="df")
+        if isinstance(result, pd.DataFrame) and not result.empty:
+            if save:
+                with tempfile.NamedTemporaryFile(delete=False, suffix="_check_uses.xlsx", dir="/tmp") as tmpfile:
+                    fp1 = tmpfile.name
+                    result.to_excel(fp1, index=False)
+                if isinstance(mail, Mail):
+                    sendEmail(mail, subject=f"Check USES for {database}", recipients=[
+                            "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+
+        return {"Total": len(result), "Check USES": result.to_dict(orient="records")}
+
+    except Exception as e:
+        result = str(e)
+        return result, 500
+
+
+def reportChanges(database, dateStart = None, dateEnd = None, action = "created node", user = None):
+    """
+    This function generates a report of changes in the database based on the logs.
+    Parameters:
+    - database: The name of the database to check.
+    - dateStart: The start date to filter changes (optional) -- returns yesterday's date if not provided.
+    - dateEnd: The end date to filter changes (optional) -- returns today's date if not provided.
+    - action: The type of action to filter changes (optional) -- defaults to "created node". Other options could be "created relationship", "deleted", "merged", "changed", etc.
+    - user: The user who made the changes (optional) -- defaults to None.
+    Returns:
+    - A json object containing the reported changes.
+    """
+    try:
+        driver = getDriver(database)
+        data = {
+            'action': action,
+            'user': user,
+            'dateStart': dateStart if dateStart else (pd.Timestamp.now() - pd.Timedelta(days=1)).strftime('%Y-%m-%d'),
+            'dateEnd': dateEnd if dateEnd else pd.Timestamp.now().strftime('%Y-%m-%d')
+        }
+        if isinstance(data['dateStart'], str):
+            data['dateStart'] = pd.to_datetime(data['dateStart']).strftime('%Y-%m-%d')
+        if isinstance(data['dateEnd'], str):
+            data['dateEnd'] = pd.to_datetime(data['dateEnd']).strftime('%Y-%m-%d')
+        if isinstance(data['user'], str):
+            data['user'] = data['user'].strip()
+            user_query = "AND l.user = toString(row.user)"
+        else: 
+            user_query = ""
+        query = f"""
+        unwind $rows as row
+        MATCH (l:LOG)
+        WHERE l.action starts with row.action AND date(datetime(l.timestamp)) >= date(row.dateStart) AND date(datetime(l.timestamp)) <= date(row.dateEnd) {user_query}
+        RETURN row.action as action, toString(date(datetime(l.timestamp))) AS date, l.user AS user, count(*) AS count order by date DESC, user
+        """
+        # return {"query": query, "params": {"rows": [data]}}
+        results = getQuery(query, driver, params={"rows":data},type="dict")
+
+        return results
+
+    except Exception as e:
+        return str(e)
