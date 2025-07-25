@@ -75,7 +75,7 @@ def getLabelsMetadata(driver):
     try:
 
         query = """
-match (n:LABEL) 
+match (n:LABEL)
 return n.CMName as label, n.groupLabel as groupLabel, 
 n.relationship as relationship, n.public as public, 
 n.default as default, n.description as description, 
