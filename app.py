@@ -1236,6 +1236,22 @@ def admin_usesproperties():
         "error": ""
     }
 
+@app.route('/create_label_helper', methods=['GET'])
+def create_label():
+    database = request.args.get('database')
+    driver = getDriver(database)
+
+    q = "MATCH (p:LABEL) WHERE p.groupLabel=p.CMName RETURN p.CMName"
+
+    with driver.session() as session:
+        result = session.run(q)
+
+        values = [record["p.CMName"] for record in result]
+
+        final_values = [v for v in values if v not in ("ALL NODES", "ANY DOMAIN")]
+        
+    return {"res":final_values}
+
 @app.route('/admin', methods=['GET'])
 def getAdmin():
     """

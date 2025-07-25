@@ -472,12 +472,14 @@ def add_edit_delete_USES(database,user,input):
     if addOrEditNode == "edit" or addOrEditNode == "add":
         updateProperty(df,isDataset,database,user,updateType = "overwrite", propertyType="USES")
         waitingUSES(database)
-    elif addOrEditNode == "delete":
-        q = f"""
-                MATCH (a {{CMID: '{CMID}'}})<-[r:USES {{Key: '{key}'}}]-(d {{CMID: '{datasetID}'}})
-                REMOVE r.'{USES_property}'
-            """
-        result = getQuery(q,driver=driver)
+    # elif addOrEditNode == "delete":
+    #     q = f"""
+    #             MATCH (a {{CMID: '{CMID}'}})<-[r:USES {{Key: '{key}'}}]-(d {{CMID: '{datasetID}'}})
+    #             REMOVE r.'{USES_property}'
+    #         """
+    #     result = getQuery(q,driver=driver)
+
+    return "done"
 
 def createLabel(database,user,input):
     driver = getDriver(database)
@@ -487,9 +489,11 @@ def createLabel(database,user,input):
     else:
         grouplabel = input.get('s1_7')
 
-    q = f"""CREATE (n:METADATA:LABEL {{CMName:'{input.get('s1_2')}',groupLabel:'{grouplabel}',relationship:'{input.get('s1_3')}',description:'{input.get('s1_4')}',displayName:'{input.get('s1_5')}',color:'{input.get('s1_6')}'}})"""
+    q = f"""CREATE (n:METADATA:LABEL {{CMName:'{input.get('s1_2')}',groupLabel:'{grouplabel}',relationship:'{input.get('s1_3')}',description:'{input.get('s1_4')}',displayName:'{input.get('s1_5')}',color:'{input.get('s1_6')}',label:'{input.get('s1_5')}',public:"TRUE"}})"""
 
     result = getQuery(q,driver=driver)
+
+    return result
 
 def deleteUSES(database,user,input):
     driver = getDriver(database)
