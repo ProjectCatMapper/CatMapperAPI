@@ -746,13 +746,27 @@ def is_non_empty(x):
     return pd.notna(x) and str(x).strip() != ''
 
 #Checks whether labels in parent_labels have same group_label as labels in child_labels.arguments must be lists
-def validate_labels(all_group_labels,parent_labels, child_labels):
+def validate_labels(uploadOption,driver,parent_labels, child_labels):
+    all_group_labels = getQuery("MATCH (n:LABEL) RETURN DISTINCT n.groupLabel AS groupLabel", driver, type="dict")
+
+    all_group_labels = {item['groupLabel'] for item in all_group_labels if item['groupLabel'] != "CATEGORY"}
+
+    if uploadOption == "add_node":
+        query = """MATCH (n:LABEL)
+                    RETURN n.CMName AS key, n.groupLabel AS value
+                    """
+        
+        result = getQuery(query=query,driver=driver)
+        label_dict = {row["key"]: row["value"] for row in result}
+
+        child_labels = [[label_dict.get(i[0])] for i in child_labels]
+            
     for idx, (i, j) in enumerate(zip(parent_labels, child_labels)):
+        if  len(i) == 0:
+            continue
+            
         singular_parent_grouplabel = all_group_labels.intersection(set(i))
         singular_child_grouplabel = all_group_labels.intersection(set(j))
-
-        print(singular_parent_grouplabel)
-        print(singular_child_grouplabel)
         
         if "GENERIC" not in singular_parent_grouplabel:
             if singular_parent_grouplabel != singular_child_grouplabel:
@@ -761,7 +775,6 @@ def validate_labels(all_group_labels,parent_labels, child_labels):
                     f"Parent Labels: {i}\n"
                     f"Child Labels: {j}"
                 )
-
 
 def input_Nodes_Uses(
     dataset,
@@ -871,7 +884,10 @@ def input_Nodes_Uses(
     # When eventType or eventDate have non-empty values, there can only be one parent in that row  
     if "eventType" in dataset.columns or "eventDate" in dataset.columns:
         # Create boolean mask for rows where A or B are non-empty
-        mask = dataset['eventType'].apply(is_non_empty) | dataset['eventDate'].apply(is_non_empty)
+        if "eventType" in dataset.columns:
+            mask = dataset['eventType'].apply(is_non_empty)
+        if "eventDate" in dataset.columns:
+            mask = dataset['eventDate'].apply(is_non_empty)
 
         # Find violations: rows where C contains ';' and A or B is non-empty
         invalid_rows = dataset.loc[mask & dataset['parent'].str.contains(';', na=False)]
@@ -932,7 +948,7 @@ def input_Nodes_Uses(
     if "label" in column_names:
 
         labels = getQuery(
-            "MATCH (l:LABEL) return l.label as label", driver, type="list"
+            "MATCH (l:LABEL) return l.CMName as label", driver, type="list"
         )
 
         print(dataset["label"].unique())
@@ -1144,7 +1160,7 @@ def input_Nodes_Uses(
         query = """
         UNWIND $labels AS labelValue
         MATCH (n:LABEL)
-        WHERE n.label = labelValue
+        WHERE n.CMName = labelValue
         RETURN labelValue, n.groupLabel AS groupLabel
         """
 
@@ -1222,11 +1238,7 @@ def input_Nodes_Uses(
                     raise ValueError(
                         f"Error: Wrong labels in database for column '{i}': {wrong_labels}"
                     )
-            else:
-                all_group_labels = getQuery("MATCH (n:LABEL) RETURN DISTINCT n.groupLabel AS groupLabel", driver, type="dict")
-
-                all_group_labels = {item['groupLabel'] for item in all_group_labels}
-
+            elif i == "parent":
                 if uploadOption == "add_node":
                     child_column = "label"
                 else:
@@ -1240,9 +1252,10 @@ def input_Nodes_Uses(
                     
                     for i in parent_values:
                         i = i.strip()
-                        if i:  # skip empty strings
-                            combined.append((child_value, i))
-
+                        # if i:  # skip empty strings
+                        #     combined.append((child_value, i))
+                        combined.append((child_value, i))
+                
                 dict_with_index = {i: {child_column: a, 'parent': b} for i, (a, b) in enumerate(combined)}
 
                 query = """
@@ -1278,8 +1291,8 @@ def input_Nodes_Uses(
                 for row in dict_with_index.values():
                     parent_labels.append(row["parent_label"])
                     child_labels.append(row['child_label'])
-                                                    
-                validate_labels(all_group_labels,parent_labels, child_labels)
+                                       
+                validate_labels(uploadOption,driver,parent_labels, child_labels)
     
     # checks if the eventType value is valid
 
@@ -1668,6 +1681,7 @@ def input_Nodes_Uses(
                     write="a",
                 )
                 try:
+                    #robert
                     # Checks that CMIDs returned from result equal inputted CMIDs
                     # This is helpful for addCMNameRel and updateAltNames
                     cmids_from_result = [link["CMID"] for link in result["result"]]

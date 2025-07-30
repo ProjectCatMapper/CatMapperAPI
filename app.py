@@ -825,6 +825,7 @@ not isEmpty([label IN labels(e)
 WHERE label IN apoc.coll.flatten([$domain],true)])
 with collect(distinct a) as a, r, e
 return a, collect(distinct r) as r, collect(distinct e) as e
+LIMIT 300
 """
         else:
             cypher_query = """
@@ -836,12 +837,15 @@ not isEmpty([label IN labels(e)
 WHERE label IN apoc.coll.flatten([$domain],true)])
 with collect(distinct a) as a, r, e
 return a, collect(distinct r) as r, collect(distinct e) as e
+LIMIT 300
 """
+
+        max_load =1000
 
         with driver.session() as session:
             # Execute the Cypher queries
             result = session.run(
-                cypher_query, cmid=cmid, relation=relation, domain=domain, endcmid=endcmid)
+                cypher_query, cmid=cmid, relation=relation, domain=domain, endcmid=endcmid,max_load=max_load)
             result = unlist([dict(record) for record in result])
             node = []
             rel = []
@@ -1173,28 +1177,31 @@ def admin_nodeproperties():
 
     # q1 captures relevant properties of node
     if "CP" in CMID:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'PROPERTY' in p.nodeType RETURN p.CMName as property"
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'PROPERTY' RETURN p.CMName as property"
     elif "CL" in CMID:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'LABEL' in p.nodeType RETURN p.CMName as property"
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'LABEL' RETURN p.CMName as property"
     elif "D" in CMID:
-        q1= "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'DATASET' in p.nodeType RETURN p.CMName as property"
+        q1= "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'DATASET' RETURN p.CMName as property"
     else:
-        q1= "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND 'CATEGORY' in p.nodeType RETURN p.CMName as property"
-
+        q1= "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'CATEGORY' RETURN p.CMName as property"
+    
 
     with driver.session() as session:
         r = session.run(q,cmid=CMID).data()
 
         if r == []:
             return jsonify({"error":"Invalid CMID"})
-        
+                
         props = [k for k in r[0]['props'].keys()] if r else []
-    
+
         # Run q1 to get allowed properties
         allowed = session.run(q1).data()
         allowed_props = {row['property'] for row in allowed}
 
         r = {k:v for k,v in r[0]['props'].items() if k in allowed_props}
+
+        if r == {}:
+            return jsonify({"error":"No editable features on this node."})
         
         # Filter props to only include allowed keys
         r1 = [k for k in allowed_props if k not in props]
@@ -1229,6 +1236,8 @@ def admin_usesproperties():
         
         allowed = session.run(q1).data()
         allowed_props = list({row['property'] for row in allowed})
+    
+    print(allowed_props)
     
     return {
         "r":records_list,
