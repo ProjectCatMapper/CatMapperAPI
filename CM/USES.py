@@ -466,7 +466,7 @@ def addCMNameRel(database, CMID=None):
             driver=driver,
         )
         
-        updateAltNames(driver, CMID=CMID)
+        updateAltNames(database, CMID=CMID)
 
     except Exception as e:
         try:

@@ -471,48 +471,278 @@ def add_edit_delete_USES(database,user,input):
 
     if addOrEditNode == "edit" or addOrEditNode == "add":
         updateProperty(df,isDataset,database,user,updateType = "overwrite", propertyType="USES")
-        waitingUSES(database)
-    # elif addOrEditNode == "delete":
-    #     q = f"""
-    #             MATCH (a {{CMID: '{CMID}'}})<-[r:USES {{Key: '{key}'}}]-(d {{CMID: '{datasetID}'}})
-    #             REMOVE r.'{USES_property}'
-    #         """
-    #     result = getQuery(q,driver=driver)
+        processUSES(CMID=CMID,database=database,user=user)
+    elif addOrEditNode == "delete":
+        q = f"""
+                MATCH (a:CATEGORY {{CMID: '{CMID}'}})<-[r:USES {{Key: '{key}'}}]-(d:DATASET {{CMID: '{datasetID}'}})
+                REMOVE r.'{USES_property} RETURN elementId(r) as relID'
+            """
+        result = getQuery(q,driver=driver)
+        processUSES(CMID=CMID,database=database,user=user)
+
+        createLog(id=[row["id"] for row in result], type="relation",
+                        log=f"deleted USES property {input.get('s1_8')} with value {input.get('s1_3')}",
+                        user=user, driver=driver)
 
     return "done"
 
 def createLabel(database,user,input):
     driver = getDriver(database)
 
-    if input.get('s1_7') == "NA":
-        grouplabel = input.get('s1_2')
-    else:
-        grouplabel = input.get('s1_7')
+    q = f"""MATCH (n:LABEL) WHERE n.CMName='{input.get('s1_2')}' RETURN n.CMName as CMName"""
 
-    q = f"""CREATE (n:METADATA:LABEL {{CMName:'{input.get('s1_2')}',groupLabel:'{grouplabel}',relationship:'{input.get('s1_3')}',description:'{input.get('s1_4')}',displayName:'{input.get('s1_5')}',color:'{input.get('s1_6')}',label:'{input.get('s1_5')}',public:"TRUE"}})"""
+    result = getQuery(q,driver=driver)
+
+    #returns error if label name already exists
+    if result != []:
+        return "Label name already exists"
+    
+    q = 'MATCH (n:LABEL) WHERE n.CMID STARTS WITH "CL" WITH n, toInteger(replace(n.CMID, "CL", "")) AS numericID RETURN numericID ORDER BY numericID DESC LIMIT 1'
+
+    result = getQuery(q,driver=driver)
+
+    CMID = "CL" + str(result[0]['numericID']+1)
+
+    if input.get('s1_7') == "NA":
+        grouplabel = input.get('s1_2').strip()
+    else:
+        grouplabel = input.get('s1_7').strip()
+    
+    if input.get('s1_6') == "":
+        color = "#404040"
+    else:
+        color = input.get('s1_6')
+    
+    if input.get('s1_3').strip() != "":       
+        q = f"""CREATE (n:METADATA:LABEL {{CMID:'{CMID}',CMName:'{input.get('s1_2')}',groupLabel:'{grouplabel}',relationship:'{input.get('s1_3')}',description:'{input.get('s1_4')}',displayName:'{input.get('s1_5')}',color:'{color}',label:'{input.get('s1_5')}',public:"TRUE"}})"""
+    else:
+        q = f"""CREATE (n:METADATA:LABEL {{CMID:'{CMID}',CMName:'{input.get('s1_2')}',groupLabel:'{grouplabel}',description:'{input.get('s1_4')}',displayName:'{input.get('s1_5')}',color:'{color}',label:'{input.get('s1_5')}',public:"TRUE"}})"""
+
 
     result = getQuery(q,driver=driver)
 
     return result
 
-def deleteUSES(database,user,input):
-    driver = getDriver(database)
+# def deleteUSES(database,user,input):
+#     driver = getDriver(database)
 
-    q = f"""MATCH (a {{CMID: '{input.get('s1_2')}'}})
-            DETACH DELETE a
-            """
+#     q = f"""MATCH (a {{CMID: '{input.get('s1_2')}'}})
+#             DETACH DELETE a
+#             """
     
-    result = getQuery(q,driver=driver)
+#     result = getQuery(q,driver=driver)
+
+def getLabel(CMID, driver, filter=True):
+    # Run Cypher query to get labels
+    query = """
+        UNWIND $id AS id 
+        MATCH (a) WHERE a.CMID = id 
+        UNWIND labels(a) AS label 
+        RETURN label
+    """
+    result = getQuery(query=query, parameters={"id": CMID}, driver=driver)
     
+    # Sort labels alphabetically
+    labels = sorted([row["label"] for row in result])
+
+    if filter:
+        # Get groupLabel metadata
+        grpLabels = getLabelsMetadata(driver=driver)
+        grpLabels = list(set(row["groupLabel"] for row in grpLabels if row["groupLabel"] is not None))
+
+        # Filter out group labels
+        resultF = [label for label in labels if label not in grpLabels]
+        if resultF:
+            labels = resultF
+
+        # Filter out "CATEGORY"
+        resultF = [label for label in labels if label != "CATEGORY"]
+        if resultF:
+            labels = resultF
+
+    return labels
+
+def getID(id_value, property, driver):
+    # Ensure id_value is a list of trimmed strings
+    if isinstance(id_value, str):
+        id_list = [id_value.strip()]
+    else:
+        id_list = [str(x).strip() for x in id_value]
+
+    # Construct and execute Cypher query
+    query = f"""
+        UNWIND $id AS id
+        MATCH (a)
+        WHERE a.{property} = id
+        RETURN id(a) AS id
+    """
+    result = getQuery(query=query, parameters={"id": id_list}, driver=driver)
+
+    # Return first result if any, else None
+    return result[0]["id"] if result else None
+
+def deleteID(id_value, driver, type="node"):
+    # Validate and coerce input to integer or list of integers
+    if isinstance(id_value, int):
+        id_list = [id_value]
+    elif isinstance(id_value, list):
+        try:
+            id_list = [int(i) for i in id_value]
+        except (ValueError, TypeError):
+            raise ValueError("id should be an integer or list of integers")
+    else:
+        raise ValueError("id should be an integer or list of integers")
+
+    if type not in ["relationship", "node"]:
+        raise ValueError("type should be 'relationship' or 'node'")
+
+    count_deleted = 0
+    queries = []
+
+    if type == "relationship":
+        for id in id_list:
+            q = f"MATCH ()-[r]->() WHERE id(r) = {id} DELETE r RETURN count(*) AS count"
+            queries.append(q)
+    else:  # type == "node"
+        for id in id_list:
+            q = f"MATCH (a) WHERE id(a) = {id} DETACH DELETE a RETURN count(*) AS count"
+            queries.append(q)
+
+    for query in queries:
+        result = getQuery(query, driver=driver)
+        if result and "count" in result[0]:
+            count_deleted += result[0]["count"]
+
+    return f"Deleted {count_deleted} of type {type}"
+
 
 def deleteNode(database,user,input):
     driver = getDriver(database)
 
-    q = f"""MATCH (a {{CMID: '{input.get('s1_2')}'}})
-            DETACH DELETE a
+    try:
+        label = getLabel(input.get('s1_2'),driver,filter=True)
+
+        if "DATASET" in label:
+            ids_query = f"""
+                MATCH (:DATASET)-[r:USES]->(:CATEGORY)
+                WHERE '{input.get('s1_2')}' IN r.Dataset
+                WITH r, [i IN r.Dataset WHERE NOT i = '{input.get('s1_2')}'] AS prop
+                SET r.Dataset = prop
+                RETURN id(r) AS ids
             """
-    
-    result = getQuery(q,driver=driver)
+
+            ids = getQuery(ids_query,driver=driver)
+
+            if len(ids) > 0:
+
+                cleanup_query = """
+                    UNWIND $ids AS id
+                    MATCH (:DATASET)-[r:USES]->(:CATEGORY)
+                    WHERE id(r) = id AND size(r.Dataset) = 0
+                    SET r.Dataset = NULL
+                """
+                getQuery(cleanup_query,driver=driver,parameters={"ids": [row['ids'] for row in ids]})
+                createLog(id=[row['ids'] for row in ids], type="relation",
+                      log=f"removed reference to deleted node {input.get('s1_2')} from Dataset property",
+                      user=user, driver=driver)
+        else:
+            props = getPropertiesMetadata(driver=driver)
+            props = list(set([p['property'] for p in props if p['relationship'] is not None] + ["parentContext"]))
+
+            rels_query = f"""
+                UNWIND $keys AS key
+                MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+                WITH key, d, c, '{input.get('s1_2')}' AS cmid, r
+                WHERE (toString(cmid) IN r[key] OR NOT ISNULL(r.parentContext) AND ANY(i IN r.parentContext WHERE i CONTAINS '\"parent\":\"' + cmid))
+                AND r[key] IS NOT NULL
+                RETURN id(r) AS id, r[key] AS val, cmid, key
+            """
+            rels = getQuery(rels_query, driver = driver, parameters={"keys": props})
+
+            datasetIDs_query = f"""
+                MATCH (d:DATASET)
+                WHERE '{input.get('s1_2')}' IN d.District OR '{input.get('s1_2')}' IN d.parent
+                RETURN id(d) AS ids
+            """
+            datasetIDs = getQuery(datasetIDs_query,driver=driver)
+
+            if len(datasetIDs) > 0:
+                for prop in ["parent", "District"]:
+                    ids_query = f"""
+                        UNWIND $ids AS id
+                        MATCH (d:DATASET) WHERE d.CMID = id
+                        WITH d, [i IN d.{prop} WHERE NOT i = '{input.get('s1_2')}'] AS p
+                        SET d.{prop} = p
+                        RETURN id(d) AS ids
+                    """
+                    ids = getQuery(ids_query, driver=driver, parameters={"ids": [row['ids'] for row in datasetIDs]})
+                    nullify_query = f"""
+                        UNWIND $ids AS id
+                        MATCH (d:DATASET) WHERE d.CMID = id AND size(d.{prop}) = 0
+                        SET d.{prop} = NULL
+                    """
+                    getQuery(nullify_query, driver=driver, parameters={"ids": [row['ids'] for row in datasetIDs]})
+                    createLog(id=[row['ids'] for row in ids], type="node",
+                          log=f"removed reference to deleted node {input.get('s1_2')} from {prop}",
+                          user=user, driver=driver)
+
+            if len(rels) > 0:
+                from itertools import groupby
+                import re
+
+                sepRels = []
+                for row in rels:
+                    for val in re.split(r' \|\|', row['val']):
+                        val = val.strip()
+                        if {input.get('s1_2')} not in val:
+                            sepRels.append({"id": row["id"], "key": row["key"], "val": val})
+
+                if len(sepRels) > 0:
+                    grouped = {}
+                    for r in sepRels:
+                        grouped.setdefault((r['id'], r['key']), []).append(r['val'])
+
+                    for (id_val, key), vals in grouped.items():
+                        val_string = '; '.join(vals)
+                        set_query = f"""
+                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE id(r) = {id_val}
+                            SET r.{key} = split('{val_string}', '; ')
+                        """
+                        getQuery(set_query,driver=driver)
+                        nullify_empty_query = f"""
+                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE id(r) = {id_val} AND size(r.{key}) = 0
+                            SET r.{key} = NULL
+                        """
+                        getQuery(nullify_empty_query,driver=driver)
+                else:
+                    for row in rels:
+                        nullify_query = f"""
+                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE id(r) = {row["id"]}
+                            SET r.{row["key"]} = NULL
+                        """
+                        getQuery(nullify_query,driver=driver)
+
+                createLog(id=[row["id"] for row in rels], type="relation",
+                      log=f"removed reference to deleted node {input.get('s1_2')}",
+                      user=user, driver=driver)
+
+        nodeID = getID(input.get('s1_2'), "CMID", driver)
+        create_deleted_query = f"""
+            MATCH (n) WHERE id(n) = {nodeID}
+            CREATE (n2:DELETED)
+            SET n2.CMID = n.CMID, n2.CMName = n.CMName, n2.log = n.log
+            RETURN id(n2) AS nodeID
+        """
+        deletedID = getQuery(create_deleted_query,driver=driver)
+        createLog(id=deletedID[0]['nodeID'], type="node",
+              log=f"deleted node {input.get('s1_2')}",
+              user=user, driver=driver)
+
+        deleteID(nodeID,driver,type="node")
+        print("deleted node")
+
+    except Exception as e:
+        print(f"error deleting node: {str(e)}")
 
 
 
