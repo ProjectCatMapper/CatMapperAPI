@@ -11,7 +11,8 @@ def search(
         context,
         country,
         limit,
-        query):
+        query,
+        dataset):
     
     if domain == "ANY DOMAIN":
         domain = "CATEGORY"
@@ -46,6 +47,13 @@ def search(
         else:
             if re.search("^SM|^SD|^AD|^AM", context) is None:
                 raise Exception("context must be a valid CMID")
+            
+    if dataset is not None:
+        if dataset == "null" or dataset == "":
+            dataset = None
+        else:
+            if re.search("^SD|^AD", dataset) is None:
+                raise Exception("dataset must be a valid CMID")
 
     if country is not None:
         if country == "null" or country == "":
@@ -95,7 +103,11 @@ def search(
 
     # if no term specified
     if term is None:
-        qStart = f"match (a:{domain}) with a, '' as matching, 0 as score"
+        if domain == "ALLNODES":
+            qStart = f"match (a) with a, '' as matching, 0 as score"
+        else:
+            qStart = f"match (a:{domain}) with a, '' as matching, 0 as score"
+
     elif property == "Key":
         qStart = f"""
     call db.index.fulltext.queryRelationships('keys','"' + custom.escapeText($term) + '"') yield relationship
@@ -167,7 +179,7 @@ def search(
     if domain != "ALLNODES":
         qDomain = f" where '{domain}' in labels(a) "
     else:
-        qDomain = ""
+        qDomain = " where any(label in labels(a) WHERE label IN ['CATEGORY', 'DATASET']) "
 
     qUnique = """
     with a, collect(matching) as matchingL, 
@@ -196,6 +208,16 @@ def search(
     else:
         context = ""
         qContext = " "
+
+    # filter by dataset
+    if dataset is not None:
+        qDataset = """
+    where (a)<-[:USES]-({CMID: $dataset})
+    with a, matching, score
+    """
+    else:
+        dataset = ""
+        qDataset = " "
 
         # filter by year
     if yearStart is not None:
@@ -239,17 +261,15 @@ def search(
     """
 
     cypher_query = qStart + qDomain + qUnique + qCountryFilter + \
-        qContext + qYear + qLimit + qCountry + qReturn
-    
-    print(cypher_query)
-    
+        qContext + qDataset + qYear + qLimit + qCountry + qReturn
+        
     if query != 'true':
         data = getQuery(cypher_query, driver, params={
-                        "term": term, "context": context, "country": country, "yearStart": yearStart, "yearEnd": yearEnd})
+                        "term": term, "context": context, "dataset": dataset, "country": country, "yearStart": yearStart, "yearEnd": yearEnd})
 
         return data
     else:
-        return ({"query": cypher_query, "parameters": [{"term": term, "context": context, "country": country, "domain": domain, "yearStart": yearStart, "yearEnd": yearEnd}]})
+        return ({"query": cypher_query, "parameters": [{"term": term, "context": context,"dataset": dataset, "country": country, "domain": domain, "yearStart": yearStart, "yearEnd": yearEnd}]})
 
 
 def translate(
@@ -300,7 +320,11 @@ def translate(
     # table = [{'Name':'test1',"key": 1}, {'Name':'test1',"key": 2}, {'Name':'test2',"key": 3}]
     df = pd.DataFrame(table)
     df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    df[term] = df[term].astype(str).str.replace('~', '', regex=False)
+    df[term] = df[term].astype(str).str.replace('"', '', regex=False)
+    # adding the index into the dataset (as an uniqueID) to preserve original order and later joining
     df['CMuniqueRowID'] = df.index
+    # creates new dataframe with term and unique row ID
     rows = pd.DataFrame(
         {'term': df[term], 'CMuniqueRowID': df["CMuniqueRowID"]})
     if isinstance(country, str) and country in df.columns:
@@ -313,12 +337,21 @@ def translate(
         rows['yearStart'] = yearStart
     if isinstance(yearEnd, str) and yearEnd is not None:
         rows['yearEnd'] = yearEnd
+    # drops nulls because you dont want to search for null values
     rows.dropna(subset=['term'], inplace=True)
     rows = rows[rows['term'] != '']
+    # chooses all column names except for unique row ID to groupby
     columns_to_group_by = rows.columns.difference(['CMuniqueRowID']).tolist()
+    # aggregates "rows" dataframe by columns to group by
+    # it stores all the CMuniqueRowID's for that group(row) in a list
+    # if "uniqueRows" is FALSE, then one-to-many warnings will only be thrown within contexts defined by the columns to group by
+    # if "uniqueRows" is FALSE, then many-to-one matches won't be thrown for matches to rows with the same name
     if not uniqueRows:
         rows = rows.groupby(columns_to_group_by)[
             'CMuniqueRowID'].apply(list).reset_index()
+    # now adds new uniqueID for each row from the potentially new "rows" 
+    # CMUniqueCategoryID clumps rows that share the same term, country, contect, dataset, yearStart and yearEnd.
+    # if "uniqueRows" is TRUE and no empty rows were dropped, CMuniqueCategoryID = CMuniqueRowID
     rows['CMuniqueCategoryID'] = rows.index
 
     rows = rows.to_dict('records')
@@ -328,12 +361,22 @@ def translate(
     qLoad = "unwind $rows as row with row call {"
 
     if property == "Key":
+        # Only finds exact matches for keys, which can include cases where an inputted 173 matches with ID: 173.  
+        # Additional code handles semicolons for composite keys.
+        # Does not require exact case matches.
         qStart = f"""
     with row call db.index.fulltext.queryRelationships('keys','"' + tolower(row.term) +'"') yield relationship
-    with row, endnode(relationship) as a, relationship.Key as matching, case when row.term contains ":" then row.term else ": " + row.term end as term
-    where '{domain}' in labels(a) and matching ends with term 
+    with row, endnode(relationship) as a, relationship.Key as matching,
+    row.term AS term
+    WITH row,a,matching,term,
+        CASE
+            WHEN term CONTAINS ':' AND matching = term THEN true
+            WHEN NOT term CONTAINS ':' AND matching ENDS WITH ": " + term THEN true
+            ELSE false
+        END AS isMatch
+    where '{domain}' in labels(a) and isMatch
     AND ( (matching CONTAINS ";" AND row.term CONTAINS ";") OR NOT matching CONTAINS ";" )
-    with row, a, matching, 0 as score
+    with row, a, matching,0 as score
     """
     elif property in ["glottocode", "ISO", "CMID"]:
         if property == "CMID":
@@ -342,10 +385,10 @@ def translate(
             indx = property
 
         qStart = f"""
-    with row call db.index.fulltext.queryNodes('{indx}','"' + toupper(row.term) +'"') yield node
+    with row call db.index.fulltext.queryNodes('{indx}','"' + toupper(row.term) + '"') yield node
     with row, node as a, toupper(node['{property}']) as matching, toupper(row.term) as term
     where matching = term
-    with row, a call apoc.when("DELETED" in labels(a),"match (a)-[:IS]->(b) return b as node, a.CMID as matching","return a as node, a.CMID as matching",{{a:a}}) yield value
+    with row, a call apoc.do.when("DELETED" in labels(a),"match (a)-[:IS]->(b) return b as node, a.CMID as matching","return a as node, a.CMID as matching",{{a:a}}) yield value
     with row, value.node as a, value.matching as matching, 0 as score
     """
 
@@ -412,10 +455,11 @@ def translate(
 
     # filter by dataset
     if 'dataset' in rows[0]:
+        # when property is key only finds cases where USES tie includes the key.
         if property == "Key":
             qDataset = """
         match (a)<-[r:USES]-(d:DATASET {CMID: row.dataset}) 
-        where r.Key ends with row.term
+        where r.Key = matching
         with row, a, matching, score
         """
         else:
@@ -481,12 +525,15 @@ def translate(
     """
     cypher_query = qLoad + qStart + qDomain + qCountryFilter + \
         qContext + qDataset + qYear + qLimit + qCountry + qKey + qReturn
+    
     if query == "true":
         qResult = getQuery(cypher_query, driver, params={'rows': rows})
         return [{"query": cypher_query.replace("\n", " "), "params": qResult, "rows": rows}]
     else:
+        # data contains any matching rows found by the propose translate query
+        # any rows that are not matched are not included
         data = getQuery(cypher_query, driver, params={'rows': rows})
-
+    
     if not data:
         data = df
         data[f'matchType_{term}'] = "None"
@@ -495,8 +542,6 @@ def translate(
     data = pd.DataFrame(data)
     data = data.replace("", pd.NA)
     data = data.dropna(axis='columns', how='all')
-
-    # return data
 
     # add matching type
     data = addMatchResults(df=data)
@@ -511,6 +556,7 @@ def translate(
     data['CMuniqueRowID'] = data['CMuniqueRowID'].astype(int)
     df['CMuniqueRowID'] = df['CMuniqueRowID'].astype(int)
 
+    # rejoins matches with original dataset
     data = pd.merge(df, data, on="CMuniqueRowID", how='outer')
     data[f'matchType_{term}'] = data[f'matchType_{term}'].fillna('none')
     data.fillna('', inplace=True)
@@ -548,39 +594,40 @@ def translate(
 
     return data
 
-
+# this determines what type of match each matched row is and returns the df with matchtype column
+# each row of the input spreadsheet is assigned a unique CMuniqueRowID 
+# CMUniqueCategoryID clumps rows that share the same term, country, contect, dataset, yearStart and yearEnd unless uniquerows is clicked.
+# Many-to-one and one-to-many are only identified within CMuniqueCategoryID
 def addMatchResults(df):
     try:
         # Initialize matchType column with None
         df['matchType'] = None
 
-        # Count occurrences of each CMID within each CMuniqueCategoryID
-        cmid_counts_per_category = df.groupby(
-            ['CMuniqueCategoryID', 'CMID']).size()
-
+        # Count how many rows each CMID is matched to but still preserves the length to grab the value later.
+        # used for many-to-one
+        df['cmid_counts_per_category'] = df['CMID'].map(df['CMID'].value_counts())
+        
         # Count occurrences of CMuniqueRowID within each CMuniqueCategoryID
+        # used for one-to-many
         cmunique_counts = df.groupby('CMuniqueCategoryID')[
             'CMuniqueRowID'].count().to_dict()
-
+         
         # Helper to assign match types
         def determine_match_type(row):
-            cmid = row['CMID']
-            cmunique = row['CMuniqueRowID']
             matching_distance = row['matchingDistance']
             category_id = row['CMuniqueCategoryID']
 
             # Check the count of the current CMID within the specific CMuniqueCategoryID
-            cmid_count_in_category = cmid_counts_per_category.get(
-                (category_id, cmid), 0)
+            cmid_count_in_category = row['cmid_counts_per_category']
             cmunique_count = cmunique_counts.get(category_id, 0)
 
             # Determine match type based on conditions
             if matching_distance == 0 and cmid_count_in_category == 1 and cmunique_count == 1:
                 return 'exact match'
-            elif cmid_count_in_category > 1:
-                return 'many-to-one'
             elif cmunique_count > 1:
                 return 'one-to-many'
+            elif cmid_count_in_category > 1:
+                return 'many-to-one'
             elif matching_distance > 0 and cmid_count_in_category == 1 and cmunique_count == 1:
                 return 'fuzzy match'
             return None

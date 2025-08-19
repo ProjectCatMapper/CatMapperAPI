@@ -4,14 +4,17 @@ from .utils import *
 from .log import createLog
 from .USES import processUSES
 from .USES import addCMNameRel,processDATASETs,waitingUSES
-from .upload_optimised import updateProperty
+from .upload_optimised import updateProperty,createUSES
+from flask import jsonify
+
 
 # This is a module for admin functions in CatMapper
 
 import re
 from neo4j import GraphDatabase
 
-
+# when a node is deleted or merged, this finds all instances of that CMID in other
+# USES tie properties and edits them to reflect the change
 def replaceProperty(cmid, property, old, new, database, datasetID = None, Key = None):
     """
     Replace a specified property value in relationships for a given CMID.
@@ -247,13 +250,13 @@ def mergeNodes(keepcmid,deletecmid,user,database):
         if not keepcmid in merged:
             raise Exception(f"Failed to merge {deletecmid} into {keepcmid}")
 
-        # create deleted node and relationship
+        # create deleted node and relationship to remaining node
         query = f"""
         unwind $keepcmid as keepcmid 
         unwind $deletecmid as deletecmid 
         match (new:{domain} {{CMID: keepcmid}}) 
         create (del:DELETED {{CMID: deletecmid}}) 
-        with new, del 
+        with new, del
         create (del)-[:IS]->(new)
         return elementId(del) as delID
         """
@@ -375,54 +378,6 @@ def add_edit_delete_Node(database,user,input):
             #CMCypherQuery(con=con, query=q, parameters={'id': changeNodeValue})
             getQuery(q,driver=driver,params={"id":changeNodeValue})
 
-            if changeNodeOptions == "District":
-                refKeyQuery = f"""
-                    MATCH (a {{CMID: '{changeNodeID}'}})
-                    OPTIONAL MATCH (a)<-[r:DISTRICT_OF]-(c:DISTRICT)
-                    DELETE r
-                    RETURN a.shortName AS shortName
-                """
-                #refKey = CMCypherQuery(con=con, query=refKeyQuery)
-                refKey = getQuery(refKeyQuery,driver=driver)
-                if not refKey.empty:
-                    refKeyVal = refKey['shortName'].iloc[0]
-                    from_values = changeNodeValue.split(' || ')
-                    links = []
-                    for from_val in from_values:
-                        links.append({
-                            'from': from_val,
-                            'to': changeNodeID,
-                            'referenceKey': refKeyVal,
-                            'label': "DATASET"
-                        })
-
-            if changeNodeOptions == "parent":
-                refKeyQuery = f"""
-                    MATCH (a {{CMID: '{changeNodeID}'}})
-                    OPTIONAL MATCH (a)<-[r:CONTAINS]-(c:DATASET)
-                    DELETE r
-                    RETURN a.shortName AS shortName
-                """
-                #refKey = CMCypherQuery(con=con, query=refKeyQuery)
-                refKey = getQuery(refKeyQuery,driver=driver)
-                if not refKey.empty:
-                    refKeyVal = refKey['shortName'].iloc[0]
-                    from_values = changeNodeValue.split(' || ')
-                    links = []
-                    for from_val in from_values:
-                        links.append({
-                            'from': from_val,
-                            'to': changeNodeID,
-                            'referenceKey': refKeyVal,
-                            'label': "DATASET"
-                        })
-                    # CMaddRelations(
-                    #     links=links,
-                    #     properties="CMID",
-                    #     relationship="CONTAINS",
-                    #     user=user,
-                    #     con=con
-                    # )
             processDATASETs(database,CMID=changeNodeID,user=user)
         else:
             q = f"""
@@ -453,6 +408,9 @@ def add_edit_delete_USES(database,user,input):
     key = input.get('s1_4')[indexValue-1][1]["Key"]
     datasetID = input.get('s1_4')[indexValue-1][2]["CMID"]
 
+    if "||" in new_property_value:
+        new_property_value=new_property_value.split("||")
+
     data = {
             'CMID': CMID,
             'Key': key,
@@ -475,7 +433,7 @@ def add_edit_delete_USES(database,user,input):
     elif addOrEditNode == "delete":
         q = f"""
                 MATCH (a:CATEGORY {{CMID: '{CMID}'}})<-[r:USES {{Key: '{key}'}}]-(d:DATASET {{CMID: '{datasetID}'}})
-                REMOVE r.'{USES_property} RETURN elementId(r) as relID'
+                REMOVE r.{USES_property} RETURN elementId(r) as relID
             """
         result = getQuery(q,driver=driver)
         processUSES(CMID=CMID,database=database,user=user)
@@ -521,26 +479,17 @@ def createLabel(database,user,input):
 
     result = getQuery(q,driver=driver)
 
-    return result
-
-# def deleteUSES(database,user,input):
-#     driver = getDriver(database)
-
-#     q = f"""MATCH (a {{CMID: '{input.get('s1_2')}'}})
-#             DETACH DELETE a
-#             """
-    
-#     result = getQuery(q,driver=driver)
+    return "done"
 
 def getLabel(CMID, driver, filter=True):
     # Run Cypher query to get labels
     query = """
-        UNWIND $id AS id 
-        MATCH (a) WHERE a.CMID = id 
+        UNWIND $CMID AS cmid 
+        MATCH (a) WHERE a.CMID = cmid 
         UNWIND labels(a) AS label 
         RETURN label
     """
-    result = getQuery(query=query, parameters={"id": CMID}, driver=driver)
+    result = getQuery(query=query, params={"CMID": CMID}, driver=driver)
     
     # Sort labels alphabetically
     labels = sorted([row["label"] for row in result])
@@ -576,7 +525,7 @@ def getID(id_value, property, driver):
         WHERE a.{property} = id
         RETURN id(a) AS id
     """
-    result = getQuery(query=query, parameters={"id": id_list}, driver=driver)
+    result = getQuery(query=query, params={"id": id_list}, driver=driver)
 
     # Return first result if any, else None
     return result[0]["id"] if result else None
@@ -621,7 +570,9 @@ def deleteNode(database,user,input):
 
     try:
         label = getLabel(input.get('s1_2'),driver,filter=True)
-
+        
+        # If you delete a dataset node, need to remove it’s CMID from all parent properties 
+        # in other dataset nodes and Dataset in USES ties
         if "DATASET" in label:
             ids_query = f"""
                 MATCH (:DATASET)-[r:USES]->(:CATEGORY)
@@ -641,10 +592,43 @@ def deleteNode(database,user,input):
                     WHERE id(r) = id AND size(r.Dataset) = 0
                     SET r.Dataset = NULL
                 """
-                getQuery(cleanup_query,driver=driver,parameters={"ids": [row['ids'] for row in ids]})
+                getQuery(cleanup_query,driver=driver,params={"ids": [row['ids'] for row in ids]})
                 createLog(id=[row['ids'] for row in ids], type="relation",
                       log=f"removed reference to deleted node {input.get('s1_2')} from Dataset property",
                       user=user, driver=driver)
+            
+            # removing CMID for deleted node from parent property in dataset nodes
+            datasetIDs_query = f"""
+                MATCH (d:DATASET)
+                WHERE '{input.get('s1_2')}' IN d.parent
+                RETURN id(d) AS ids
+            """
+            datasetIDs = getQuery(datasetIDs_query,driver=driver)
+
+            if len(datasetIDs) > 0:
+                for prop in ["parent"]:
+                    ids_query = f"""
+                        UNWIND $ids AS id
+                        MATCH (d:DATASET) WHERE d.CMID = id
+                        WITH d, [i IN d.{prop} WHERE NOT i = '{input.get('s1_2')}'] AS p
+                        SET d.{prop} = p
+                        RETURN id(d) AS ids
+                    """
+                    ids = getQuery(ids_query, driver=driver, params={"ids": [row['ids'] for row in datasetIDs]})
+                    nullify_query = f"""
+                        UNWIND $ids AS id
+                        MATCH (d:DATASET) WHERE d.CMID = id AND size(d.{prop}) = 0
+                        SET d.{prop} = NULL
+                    """
+                    getQuery(nullify_query, driver=driver, params={"ids": [row['ids'] for row in datasetIDs]})
+                    createLog(id=[row['ids'] for row in ids], type="node",
+                          log=f"removed reference to deleted node {input.get('s1_2')} from {prop}",
+                          user=user, driver=driver)
+
+
+        # If you delete a category node, need to remove it’s CMID from all properties (including parentContext) 
+        # in all USES ties (district, country, parent, language, culture….) and 
+        # from dataset nodes (District)
         else:
             props = getPropertiesMetadata(driver=driver)
             props = list(set([p['property'] for p in props if p['relationship'] is not None] + ["parentContext"]))
@@ -653,21 +637,24 @@ def deleteNode(database,user,input):
                 UNWIND $keys AS key
                 MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
                 WITH key, d, c, '{input.get('s1_2')}' AS cmid, r
-                WHERE (toString(cmid) IN r[key] OR NOT ISNULL(r.parentContext) AND ANY(i IN r.parentContext WHERE i CONTAINS '\"parent\":\"' + cmid))
-                AND r[key] IS NOT NULL
+                WHERE r[key] IS NOT NULL AND (
+                    toString(cmid) IN r[key] OR 
+                    (r.parentContext IS NOT NULL AND ANY(i IN r.parentContext WHERE i CONTAINS '\"parent\":\"' + cmid))
+                )
                 RETURN id(r) AS id, r[key] AS val, cmid, key
             """
-            rels = getQuery(rels_query, driver = driver, parameters={"keys": props})
+            rels = getQuery(rels_query, driver = driver, params={"keys": props})
 
             datasetIDs_query = f"""
                 MATCH (d:DATASET)
-                WHERE '{input.get('s1_2')}' IN d.District OR '{input.get('s1_2')}' IN d.parent
+                WHERE '{input.get('s1_2')}' IN d.District
                 RETURN id(d) AS ids
             """
             datasetIDs = getQuery(datasetIDs_query,driver=driver)
 
+            # removing CMID for deleted node from District property in dataset nodes
             if len(datasetIDs) > 0:
-                for prop in ["parent", "District"]:
+                for prop in ["District"]:
                     ids_query = f"""
                         UNWIND $ids AS id
                         MATCH (d:DATASET) WHERE d.CMID = id
@@ -675,17 +662,18 @@ def deleteNode(database,user,input):
                         SET d.{prop} = p
                         RETURN id(d) AS ids
                     """
-                    ids = getQuery(ids_query, driver=driver, parameters={"ids": [row['ids'] for row in datasetIDs]})
+                    ids = getQuery(ids_query, driver=driver, params={"ids": [row['ids'] for row in datasetIDs]})
                     nullify_query = f"""
                         UNWIND $ids AS id
                         MATCH (d:DATASET) WHERE d.CMID = id AND size(d.{prop}) = 0
                         SET d.{prop} = NULL
                     """
-                    getQuery(nullify_query, driver=driver, parameters={"ids": [row['ids'] for row in datasetIDs]})
+                    getQuery(nullify_query, driver=driver, params={"ids": [row['ids'] for row in datasetIDs]})
                     createLog(id=[row['ids'] for row in ids], type="node",
                           log=f"removed reference to deleted node {input.get('s1_2')} from {prop}",
                           user=user, driver=driver)
-
+                    
+            # getting all the affected relationships and extracting the safe data and setting it back
             if len(rels) > 0:
                 from itertools import groupby
                 import re
@@ -697,6 +685,7 @@ def deleteNode(database,user,input):
                         if {input.get('s1_2')} not in val:
                             sepRels.append({"id": row["id"], "key": row["key"], "val": val})
 
+                # if there's saved data, it is set back before removing the purely unsaved data
                 if len(sepRels) > 0:
                     grouped = {}
                     for r in sepRels:
@@ -714,6 +703,7 @@ def deleteNode(database,user,input):
                             SET r.{key} = NULL
                         """
                         getQuery(nullify_empty_query,driver=driver)
+                # removing the purely unsaved data
                 else:
                     for row in rels:
                         nullify_query = f"""
@@ -734,15 +724,228 @@ def deleteNode(database,user,input):
             RETURN id(n2) AS nodeID
         """
         deletedID = getQuery(create_deleted_query,driver=driver)
-        createLog(id=deletedID[0]['nodeID'], type="node",
-              log=f"deleted node {input.get('s1_2')}",
+        createLog(id=[deletedID[0]['nodeID']], type="node",
+              log=[f"deleted node {input.get('s1_2')}"],
               user=user, driver=driver)
 
         deleteID(nodeID,driver,type="node")
         print("deleted node")
+        return "done"
 
     except Exception as e:
         print(f"error deleting node: {str(e)}")
+
+def deleteUSES(database,user,input):
+    driver = getDriver(database)
+    CMID = input.get('s1_2')
+    USES_property = json.loads(input.get('s1_7'))
+    id = USES_property[1]["id"]
+
+    q = f"MATCH ()-[r]->() WHERE elementId(r) = '{id}' DELETE r RETURN count(*) AS count"
+    result = getQuery(q, driver=driver)
+
+    processUSES(database,CMID)
+
+    print("Action completed")
+
+    return "done"
+
+def CMgetID(id_value, property_name, driver):
+    """
+    Given a node property value, returns the internal Neo4j node ID.
+    Returns None if no node is found.
+    
+    Parameters:
+    - id_value: str or int, the value to match
+    - property_name: str, property key to search on
+    - con: Neo4j driver session or wrapper with a run(query, params) method
+    """
+    # Convert id_value to string and trim whitespace
+    id_str = str(id_value).strip()
+
+    query = f"""
+    UNWIND $id AS id
+    MATCH (a)
+    WHERE a.{property_name} = id
+    RETURN id(a) AS id
+    """
+
+    # Run the query with parameters
+    result = getQuery(query,driver, params={"id": [id_str]})
+    
+    # Collect records
+    records = list(result)
+    if len(records) > 0:
+        return records[0]["id"]
+    else:
+        return None
+
+def USESLogText(relid, driver):
+    """
+    Creates a custom log text for the uses tie that is to be moved.
+
+    Parameters:
+    - relid: str - relationshipID
+    - driver: Neo4j session
+    
+    Returns:
+    - pandas DataFrame with columns: logtext
+    """
+    query = """
+    UNWIND $relid AS relid
+    MATCH (a)-[r:USES]->(b)
+    WHERE elementId(r) = relid
+    RETURN coalesce(a.CMName,'NA') + '-' + type(r) + '-' + coalesce(r.Key,'') + '->' + coalesce(b.CMName,'NA') AS logtext
+    """
+    
+    result = getQuery(query,driver, params={"relid": relid})
+    logtext = result[0]["logtext"]
+    
+    return logtext
+
+def check_ambiguous_ties_moveUSESties(driver,CMID_from,rel_id):
+    # 1. Get dataset CMID linked to the relID
+    query_dataset = """
+    UNWIND $relID AS relID
+    MATCH (d:DATASET)-[r:USES]->(:CATEGORY)
+    WHERE elementId(r) = relID
+    RETURN d.CMID AS datasetID
+    """
+    dataset_df = getQuery(query_dataset,driver,params = {'relID': rel_id})
+
+    if dataset_df:
+        dataset = dataset_df[0]['datasetID']
+    else:
+        return "No Dataset found for this USES tie."
+    
+    #checks if there are multiple uses ties from the same Dataset d to the from node p
+    query_check_for_multiple_uses_ties = """
+    UNWIND $fromCMID AS fromCMID
+    UNWIND $dataset AS dataset
+    MATCH (p:CATEGORY {CMID: fromCMID})<-[r:USES]-(d:DATASET {CMID: dataset})
+    Return count(r) as uses_count
+    """
+
+    uses_count = getQuery(query_check_for_multiple_uses_ties,driver,params= {'fromCMID': [CMID_from], 'dataset': [dataset]})
+    uses_count = uses_count[0]['uses_count']
+
+    # do any contextual children of fromNode A have a USES tie from D that includes A as a property
+    query = """
+        UNWIND $fromCMID AS fromCMID
+        UNWIND $dataset AS dataset
+        MATCH (p:PROPERTY)
+        WHERE p.relationship IS NOT NULL
+        WITH collect(p.CMName) AS prop_CMNames,fromCMID,dataset
+
+        MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET {CMID: dataset})
+        WHERE any(k IN prop_CMNames WHERE fromCMID IN r[k])
+        RETURN c.CMID as CMID, r.Key as Key
+        """
+
+    child_USES_check = getQuery(query,driver,params= {'fromCMID': [CMID_from], 'dataset': [dataset]})
+
+    if uses_count > 1 and child_USES_check:
+        return jsonify({
+            "status" : "True",
+            "dataset": dataset,
+            "child_USES_check": child_USES_check
+        })
+    else:
+        return jsonify({"status" : "False",
+                        "dataset": dataset,
+                        "child_USES_check": child_USES_check})
+
+# table data includes user decisions about ambiguous parents
+def moveUSESties(database,user,input,dataset,tabledata):
+    driver = getDriver(database)
+    CMID_from = input.get('s1_2')
+    CMID_to = input.get('s1_3')
+    USES_property = json.loads(input.get('s1_7'))
+    rel_id = USES_property[1]["id"]
+    # only need to revise operation if user wants to keep some parent-child ties with the FROM node.
+    USES_to_change = [row for row in tabledata if row['optionA'] != 'From']
+
+    try:
+        if len(USES_to_change) > 0:
+
+            query_update_parents = """
+            UNWIND $changes AS change
+            MATCH (c {CMID: change.cmid})<-[r:USES {Key: change.Key}]-(d:DATASET {CMID: $dataset})
+            WITH c, d, r, $old AS old, $new AS new
+
+            WITH c, d, r, old, new, [x IN r.parentContext WHERE x IS NOT NULL | 
+                CASE 
+                    WHEN apoc.convert.fromJsonMap(x).parent = old 
+                    THEN apoc.convert.toJson(apoc.map.setKey(apoc.convert.fromJsonMap(x), 'parent', new))
+                    ELSE x 
+                END
+            ] AS updatedParentContext
+            SET r.parentContext = updatedParentContext
+
+            WITH c, d, r, old, new
+
+            MATCH (p:PROPERTY) WHERE p.relationship IS NOT NULL
+            WITH c, d, r,old,new, collect(p.CMName) AS prop_CMNames
+
+            UNWIND prop_CMNames AS propName
+            WITH c, d, r, old, new, propName
+            WHERE r[propName] IS NOT NULL
+            SET r[propName] = [element IN r[propName] | CASE WHEN element = old THEN new ELSE element END]
+
+            RETURN c.CMID AS CMID, r, d.CMID AS datasetID
+            """
+            print(CMID_from)
+            print(CMID_to)
+            result = getQuery(query_update_parents,driver,params = {
+                'changes': [{"cmid": row['CMID'], "Key": row['Key']} for row in USES_to_change],
+                'old': CMID_from,
+                'new': CMID_to,
+                'dataset': dataset,
+            })
+
+            print("completed moving props")
+
+            processUSES(CMID=[row['CMID']for row in USES_to_change], database=database)
+
+        # Move the relationship itself
+        # Fetch relationship details for log
+        logtext = USESLogText(rel_id,driver)
+        
+        log_msg = f"moved relationship {logtext} from {CMID_from} to {CMID_to}"
+
+        query_move_rel = f"""
+        MATCH ()-[r:USES]->(from)
+        WHERE from.CMID = '{CMID_from}' AND elementId(r) = '{rel_id}'
+        MATCH (to)
+        WHERE to.CMID = '{CMID_to}'
+        CALL apoc.refactor.to(r, to) YIELD input, output
+        RETURN elementId(output) AS relID
+        """
+        rel_id_df = getQuery(query_move_rel,driver)
+        new_rel_id = rel_id_df[0]['relID'] if rel_id_df else None
+
+        #Logging
+        from_node_id = CMgetID(CMID_from, "CMID", driver)
+        to_node_id = CMgetID(CMID_to, "CMID", driver)
+
+        #CMlog(id=from_node_id, type_="node", log=log_msg, user=user, con=con)
+        #CMlog(id=to_node_id, type_="node", log=log_msg, user=user, con=con)
+
+        try:
+            if new_rel_id is not None:
+                createLog(id=new_rel_id, type="relation", log=log_msg, user=user, driver=driver)
+        except Exception as e:
+            print(f"Warning while logging relation: {e}")
+
+    except Exception as e:
+        return str(e)
+
+    # Final updates and notifications
+    print("move completed: updating USES ties")
+    processUSES(CMID=[CMID_from, CMID_to], database=database)
+    print("Completed USES ties update")
+
+    return "done"
 
 
 
