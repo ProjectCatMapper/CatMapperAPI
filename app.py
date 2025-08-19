@@ -128,7 +128,7 @@ CALL apoc.when(districtID IS NOT NULL,
     {id: districtID}) YIELD value AS district
 
 RETURN 
-    apoc.text.join(Name, ', ') AS Name,
+    apoc.text.join(Name, '; ') AS Name,
     apoc.text.join([i IN [country.country, district.district] WHERE i IS NOT NULL AND i <> ''], ', ') AS Location,
     type AS Type,
     recordStart AS `rStart`,
@@ -203,6 +203,83 @@ ORDER BY Domain
         if qSamples is not None:
             samples = session.run(qSamples, cmid=cmid, database=database)
             samples = [dict(record) for record in samples]
+
+            grouped = defaultdict(lambda: {
+                'Name': set(),
+                'Population est.': 0,
+                'Sample size': 0
+            })
+
+            for row in samples:
+                key = (
+                    row.get('Source')[0] if isinstance(row.get('Source'), list) else row.get('Source'),
+                    row.get('rStart'),
+                    row.get('rEnd'),
+                    row.get('Location'),
+                    row.get('Type')[0] if isinstance(row.get('Type'), list) else row.get('Type'),
+                    row.get('yStart'),
+                    row.get('yEnd'),
+                    row.get('link2'),
+                    row.get('Version'),
+                    row.get('cType'),
+                    row.get('Link'),
+                )
+
+                print(key)
+
+                group = grouped[key]
+                
+                # Aggregate name
+                name = row.get('Name')
+                if name:
+                    group['Name'].add(name)
+
+                # Aggregate population and sample size (convert to float or int safely)
+                try:
+                    pop = float(row.get('Population est.', 0))  # or int(), depending on data
+                    group['Population est.'] += pop
+                except (ValueError, TypeError):
+                    pass
+
+                try:
+                    sample = float(row.get('Sample size', 0))
+                    group['Sample size'] += sample
+                except (ValueError, TypeError):
+                    pass
+
+            # Construct the final merged output
+            aggregated_samples = []
+
+            for key, values in grouped.items():
+                (Source, rStart, rEnd, Location, Type, yStart, yEnd, link2, Version, cType, Link) = key
+                aggregated_samples.append({
+                    'Source': Source,
+                    'rStart': rStart,
+                    'rEnd': rEnd,
+                    'Location': Location,
+                    'Type': Type,
+                    'yStart': yStart,
+                    'yEnd': yEnd,
+                    'link2': link2,
+                    'Version': Version,
+                    'cType': cType,
+                    'Link': Link,
+                    'Name': '; '.join(sorted(values['Name'])),
+                    'Population est.': round(values['Population est.']),
+                    'Sample size': round(values['Sample size']),
+                })
+            
+            for row in aggregated_samples:
+                if row["Sample size"] == 0:
+                    row["Sample size"] = ""
+                if row["Population est."] == 0:
+                    row["Population est."] = ""
+                names_set = set(name.strip() for name in row["Name"].split(";"))
+                row["Name"] = ", ".join(names_set)
+                
+                
+            samples = aggregated_samples
+
         else:
             samples = []
         driver.close()
@@ -333,13 +410,13 @@ ORDER BY Domain
                 continue
             if valid_data[i]['geometry']["type"] != "MultiPoint":
                 point.append(
-                    {"cood": valid_data[i]['geometry']["coordinates"][::-1], "source": valid_data[i]["source"]})
+                    {"cood": valid_data[i]['geometry']["coordinates"], "source": valid_data[i]["source"]})
             else:
                 temp = valid_data[i]
                 source = temp['source']
                 for j in range(0, len(temp['geometry']['coordinates'])):
                     point.append(
-                        {'cood': temp['geometry']['coordinates'][j][::-1], "source": source})
+                        {'cood': temp['geometry']['coordinates'][j], "source": source})
         if point:
             points = point
 
@@ -357,7 +434,7 @@ ORDER BY Domain
     if "Location" in info[0]:
         if info[0]['Location'][-2:-1] == ",":
             info[0]['Location'] = info[0]['Location'][:-2].strip()
-    
+
     return jsonify({
         "info": info[0],
         "samples": samples,
@@ -369,7 +446,8 @@ ORDER BY Domain
         "polysource": polysources,
         "badsources": bad_sources
     })
-        
+
+
 @app.route("/network", methods=['GET'])
 def net():
     p0 = request.args.get('value')
@@ -584,12 +662,12 @@ def upload_API():
                 else:
                     key_cols[key] = None
 
-            response,desired_order = input_Nodes_Uses(
+            response, desired_order = input_Nodes_Uses(
                 dataset=df,
                 database=database,
                 uploadOption=uploadOption,
                 formatKey=False,
-                optionalProperties = optionalProperties,
+                optionalProperties=optionalProperties,
                 user=user,
                 addDistrict=addDistrict,
                 addRecordYear=addRecordYear,
@@ -612,12 +690,12 @@ def upload_API():
                       Key: "Key", altNames: "altNames"}, inplace=True)
             df = df.to_dict(orient='records')
             # return {"Name":Name, "CMID":CMID,"altNames":altNames,"Key":Key,"user":user,"overwriteProperties":overwriteProperties,"updateProperties":updateProperties,"addDistrict":addDistrict,"addRecordYear":addRecordYear}
-            response,desired_order = input_Nodes_Uses(
+            response, desired_order = input_Nodes_Uses(
                 dataset=df,
                 database=database,
                 uploadOption="add_uses",
                 formatKey=True,
-                optionalProperties = optionalProperties,
+                optionalProperties=optionalProperties,
                 user=user,
                 addDistrict=False,
                 addRecordYear=False,
@@ -627,7 +705,7 @@ def upload_API():
         if isinstance(response, pd.DataFrame):
             n = len(response)
             response_dict = response.to_dict(orient='records')
-            return jsonify({"message": f"Upload completed for {n} row(s)", "file": response_dict,"order":desired_order})
+            return jsonify({"message": f"Upload completed for {n} row(s)", "file": response_dict, "order": desired_order})
         # else:
         #     return "Error!! Check your file."
 
@@ -840,12 +918,12 @@ return a, collect(distinct r) as r, collect(distinct e) as e
 LIMIT 300
 """
 
-        max_load =1000
+        max_load = 1000
 
         with driver.session() as session:
             # Execute the Cypher queries
             result = session.run(
-                cypher_query, cmid=cmid, relation=relation, domain=domain, endcmid=endcmid,max_load=max_load)
+                cypher_query, cmid=cmid, relation=relation, domain=domain, endcmid=endcmid, max_load=max_load)
             result = unlist([dict(record) for record in result])
             node = []
             rel = []
@@ -977,6 +1055,7 @@ def getSearch():
         yearStart = request.args.get('yearStart')
         yearEnd = request.args.get('yearEnd')
         context = request.args.get('context')
+        dataset = request.args.get('dataset')
         country = request.args.get('country')
         limit = request.args.get('limit')
         query = request.args.get('query')
@@ -991,7 +1070,8 @@ def getSearch():
             context,
             country,
             limit,
-            query
+            query,
+            dataset
         )
         return jsonify(result)
 
@@ -1086,7 +1166,7 @@ def getnewuser():
         driver = getDriver("userdb")
 
         queryExists = """
-MATCH (u:USER {access: 'new',username: $username})
+MATCH (u:USER {username: $username})
 WHERE $database IN u.database
 return true as exists
 """
@@ -1096,12 +1176,14 @@ return true as exists
             data = [dict(record) for record in result]
             driver.close()
 
+        print(data)
+
         if isinstance(data, list) and data and data[0].get("exists") is not None:
             raise Exception(
                 "Username already exists. Please try another username.")
 
         queryExists = """
-match (u:USER {email: $email,access:'new'})
+match (u:USER {email: $email})
 WHERE $database IN u.database
 return true as exists
 """
@@ -1115,22 +1197,22 @@ return true as exists
                 "Account with this email already exists. Please contact admin@catmapper.org to reset password.")
 
         query = """
-match (p:USER) with toInteger(p.userid) + 1 as id order by id desc limit 1
-merge (u:USER {username: $username})
-on create set u.username = $username,
-u.first = $firstName,
-u.last = $lastName,
-u.email = $email,
-u.access = "pending",
-u.log = [toString(datetime()) + ": created user via API", toString(datetime()) + \
-                  ": created autoapproved via API during workshop registration"],
-u.password = $password,
-u.userid = toString(id),
-u.role = 'user',
-u.intendedUse = $intendedUse,
-u.database = split($database,"|")
-return u.userid as userid
-"""
+                match (p:USER) with toInteger(p.userid) + 1 as id order by id desc limit 1
+                merge (u:USER {username: $username})
+                on create set u.username = $username,
+                u.first = $firstName,
+                u.last = $lastName,
+                u.email = $email,
+                u.access = "pending",
+                u.log = [toString(datetime()) + ": created user via API", toString(datetime()) + \
+                                ": created autoapproved via API during workshop registration"],
+                u.password = $password,
+                u.userid = toString(id),
+                u.role = 'user',
+                u.intendedUse = $intendedUse,
+                u.database = split($database,"|")
+                return u.userid as userid
+                """
 
         with driver.session() as session:
             result = session.run(query, firstName=firstName, lastName=lastName, email=email,
@@ -1139,21 +1221,24 @@ return u.userid as userid
             driver.close()
 
         body = f"""
-Hello,
-A new user has just registered.
-Name: {firstName} {lastName}
-email: {email}
-database: {database}
-description: {intendedUse}
-"""
+                Hello,
+                A new user has just requested registration.
+                Name: {firstName} {lastName}
+                email: {email}
+                database: {database}
+                description: {intendedUse}
+                """
+
         sendEmail(mail, subject="New registered user", recipients=[
             "admin@catmapper.org"], body=body, sender=mail_default)
 
-        return jsonify(data)
+        return jsonify({"message": "Success"}), 200
 
     except Exception as e:
         # Check for specific error messages
         error_message = str(e)
+
+        print(error_message)
 
         if "Account with this email already exists." in error_message:
             return jsonify({"error": str(e)}), 400    # Return 400 Bad Request
@@ -1165,13 +1250,14 @@ description: {intendedUse}
             # Default error message
             return jsonify({"error": "please contact admin@catmapper.org. Error:" + error_message}), 500
 
+
 @app.route("/admin_add_edit_delete_nodeproperties", methods=['GET'])
 def admin_nodeproperties():
     CMID = request.args.get('CMID')
     database = request.args.get('database')
 
     driver = getDriver(database)
-    
+
     # q captures the actual properties of a node
     q = "MATCH (n) WHERE n.CMID = $cmid return properties(n) AS props"
 
@@ -1181,69 +1267,74 @@ def admin_nodeproperties():
     elif "CL" in CMID:
         q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'LABEL' RETURN p.CMName as property"
     elif "D" in CMID:
-        q1= "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'DATASET' RETURN p.CMName as property"
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'DATASET' RETURN p.CMName as property"
     else:
-        q1= "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'CATEGORY' RETURN p.CMName as property"
-    
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'CATEGORY' RETURN p.CMName as property"
 
     with driver.session() as session:
-        r = session.run(q,cmid=CMID).data()
+        r = session.run(q, cmid=CMID).data()
 
         if r == []:
-            return jsonify({"error":"Invalid CMID"})
-                
+            return jsonify({"error": "Invalid CMID"})
+
         props = [k for k in r[0]['props'].keys()] if r else []
 
         # Run q1 to get allowed properties
         allowed = session.run(q1).data()
         allowed_props = {row['property'] for row in allowed}
 
-        r = {k:v for k,v in r[0]['props'].items() if k in allowed_props}
+        r = {k: v for k, v in r[0]['props'].items() if k in allowed_props}
 
         if r == {}:
-            return jsonify({"error":"No editable features on this node."})
-        
+            return jsonify({"error": "No editable features on this node."})
+
         # Filter props to only include allowed keys
         r1 = [k for k in allowed_props if k not in props]
 
     return jsonify({
-        "r":r,
+        "r": r,
         "r1": r1,
         "error": ""
     })
+
 
 @app.route("/admin_add_edit_delete_usesproperties", methods=['GET'])
 def admin_usesproperties():
     CMID = request.args.get('CMID')
     database = request.args.get('database')
+    func = request.args.get("func")
+    print(func)
 
     driver = getDriver(database)
 
     q = "MATCH (n)<-[r:USES]-(d) WHERE n.CMID = $cmid RETURN n,r,d"
-
+    
     q1 = "MATCH (p:PROPERTY) WHERE p.type='relationship' RETURN p.CMName as property"
 
-
     with driver.session() as session:
-        result = session.run(q,cmid=CMID)
+        result = session.run(q, cmid=CMID)
 
         records_list = []
+        temp_list = []
         for record in result:
             n = dict(record["n"].items())
             r = dict(record["r"].items())
+            r["id"] = record["r"].element_id
             d = dict(record["d"].items())
-            records_list.append((n, r, d))
+            temp_list.append((n, r, d))
+        
+        temp_list.sort(key=lambda x: (x[2].get("CMName", ""), x[1].get("Key", "")))
+        records_list.extend(temp_list)
         
         allowed = session.run(q1).data()
         allowed_props = list({row['property'] for row in allowed})
     
-    print(allowed_props)
-    
     return {
-        "r":records_list,
+        "r": records_list,
         "r1": allowed_props,
         "error": ""
     }
+
 
 @app.route('/create_label_helper', methods=['GET'])
 def create_label():
@@ -1257,9 +1348,26 @@ def create_label():
 
         values = [record["p.CMName"] for record in result]
 
-        final_values = [v for v in values if v not in ("ALL NODES", "ANY DOMAIN")]
-        
-    return {"res":final_values}
+        final_values = [v for v in values if v not in (
+            "ALL NODES", "ANY DOMAIN")]
+
+    return {"res": final_values}
+
+@app.route('/check_ambiguous_usesties', methods=['POST'])
+def check_ambiguous_usesties():
+    data = request.get_data()
+    data = json.loads(data)
+    database = unlist(data.get('database'))
+    credentials = unlist(data.get("cred"))
+    input = unlist(data.get("input"))
+    CMID_from = input.get('s1_2')
+    CMID_to = input.get('s1_3')
+    USES_property = json.loads(input.get('s1_7'))
+    rel_id = USES_property[1]["id"]
+    driver = getDriver(database)
+
+    result = check_ambiguous_ties_moveUSESties(driver,CMID_from,rel_id)
+    return result
 
 @app.route('/admin', methods=['GET'])
 def getAdmin():
@@ -1282,6 +1390,7 @@ def getAdmin():
     """
     headers = {'Content-Type': 'text/html'}
     return make_response(render_template('admin.html'), 200, headers)
+
 
 @app.route('/admin/edit', methods=['GET', 'POST'])
 def getAdminEdit():
@@ -1324,7 +1433,7 @@ def getAdminEdit():
                     user = credentials.get('userid')
             if not validated:
                 raise Exception("User not authorized")
-
+        
         result = "Nothing returned"
         # if fun == "getUSESrels":
         #     result = getUSESrels(request,driver)
@@ -1344,17 +1453,25 @@ def getAdminEdit():
             new = unlist(data.get('new'))
             result = replaceProperty(cmid, property, old, new, database)
         elif fun == "add/edit/delete node property":
-            result = add_edit_delete_Node(database,credentials.get("userid"),input)
+            print("hello")
+            result = add_edit_delete_Node(
+                database, credentials.get("userid"), input)
         elif fun == "add/edit/delete USES property":
-            result = add_edit_delete_USES(database,credentials.get("userid"),input)  
+            result = add_edit_delete_USES(
+                database, credentials.get("userid"), input)
         elif fun == "merge nodes":
-            result = mergeNodes(input.get('s1_2'),input.get('s1_3'),credentials.get("userid"),database)
+            result = mergeNodes(input.get('s1_2'), input.get(
+                's1_3'), credentials.get("userid"), database)
         elif fun == "create new label":
-            result = createLabel(database,credentials.get("userid"),input)
+            result = createLabel(database, credentials.get("userid"), input)
         elif fun == "delete node":
-            result = deleteNode(database,credentials.get("userid"),input)
+            result = deleteNode(database, credentials.get("userid"), input)
         elif fun == "delete USES relation":
-            result = deleteUSES(database,credentials.get("userid"),input)
+            result = deleteUSES(database, credentials.get("userid"), input)
+        elif fun == "move USES tie":
+            tabledata = data.get("tabledata")
+            dataset = data.get("datasetID")
+            result = moveUSESties(database, credentials.get("userid"), input,dataset,tabledata)
         else:
             raise Exception("Function does not exist")
         return result
@@ -1487,8 +1604,6 @@ def getDataset():
         df.replace([np.nan, None, "nan"], '', inplace=True)
 
         df = df.drop('relID', axis=1).copy()
-
-        print(df)
 
         return df.to_json(orient='records')
 
@@ -1850,7 +1965,7 @@ def getProgress():
 
         query = """
         match (l:LABEL)
-        where l.public = 'TRUE' and l.groupLabel = l.CMName and not l.CMName = "CATEGORY"
+        where l.public = 'TRUE' and l.groupLabel = l.CMName and not l.CMName IN ["CATEGORY","GENERIC"]
         return l.CMName as label, l.displayName as newlabel
         """
         domains = getQuery(query=query, driver=driver)
@@ -1931,6 +2046,7 @@ def test():
 
     return data
 
+
 @app.route('/mergeDatasets', methods=['GET'])
 def getMergeDatasets():
 
@@ -1951,7 +2067,6 @@ def getUpdateWaitingUSES():
     result = waitingUSES(database)
     return result
 
-
 @app.route('/updateNewUsers', methods=['POST'])
 def updateNewUsers():
     try:
@@ -1970,9 +2085,9 @@ def updateNewUsers():
 
         approver = credentials.get("userid")
 
-        result = enableUser(database,process=process,
+        result = enableUser(database, process=process,
                             userid=userid, approver=approver)
-        
+
 #         users = [user for user in result if user.get("email")]
 #         mail = Mail()
 
@@ -2036,6 +2151,11 @@ app.add_url_rule('/metadata/subdomains/<database>', 'getSubdomains',
 
 app.add_url_rule('/metadata/domainDescriptions/<database>', 'getDomainDescriptions',
                  getDomainDescriptions, methods=['GET'])
+
+app.add_url_rule('/metadata/CMIDProperties/<database>/<domain>', 'getProperties_route',
+                 getProperties_route, methods=['POST'])
+
+
 @app.route("/download/test", methods=["GET"])
 def test_download():
 
@@ -2072,6 +2192,10 @@ app.add_url_rule('/logs/<database>/<CMID>', 'getLogs',
 
 app.add_url_rule('/admin/moveUSESValidate/<database>/<relid>', 'get_moveUSESValidate',
                  get_moveUSESValidate, methods=['GET'])
+
+app.add_url_rule('/download/advanced/<database>', 'get_advanced_download_route',
+                 get_advanced_download_route, methods=['POST'])
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)
