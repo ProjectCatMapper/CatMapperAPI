@@ -1911,11 +1911,10 @@ def getLogin():
     try:
         data = request.get_data()
         data = json.loads(data)
-        database = unlist(data.get('database'))
         user = unlist(data.get('user'))
         password = unlist(data.get('password'))
 
-        credentials = login(database, user, password)
+        credentials = login(user, password)
 
         return credentials
 

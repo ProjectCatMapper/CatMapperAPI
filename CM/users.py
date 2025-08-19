@@ -41,25 +41,18 @@ def verifyPassword(stored_hash, password):
         return False
 
 
-def login(database, user, password):
+def login(user, password):
     try:
-
-        if database.lower() == "archamap":
-            database = "ArchaMap"
-        elif database.lower() == "sociomap":
-            database = "SocioMap"
-        else:
-            raise Exception("database must be SocioMap or ArchaMap")
 
         driver = getDriver("userdb")
 
         query = """
         match (u:USER) 
-        where toLower(u.username) = toLower($username) and $database in u.database and u.access = "enabled"
+        where toLower(u.username) = toLower($username) and u.access = "enabled"
         return u.username as username, u.userid as userid, u.password as key, u.access as access, u.role as role
 """
         result = getQuery(query, driver, params={
-                          'username': user, 'database': database})
+                          'username': user})
 
         if len(result) == 0:
             raise Exception("User not found")
