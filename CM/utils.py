@@ -286,3 +286,37 @@ def testConnection(configOpt="DB",database="SocioMap"):
         return success
     except Exception as e:
         return False
+    
+def getNodeProperties(database, domain, CMID):
+    """
+    Get the properties of a node in the specified database.
+    Args:
+        database (str): The name of the database.
+        domain (str): The domain of the node (e.g., "CATEGORY", "DATASET").
+        CMID (list): A list of CMIDs to query.
+    """
+    driver = getDriver(database)
+    if domain == "CATEGORY":
+        query = """
+        unwind $CMID as cmid
+        match (c:CATEGORY {CMID: cmid})<-[r:USES]-(d:DATASET)
+        with distinct apoc.coll.toSet(apoc.coll.flatten(collect(keys(c) + keys(r)))) as properties
+        with [i in properties where not i in ["log","logID","CMName","CMID","names"]] as properties
+        unwind properties as property
+        return property
+        """
+    elif domain == "DATASET":
+        query = """
+        unwind $CMID as cmid
+        match (d:DATASET {CMID: cmid})
+        with distinct apoc.coll.toSet(collect(keys(d))) as properties
+        with [i in properties where not i in ["log","logID","CMName","CMID","names"]] as properties
+        unwind properties as property
+        return property
+        """
+    else: 
+        raise ValueError("Invalid domain specified")
+
+    properties = getQuery(query, driver, CMID = CMID, type = "list")
+    
+    return properties

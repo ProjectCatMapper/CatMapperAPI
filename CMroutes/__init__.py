@@ -1,4 +1,4 @@
-from .test_routes import *
+from .dev_routes import *
 from .admin_routes import *
 from .routines import *
 from .query import *

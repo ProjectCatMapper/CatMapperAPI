@@ -65,25 +65,6 @@ def updateLog(f, txt, write="a"):
     except Exception as e:
         print(e)
 
-#Creates names property for new dataset node that combines shortName, CMName, and DatasetCitation, names
-#Dan need to apply for functions 5 and 6
-# def add_to_names_for_dataset(row):
-#         # Extract base names as a list
-#         if pd.isna(row["names"]):
-#             names_list = []
-#         elif ";" in row["names"]:
-#             names_list = [name.strip() for name in row["names"].split(";") if name.strip()]
-#         else:
-#             names_list = [row["names"].strip()]
-
-#         # Append CMName, shortName, and DatasetCitation if they exist
-#         for col in ["CMName", "shortName", "DatasetCitation"]:
-#             val = row.get(col)
-#             if pd.notna(val):
-#                 names_list.append(str(val).strip())
-        
-#         return names_list
-
 #Creates new nodes for functions 1 and 2
 def createNodes(df, database,isDataset, user, uniqueID=None):
     try:
@@ -93,13 +74,6 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         df = df.copy()
 
         isDataset = isDataset
-
-       #For datasets, compiles shortName, CMName, datasetCitation, and names 
-       # into names property for searching
-        # if isDataset:
-        #     if "names" not in df.columns:
-        #         df["names"] = None
-        #     df["names"] = df.apply(add_to_names_for_dataset, axis=1)
 
         #Assigns appropriate label(s) to node, adding CATEGORY if the label is a CATEGORY domain.
         idlabel = "CATEGORY"
@@ -1574,12 +1548,21 @@ def input_Nodes_Uses(
                 newly_created_nodes = pd.DataFrame(newly_created_nodes)
                 newly_created_nodes = newly_created_nodes.astype(str)
                 sub_dataset = sub_dataset.astype(str)
+                print(newly_created_nodes)
 
                 #Merge CMIDs for new nodes back into sub_dataset. New merged dataset is called dataset_match
                 #If function 2, then also add new CMIDs into dataset_for_results
                 #Dan. Why not just add new CMIDS into dataset_for_results for function 1 as well?
                 dataset_match = sub_dataset.merge(
                             newly_created_nodes[["importID", "CMID", "nodeID"]],
+                            on="importID",
+                            how="left",
+                            suffixes=('', '_new')
+                        )
+                
+                if isDataset and uploadOption == "add_node":
+                    dataset_for_results = dataset_for_results.merge(
+                            newly_created_nodes[["importID", "CMID"]],
                             on="importID",
                             how="left",
                             suffixes=('', '_new')
@@ -1680,28 +1663,13 @@ def input_Nodes_Uses(
                     "Processing returned CMIDs",
                     write="a",
                 )
+                cmids_from_result = [link["CMID"] for link in result["result"]]
                 try:
-                    #robert
-                    # Checks that CMIDs returned from result equal inputted CMIDs
-                    # This is helpful for addCMNameRel and updateAltNames
-                    cmids_from_result = [link["CMID"] for link in result["result"]]
-
+                    # Final checks that CMIDs returned from result equal inputted CMID
                     if set(cmids_from_result) != set(links["CMID"]):
                         raise KeyError(
                             f"These inputted CMIDs have not been returned in result: {set(links['CMID']) - set(cmids_from_result)}"
                         )
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "adding CMName to Name parameter",
-                        write="a",
-                    )
-                    # adds CMName to the Name parameter if missing
-                    addCMNameRel(database, CMID=cmids_from_result)
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        "updating alternate names",
-                        write="a",
-                    )
                 except KeyError as e:
                     updateLog(
                         f"log/{user}uploadProgress.txt",
@@ -1711,10 +1679,19 @@ def input_Nodes_Uses(
                     continue
 
                 updateLog(
+                        f"log/{user}uploadProgress.txt",
+                        "adding CMName to Name parameter and updating alternate names",
+                        write="a",
+                    )
+                # adds CMName to the Name parameter if missing
+                addCMNameRel(database, CMID=cmids_from_result)
+                
+                updateLog(
                     f"log/{user}uploadProgress.txt",
                     "Completed updating USES relationships",
                     write="a",
                 )
+
 
             #For function 5 and 6. Categories and Datasets
             if uploadOption in ["node_replace","node_add"]:
@@ -1761,8 +1738,8 @@ def input_Nodes_Uses(
                 
             if isDataset:
                 cmids = dataset_match["CMID"].unique()
-                print(cmids)
-                processDATASETs(database=database, user=user, CMID=cmids)
+                for cmid in cmids:
+                    processDATASETs(database=database, user=user, CMID=cmid)
             
             #Appending result of batch to previous batch results (final_result)
             updateLog(
@@ -1787,6 +1764,11 @@ def input_Nodes_Uses(
                 )
 
             updateLog(f"log/{user}uploadProgress.txt", "End of batch", write="a")
+
+            # this is also called in waitingUSES, but we call now to get these done quickly
+            # if not isDataset and uploadOption not in ["node_replace","node_add"]:
+            #     updateAltNames(CMID=CMID, database=database)
+            #     updateLabels(CMID=CMID, database=database)
 
     except Exception as e:
         try:

@@ -22,7 +22,7 @@ def pivot_property_value_columns(filepath):
     # Check required columns
     required_cols = {'property', 'value'}
     if not required_cols.issubset(df.columns):
-        raise ValueError(f"Missing required columns: {required_cols - set(df.columns)}")
+        return f"CSV already pivoted or invalid: {filepath}"
 
     # Function to safely parse list-like strings
     def parse_list(val):
@@ -67,6 +67,8 @@ def pivot_property_value_columns(filepath):
 
     # Save the resulting DataFrame
     df_wide.to_csv(filepath, index=False)
+    
+    return f"Processed and saved: {filepath}"
 
 if __name__ == "__main__":
     import argparse
@@ -75,5 +77,8 @@ if __name__ == "__main__":
     parser.add_argument("filepath", help="Path to the CSV file to process.")
     args = parser.parse_args()
 
-    pivot_property_value_columns(args.filepath)
-    print(f"Processed and saved: {args.filepath}")
+    result = pivot_property_value_columns(args.filepath)
+    if isinstance(result, str):
+        print(result)
+    else:
+        print(f"Unknown error occurred while processing: {args.filepath}")

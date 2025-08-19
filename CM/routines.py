@@ -108,7 +108,7 @@ def backup2CSV(database, mail=None):
         results.append(datasets)
 
         query_CATEGORIES = """
-            with 'match (d:CATEGORY) unwind keys(d) as property return distinct elementId(d) as nodeID, property, d[property] as value' as query CALL apoc.export.csv.query(query, '/backups/download/categoryNodes_' + toString(date()) + '.csv', {})
+            with 'match (d:CATEGORY) unwind keys(d) as property return distinct elementId(d) as nodeID, apoc.text.join(labels(d),"; ") as label, apoc.text.join(d.names,"; ") as names, property, d[property] as value' as query CALL apoc.export.csv.query(query, '/backups/download/categoryNodes_' + toString(date()) + '.csv', {})
             YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
             RETURN count(*);
         """
@@ -133,6 +133,14 @@ def backup2CSV(database, mail=None):
             """
         DELETED = getQuery(query_DELETED, driver)
         results.append(DELETED)
+        
+        query_Metadata = """
+            with 'match (m:METADATA) unwind keys(m) as property return distinct elementId(m) as nodeID, m.CMID as CMID, m.CMName as CMName, property, m[property] as value' as query CALL apoc.export.csv.query(query, '/backups/download/metadata_' + toString(date()) + '.csv', {})
+            YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
+            RETURN count(*);
+            """
+        Metadata = getQuery(query_Metadata, driver)
+        results.append(Metadata)
 
         # query_LOGS = """
         #     with 'match (l:LOG) unwind keys(l) as property return distinct elementId(l) as nodeID, property, l[property] as value' as query CALL apoc.export.csv.query(query, '/backups/download/logs_' + toString(date()) + '.csv', {})
@@ -146,7 +154,7 @@ def backup2CSV(database, mail=None):
             sendEmail(mail, subject="Weekly CSV Backup", recipients=[
                       "rjbischo@catmapper.org"], body="Weekly CSV backup completed.", sender=os.getenv("mail_default"))
 
-        return "backup2CSV completed"
+        return f"backup2CSV completed for {database}"
 
     except Exception as e:
         return str(e)
