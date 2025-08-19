@@ -53,7 +53,7 @@ def mergeUSES(database, CMID, Key, datasetID, properties = None):
 
     return "Merged " + str(count[0]) + " relationship(s) into " + str(result[0]) + " relationship(s) for CMID " + f"'{CMID}' with Key '{Key}' and datasetID (CMID) '{datasetID}' using properties combined as {properties}" + "."
         
-
+# merges duplicate contextual ties - not USES ties
 def mergeDupRelations(database, CMID=None):
     try:
         driver = getDriver(database)
@@ -69,7 +69,7 @@ match (a)-[r]-(b)
 where 
 """ + qFilterb + """
 not type(r) = 'USES' 
-with a, b, collect(r) as rels 
+with a, b,type(r) AS relType, collect(r) as rels 
 call apoc.refactor.mergeRelationships(rels,{properties: {`.*`: 'combine'}}) yield rel 
 return count(*) as count
 """
@@ -81,7 +81,7 @@ return count(*) as count
         result = str(e)
         return result, 500
 
-
+# ensures reference Keys in contextual ties are correct.
 def fixUsesRels(database, property, relationship, CMID=None):
     try:
         driver = getDriver(database)
@@ -140,7 +140,7 @@ return count(*) as count
         result = str(e)
         return result, 500
 
-
+# if no CMID is set, it updates labels for all
 def updateLabels(database, CMID=None):
     try:
         driver = getDriver(database)
@@ -285,27 +285,56 @@ def updateContains(database, CMID=None):
         result = str(e)
         return result, 500
 
-
-def updateAltNames(database, CMID=None):
+# if no CMID is set, it updates names for all
+def updateAltNames(database, CMID=None, domain = "CATEGORY"):
     try:
         driver = getDriver(database)
+        
+        if isinstance(CMID, str):
+            CMID = [CMID]
+            
+        if isinstance(CMID, list) and len(CMID) == 0:
+            CMID = None
+            
+        if CMID is not None and isinstance(CMID, list):
+            if CMID[0][1] == 'D':
+                domain = "DATASET"
+            elif CMID[0][1] == 'M':
+                domain = "CATEGORY"
+            else:
+                raise ValueError("Invalid CMID format. Must start with 'AD/SD' or 'AM/SM'.")
+
         if CMID is not None:
             qFiltera = "unwind $cmid as cmid"
-            qFilterb = "where a.CMID = cmid"
+            qFilterb = "where n.CMID = cmid"
         else:
             qFiltera = ""
             qFilterb = ""
 
-        query = qFiltera + """
-match (a:CATEGORY)<-[r:USES]-(:DATASET)
+        if domain == "DATASET":
+            query =  f"""
+                    {qFiltera}
+                    MATCH (n:DATASET {qFilterb})
+                    WITH n,
+                    [x IN [n.CMName, n.shortName, n.DatasetCitation] WHERE x IS NOT NULL] AS newNames
+                    SET n.names = apoc.coll.toSet(
+                    (CASE WHEN n.names IS NOT NULL THEN n.names ELSE [] END) + newNames
+                    )
+                    RETURN n.names
+                    """
+        elif domain == "CATEGORY":
+            query = qFiltera + """
+match (n:CATEGORY)<-[r:USES]-(:DATASET)
 """ + qFilterb + """
-with a, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.Name),true)) as names
-set a.names = names
-return count(a)
+with n, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.Name),true)) as names
+set n.names = names
+return count(n)
 """
-        getQuery(query, driver, params={'cmid': CMID})
+        else:
+            raise ValueError("Invalid domain. Must be 'DATASET' or 'CATEGORY'.")
+        getQuery(query, driver, params={'cmid': CMID}, type = "list")
 
-        return "Completed"
+        return f"Completed updating alternate names for {CMID}" if CMID else f"Completed updating alternate names for all {domain} nodes."
     except Exception as e:
         # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
@@ -326,9 +355,9 @@ def processUSES(database, CMID=None, user="0"):
         updateLabelsResults = updateLabels(CMID=CMID, database=database)
 
         # Fix duplicate relationships
-        mergeDupRelationsResults = "Not ran"
-        # if CMID is not None:
-        #     mergeDupRelationsResults = mergeDupRelations(CMID=CMID, database = database)
+        if CMID is not None:
+            print("running merge duplicate relations")
+            mergeDupRelationsResults = mergeDupRelations(CMID=CMID, database = database)
 
         # Update structural properties and referenceKeys
         properties = getPropertiesMetadata(driver=driver)
@@ -346,19 +375,26 @@ def processUSES(database, CMID=None, user="0"):
         print("updating contains")
         updateContainsResults = updateContains(CMID=CMID, database=database)
 
+        #for singular CMID coming from admin functions
+        if not isinstance(CMID,list):
+            CMID = [CMID]
+        q = f'''Match (c:CATEGORY)<-[r:USES]-(d:DATASET) where c.CMID IN $CMID_list and r.status is not null and r.status = 'update' set r.status = NULL'''
+        getQuery(q,driver=driver,params={"CMID_list": CMID})
+
         return {"CMID": CMID, "mergeDupRelations": mergeDupRelationsResults, "properties": propertiesResults, "updateLabels": updateLabelsResults, "updateContains": updateContainsResults, "updateAltNames": updateAltNamesResults}
     except Exception as e:
         # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
         return result, 500
 
-
+# gets all CMIDs based on r.status = 'update' and sends to processUSES in batches
+#If no CMIDs are found , it does nothing
 def waitingUSES(database, BATCH_SIZE=1000):
     try:
-        print(database)
         driver = getDriver(database)
         CMID = getQuery(
-            "Match (c)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' return c.CMID as CMID", driver, type='list')
+            "Match (c:CATEGORY)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' return c.CMID as CMID", driver, type='list')
+        CMID = list(set(CMID))
         if CMID:
             for i in range(0, len(CMID), BATCH_SIZE):
                 # Slice the CMID list to get the current batch
@@ -370,12 +406,11 @@ def waitingUSES(database, BATCH_SIZE=1000):
                 # Optional: Print progress (useful for debugging or monitoring)
                 print(
                     f"Processed batch {i // BATCH_SIZE + 1} with {len(batch)} CMIDs.")
-            getQuery(
-                "Match (c:CATEGORY)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' set r.status = NULL", driver)
+            # this query maybe redundant, the status is set in processUSES
+            getQuery("Match (c:CATEGORY)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' set r.status = NULL", driver)
             result = f"Successfully updated {len(CMID)} CMIDs in batches of {BATCH_SIZE}."
         else:
             result = "Nothing to update"
-        print(result)
         return result
     except Exception as e:
         try:
@@ -523,30 +558,21 @@ return count(*)
         getQuery(query, driver=driver, params={"CMID": CMID})
 
         #updating dataset names
-
-        query = f"""{q1}
-                    MATCH (n:DATASET {q2})
-                    SET n.names = 
-                        apoc.coll.toSet(
-                            CASE 
-                            WHEN exists(n.names) THEN n.names + [n.CMname, n.shortName, n.datasetCitation]
-                            ELSE [n.CMname, n.shortName, n.datasetCitation]
-                            END
-                        )
-                    RETURN n.names"""
         
-        query =  f"""
-                    {q1}
-                    MATCH (n:DATASET {q2})
-                    WITH n,
-                    [x IN [n.CMname, n.shortName, n.DatasetCitation] WHERE x IS NOT NULL] AS newNames
-                    SET n.names = apoc.coll.toSet(
-                    (CASE WHEN n.names IS NOT NULL THEN n.names ELSE [] END) + newNames
-                    )
-                    RETURN n.names
-                    """
+        # query =  f"""
+        #             {q1}
+        #             MATCH (n:DATASET {q2})
+        #             WITH n,
+        #             [x IN [n.CMname, n.shortName, n.DatasetCitation] WHERE x IS NOT NULL] AS newNames
+        #             SET n.names = apoc.coll.toSet(
+        #             (CASE WHEN n.names IS NOT NULL THEN n.names ELSE [] END) + newNames
+        #             )
+        #             RETURN n.names
+        #             """
 
-        getQuery(query, driver=driver, params={"CMID": CMID})
+        # getQuery(query, driver=driver, params={"CMID": CMID})
+
+        updateAltNames(database, CMID=CMID)
 
     except Exception as e:
         try:
