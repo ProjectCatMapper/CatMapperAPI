@@ -104,7 +104,7 @@ def getAdvancedDownload(database, CMID, properties):
     """
     elif domain == "CATEGORY":
         prop_query = """
-    match (p:PROPERTY) where p.CMName in $properties and not p.nodeType = "DATASET" return p.CMName as property, p.type as type
+    match (p:PROPERTY) where p.CMName in $properties and (p.nodeType contains "CATEGORY" or p.nodeType is null) return p.CMName as property, p.type as type
     """
     else:
         raise ValueError("Invalid domain. Must be 'DATASET' or 'CATEGORY'.")
@@ -131,16 +131,29 @@ def getAdvancedDownload(database, CMID, properties):
         query = f"""
         unwind $CMID as cmid
         match (c:CATEGORY)<-[r:USES]-(:DATASET) where c.CMID = cmid
-        return c.CMID as CMID, c.CMName as CMName, {prop_query} 
+        return c.CMID as CMID, c.CMName as CMName, labels(c) as domains, {prop_query} 
         """
         
     result = getQuery(query=query, driver=driver, CMID=CMID, type = "df")
     
-    # convert list columns to strings separated by "; "
-    for col in result.columns:
-        if result[col].apply(lambda x: isinstance(x, list)).any():
-            result[col] = result[col].apply(lambda x: "; ".join(x) if isinstance(x, list) else x)
-    
+    def agg_semicolon(series):
+        # flatten any lists
+        values = []
+        for v in series.dropna():
+            if isinstance(v, list):
+                values.extend(v)
+            else:
+                values.append(v)
+        # keep unique values, preserve order
+        seen = []
+        for v in values:
+            if v not in seen:
+                seen.append(v)
+        return "; ".join(map(str, seen)) if seen else ""
+
+# group and aggregate all columns
+    group_cols = ["CMID"]
+    result = result.groupby(group_cols, as_index=False).agg(agg_semicolon)
     # convert all to strings
     result = result.astype(str)
     return result.to_dict(orient='records')
