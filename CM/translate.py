@@ -344,14 +344,10 @@ def translate(
     columns_to_group_by = rows.columns.difference(['CMuniqueRowID']).tolist()
     # aggregates "rows" dataframe by columns to group by
     # it stores all the CMuniqueRowID's for that group(row) in a list
-    # if "uniqueRows" is FALSE, then one-to-many warnings will only be thrown within contexts defined by the columns to group by
-    # if "uniqueRows" is FALSE, then many-to-one matches won't be thrown for matches to rows with the same name
-    if not uniqueRows:
-        rows = rows.groupby(columns_to_group_by)[
+    rows = rows.groupby(columns_to_group_by)[
             'CMuniqueRowID'].apply(list).reset_index()
     # now adds new uniqueID for each row from the potentially new "rows" 
     # CMUniqueCategoryID clumps rows that share the same term, country, contect, dataset, yearStart and yearEnd.
-    # if "uniqueRows" is TRUE and no empty rows were dropped, CMuniqueCategoryID = CMuniqueRowID
     rows['CMuniqueCategoryID'] = rows.index
 
     rows = rows.to_dict('records')
@@ -506,22 +502,22 @@ def translate(
     # get country
     qCountry = """
     optional match (a)<-[:DISTRICT_OF]-(c:ADM0)
-    with row, a, matching, collect(c.CMName) as country, score
+    with row, a, matching, collect(c.CMName) as CMcountry, score
     """
 
     # get key
     if key and 'dataset' in rows[0]:
         qKey = """
         optional match (a)<-[r:USES]-(:DATASET {CMID: row.dataset})
-        with row, a, matching, country, score, r.Key as Key
+        with row, a, matching, CMcountry, score, r.Key as Key
         """
     else:
-        qKey = "with row, a, matching, country, score, '' as Key"
+        qKey = "with row, a, matching, CMcountry, score, '' as Key"
 
     # return results
     qReturn = """
     return distinct row.CMuniqueCategoryID as CMuniqueCategoryID, row.CMuniqueRowID as CMuniqueRowID, row.term as term, a.CMID as CMID, a.CMName as CMName, custom.getLabel(a) as label, 
-    matching, score as matchingDistance, country, apoc.text.join(collect(Key),'; ') as Key order by matchingDistance
+    matching, score as matchingDistance,CMcountry, apoc.text.join(collect(Key),'; ') as Key order by matchingDistance
     """
     cypher_query = qLoad + qStart + qDomain + qCountryFilter + \
         qContext + qDataset + qYear + qLimit + qCountry + qKey + qReturn
@@ -534,6 +530,7 @@ def translate(
         # any rows that are not matched are not included
         data = getQuery(cypher_query, driver, params={'rows': rows})
     
+    
     if not data:
         data = df
         data[f'matchType_{term}'] = "None"
@@ -543,8 +540,10 @@ def translate(
     data = data.replace("", pd.NA)
     data = data.dropna(axis='columns', how='all')
 
+    rows_df=pd.DataFrame.from_records(rows)
+
     # add matching type
-    data = addMatchResults(df=data)
+    data = addMatchResults(df=data,original_df=rows_df)
     data = data.drop('CMuniqueCategoryID', axis=1).copy()
     new_column_names = {
         col: f"{col}_{term}" for col in data.columns if col != 'CMuniqueRowID'}
@@ -598,19 +597,35 @@ def translate(
 # each row of the input spreadsheet is assigned a unique CMuniqueRowID 
 # CMUniqueCategoryID clumps rows that share the same term, country, contect, dataset, yearStart and yearEnd unless uniquerows is clicked.
 # Many-to-one and one-to-many are only identified within CMuniqueCategoryID
-def addMatchResults(df):
+def addMatchResults(df,original_df):
     try:
         # Initialize matchType column with None
         df['matchType'] = None
+        print(df)
+        print(original_df)
+        df = pd.merge(df,original_df,on="CMuniqueRowID",how="left")
+        print(df)
 
         # Count how many rows each CMID is matched to but still preserves the length to grab the value later.
         # used for many-to-one
+        groupby_list = ["country","yearStart","yearEnd","context"]
+        columns_to_group_by = [col for col in groupby_list in df.columns]
+        print(columns_to_group_by)
+
+        # if no context variables are provided, all rows belong to same context
+        if columns_to_group_by:
+            context_grouping = df.groupby(columns_to_group_by)[
+                'CMuniqueRowID'].apply(list).reset_index()
+            print(context_grouping)
+        else:
+            df['context_grouping'] = 1
+
         df['cmid_counts_per_category'] = df['CMID'].map(df['CMID'].value_counts())
+            
         
         # Count occurrences of CMuniqueRowID within each CMuniqueCategoryID
         # used for one-to-many
-        cmunique_counts = df.groupby('CMuniqueCategoryID')[
-            'CMuniqueRowID'].count().to_dict()
+        cmunique_counts = df['CMuniqueRowID'].count().to_dict()
          
         # Helper to assign match types
         def determine_match_type(row):
