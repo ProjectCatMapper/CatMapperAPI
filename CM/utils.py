@@ -301,7 +301,7 @@ def getNodeProperties(database, domain, CMID):
         unwind $CMID as cmid
         match (c:CATEGORY {CMID: cmid})<-[r:USES]-(d:DATASET)
         with distinct apoc.coll.toSet(apoc.coll.flatten(collect(keys(c) + keys(r)))) as properties
-        with [i in properties where not i in ["log","logID","CMName","CMID","names"]] as properties
+        with [i in properties where not i in ["log","logID","CMName","CMID","names","label"]] as properties
         unwind properties as property
         return property
         """

@@ -17,6 +17,7 @@ def get_advanced_download_route(database):
     try:
         CMIDs = request.json.get('CMID', [])
         properties = request.json.get('properties', [])
+        # return {"CMIDs":CMIDs,"properties":properties}
         if not CMIDs or not properties:
             return {"error": "CMIDs and properties must be provided"}, 400
         data = getAdvancedDownload(database, CMIDs, properties)
