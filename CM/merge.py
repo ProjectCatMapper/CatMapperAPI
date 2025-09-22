@@ -226,30 +226,31 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
                     """
 
             merged = getQuery(query, driver=driver, params={
-                              'datasets': dataset_choices})
-
-            if "Neo.ClientError.Statement.SyntaxError" in merged[0]:
-                raise Exception(merged[0])
-
-            merged = pd.DataFrame(merged)
+                              'datasets': dataset_choices}, type = "df")
 
             if not merged.empty:
-                # Pivot wider equivalent
-                merged_df = merged.pivot_table(
-                    index=['CMName', 'CMID'],
-                    columns='datasetID',
-                    values=['Key', 'Name'],
-                    aggfunc=lambda x: '; '.join(filter(None, set(x)))
-                )
+                dataset_list = []
+                for dataset in dataset_choices:
+                    tmp = merged[merged['datasetID'] == dataset].copy()
+                    dataset_list.append(tmp)
+                merged_df = dataset_list[0]
+                merged_df.rename(columns={"Key": f"Key_{merged_df['datasetID'].iloc[0]}", "Name": f"Name_{merged_df['datasetID'].iloc[0]}"}, inplace=True)
+                merged_df.drop(columns=["datasetID"], inplace=True)
 
-                merged_df.columns = [
-                    f"{col[0]}_{col[1]}" for col in merged_df.columns]
-                merged_df.reset_index(inplace=True)
+                for dataset in dataset_list[1:]:
+                    dataset.rename(columns={"Key": f"Key_{dataset['datasetID'].iloc[0]}", "Name": f"Name_{dataset['datasetID'].iloc[0]}"}, inplace=True)
+                    dataset.drop(columns=["datasetID"], inplace=True)
+                    merged_df = pd.merge(merged_df, dataset, on=["CMName", "CMID"], how="outer")
+                    
+                # reorder columns
+                cols = merged_df.columns.tolist()
+                cols = ["CMName", "CMID"] + [col for col in cols if col not in ["CMName", "CMID"]]
+                merged_df = merged_df[cols]
 
-                # Flatten lists, filter keys if intersection is off
+                # filter keys if intersection is off
                 if intersection:
                     for col in merged_df.columns:
-                        if 'Key' in col:
+                        if 'Key_' in col:
                             merged_df = merged_df[merged_df[col].notna()]
 
                 merged = merged_df.fillna("")

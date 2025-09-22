@@ -383,9 +383,7 @@ def updateProperty(df,isDataset, database, user, updateType, propertyType="USES"
         metaTypeDict = {item["property"]: item["metaType"] for item in filteredItems}
 
         keys = []
-        print(node_or_tie)
-        print(vars)
-         
+                 
         for var in vars:
             # Get the metaType for the given property
             metaType = metaTypeDict.get(var)
@@ -415,15 +413,11 @@ def updateProperty(df,isDataset, database, user, updateType, propertyType="USES"
             RETURN elementId(n) AS nodeID, n.CMID AS CMID,{{ {old_keys} }} AS oldVals
             """
         
-        print("Stage 0")
-
         old_values = getQuery(
             query=get_old_vals_query,
             driver=driver,
             params={"rows": df.to_dict(orient="records")},
         )
-
-        print("Stage 1")
 
         items = [k.split('=')[0].strip() for k in keys.split(',') if '=' in k]
 
@@ -433,7 +427,6 @@ def updateProperty(df,isDataset, database, user, updateType, propertyType="USES"
             if len(items) == 1
             else ', '.join([f"{item} AS {item.split('.')[-1]}" for item in items])
         )
-
 
         # Query branching based on uses ties or node properties
         if propertyType == "USES":
@@ -448,19 +441,13 @@ def updateProperty(df,isDataset, database, user, updateType, propertyType="USES"
             q = f"""
             UNWIND $rows AS row
             MATCH (n {{CMID: row.CMID}})
-            SET n.status = "update", {keys}
+            SET {keys}
             RETURN elementId(n) as nodeID, n.CMID as CMID
             """
 
         df_dict = df.to_dict(orient="records")
 
-        print("Stage 2")
-
         result = getQuery(query=q, driver=driver, params={"rows": df_dict})
-
-        print(result)
-
-        print("Stage 3")
 
         logs = []
 
@@ -762,7 +749,7 @@ def input_Nodes_Uses(
     geocode=False,
     batchSize=1000,
 ):
-   
+       
     updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write="w")
 
     if user is None:
@@ -868,16 +855,11 @@ def input_Nodes_Uses(
 
         if not invalid_rows.empty:
             raise ValueError(f"When eventType or eventDate have non-empty values, there can only be one parent in that row:\n{invalid_rows}")
-
+    
     # check if any optional property columns are completely empty
     for i in optionalProperties:
         if dataset[i].replace("",pd.NA).isna().all():
             raise ValueError(f"{dataset[i]} has all empty values")
-
-    # checks for duplicate columns
-    duplicates = dataset.columns[dataset.columns.duplicated()]
-    if not duplicates.empty:
-        raise ValueError("Duplicate column names found:", duplicates.tolist())
 
     """checks if all required columns are present"""
 
@@ -924,8 +906,6 @@ def input_Nodes_Uses(
         labels = getQuery(
             "MATCH (l:LABEL) return l.CMName as label", driver, type="list"
         )
-
-        print(dataset["label"].unique())
 
         invalid_labels = [label for label in dataset["label"].unique() if label not in labels]
         if invalid_labels:
@@ -989,16 +969,16 @@ def input_Nodes_Uses(
             error_msg += f" - Column '{col}': {values}\n"
         raise ValueError(error_msg)
     
-    # # checks for year validities
-    # if "recordEnd" in dataset.columns:
-    #     invalid_rows = get_invalid_ranges(dataset, "recordStart", "recordEnd")
-    #     if not invalid_rows.empty:
-    #         raise ValueError(f"Found {len(invalid_rows)} invalid rows where 'recordEnd' < 'recordStart'")
+    # checks for year validities
+    if "recordEnd" in dataset.columns:
+        invalid_rows = get_invalid_ranges(dataset, "recordStart", "recordEnd")
+        if not invalid_rows.empty:
+            raise ValueError(f"Found {len(invalid_rows)} invalid rows where 'recordEnd' < 'recordStart'")
     
-    # if "yearEnd" in dataset.columns:
-    #     invalid_rows = get_invalid_ranges(dataset, "yearStart", "yearEnd")
-    #     if not invalid_rows.empty:
-    #         raise ValueError(f"Found {len(invalid_rows)} invalid rows where 'yearEnd' < 'yearStart'")
+    if "yearEnd" in dataset.columns:
+        invalid_rows = get_invalid_ranges(dataset, "yearStart", "yearEnd")
+        if not invalid_rows.empty:
+            raise ValueError(f"Found {len(invalid_rows)} invalid rows where 'yearEnd' < 'yearStart'")
         
     #Confirms that all latitude and longitudes are in range
     if {"latitude", "longitude"}.issubset(dataset.columns):
@@ -1006,17 +986,17 @@ def input_Nodes_Uses(
             try:
                 lat = float(row["latitude"])
                 if lat < -90 or lat > 90:
-                    return f"Latitude at row {index} is illogical (value: {lat})."
+                    raise ValueError(f"Latitude at row {index} is illogical (value: {lat}).")
             except (ValueError, TypeError):
-                return f"Latitude at row {index} is not a valid number (value: {row['latitude']})."
+                raise ValueError(f"Latitude at row {index} is not a valid number (value: {row['latitude']}).")
 
             try:
                 lon = float(row["longitude"])
                 if lon < -180 or lon > 180:
-                    return f"Longitude at row {index} is illogical (value: {lon})."
+                    raise ValueError(f"Longitude at row {index} is illogical (value: {lon}).")
             except (ValueError, TypeError):
-                return f"Longitude at row {index} is not a valid number (value: {row['longitude']})."
-
+                raise ValueError(f"Longitude at row {index} is not a valid number (value: {row['longitude']}).")
+            
     """ Replaces nan/NA values with None and then replaces all none with "" """
     """ Also converts everything to string """
     dataset = dataset.replace({np.nan: None, pd.NA: None})
@@ -1398,7 +1378,7 @@ def input_Nodes_Uses(
         for group in grouped_columns["group"].unique():
             linkProperties.append(group)
         linkProperties = list(set(linkProperties))
-           
+               
     # if user chooses to upload district and recordyear information from dataset
     if addDistrict:
         updateLog(

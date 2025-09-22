@@ -30,11 +30,11 @@ def get_merge_template(database, datasetID):
         return result, 500
 
 
-def get_moveUSESValidate(database, relid):
-    try:
-        from CM.admin import moveUSESValidate
-        result = moveUSESValidate(relid, database)
-        return result, 200
-    except Exception as e:
-        result = str(e)
-        return result, 500
+# def get_moveUSESValidate(database, relid):
+#     try:
+#         from CM.admin import moveUSESValidate
+#         result = moveUSESValidate(relid, database)
+#         return result, 200
+#     except Exception as e:
+#         result = str(e)
+#         return result, 500

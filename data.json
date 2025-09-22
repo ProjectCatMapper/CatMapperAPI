@@ -1,16 +1,51 @@
 [
     {
         "cood": [
-            -105.7415,
-            32.6133
+            -3.4406,
+            19.5587
         ],
-        "source": "p3k14c2022_6"
+        "source": "Price1990"
     },
     {
         "cood": [
-            -104.3045,
-            32.4716
+            0.2367,
+            17.7469
         ],
-        "source": "p3k14c2022_6"
+        "source": "Price1990"
+    },
+    {
+        "cood": [
+            2.0,
+            20.0
+        ],
+        "source": "GlobalJukebox"
+    },
+    {
+        "cood": [
+            2,
+            20
+        ],
+        "source": "HRAF"
+    },
+    {
+        "cood": [
+            2,
+            20
+        ],
+        "source": "EthnographicAtlas"
+    },
+    {
+        "cood": [
+            7.14,
+            23
+        ],
+        "source": "Price1990"
+    },
+    {
+        "cood": [
+            9.02,
+            31.11
+        ],
+        "source": "Price1990"
     }
 ]
