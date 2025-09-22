@@ -67,7 +67,7 @@ def get_backup_csv_urls(database, bucket="sociomap-backups", region="us-west-1",
 
     return results
 
-def getAdvancedDownload(database, CMID, properties):
+def getAdvancedDownload(database,domain, properties,CMIDs):
     """
     Returns a dataset with the given CMIDs and properties.
 
@@ -77,65 +77,63 @@ def getAdvancedDownload(database, CMID, properties):
         properties (dict): Additional properties to include with the download
 
     Returns:
-        list of tuples: (url, size_in_MB)
+        list of dict: Each dict contains the CMID, CMName, and requested properties
     """
     driver = getDriver(database)
     
-    if isinstance(CMID, str):
-        CMID = [CMID]
+    # if isinstance(CMID, str):
+    #     CMID = [CMID]
     if isinstance(properties, str):
         properties = [properties]
         
-    if not isinstance(CMID, list) or not isinstance(properties, list):
-        raise ValueError("CMID and properties must be lists.")
-    
-    # determine if the second letter starts with a 'D' or 'M' to determine if it is a dataset or category
-    if CMID[0][1] == 'D':
-        domain = "DATASET"
-    elif CMID[0][1] == 'M':
-        domain = "CATEGORY"
-    else:
-        raise ValueError("Invalid CMID format. Must start with 'AD/SD' or 'AM/SM'.")
+    if not isinstance(properties, list):
+        raise ValueError("Properties must be lists.")
         
     # determine if properties are node or relationship properties
-    if domain == "DATASET":
-        prop_query = """
+
+    prop_query1 = """
     match (p:PROPERTY) where p.CMName in $properties and not p.type = "relationship" return p.CMName as property, p.type as type
     """
-    elif domain == "CATEGORY":
-        prop_query = """
+    prop_query2 = """
     match (p:PROPERTY) where p.CMName in $properties and (p.nodeType contains "CATEGORY" or p.nodeType is null) return p.CMName as property, p.type as type
     """
-    else:
-        raise ValueError("Invalid domain. Must be 'DATASET' or 'CATEGORY'.")
     
-    prop_metadata = getQuery(query=prop_query, driver=driver, properties=properties)
+    prop_metadata1 = getQuery(query=prop_query1, driver=driver, properties=properties)
+    prop_metadata2 = getQuery(query=prop_query2, driver=driver, properties=properties)
     
     # format return query as c.{property} if property is a node property or r.{property} if relationship property
-    node_properties = [p['property'] for p in prop_metadata if p['type'] == 'node']
-    relationship_properties = [p['property'] for p in prop_metadata if p['type'] == 'relationship']
+    node_properties1 = [p['property'] for p in prop_metadata1 if p['type'] == 'node']
+    node_properties2 = [p['property'] for p in prop_metadata2 if p['type'] == 'node']
+    relationship_properties = [p['property'] for p in prop_metadata2 if p['type'] == 'relationship']
 
-    node_query = [f"c.{prop} as {prop}" for prop in node_properties]
+    node_query1 = [f"c.{prop} as {prop}" for prop in node_properties1]
+    node_query2 = [f"c.{prop} as {prop}" for prop in node_properties2]
     relationship_query = [f"r.{prop} as {prop}" for prop in relationship_properties]
-    if not node_query and not relationship_query:
+    if not node_query1 and not node_query2 and not relationship_query:
         raise ValueError("No valid properties found for the given CMIDs.")
-    prop_query = ", ".join(node_query + relationship_query)   
     
-    if domain == "DATASET":
-        query = f"""
+    prop_query = ", ".join(node_query2 + relationship_query)  
+    if node_query1: 
+        node_query1 = "," + ", ".join(node_query1)
+    else: 
+        node_query1 = ""
+    
+    query1 = f"""
         unwind $CMID as cmid
         match (c:DATASET) where c.CMID = cmid
-        return c.CMID as CMID, c.CMName as CMName, {prop_query} 
+        return c.CMID as CMID, c.CMName as CMName {node_query1} 
         """
-    elif domain == "CATEGORY":
-        query = f"""
+    query2 = f"""
         unwind $CMID as cmid
-        match (c:CATEGORY)<-[r:USES]-(:DATASET) where c.CMID = cmid
-        return c.CMID as CMID, c.CMName as CMName, labels(c) as domains, {prop_query} 
+        match (c:CATEGORY)<-[r:USES]-(d:DATASET) where c.CMID = cmid
+        return c.CMID as CMID, c.CMName as CMName, labels(c) as domains, apoc.text.join(collect(distinct d.CMID),"; ") as datasets, {prop_query} 
         """
-        
-    result = getQuery(query=query, driver=driver, CMID=CMID, type = "df")
     
+    result1 = getQuery(query=query1, driver=driver, CMID=CMIDs, type = "df")
+    result2 = getQuery(query=query2, driver=driver, CMID=CMIDs, type = "df")
+
+    result = pd.concat([result1, result2])
+
     def agg_semicolon(series):
         # flatten any lists
         values = []
@@ -150,7 +148,7 @@ def getAdvancedDownload(database, CMID, properties):
             if v not in seen:
                 seen.append(v)
         return "; ".join(map(str, seen)) if seen else ""
-
+    
 # group and aggregate all columns
     group_cols = ["CMID"]
     result = result.groupby(group_cols, as_index=False).agg(agg_semicolon)

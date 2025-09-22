@@ -29,6 +29,7 @@ def swagger_yaml():
     return send_file('swagger.yml', mimetype='application/yaml')
 
 
+# gets samples, info data, categories and map data
 @app.route("/category", methods=['GET'])
 def catm():
 
@@ -166,7 +167,11 @@ return distinct Domain, Count order by Domain
     return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID,
     labels(a) as Domains, a.parent as Parent,
       a.DatasetCitation as Citation, "<a href ='" + a.DatasetLocation + "' target='_blank' >" + a.DatasetLocation +"</a>" as `Dataset Location`,
-        a.ApplicableYears as `Applicable Years`,
+        a.yearPublished as `Year Published`,
+        CASE 
+            WHEN a.recordStart IS NULL AND a.recordEnd IS NULL THEN null
+            ELSE coalesce(a.recordStart, '') + '-' + coalesce(a.recordEnd, '')
+        END AS `Time Span`,
         custom.getName(a.foci) as Foci,
         a.Note as Note
     '''
@@ -883,8 +888,8 @@ def getNetworkjs():
             domain = re.split(",", domain)
         else:
             domain = ["CATEGORY", "DATASET"]
-
-        endcmid = request.args.get('endcmid')
+        
+        #endcmid = request.args.get('endcmid')
         relation = request.args.get('relation')
         if relation is None:
             relation = "USES"
@@ -892,38 +897,37 @@ def getNetworkjs():
 
         driver = getDriver(database)
 
-        if endcmid is not None:
-            cypher_query = """
-unwind $cmid as cmid unwind $endcmid as endcmid unwind $relation as relation
-MATCH (a)
-WHERE a.CMID = cmid
-optional match (a)-[r]-(e)
-where type(r) = relation and e.CMID = endcmid and
-not isEmpty([label IN labels(e)
-WHERE label IN apoc.coll.flatten([$domain],true)])
-with collect(distinct a) as a, r, e
-return a, collect(distinct r) as r, collect(distinct e) as e
-LIMIT 300
-"""
-        else:
-            cypher_query = """
-unwind $cmid as cmid unwind $relation as relation MATCH (a)
-WHERE a.CMID = cmid
-optional match (a)-[r]-(e)
-where type(r) = relation and
-not isEmpty([label IN labels(e)
-WHERE label IN apoc.coll.flatten([$domain],true)])
-with collect(distinct a) as a, r, e
-return a, collect(distinct r) as r, collect(distinct e) as e
-LIMIT 300
-"""
+        #         if endcmid is not None:
+        #             cypher_query = """
+        # unwind $cmid as cmid unwind $endcmid as endcmid unwind $relation as relation
+        # MATCH (a)
+        # WHERE a.CMID = cmid
+        # optional match (a)-[r]-(e)
+        # where type(r) = relation and e.CMID = endcmid and
+        # not isEmpty([label IN labels(e)
+        # WHERE label IN apoc.coll.flatten([$domain],true)])
+        # with collect(distinct a) as a, r, e
+        # return a, collect(distinct r) as r, collect(distinct e) as e
+        # LIMIT 300
+        # """
+        #         else:
 
-        max_load = 1000
+        cypher_query = """
+        unwind $cmid as cmid unwind $relation as relation MATCH (a)
+        WHERE a.CMID = cmid
+        optional match (a)-[r]-(e)
+        where type(r) = relation and
+        not isEmpty([label IN labels(e)
+        WHERE label IN apoc.coll.flatten([$domain],true)])
+        with collect(distinct a) as a, r, e
+        LIMIT 300
+        return a, collect(distinct r) as r, collect(distinct e) as e
+        """
 
         with driver.session() as session:
             # Execute the Cypher queries
             result = session.run(
-                cypher_query, cmid=cmid, relation=relation, domain=domain, endcmid=endcmid, max_load=max_load)
+                cypher_query, cmid=cmid, relation=relation, domain=domain)
             result = unlist([dict(record) for record in result])
             node = []
             rel = []
@@ -943,7 +947,7 @@ LIMIT 300
         rel = [flatten_json(entry) for entry in rel]
         end = [flatten_json(entry) for entry in end]
 
-        return {"node": node, "relations": rel, "relNodes": end, "query": cypher_query, "params": [{"cmid": cmid, "database": database, "domain": domain, "relation": relation, "endcmid": endcmid}]}
+        return {"node": node, "relations": rel, "relNodes": end, "params": [{"cmid": cmid, "database": database, "domain": domain, "relation": relation}]}
     except Exception as e:
         return str(e), 500
 
@@ -1057,7 +1061,6 @@ def getSearch():
         context = request.args.get('context')
         dataset = request.args.get('dataset')
         country = request.args.get('country')
-        limit = request.args.get('limit')
         query = request.args.get('query')
 
         result = search(
@@ -1069,16 +1072,14 @@ def getSearch():
             yearEnd,
             context,
             country,
-            limit,
             query,
-            dataset
-        )
+            dataset)
+        
         return jsonify(result)
 
     except Exception as e:
         return str(e), 500
-
-
+    
 @app.route('/translate2', methods=['POST'])
 def getTranslate2():
     try:
@@ -1098,9 +1099,9 @@ def getTranslate2():
         yearEnd = unlist(data.get('yearEnd'))
         query = unlist(data.get("query"))
         table = data.get("table")
-        uniqueRows = data.get("uniqueRows")
+        countsamename = data.get("uniqueRows")
 
-        data = translate(
+        data, desired_order = translate(
             database=database,
             property=property,
             domain=domain,
@@ -1113,11 +1114,13 @@ def getTranslate2():
             yearEnd=yearEnd,
             query=query,
             table=table,
-            uniqueRows=uniqueRows)
+            countsamename=countsamename)
 
         data_dict = data.to_dict(orient='records')
 
-        return data_dict
+        print(data_dict)
+
+        return jsonify({"file": data_dict, "order": desired_order})
 
     except Exception as e:
         return str(e), 500
@@ -1303,11 +1306,10 @@ def admin_usesproperties():
     CMID = request.args.get('CMID')
     database = request.args.get('database')
     func = request.args.get("func")
-    print(func)
 
     driver = getDriver(database)
 
-    q = "MATCH (n)<-[r:USES]-(d) WHERE n.CMID = $cmid RETURN n,r,d"
+    q = "MATCH (n:CATEGORY)<-[r:USES]-(d:DATASET) WHERE n.CMID = $cmid RETURN {CMName: n.CMName, CMID: n.CMID,elementId: elementId(n)} AS n,r,d"
     
     q1 = "MATCH (p:PROPERTY) WHERE p.type='relationship' RETURN p.CMName as property"
 
@@ -1328,7 +1330,7 @@ def admin_usesproperties():
         
         allowed = session.run(q1).data()
         allowed_props = list({row['property'] for row in allowed})
-    
+        
     return {
         "r": records_list,
         "r1": allowed_props,
@@ -1366,7 +1368,7 @@ def check_ambiguous_usesties():
     rel_id = USES_property[1]["id"]
     driver = getDriver(database)
 
-    result = check_ambiguous_ties_moveUSESties(driver,CMID_from,rel_id)
+    result = check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id)
     return result
 
 @app.route('/admin', methods=['GET'])
@@ -1435,14 +1437,10 @@ def getAdminEdit():
                 raise Exception("User not authorized")
         
         result = "Nothing returned"
-        # if fun == "getUSESrels":
-        #     result = getUSESrels(request,driver)
         if fun == "mergeNodes":
             keepcmid = unlist(data.get('keepcmid'))
             deletecmid = unlist(data.get('deletecmid'))
             result = mergeNodes(keepcmid, deletecmid, user, database)
-        elif fun == "addIndexes":
-            result = addIndexes(driver)
         elif fun == "processUSES":
             CMID = cleanCMID(data.get('CMID'))
             result = processUSES(database=database, CMID=CMID)
@@ -1453,7 +1451,6 @@ def getAdminEdit():
             new = unlist(data.get('new'))
             result = replaceProperty(cmid, property, old, new, database)
         elif fun == "add/edit/delete node property":
-            print("hello")
             result = add_edit_delete_Node(
                 database, credentials.get("userid"), input)
         elif fun == "add/edit/delete USES property":
@@ -1480,7 +1477,6 @@ def getAdminEdit():
         data = str(e)
         return data, 500
 
-
 @app.route('/dataset', methods=['GET', 'POST'])
 def getDataset():
     # to do: document
@@ -1500,6 +1496,8 @@ def getDataset():
             children = unlist(data.get('children'))
         else:
             raise Exception("invalid request method")
+        
+        print(cmid)
 
         driver = getDriver(database)
 
@@ -1526,7 +1524,8 @@ def getDataset():
             unwind $cmid as cmid
             match (:DATASET {CMID: cmid})-[:CONTAINS*..5]->(d:DATASET) return distinct d.CMID as CMID
             """
-            result = getQuery(query=query, driver=driver, type="list")
+            result = getQuery(query=query,params={
+                "cmid": cmid}, driver=driver, type="list")
             if result is not None:
                 cmid = [cmid] + result
 
@@ -1953,6 +1952,40 @@ def addFoci():
     except Exception as e:
         result = str(e)
         return result, 500
+    
+@app.route('/homepagecount',methods=['GET'])
+def gethomepageCount():
+    try:
+        database = request.args.get('database')
+
+        driver = getDriver(database)
+
+        if database == "SocioMap":
+            domains = ["ETHNICITY","RELIGION","LANGUOID","DISTRICT"]
+        elif database == "ArchaMap":
+            domains = ["SITE","PERIOD","CULTURE","CERAMIC","STONE","PROJECTILE_POINT","WEAPON","COIN"]
+        
+        query = """
+                UNWIND $labels AS lbl
+                RETURN lbl AS label, count { MATCH (n) WHERE lbl IN labels(n) } AS node_count
+                """
+
+        data = getQuery(query=query, driver=driver, params={
+            "labels": domains})
+        
+        if database == "ArchaMap":
+            data.append({"label": "Artifact","node_count":data[3]["node_count"] + data[4]["node_count"] + data[5]["node_count"] + data[6]["node_count"] + data[7]["node_count"]})
+            del data[7]
+            del data[6]
+            del data[5]
+            del data[4]
+            del data[3]
+        
+        return data
+
+    except Exception as e:
+        result = str(e)
+        return result, 500
 
 
 @app.route('/progress', methods=['GET'])
@@ -2185,16 +2218,15 @@ def download_zip(hash_id):
     else:
         abort(404, description=f"{file_path} not found")
 
-
 app.add_url_rule('/logs/<database>/<CMID>', 'getLogs',
                  getLogs, methods=['GET'])
 
-app.add_url_rule('/admin/moveUSESValidate/<database>/<relid>', 'get_moveUSESValidate',
-                 get_moveUSESValidate, methods=['GET'])
+# The call for ambiguous USES ties is above at check_ambiguous_usesties().
+# app.add_url_rule('/admin/moveUSESValidate/<database>/<relid>', 'get_moveUSESValidate',
+#                  get_moveUSESValidate, methods=['GET'])
 
 app.add_url_rule('/download/advanced/<database>', 'get_advanced_download_route',
                  get_advanced_download_route, methods=['POST'])
-
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)

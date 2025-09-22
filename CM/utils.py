@@ -40,7 +40,7 @@ def unlist(l):
         l = l[0]
     return l
 
-
+# it returns true if CMID exists else returns empty list
 def isValidCMID(cmid, driver):
 
     query = "unwind $cmid as cmid match (c) where c.CMID = cmid return c.CMID as cmid, true as exists"
