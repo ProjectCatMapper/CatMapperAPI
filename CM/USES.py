@@ -343,7 +343,6 @@ return count(n)
 
 def processUSES(database, CMID=None, user="0"):
     try:
-
         driver = getDriver(database)
         # Update alternative names
         print("updating alternate names")
@@ -556,21 +555,6 @@ call apoc.do.when(size(extra) > 0,'match (d)<-[r:CONTAINS]-(p) where p.CMID in e
 return count(*)
 """
         getQuery(query, driver=driver, params={"CMID": CMID})
-
-        #updating dataset names
-        
-        # query =  f"""
-        #             {q1}
-        #             MATCH (n:DATASET {q2})
-        #             WITH n,
-        #             [x IN [n.CMname, n.shortName, n.DatasetCitation] WHERE x IS NOT NULL] AS newNames
-        #             SET n.names = apoc.coll.toSet(
-        #             (CASE WHEN n.names IS NOT NULL THEN n.names ELSE [] END) + newNames
-        #             )
-        #             RETURN n.names
-        #             """
-
-        # getQuery(query, driver=driver, params={"CMID": CMID})
 
         updateAltNames(database, CMID=CMID)
 

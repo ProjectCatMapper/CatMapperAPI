@@ -46,7 +46,7 @@ def validateJSON(database, property='parentContext', path="/mnt/storage/app/tmp/
         return "Unable to validate JSON properties: " + str(e)
 
 
-def checkDomains(database, mail=None):
+def checkDomains(database, mail=None, return_type="data"):
     try:
         driver = getDriver(database)
         query = """
@@ -76,15 +76,18 @@ def checkDomains(database, mail=None):
         return "MissingDomain" as query, n.CMID as CMID, n.CMName as CMName, r.label as subdomain, labelGroup[r.label] as domain, d.CMID as datasetID
         """
         results = getQuery(query, driver, type ="df")
+        fp1 = None
         if isinstance(results, pd.DataFrame) and not results.empty:
+            with tempfile.NamedTemporaryFile(delete=False, suffix="_missingDomains.xlsx", dir="/tmp") as tmpfile:
+                fp1 = tmpfile.name
+                results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                with tempfile.NamedTemporaryFile(delete=False, suffix="_missingDomains.xlsx", dir="/tmp") as tmpfile:
-                    fp1 = tmpfile.name
-                    results.to_excel(fp1, index=False)
                 sendEmail(mail, subject=f"Missing Domains for {database}", recipients=[
                             "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
-                
-        return results.to_dict(orient="records")
+        if return_type == "data":        
+            return results.to_dict(orient="records")
+        else:
+            return {"info": f"Completed and returned {len(results)} rows","filepath": fp1}
 
     except Exception as e:
         return str(e)
@@ -530,6 +533,7 @@ def checkUSES(database, save = True, mail=None):
         RETURN "No Name" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
         """
         result = getQuery(query, driver, type="df")
+        fp1 = None
         if isinstance(result, pd.DataFrame) and not result.empty:
             if save:
                 with tempfile.NamedTemporaryFile(delete=False, suffix="_check_uses.xlsx", dir="/tmp") as tmpfile:
@@ -546,22 +550,27 @@ def checkUSES(database, save = True, mail=None):
         return result, 500
 
 
-def reportChanges(database, dateStart = None, dateEnd = None, action = "created node", user = None):
+def reportChanges(database, dateStart = None, dateEnd = None, action = "default", user = None, mail = None, return_type = "data"):
     """
     This function generates a report of changes in the database based on the logs.
     Parameters:
     - database: The name of the database to check.
     - dateStart: The start date to filter changes (optional) -- returns yesterday's date if not provided.
     - dateEnd: The end date to filter changes (optional) -- returns today's date if not provided.
-    - action: The type of action to filter changes (optional) -- defaults to "created node". Other options could be "created relationship", "deleted", "merged", "changed", etc.
+    - action: The type of action to filter changes (optional) -- default value is "default" which returns all of these actions "created node", "created relationship", "deleted", "merged", "changed". Can be passed as a list.
     - user: The user who made the changes (optional) -- defaults to None.
     Returns:
     - A json object containing the reported changes.
     """
     try:
         driver = getDriver(database)
+        if action == "default":
+            action = ["created node","created relationship", "deleted", "merged", "changed"]
+        elif isinstance(action, str):
+            action = [action]
+        elif not isinstance(action, list):
+            return "Invalid action parameter. Must be a string or a list of strings."
         data = {
-            'action': action,
             'user': user,
             'dateStart': dateStart if dateStart else (pd.Timestamp.now() - pd.Timedelta(days=1)).strftime('%Y-%m-%d'),
             'dateEnd': dateEnd if dateEnd else pd.Timestamp.now().strftime('%Y-%m-%d')
@@ -575,16 +584,61 @@ def reportChanges(database, dateStart = None, dateEnd = None, action = "created 
             user_query = "AND l.user = toString(row.user)"
         else: 
             user_query = ""
-        query = f"""
+         
+        queries = [] 
+        for act in action:
+             queries.append(f"""
         unwind $rows as row
         MATCH (l:LOG)
-        WHERE l.action starts with row.action AND date(datetime(l.timestamp)) >= date(row.dateStart) AND date(datetime(l.timestamp)) <= date(row.dateEnd) {user_query}
-        RETURN row.action as action, toString(date(datetime(l.timestamp))) AS date, l.user AS user, count(*) AS count order by date DESC, user
-        """
-        # return {"query": query, "params": {"rows": [data]}}
-        results = getQuery(query, driver, params={"rows":data},type="dict")
+        WHERE l.action starts with "{act}" AND date(datetime(l.timestamp)) >= date(row.dateStart) AND date(datetime(l.timestamp)) <= date(row.dateEnd) {user_query}
+        RETURN "{act}" as action, toString(date(datetime(l.timestamp))) AS date, l.user AS user, count(*) AS count order by date DESC, user
+        """)
 
-        return results
+        query = " UNION ALL ".join(queries)
+
+        # return {"query": query, "params": {"rows": [data]}}
+        results = getQuery(query, driver, params={"rows":data},type="df")
+        
+        driver_uses = getDriver("userdb")
+        query_uses = """
+        MATCH (u:USER) return u.userid as user, u.username as username, u.first + " " + u.last as fullname
+        """
+        users_df = getQuery(query_uses, driver=driver_uses, type="df")
+
+        results = results.merge(users_df, on='user', how='left')
+
+        fp1 = None
+        if isinstance(results,pd.DataFrame):
+            with tempfile.NamedTemporaryFile(delete=False, suffix="_DBchanges.xlsx", dir="/tmp") as tmpfile:
+                    fp1 = tmpfile.name
+            results.to_excel(fp1, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Database Changes for {database} and {action} from {data['dateStart']} to {data['dateEnd']}", recipients=[
+                        "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+
+        if return_type == "data":
+            return results.to_dict(orient="records")
+        else:
+            agg = results.groupby("action", as_index=False)["count"].sum()
+            agg_html = agg.to_html(index=False,border=0.5, classes="dataframe", justify="left")
+            return {"info": agg_html,"filepath": fp1}
 
     except Exception as e:
         return str(e)
+    
+def runRoutines(database,mail):
+    files = []
+    info = []
+    info.append("Routines started at " + pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'))
+    
+    info.append("Modifications to " + database + ":")
+    data = reportChanges(database, return_type = "info")
+    
+    info.append("Check Domains for " + database + ":")
+    data = checkDomains(database, mail=None, return_type="info")
+    info.append(data.get("info"))
+    files.append(data.get("filepath"))
+
+    sendEmail(mail, subject=f"Routines for {database} - {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}", recipients=["rjbischo@asu.edu"], body="<br>".join(info), sender=os.getenv("mail_default"), attachments=files)
+    return "Routines completed"
+    
