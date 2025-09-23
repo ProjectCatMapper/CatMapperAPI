@@ -1,50 +1,8 @@
 [
     {
         "cood": [
-            -3.4406,
-            19.5587
-        ],
-        "source": "Price1990"
-    },
-    {
-        "cood": [
-            0.2367,
-            17.7469
-        ],
-        "source": "Price1990"
-    },
-    {
-        "cood": [
-            2.0,
-            20.0
-        ],
-        "source": "GlobalJukebox"
-    },
-    {
-        "cood": [
-            2,
-            20
-        ],
-        "source": "HRAF"
-    },
-    {
-        "cood": [
-            2,
-            20
-        ],
-        "source": "EthnographicAtlas"
-    },
-    {
-        "cood": [
-            7.14,
-            23
-        ],
-        "source": "Price1990"
-    },
-    {
-        "cood": [
-            9.02,
-            31.11
+            144.29,
+            -4.62
         ],
         "source": "Price1990"
     }

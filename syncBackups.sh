@@ -6,7 +6,7 @@ aws s3 sync /mnt/storage/app/db/sociomap1/backups/ s3://catmapper/backups/sociom
 
 aws s3 sync /mnt/storage/app/db/archamap1/backups/ s3://catmapper/backups/archamap1/;
 
-aws s3 sync /mnt/storage/app/GISdb/backups/ s3://catmapper/backups/gisdb/;
+aws s3 sync /mnt/storage/app/db/gisdb/backups/ s3://catmapper/backups/gisdb/;
 
-aws s3 sync /mnt/storage/app/userdb/backups/ s3://catmapper/backups/userdb/;
+aws s3 sync /mnt/storage/app/db/userdb/backups/ s3://catmapper/backups/userdb/;
 
