@@ -333,7 +333,7 @@ def createUSES(links, database, user):
 
 
 # function to update or replace properties of USES ties or nodes, (functions 3 to 6)
-def updateProperty(df,isDataset, database, user, updateType, propertyType="USES"):
+def updateProperty(df,optionalProperties,isDataset, database, user, updateType, propertyType="USES"):
     try:
         # double checking for errors, if in future we call this function elsewhere outside this pipeline
         if not updateType in ["overwrite", "update"]:
@@ -354,14 +354,50 @@ def updateProperty(df,isDataset, database, user, updateType, propertyType="USES"
         for required in requiredCols:
             if required not in df.columns:
                 raise ValueError(f"Missing required column {required}")
-                        
-        vars = df.drop(
-            columns=[col for col in requiredCols if col in df.columns]
-        ).columns.tolist()
+
+        #Every column excluding the required columns in the dataframe                
+        # vars = df.drop(
+        #     columns=[col for col in requiredCols if col in df.columns]
+        # ).columns.tolist()
+
+        vars = optionalProperties
+
+        if "NewKey" in vars:
+            for x in range(len(vars)):
+                if vars[x] == "NewKey":
+                    vars[x] = "Key"
 
         if not vars:
-            raise ValueError("One of the selected properties is not a property of USES ties. Hence it cannot be uploaded.")
+            raise ValueError("No columns to change were uploaded.")
+                
+        # End of error checking
+        
+        #get elementID of USES tie uniquely identified by CMID,Key and datasetID
+        id_query = """UNWIND $rows AS row
+            MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
+            RETURN elementId(r) AS relID, row.CMID AS CMID, row.Key AS Key, row.datasetID AS datasetID
+            """
+        
+        id_values = getQuery(
+            query=id_query,
+            driver=driver,
+            params={"rows": df.to_dict(orient="records")}, type="df"
+        )
 
+        df = df.merge(
+                id_values,
+                on=["CMID", "Key", "datasetID"],
+                how="left"
+            )
+                        
+        if "NewKey" in df.columns:
+            df = df.rename(columns={
+            'Key': 'OldKey',
+            })
+            df = df.rename(columns={
+                'NewKey': 'Key',
+            })
+        
         # this code builds the cypher query
         #query = """
         #    match (n:PROPERTY)
@@ -382,35 +418,44 @@ def updateProperty(df,isDataset, database, user, updateType, propertyType="USES"
 
         metaTypeDict = {item["property"]: item["metaType"] for item in filteredItems}
 
-        keys = []
+        props = []
                  
         for var in vars:
             # Get the metaType for the given property
             metaType = metaTypeDict.get(var)
             if updateType == "overwrite" and var != "log":
-                keys.append(
+                props.append(
                     f"{node_or_tie}.{var} = custom.formatProperties(['',row.{var}],'{metaType}',';')[0].prop"
                 )
             else:
-                keys.append(
+                props.append(
                     f"{node_or_tie}.{var} = custom.formatProperties([{node_or_tie}.{var},row.{var}],'{metaType}',';')[0].prop"
                 )
-        old_keys = ", ".join([f"`{var}`: COALESCE({node_or_tie}.{var}, 'None')" for var in vars])
+        
 
-        keys = ", ".join(keys)
+        old_props = ", ".join([f"`{var}`: COALESCE({node_or_tie}.{var}, 'None')" for var in vars])
+
+        props = ", ".join(props)
       
         if propertyType == "USES":
+            # get_old_vals_query = f"""
+            # UNWIND $rows AS row
+            # MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}})
+            # RETURN elementId(r) AS relID, b.CMID AS CMID, row.Key AS Key, row.datasetID AS datasetID,
+            #     {{ {old_keys} }} AS oldVals
+            # """
             get_old_vals_query = f"""
             UNWIND $rows AS row
-            MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}})
+            MATCH (a:DATASET)-[r:USES]->(b:CATEGORY)
+            WHERE elementId(r) = row.relID
             RETURN elementId(r) AS relID, b.CMID AS CMID, row.Key AS Key, row.datasetID AS datasetID,
-                {{ {old_keys} }} AS oldVals
+                {{ {old_props} }} AS oldVals
             """
         elif propertyType == "NODE":
             get_old_vals_query = f"""
             UNWIND $rows AS row
             MATCH (n {{CMID: row.CMID}})
-            RETURN elementId(n) AS nodeID, n.CMID AS CMID,{{ {old_keys} }} AS oldVals
+            RETURN elementId(n) AS nodeID, n.CMID AS CMID,{{ {old_props} }} AS oldVals
             """
         
         old_values = getQuery(
@@ -419,29 +464,50 @@ def updateProperty(df,isDataset, database, user, updateType, propertyType="USES"
             params={"rows": df.to_dict(orient="records")},
         )
 
-        items = [k.split('=')[0].strip() for k in keys.split(',') if '=' in k]
+        items = [k.split('=')[0].strip() for k in props.split(',') if '=' in k]
 
         # Format each property as: r.prop AS prop - for cypher query
+
         return_props = (
             items[0] + f" AS {items[0].split('.')[-1]}"
             if len(items) == 1
             else ', '.join([f"{item} AS {item.split('.')[-1]}" for item in items])
         )
+        
 
         # Query branching based on uses ties or node properties
         if propertyType == "USES":
-            q = f"""
-            UNWIND $rows AS row
-            MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}})
-            WITH row, r, b
-            SET r.status = 'update', {keys}
-            RETURN elementId(b) as nodeID,elementId(r) as relID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, {return_props}
-            """
+            # q = f"""
+            # UNWIND $rows AS row
+            # MATCH (a:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(b:CATEGORY {{CMID: row.CMID}})
+            # WITH row, r, b
+            # SET r.status = 'update', {props}
+            # RETURN elementId(b) as nodeID,elementId(r) as relID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, {return_props}
+            # """
+
+            if "Key" in vars:
+                q = f"""
+                UNWIND $rows AS row
+                MATCH (a:DATASET)-[r:USES]->(b:CATEGORY)
+                WHERE elementId(r) = row.relID
+                WITH row, r, b
+                SET r.status = 'update', {props}
+                RETURN elementId(b) as nodeID,elementId(r) as relID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID
+                """
+            else:
+                q = f"""
+                UNWIND $rows AS row
+                MATCH (a:DATASET)-[r:USES]->(b:CATEGORY)
+                WHERE elementId(r) = row.relID
+                WITH row, r, b
+                SET r.status = 'update', {props}
+                RETURN elementId(b) as nodeID,elementId(r) as relID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, {return_props}
+                """
         elif propertyType == "NODE":
             q = f"""
             UNWIND $rows AS row
             MATCH (n {{CMID: row.CMID}})
-            SET {keys}
+            SET {props}
             RETURN elementId(n) as nodeID, n.CMID as CMID
             """
 
@@ -461,7 +527,7 @@ def updateProperty(df,isDataset, database, user, updateType, propertyType="USES"
                     (
                         r
                         for r in df_dict
-                        if r.get("Key") == old_row.get("Key")
+                        if r.get("relID") == old_row.get("relID")
                         and r.get("CMID") == old_row.get("CMID")
                         and (
                             propertyType != "USES"
@@ -837,7 +903,10 @@ def input_Nodes_Uses(
     with driver.session() as session:
                 results = session.run(link_query)
                 linkProperties = [record["property"] for record in results.data() if record["property"] in optionalProperties]
-
+    
+    if "NewKey" in optionalProperties:
+        linkProperties.append("NewKey")
+    
     """............................"""
     """ Error checking starts here """
     """............................"""
@@ -1011,12 +1080,17 @@ def input_Nodes_Uses(
     # checks for all CMIDS to be either category or dataset
     if "CMID" in dataset.columns:
         cmids = dataset["CMID"].astype(str)[(dataset["CMID"] != '')]
+        pattern = r'^(SM|AM|AD|SD)\d+$'
+
+        for i in cmids:
+            if not bool(re.match(pattern, i)):
+                raise ValueError("There is a malformed CMID in the CMID column.")
 
         if (
             not cmids.str.startswith(("SD", "AD")).all()
             and not cmids.str.startswith(("SM", "AM")).all()
         ):
-            raise ValueError("Category or Dataset CMIDs cant be mixed.")
+            raise ValueError("Category or Dataset CMIDs cant be mixed in the CMID column.")
 
     """Checks for existence of CMID values in the database."""
 
@@ -1032,6 +1106,7 @@ def input_Nodes_Uses(
         "culture",
         "polity",
     ]
+    
     error_columns = ["CMID", "datasetID"] + multi_value_columns
 
     for i in error_columns:
@@ -1608,6 +1683,7 @@ def input_Nodes_Uses(
                     )
                     result = updateProperty(
                         links[link_cols],
+                        optionalProperties,
                         isDataset,
                         database=database,
                         user=user,
@@ -1619,6 +1695,7 @@ def input_Nodes_Uses(
                     )
                     result = updateProperty(
                         links[link_cols],
+                        optionalProperties,
                         isDataset,
                         database=database,
                         user=user,
@@ -1689,6 +1766,7 @@ def input_Nodes_Uses(
                     )
                     result = updateProperty(
                         nodes,
+                        optionalProperties,
                         isDataset,
                         database=database,
                         user=user,
@@ -1703,6 +1781,7 @@ def input_Nodes_Uses(
                     )
                     result = updateProperty(
                         nodes,
+                        optionalProperties,
                         isDataset,
                         database=database,
                         user=user,

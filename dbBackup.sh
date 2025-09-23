@@ -50,7 +50,7 @@ fi
 if [ "$run_gisdb" -eq 1 ]; then
     docker stop gisdb;
 
-    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/GISdb/backups/neo4j-backup.tar.zst -C /mnt/storage/app/GISdb data
+    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/db/gisdb/backups/neo4j-backup.tar.zst -C /mnt/storage/app/db/gisdb data
 
     docker start gisdb;
 fi
@@ -59,7 +59,7 @@ fi
 if [ "$run_gisdb" -eq 1 ]; then
     docker stop userdb;
 
-    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/userdb/backups/neo4j-backup.tar.zst -C /mnt/storage/app/userdb data
+    tar -I 'zstd -T0 --fast' -cvf /mnt/storage/app/db/userdb/backups/neo4j-backup.tar.zst -C /mnt/storage/app/db/userdb data
 
     docker start userdb;
 fi
@@ -70,8 +70,8 @@ chmod -R 777 /mnt/storage/app/db/archamap1/backups;
 
 chmod -R 777 /mnt/storage/app/db/sociomap1/backups;
 
-chmod -R 777 /mnt/storage/app/GISdb/backups;
+chmod -R 777 /mnt/storage/app/db/gisdb/backups;
 
-chmod -R 777 /mnt/storage/app/userdb/backups;
+chmod -R 777 /mnt/storage/app/db/userdb/backups;
 
 sudo -u rjbischo /mnt/storage/app/CatMapperAPI/syncBackups.sh;

@@ -341,7 +341,7 @@ return count(n)
         return result, 500
 
 
-def processUSES(database, CMID=None, user="0"):
+def processUSES(database, CMID=None, user="0", detailed = True):
     try:
         driver = getDriver(database)
         # Update alternative names
@@ -380,7 +380,10 @@ def processUSES(database, CMID=None, user="0"):
         q = f'''Match (c:CATEGORY)<-[r:USES]-(d:DATASET) where c.CMID IN $CMID_list and r.status is not null and r.status = 'update' set r.status = NULL'''
         getQuery(q,driver=driver,params={"CMID_list": CMID})
 
-        return {"CMID": CMID, "mergeDupRelations": mergeDupRelationsResults, "properties": propertiesResults, "updateLabels": updateLabelsResults, "updateContains": updateContainsResults, "updateAltNames": updateAltNamesResults}
+        if detailed:
+            return {"CMID": CMID, "mergeDupRelations": mergeDupRelationsResults, "properties": propertiesResults, "updateLabels": updateLabelsResults, "updateContains": updateContainsResults, "updateAltNames": updateAltNamesResults}
+        else:
+            return f"Completed processing USES for {CMID}" if CMID else f"Completed processing USES for all CATEGORY nodes."
     except Exception as e:
         # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
@@ -557,6 +560,8 @@ return count(*)
         getQuery(query, driver=driver, params={"CMID": CMID})
 
         updateAltNames(database, CMID=CMID)
+        
+        return "Completed processing DATASETs"
 
     except Exception as e:
         try:
