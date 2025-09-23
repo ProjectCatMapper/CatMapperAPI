@@ -24,7 +24,7 @@ chmod -R 777 /mnt/storage/app/db/"$database_name"/backups;
 # Pull the backup from AWS S3 if pullAWS is true
 if [ "$pullAWS" = true ]; then
     echo "Pulling backup from AWS S3..."
-    sudo -u ubuntu aws s3 cp s3://catmapper/backups/"$database_name"/neo4j-backup.tar.zst /mnt/storage/app/db/"$database_name"/backups/
+    sudo -u rjbischo aws s3 cp s3://catmapper/backups/"$database_name"/neo4j-backup.tar.zst /mnt/storage/app/db/"$database_name"/backups/
 else
     echo "Skipping AWS S3 pull."
 fi

@@ -1,3 +1,5 @@
+"""First layer of contact between the frontend and backend, some functions diverge from here to other files but the rest are computed here."""
+
 from flask import request, send_file, send_from_directory, jsonify, render_template, make_response, send_from_directory
 import os
 from bs4 import BeautifulSoup
@@ -11,7 +13,6 @@ from CMroutes import *
 
 app = create_app()
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB
-
 
 @app.route("/")
 def root():
@@ -170,6 +171,7 @@ return distinct Domain, Count order by Domain
         a.yearPublished as `Year Published`,
         CASE 
             WHEN a.recordStart IS NULL AND a.recordEnd IS NULL THEN null
+            WHEN a.recordStart = a.recordEnd THEN a.recordStart
             ELSE coalesce(a.recordStart, '') + '-' + coalesce(a.recordEnd, '')
         END AS `Time Span`,
         custom.getName(a.foci) as Foci,

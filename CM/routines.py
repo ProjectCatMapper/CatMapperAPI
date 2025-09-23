@@ -10,6 +10,9 @@ import pandas as pd
 import json
 import tempfile
 from flask_mail import Mail
+from configparser import ConfigParser
+config = ConfigParser()
+config.read('config.ini')
 
 def is_valid_json(json_string):
     try:
@@ -83,7 +86,7 @@ def checkDomains(database, mail=None, return_type="data"):
                 results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
                 sendEmail(mail, subject=f"Missing Domains for {database}", recipients=[
-                            "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+                            "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
         if return_type == "data":        
             return results.to_dict(orient="records")
         else:
@@ -155,7 +158,7 @@ def backup2CSV(database, mail=None):
 
         if isinstance(mail, Mail):
             sendEmail(mail, subject="Weekly CSV Backup", recipients=[
-                      "rjbischo@catmapper.org"], body="Weekly CSV backup completed.", sender=os.getenv("mail_default"))
+                      "rjbischo@catmapper.org"], body="Weekly CSV backup completed.", sender=config['MAIL']['mail_default'])
 
         return f"backup2CSV completed for {database}"
 
@@ -212,7 +215,7 @@ def getBadCMID(database, mail=None):
                         fp1 = tmpfile.name
                         results.to_excel(fp1, index=False)
                     sendEmail(mail, subject=f"Bad CMIDs for {database}", recipients=[
-                              "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+                              "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
 
             return results.to_dict(orient="records")
         else:
@@ -237,7 +240,7 @@ def getMultipleLabels(database, mail=None):
                     fp1 = tmpfile.name
                     results.to_excel(fp1, index=False)
                 sendEmail(mail, subject=f"Multiple Labels for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
 
             return results
 
@@ -264,12 +267,12 @@ def getBadJSON(database, mail=None):
         if isinstance(mail, Mail):
             if len(results1) > 1:
                 sendEmail(mail, subject=f"Invalid geoCoords properties for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
                 mailSent = "True"
 
             if len(results2) > 1:
                 sendEmail(mail, subject=f"Invalid parentContext properties for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp2])
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
                 mailSent = "True"
 
         return {"geoCoords": len(results1), "parentContext": len(results2), "geoCoords": results1, "parentContext": results2, "emailSent": mailSent}
@@ -318,7 +321,7 @@ def getBadDomains(database, mail=None):
                     fp1 = tmpfile.name
                     bad_labels.to_excel(fp1, index=False)
                 sendEmail(mail, subject=f"Bad Labels for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
 
         missing_category = getQuery(
             "match (c)<-[:USES]-(d:DATASET) where not 'CATEGORY' in labels(c) return c.CMID as CMID, c.CMName as CMName", driver, type="df")
@@ -329,7 +332,7 @@ def getBadDomains(database, mail=None):
                     fp1 = tmpfile.name
                     missing_category.to_excel(fp1, index=False)
                 sendEmail(mail, subject=f"Missing CATEGORY Label for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
 
         missing_dataset = getQuery(
             "match (c)<-[:USES]-(d:DATASET) where not 'DATASET' in labels(d) return d.CMID as CMID, d.CMName as CMName", driver, type="df")
@@ -340,7 +343,7 @@ def getBadDomains(database, mail=None):
                     fp1 = tmpfile.name
                     missing_dataset.to_excel(fp1, index=False)
                 sendEmail(mail, subject=f"Missing DATASET Label for {database}", recipients=[
-                    "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+                    "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
 
         return {"bad_labels_count": len(bad_labels), "missing_category_count": len(missing_category), "missing_dataset_count": len(missing_dataset), "bad_labels": bad_labels.to_dict(orient="records"), "missing_category": missing_category.to_dict(orient="records"), "missing_dataset": missing_dataset.to_dict(orient="records")}
     except Exception as e:
@@ -388,7 +391,7 @@ def getBadRelations(database, mail=None):
                     fp1 = tmpfile.name
                     results.to_excel(fp1, index=False)
                 sendEmail(mail, subject=f"Bad Relationship Label for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
 
         return {"bad_relationship_labels_count": len(results), "bad_relationship_labels": results.to_dict(orient="records")}
 
@@ -420,7 +423,7 @@ def CMNameNotInName(database, mail=None):
                     cmids.columns = ["CMID"]
                     cmids.to_excel(fp1, index=False)
                 sendEmail(mail, subject=f"Bad Relationship Label for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
 
         return {"Total": len(cmids), "Name not in CMName": cmids}
 
@@ -492,7 +495,7 @@ def noUSES(database, save=True, mail=None):
                     results.to_excel(fp1, index=False)
                 if isinstance(mail, Mail):
                     sendEmail(mail, subject=f"No USES for {database}", recipients=[
-                            "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+                            "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
 
         return {"Total": len(results), "No USES": results.to_dict(orient="records")}
 
@@ -541,7 +544,7 @@ def checkUSES(database, save = True, mail=None):
                     result.to_excel(fp1, index=False)
                 if isinstance(mail, Mail):
                     sendEmail(mail, subject=f"Check USES for {database}", recipients=[
-                            "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+                            "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
 
         return {"Total": len(result), "Check USES": result.to_dict(orient="records")}
 
@@ -570,6 +573,8 @@ def reportChanges(database, dateStart = None, dateEnd = None, action = "default"
             action = [action]
         elif not isinstance(action, list):
             return "Invalid action parameter. Must be a string or a list of strings."
+        if not user:
+            user = ""
         data = {
             'user': user,
             'dateStart': dateStart if dateStart else (pd.Timestamp.now() - pd.Timedelta(days=1)).strftime('%Y-%m-%d'),
@@ -579,7 +584,7 @@ def reportChanges(database, dateStart = None, dateEnd = None, action = "default"
             data['dateStart'] = pd.to_datetime(data['dateStart']).strftime('%Y-%m-%d')
         if isinstance(data['dateEnd'], str):
             data['dateEnd'] = pd.to_datetime(data['dateEnd']).strftime('%Y-%m-%d')
-        if isinstance(data['user'], str):
+        if not data['user'] == "":
             data['user'] = data['user'].strip()
             user_query = "AND l.user = toString(row.user)"
         else: 
@@ -614,7 +619,7 @@ def reportChanges(database, dateStart = None, dateEnd = None, action = "default"
             results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
                 sendEmail(mail, subject=f"Database Changes for {database} and {action} from {data['dateStart']} to {data['dateEnd']}", recipients=[
-                        "admin@catmapper.org"], body="See attached", sender=os.getenv("mail_default"), attachments=[fp1])
+                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
 
         if return_type == "data":
             return results.to_dict(orient="records")
@@ -633,12 +638,33 @@ def runRoutines(database,mail):
     
     info.append("Modifications to " + database + ":")
     data = reportChanges(database, return_type = "info")
+    info.append(data.get("info"))
+    files.append(data.get("filepath"))
     
     info.append("Check Domains for " + database + ":")
     data = checkDomains(database, mail=None, return_type="info")
     info.append(data.get("info"))
     files.append(data.get("filepath"))
 
-    sendEmail(mail, subject=f"Routines for {database} - {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}", recipients=["rjbischo@asu.edu"], body="<br>".join(info), sender=os.getenv("mail_default"), attachments=files)
-    return "Routines completed"
+    # info.append("Processing USES for " + database + ":")
+    # data_USES = processUSES(database, CMID = "AM1", detailed = False)
+    # info.append(data_USES)
     
+    # info.append("Processing DATASETs for " + database + ":")
+    # data_Dataset = processDATASETs(database)
+    # info.append(data_Dataset)
+    
+    files = [f for f in files if f is not None]
+
+    if isinstance(mail, Mail):
+        status = sendEmail(mail, subject=f"Routines for {database} - {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}", recipients=["rjbischo@asu.edu"], body="<br>".join(info), sender=config['MAIL']['mail_default'], attachments=files or [])
+        return f"""
+        Routines completed with status "{status or 'no status returned'}": <br>
+        Files: <br>
+        {"<br>".join(str(f) for f in (files or []) if f is not None)}
+        <br>
+        Info: <br>
+        {"<br>".join(str(i) for i in (info or []) if i is not None)}
+        """
+    else:
+        return info
