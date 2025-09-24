@@ -383,7 +383,11 @@ def processUSES(database, CMID=None, user="0", detailed = True):
         if detailed:
             return {"CMID": CMID, "mergeDupRelations": mergeDupRelationsResults, "properties": propertiesResults, "updateLabels": updateLabelsResults, "updateContains": updateContainsResults, "updateAltNames": updateAltNamesResults}
         else:
-            return f"Completed processing USES for {CMID}" if CMID else f"Completed processing USES for all CATEGORY nodes."
+            return (
+                f"Completed processing USES for {CMID}"
+                if CMID and CMID != [None]
+                else "Completed processing USES for all CATEGORY nodes."
+            )
     except Exception as e:
         # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)

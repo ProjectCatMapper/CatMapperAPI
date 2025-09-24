@@ -1413,7 +1413,30 @@ def input_Nodes_Uses(
             raise ValueError(
                 "Error: shortName already exists for: " + ", ".join(shortNames)
             )
+    
+    # check for key already exists for the same CMID and datasetID for function 2
+    if uploadOption == "add_uses":
+        CMID_df = df[df["CMID"].notna() & (df["CMID"] != "")]
+        CMID_df = CMID_df.reset_index(drop=True)
+        CMID_dict = CMID_df.to_dict(orient="records")
+
+        query = """UNWIND $rows AS row
+                OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
+                RETURN row.CMID AS CMID, row.datasetID AS datasetID, row.Key AS Key, COUNT(r) AS rel_count"""
         
+        with driver.session() as session:
+            results = session.run(error_query, rows=CMID_dict)
+            keyExists = [
+                (r["CMID"], r["datasetID"], r["Key"])
+                for r in results.data()
+                if r["rel_count"] >= 1
+            ]
+
+            if keyExists:
+                raise ValueError(
+                    f"Error:CMID, Key and datasetID already exists for {keyExists}"
+                )
+                
     '''Error checking ends here'''
 
     '''Data pre-processing starts'''

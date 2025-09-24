@@ -16,8 +16,8 @@ response=$(curl -ks "Content-Type: application/json" "$api_url")
 echo "API Response for backup CSV in ArchaMap:"
 echo "$response"
 
-chmod -R 777 /mnt/storage/app/db/sociomap1/backups/download;
-chmod -R 777 /mnt/storage/app/db/archamap1/backups/download;
+chmod -R 777 /mnt/storage/app/db/sociomap1/backups;
+chmod -R 777 /mnt/storage/app/db/archamap1/backups;
 
 fp1="/mnt/storage/app/db/sociomap1/backups/download/datasetNodes_$(date +%Y-%m-%d).csv"
 fp2="/mnt/storage/app/db/archamap1/backups/download/datasetNodes_$(date +%Y-%m-%d).csv"

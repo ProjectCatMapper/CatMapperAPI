@@ -21,8 +21,8 @@ base_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals()
 def create_app():
     app = Flask(__name__,
                 template_folder=os.path.join(
-                    os.path.dirname(base_dir), '../templates'),
-                static_folder=os.path.join(os.path.dirname(base_dir), '../static'))
+                    os.path.dirname(base_dir), 'templates'),
+                static_folder=os.path.join(os.path.dirname(base_dir), 'static'))
 
     CORS(app)
     app.config['CORS_HEADERS'] = 'Content-Type'
