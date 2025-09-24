@@ -511,6 +511,7 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
                 "Error: One or more CMIDs not found in the database\nMissing CMIDs: ", missing)
         else:
             print("All CMIDs found in the database.")
+        # need to adjust query to account for no stack datasets and for potentially different keys to variables using equivalence ties
         db_query = """
             unwind $rows as row
             match (m:DATASET {CMID: row.mergingID})-[rs:MERGING]->(s:DATASET {CMID: row.stackID})-[rm:MERGING]->(v:VARIABLE)<-[ru:USES]-(d:DATASET {CMID: row.datasetID})
@@ -548,6 +549,7 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
             data, template[["datasetID", "filePath"]], on="datasetID", how="left")
         # print(dirpath)
         data.to_excel(os.path.join(dirpath, "data.xlsx"), index=False)
+        # missing the where clause to make sure the equivalent tie is associated with the merging template
         cat_query = f"""
             unwind $rows as row
             match (d:DATASET {{CMID: row.datasetID}})-[ru:USES]->(c:{domain}) optional match (c)-[:EQUIVALENT]->(e:{domain})

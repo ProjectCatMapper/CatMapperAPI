@@ -1,5 +1,5 @@
 from CM import *
-from flask import request
+from flask import request, Response, stream_with_context
 from flask_mail import Mail
 from .extensions import mail
 
@@ -15,3 +15,9 @@ def send_test_email():
         return msg
     except Exception as e:
         return str(e), 500
+
+# def testStream():
+#     return Response(
+#         stream_with_context(runRoutinesStream()),
+#         mimetype="text/html"
+#     )

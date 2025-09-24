@@ -24,6 +24,7 @@ def get_routines(routine, database):
         # Define available arguments
         available_args = {
             'database': database,
+            'databases': database or "all",
             'mail': request.args.get('mail') or globals().get('mail'), 
             'CMID': request.args.get('CMID'),
             'datasetID': request.args.get('datasetID'),
@@ -32,7 +33,8 @@ def get_routines(routine, database):
             'dateStart': request.args.get('dateStart') or None,
             'dateEnd': request.args.get('dateEnd') or None ,
             'user': request.args.get('user') or None,
-            'action': request.args.get('action') or "created node",
+            'action': request.args.get('action') or "default",
+            'return_type': request.args.get('return_type') or "info"
         }
 
         # Match args to function signature
@@ -44,5 +46,11 @@ def get_routines(routine, database):
 
         return func(**kwargs)
 
+    except Exception as e:
+        return str(e), 500
+
+def get_runRoutinesStream(databases):
+    try:
+        return routines_module.runRoutinesStream(databases, mail)
     except Exception as e:
         return str(e), 500

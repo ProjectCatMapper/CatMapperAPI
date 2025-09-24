@@ -2230,5 +2230,8 @@ app.add_url_rule('/logs/<database>/<CMID>', 'getLogs',
 app.add_url_rule('/download/advanced/<database>', 'get_advanced_download_route',
                  get_advanced_download_route, methods=['POST'])
 
+app.add_url_rule('/runRoutines/<databases>', 'get_runRoutinesStream',
+                 get_runRoutinesStream, methods=['GET'])
+
 if __name__ == "__main__":
     app.run(debug=True, port=5001)
