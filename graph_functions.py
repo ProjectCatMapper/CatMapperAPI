@@ -15,7 +15,7 @@ EXCLUDED_FILES = {
     "__init__.py"
 }
 EXCLUDED_DIRS = {'.git', '__pycache__', '.venv', 'env', 'build', 'dist', '.vscode','lib','lib64'}
-def save_edgelist_to_excel(G, output_file="function_call_edgelist.xlsx"):
+def save_edgelist_to_excel(G, output_file="tmp/graph_data.xlsx"):
     edges = list(G.edges())
     df = pd.DataFrame(edges, columns=["Caller", "Callee"])
     df.to_excel(output_file, index=False)

@@ -3,8 +3,8 @@
 # File paths for backups
 archamap_backup="/mnt/storage/app/db/archamap1/backups/neo4j-backup.tar.zst"
 sociomap_backup="/mnt/storage/app/db/sociomap1/backups/neo4j-backup.tar.zst"
-gisdb_backup="/mnt/storage/app/GISdb/backups/neo4j-backup.tar.zst"
-userdb_backup="/mnt/storage/app/userdb/backups/neo4j-backup.tar.zst"
+gisdb_backup="/mnt/storage/app/db/gisdb/backups/neo4j-backup.tar.zst"
+userdb_backup="/mnt/storage/app/db/userdb/backups/neo4j-backup.tar.zst"
 
 # Today's date for comparison (formatted as YYYY-MM-DD)
 today=$(date "+%Y-%m-%d")
@@ -32,7 +32,8 @@ else
 fi
 
 # Email body
-body="Archamap last backed up: $archamap_last_modified\nSociomap last backed up: $sociomap_last_modified\nGIS database last backed up: $gis_last_modified\nUser database last backed up: $user_last_modified\n\nPlease check the logs for more details."
+body="Archamap last backed up: $archamap_last_modified<br>Sociomap last backed up: $sociomap_last_modified<br>GIS database last backed up: $gis_last_modified<br>User database last backed up: $user_last_modified<br>\nPlease check the logs for more details."
 
 # Send the email
-echo -e "$body" | mail -s "$subject" admin@catmapper.org
+echo -e "$body" | mail -a "Content-Type: text/html" -s "$subject" admin@catmapper.org
+
