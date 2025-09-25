@@ -14,7 +14,7 @@ from CM.utils import getDriver
 # Neo4j Config
 
 # OpenAI API key
-openai.api_key = "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"
+openai.api_key = api_key
 
 # Chroma settings
 CHROMA_PERSIST_DIR = "./chroma"
@@ -25,7 +25,7 @@ CHROMA_PERSIST_DIR = "./chroma"
 
 # def get_graph_data():
 #     driver = GraphDatabase.driver('neo4j://sociomap.rc.asu.edu:7687', auth=(
-#                 'neo4j', 'catnapperproject'))
+#                 'u', 'p'))
 #     query = """
 #     MATCH (n)-[r]->(m)
 #     RETURN n, r, m
@@ -105,7 +105,7 @@ CHROMA_PERSIST_DIR = "./chroma"
 
 
 # Load Chroma collection
-client = OpenAI(api_key= "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")
+client = OpenAI(api_key= api_key)
 chroma_client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR)
 collection = chroma_client.get_collection(name="neo4j_rag")
 

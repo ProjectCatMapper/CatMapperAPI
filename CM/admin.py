@@ -141,23 +141,50 @@ def add_edit_delete_USES(database,user,input):
         
     if "||" in new_property_value:
         new_property_value=new_property_value.split("||")
-
-    data = {
-            'CMID': CMID,
-            'Key': key,
-            'datasetID': datasetID,
-            USES_property: new_property_value
-        }
     
-    if CMID[1] == "D":
-        isDataset = True
-    elif CMID[1] == "M":
-        isDataset = False
-
-    df = pd.DataFrame([data])
-
     if addOrEditNode == "edit" or addOrEditNode == "add":
-        updateProperty(df,isDataset,database,user,updateType = "overwrite", propertyType="USES")
+        if USES_property == "Key":
+            data = {
+                'CMID': CMID,
+                'Key': key,
+                'datasetID': datasetID,
+                "NewKey": new_property_value
+            }
+            USES_property = ["NewKey"]
+
+            query = """UNWIND $rows AS row
+                OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.NewKey}]->(b:CATEGORY {CMID: row.CMID})
+                RETURN row.CMID AS CMID, row.datasetID AS datasetID, row.NewKey AS Key, COUNT(r) AS rel_count"""
+        
+            with driver.session() as session:
+                results = session.run(query, rows=data)
+                keyExists = [
+                    (r["CMID"], r["datasetID"], r["Key"])
+                    for r in results.data()
+                    if r["rel_count"] >= 1
+                ]
+
+                if keyExists:
+                    raise ValueError(
+                        f"Error:CMID, Key and datasetID triplet already exists for {keyExists}"
+                    )
+        
+        else:
+            data = {
+                    'CMID': CMID,
+                    'Key': key,
+                    'datasetID': datasetID,
+                    USES_property: new_property_value
+                }
+            USES_property = [USES_property]
+        
+        if CMID[1] == "D":
+            isDataset = True
+        elif CMID[1] == "M":
+            isDataset = False
+
+        df = pd.DataFrame([data])
+        updateProperty(df,USES_property,isDataset,database,user,updateType = "overwrite", propertyType="USES")
         processUSES(CMID=CMID,database=database,user=user)
     elif addOrEditNode == "delete":
         q = f"""
