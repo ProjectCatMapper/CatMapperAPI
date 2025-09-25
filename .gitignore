@@ -12,3 +12,4 @@ pyvenv.cfg
 tmp/*
 *.pyc
 *.json
+*.jsonl

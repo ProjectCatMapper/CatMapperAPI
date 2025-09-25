@@ -1,6 +1,6 @@
 from .dev_routes import *
 from .admin_routes import *
-from .routines import *
+from .routine_routes import *
 from .query import *
 from .getDownloads import *
 from .getLogs import *
@@ -14,13 +14,15 @@ from flask_cors import CORS
 from configparser import ConfigParser
 config = ConfigParser()
 config.read('config.ini')
-
+from flask_mail import Mail
+mail = Mail()
+base_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
 
 def create_app():
     app = Flask(__name__,
                 template_folder=os.path.join(
-                    os.path.dirname(__file__), '../templates'),
-                static_folder=os.path.join(os.path.dirname(__file__), '../static'))
+                    os.path.dirname(base_dir), 'templates'),
+                static_folder=os.path.join(os.path.dirname(base_dir), 'static'))
 
     CORS(app)
     app.config['CORS_HEADERS'] = 'Content-Type'

@@ -1,9 +1,23 @@
 [
     {
         "cood": [
-            35.25,
-            45.25
+            140.326,
+            -2.5226
         ],
-        "source": "Pleiades4.1"
+        "source": "glottolog5.2"
+    },
+    {
+        "cood": [
+            140.326,
+            -2.5226
+        ],
+        "source": "glottolog4.4"
+    },
+    {
+        "cood": [
+            140.326,
+            -2.5226
+        ],
+        "source": "glottolog4.2.1"
     }
 ]
