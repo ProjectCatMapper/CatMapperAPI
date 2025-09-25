@@ -1,7 +1,9 @@
 from CM import getDriver, getQuery, getNodeProperties
-from flask import request
+from flask import request, Blueprint
 
+metadata_bp = Blueprint('metadata', __name__)
 
+@metadata_bp.route('/domains/<database>', methods=['GET'])
 def getDomains(database):
     driver = getDriver(database)
     if not driver:
@@ -12,7 +14,7 @@ def getDomains(database):
 
     return domains
 
-
+@metadata_bp.route('/subdomains/<database>', methods=['GET'])
 def getSubdomains(database):
     driver = getDriver(database)
     if not driver:
