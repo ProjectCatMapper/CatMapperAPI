@@ -1,13 +1,16 @@
 from CM import *
-from flask import render_template, request, Response, stream_with_context
+from flask import render_template, Blueprint
 from flask_mail import Mail
 from .extensions import mail
 import pandas as pd
 
+dev_bp = Blueprint('dev', __name__)
+
+@dev_bp.route('/testmsg/<database>/<msg>', methods=['GET'])
 def testmsg(database, msg):
     return "This is a test message from the " + database + " database that says: " + msg
 
-
+@dev_bp.route('/send_test_email', methods=['GET'])
 def send_test_email():
     try:
         msg = sendEmail(mail, "Test Email", [
@@ -22,6 +25,7 @@ def send_test_email():
 #         mimetype="text/html"
 #     )
 
+@dev_bp.route('/admin/graph', methods=['GET'])
 def get_graph():
     
     data = pd.read_excel("tmp/graph_data.xlsx").to_dict(orient="records")
@@ -40,5 +44,6 @@ def get_graph():
     graph = {"nodes": nodes, "edges": edges}
     return graph
 
+@dev_bp.route('/admin/view_graph', methods=['GET'])
 def display_graph():
     return render_template("graph.html")
