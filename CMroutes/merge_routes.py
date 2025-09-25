@@ -1,8 +1,10 @@
 import os
-from flask import request, jsonify
+from flask import request, Blueprint
 import json
 
+merge_bp = Blueprint('merge', __name__)
 
+@merge_bp.route('/syntax/<database>', methods=['POST'])
 def get_merge_syntax_route(database):
     try:
         from CM.merge import createSyntax
@@ -19,7 +21,7 @@ def get_merge_syntax_route(database):
         result = str(e)
         return result, 500
 
-
+@merge_bp.route('/template/<database>/<datasetID>', methods=['GET'])
 def get_merge_template(database, datasetID):
     try:
         from CM.merge import getMergingTemplate
@@ -28,13 +30,3 @@ def get_merge_template(database, datasetID):
     except Exception as e:
         result = str(e)
         return result, 500
-
-
-# def get_moveUSESValidate(database, relid):
-#     try:
-#         from CM.admin import moveUSESValidate
-#         result = moveUSESValidate(relid, database)
-#         return result, 200
-#     except Exception as e:
-#         result = str(e)
-#         return result, 500
