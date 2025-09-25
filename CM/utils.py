@@ -320,3 +320,23 @@ def getNodeProperties(database, domain, CMID):
     properties = getQuery(query, driver, CMID = CMID, type = "list")
     
     return properties
+
+
+# Function to serialize a Neo4j Node object into a serializable dictionary
+def serialize_node(node):
+    return {
+        "id": node.element_id,
+        "labels": list(node.labels),
+        "properties": dict(node)
+    }
+
+# Function to serialize Neo4j Relationship object into a serializable dictionary
+
+
+def serialize_relationship(relationship):
+    return {
+        "type": relationship.type,
+        "start_node_id": relationship.start_node.element_id,
+        "end_node_id": relationship.end_node.element_id,
+        "properties": dict(relationship.items())
+    }
