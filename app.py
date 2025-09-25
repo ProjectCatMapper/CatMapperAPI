@@ -40,16 +40,6 @@ def catm():
     driver = getDriver(database)
     session = driver.session()
 
-    # this query gets the labels for the node
-    # q = "match (a) where a.CMID = '"+cmid + \
-    #     "' return elementId(a) as id,labels(a) as label"
-    # labels = session.run(q)
-    # labels = labels.data()
-    # if labels:
-    #     labels = str(labels[0]['label'][-1])
-    # else:
-    #     labels = ""
-
     '''Gets the list of relations for the node'''
     relnames = []
     visible_relations = ["USES", "CONTAINS", "DISTRICT_OF",
@@ -64,17 +54,16 @@ def catm():
 
     driver = getDriver(database)
 
-    if str.lower(database) == "sociomap":
-        label = re.search("^SM", cmid)
-    elif str.lower(database) == "archamap":
-        label = re.search("^AM", cmid)
-    else:
-        pass
-
-    if label is not None:
-        label = "CATEGORY"
-    else:
+    # this query gets the labels for the node
+    q = f"match (a) where a.CMID = '{cmid}' return labels(a) as label"
+    labels = getQuery(q,driver=driver,type='list')
+    print(labels)
+    if "DATASET" in labels[0]:
         label = "DATASET"
+    elif "CATEGORY" in labels[0]:
+        label = "CATEGORY"
+    elif "DELETED" in labels[0]:
+        label = "DELETED"
 
     if label == "CATEGORY":
         qInfo = '''
@@ -96,109 +85,127 @@ def catm():
     # end as timeSpan
     # custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
         qSamples = '''
-   UNWIND $cmid AS cmid
-MATCH (a:CATEGORY)<-[r:USES]-(d:DATASET)
-WHERE a.CMID = cmid
+                UNWIND $cmid AS cmid
+                MATCH (a:CATEGORY)<-[r:USES]-(d:DATASET)
+                WHERE a.CMID = cmid
 
-WITH a, d, r, coalesce(d.project,d.CMName) AS Source, d.CMID AS datasetID, d.DatasetVersion AS Version
+                WITH a, d, r, coalesce(d.project,d.CMName) AS Source, d.CMID AS datasetID, d.DatasetVersion AS Version
 
-WITH a, d, r, Source, datasetID, Version,
-     COLLECT(DISTINCT r.categoryType) AS allCTypes
+                WITH a, d, r, Source, datasetID, Version,
+                    COLLECT(DISTINCT r.categoryType) AS allCTypes
 
-WITH a, d, r, Source, datasetID, Version, allCTypes,
-     SIZE([x IN allCTypes WHERE x IS NOT NULL AND x <> '']) AS cTypeCount
+                WITH a, d, r, Source, datasetID, Version, allCTypes,
+                    SIZE([x IN allCTypes WHERE x IS NOT NULL AND x <> '']) AS cTypeCount
 
-WITH r, d, Source, datasetID, Version, cTypeCount,
-     r.Name AS Name, r.country AS countryID, r.district AS districtID,
-     r.url AS Link, r.recordStart AS recordStart, r.recordEnd AS recordEnd, r.yearStart as yearStart, r.yearEnd as yearEnd,
-     toInteger(r.populationEstimate) AS Population, toInteger(r.sampleSize) AS `Sample size`,
-     r.type AS type,
-     CASE
-       WHEN r.populationEstimate IS NULL OR r.populationEstimate = 0 THEN null
-       WHEN cTypeCount >= 1 THEN r.categoryType
-       ELSE null
-     END AS cType
+                WITH r, d, Source, datasetID, Version, cTypeCount,
+                    r.Name AS Name, r.country AS countryID, r.district AS districtID,
+                    r.url AS Link, r.recordStart AS recordStart, r.recordEnd AS recordEnd, r.yearStart as yearStart, r.yearEnd as yearEnd,
+                    toInteger(r.populationEstimate) AS Population, toInteger(r.sampleSize) AS `Sample size`,
+                    r.type AS type,
+                    CASE
+                    WHEN r.populationEstimate IS NULL OR r.populationEstimate = 0 THEN null
+                    WHEN cTypeCount >= 1 THEN r.categoryType
+                    ELSE null
+                    END AS cType
 
-CALL apoc.when(countryID IS NOT NULL,
-    'RETURN custom.getName($id) AS country',
-    'RETURN null AS country',
-    {id: countryID}) YIELD value AS country
+                CALL apoc.when(countryID IS NOT NULL,
+                    'RETURN custom.getName($id) AS country',
+                    'RETURN null AS country',
+                    {id: countryID}) YIELD value AS country
 
-CALL apoc.when(districtID IS NOT NULL,
-    'RETURN custom.getName($id) AS district',
-    'RETURN null AS district',
-    {id: districtID}) YIELD value AS district
+                CALL apoc.when(districtID IS NOT NULL,
+                    'RETURN custom.getName($id) AS district',
+                    'RETURN null AS district',
+                    {id: districtID}) YIELD value AS district
 
-RETURN 
-    apoc.text.join(Name, '; ') AS Name,
-    apoc.text.join([i IN [country.country, district.district] WHERE i IS NOT NULL AND i <> ''], ', ') AS Location,
-    type AS Type,
-    recordStart AS `rStart`,
-    recordEnd AS `rEnd`,    
-    yearStart AS `yStart`,
-    yearEnd AS `yEnd`,
-    Population AS `Population est.`,
-    `Sample size` AS `Sample size`,
-    Source AS `Source`,
-    'https://catmapper.org/' + tolower($database) + '/' + datasetID AS `link2`,
-    Version,
-    cType,
-    Link
-ORDER BY Source, Name
-    '''
+                RETURN 
+                    apoc.text.join(Name, '; ') AS Name,
+                    apoc.text.join([i IN [country.country, district.district] WHERE i IS NOT NULL AND i <> ''], ', ') AS Location,
+                    type AS Type,
+                    recordStart AS `rStart`,
+                    recordEnd AS `rEnd`,    
+                    yearStart AS `yStart`,
+                    yearEnd AS `yEnd`,
+                    Population AS `Population est.`,
+                    `Sample size` AS `Sample size`,
+                    Source AS `Source`,
+                    'https://catmapper.org/' + tolower($database) + '/' + datasetID AS `link2`,
+                    Version,
+                    cType,
+                    Link
+                ORDER BY Source, Name
+                '''
     # apoc.text.join([
     #     coalesce(toString(recordStart), ''),
     #     coalesce(toString(recordEnd), '')
     # ], '-') AS `Time span`,
 
         qCategories = """
-unwind $cmid as cmid
-match (a:ADM0 {CMID: cmid})-[:DISTRICT_OF]-(c:CATEGORY)
-unwind labels(c) as Domain with Domain, count(*) as Count
-return distinct Domain, Count order by Domain
-"""
+                    unwind $cmid as cmid
+                    match (a:ADM0 {CMID: cmid})-[:DISTRICT_OF]-(c:CATEGORY)
+                    unwind labels(c) as Domain with Domain, count(*) as Count
+                    return distinct Domain, Count order by Domain
+                    """
 
-    else:
+    elif label == "DATASET":
         qInfo = '''
-    unwind $cmid as cmid
-    match (a:DATASET)
-    where a.CMID = cmid
-    with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
-    'return null as name',{id:a.District}) yield value as Location
-    return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID,
-    labels(a) as Domains, a.parent as Parent,
-      a.DatasetCitation as Citation, "<a href ='" + a.DatasetLocation + "' target='_blank' >" + a.DatasetLocation +"</a>" as `Dataset Location`,
-        a.yearPublished as `Year Published`,
-        CASE 
-            WHEN a.recordStart IS NULL AND a.recordEnd IS NULL THEN null
-            WHEN a.recordStart = a.recordEnd THEN a.recordStart
-            ELSE coalesce(a.recordStart, '') + '-' + coalesce(a.recordEnd, '')
-        END AS `Time Span`,
-        custom.getName(a.foci) as Foci,
-        a.Note as Note
-    '''
+            unwind $cmid as cmid
+            match (a:DATASET)
+            where a.CMID = cmid
+            with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
+            'return null as name',{id:a.District}) yield value as Location
+            return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID,
+            labels(a) as Domains, a.parent as Parent,
+            a.DatasetCitation as Citation, "<a href ='" + a.DatasetLocation + "' target='_blank' >" + a.DatasetLocation +"</a>" as `Dataset Location`,
+            a.yearPublished as `Year Published`,
+            CASE 
+                WHEN a.recordStart IS NULL AND a.recordEnd IS NULL THEN null
+                WHEN a.recordStart = a.recordEnd THEN a.recordStart
+                ELSE coalesce(a.recordStart, '') + '-' + coalesce(a.recordEnd, '')
+            END AS `Time Span`,
+            custom.getName(a.foci) as Foci,
+            a.Note as Note
+            '''
+        
         qSamples = None
 
         qCategories = """
-UNWIND $cmid AS cmid
-MATCH (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY)
+                UNWIND $cmid AS cmid
+                MATCH (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY)
 
-// Unwind labels per relationship
-UNWIND r.label AS Domain
+                // Unwind labels per relationship
+                UNWIND r.label AS Domain
 
-WITH Domain, c, r
+                WITH Domain, c, r
 
-// Count distinct nodes per Domain and collect all uses relationships per Domain
-WITH Domain, 
-     COUNT(DISTINCT c) AS distinctNodeCount,   // distinct CATEGORY nodes per domain
-     COLLECT(r) AS usesRels                    // all :USES rels for this domain
+                // Count distinct nodes per Domain and collect all uses relationships per Domain
+                WITH Domain, 
+                    COUNT(DISTINCT c) AS distinctNodeCount,   // distinct CATEGORY nodes per domain
+                    COLLECT(r) AS usesRels                    // all :USES rels for this domain
 
-WITH Domain, distinctNodeCount, usesRels, size(usesRels) AS totalUses
+                WITH Domain, distinctNodeCount, usesRels, size(usesRels) AS totalUses
 
-RETURN Domain, distinctNodeCount AS Count, totalUses as TotalUses
-ORDER BY Domain
+                RETURN Domain, distinctNodeCount AS Count, totalUses as TotalUses
+                ORDER BY Domain
 
-"""
+                """
+        
+    elif label == "DELETED":
+        qInfo = '''
+            unwind $cmid as cmid
+            match (a:DELETED)
+            where a.CMID = cmid
+            OPTIONAL MATCH (a)-[:IS]->(b)
+            return a.CMName as CMName, a.CMID as CMID,
+            labels(a) as Domains,
+            CASE WHEN b IS NOT NULL THEN b.CMID ELSE NULL END AS Merged_into_CMID
+            '''
+        
+        qSamples = None
+
+        qCategories = None
+        
+
     with driver.session() as session:
         info = session.run(qInfo, cmid=cmid)
         info = [dict(record) for record in info]
@@ -231,8 +238,6 @@ ORDER BY Domain
                     row.get('cType'),
                     row.get('Link'),
                 )
-
-                print(key)
 
                 group = grouped[key]
                 
@@ -290,6 +295,8 @@ ORDER BY Domain
         else:
             samples = []
         driver.close()
+    
+
 
     if "Dataset Location" in info[0]:
         print(info[0]["Dataset Location"])
@@ -2232,6 +2239,12 @@ app.add_url_rule('/download/advanced/<database>', 'get_advanced_download_route',
 
 app.add_url_rule('/runRoutines/<databases>', 'get_runRoutinesStream',
                  get_runRoutinesStream, methods=['GET'])
+
+app.add_url_rule('/admin/graph', 'get_graph',
+                 get_graph, methods=['GET'])
+
+app.add_url_rule('/admin/view_graph', 'display_graph',
+                 display_graph, methods=['GET'])
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)
