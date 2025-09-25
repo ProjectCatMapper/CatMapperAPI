@@ -1,0 +1,178 @@
+<!doctype html>
+<html>
+
+<head>
+    <title>API Graph</title>
+    <script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+    <style>
+        #mynetwork {
+            width: 100%;
+            height: 600px;
+            border: 1px solid lightgray;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 20px;
+            font-weight: bold;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+        }
+
+        #filterForm {
+            margin-bottom: 10px;
+        }
+
+        #filterButton {
+            position: relative;
+            padding-right: 30px;
+        }
+
+        #filterSpinner {
+            display: none;
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 14px;
+            height: 14px;
+            border: 2px solid #fff;
+            border-top: 2px solid #000;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: translateY(-50%) rotate(0deg);
+            }
+
+            100% {
+                transform: translateY(-50%) rotate(360deg);
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <form id="filterForm">
+        <input id="filterInput" type="text" placeholder="Filter nodes by label...">
+        <button id="filterButton" type="submit">
+            Apply Filter
+            <span id="filterSpinner"></span>
+        </button>
+    </form>
+
+    <div id="loading">Loading graph...</div>
+    <div id="mynetwork"></div>
+
+    <script>
+        let network, allNodes, allEdges;
+
+        // show loader
+        document.getElementById("loading").style.display = "block";
+
+        fetch("https://api.catmapper.org/admin/graph")
+            .then(response => response.json())
+            .then(data => {
+                const container = document.getElementById("mynetwork");
+                const options = {
+                    physics: true,
+                    edges: {
+                        arrows: {
+                            to: { enabled: true, scaleFactor: 1 } // arrow pointing toward the "to" node
+                        }
+                    }
+                };
+
+                allNodes = new vis.DataSet(data.nodes);
+                allEdges = new vis.DataSet(
+                    data.edges.map((e, i) => Object.assign({ id: i }, e)) // ensure edges have ids
+                );
+
+                const visData = { nodes: allNodes, edges: allEdges };
+                network = new vis.Network(container, visData, options);
+
+                // hide loader once network is ready
+                network.once("stabilizationIterationsDone", function () {
+                    document.getElementById("loading").style.display = "none";
+                });
+
+                network.on("doubleClick", function (params) {
+                    if (params.nodes.length > 0) {
+                        const clickedNodeId = params.nodes[0];
+
+                        // get all edges connected to this node
+                        const connectedEdges = allEdges.get({
+                            filter: e => e.from === clickedNodeId || e.to === clickedNodeId
+                        });
+
+                        // unhide connected nodes + edges
+                        connectedEdges.forEach(edge => {
+                            allEdges.update({ id: edge.id, hidden: false });
+                            allNodes.update({ id: edge.from, hidden: false });
+                            allNodes.update({ id: edge.to, hidden: false });
+                        });
+                    }
+                });
+            });
+
+        // Filter on form submit
+        document.getElementById("filterForm").addEventListener("submit", function (e) {
+            e.preventDefault(); // prevent page reload
+            const query = document.getElementById("filterInput").value.toLowerCase();
+
+            // show spinner
+            document.getElementById("filterSpinner").style.display = "inline-block";
+
+            setTimeout(() => {
+                if (!query) {
+                    // reset
+                    allNodes.forEach(node => allNodes.update({ id: node.id, hidden: false }));
+                    allEdges.forEach(edge => allEdges.update({ id: edge.id, hidden: false }));
+                } else {
+                    // find nodes that match query
+                    const matchedNodes = new Set();
+                    allNodes.forEach(node => {
+                        if (node.label.toLowerCase().includes(query)) {
+                            matchedNodes.add(node.id);
+                        }
+                    });
+
+                    // collect visible edges and neighbor nodes
+                    const visibleEdges = new Set();
+                    const finalVisibleNodes = new Set([...matchedNodes]);
+
+                    allEdges.forEach(edge => {
+                        if (matchedNodes.has(edge.from) || matchedNodes.has(edge.to)) {
+                            visibleEdges.add(edge.id);
+                            finalVisibleNodes.add(edge.from);
+                            finalVisibleNodes.add(edge.to);
+                        }
+                    });
+
+                    // update node visibility
+                    allNodes.forEach(node => {
+                        allNodes.update({ id: node.id, hidden: !finalVisibleNodes.has(node.id) });
+                    });
+
+                    // update edge visibility
+                    allEdges.forEach(edge => {
+                        allEdges.update({ id: edge.id, hidden: !visibleEdges.has(edge.id) });
+                    });
+
+                }
+
+                // hide spinner
+                document.getElementById("filterSpinner").style.display = "none";
+            }, 50); // slight delay so spinner is visible
+        });
+    </script>
+</body>
+
+</html>

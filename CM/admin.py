@@ -151,6 +151,23 @@ def add_edit_delete_USES(database,user,input):
                 "NewKey": new_property_value
             }
             USES_property = ["NewKey"]
+
+            query = """UNWIND $rows AS row
+                OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.NewKey}]->(b:CATEGORY {CMID: row.CMID})
+                RETURN row.CMID AS CMID, row.datasetID AS datasetID, row.NewKey AS Key, COUNT(r) AS rel_count"""
+        
+            with driver.session() as session:
+                results = session.run(query, rows=data)
+                keyExists = [
+                    (r["CMID"], r["datasetID"], r["Key"])
+                    for r in results.data()
+                    if r["rel_count"] >= 1
+                ]
+
+                if keyExists:
+                    raise ValueError(
+                        f"Error:CMID, Key and datasetID triplet already exists for {keyExists}"
+                    )
         
         else:
             data = {

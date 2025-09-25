@@ -613,20 +613,43 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
         return f"Error: {str(e)}"
 
 #collapses rows by the group_by_cols variable and joins properties from seperate rows by ;
-def combine_properties(df, group_by_cols):
-
-    def combine_column(column):
-        if isinstance(column, list):
-            return "; ".join(
-                sorted(set([str(x).strip() for x in column if pd.notna(x)]))
+def combine_properties(df, group_by_cols, string_cols, driver):
+    
+    # Puts values from different rows in a single list and for string-value columns it checks if there is more than one value
+    # then changes the list to a ; delimited string
+    def combine_column(colname, values):
+        vals = [str(x).strip() for x in values if pd.notna(x)]
+        unique_vals = sorted(set(vals))
+        
+        # strict check
+        if colname in string_cols and len(unique_vals) > 1:
+            raise ValueError(
+                f"Column '{colname}' has multiple values in one group: {unique_vals}"
             )
-        return column
+        
+        # join otherwise
+        return "; ".join(unique_vals)
 
     grouped_df = df.groupby(group_by_cols, as_index=False).agg(lambda x: x.tolist())
 
     for col in grouped_df.columns:
         if col not in group_by_cols:
-            grouped_df[col] = grouped_df[col].apply(combine_column)
+            grouped_df[col] = grouped_df[col].apply(
+                lambda vals, c=col: combine_column(c, vals)
+            )
+
+    # def combine_column(column):
+    #     if isinstance(column, list):
+    #         return "; ".join(
+    #             sorted(set([str(x).strip() for x in column if pd.notna(x)]))
+    #         )
+    #     return column
+
+    # grouped_df = df.groupby(group_by_cols, as_index=False).agg(lambda x: x.tolist())
+
+    # for col in grouped_df.columns:
+    #     if col not in group_by_cols:
+    #         grouped_df[col] = grouped_df[col].apply(combine_column)
 
     return grouped_df
 
@@ -929,6 +952,13 @@ def input_Nodes_Uses(
     for i in optionalProperties:
         if dataset[i].replace("",pd.NA).isna().all():
             raise ValueError(f"{dataset[i]} has all empty values")
+    
+    # For function 5 and 6, if the CMID column has duplicates, throws an error
+    if uploadOption == "node_add" or uploadOption == "node_replace":
+        duplicate_CMIDs = dataset[dataset['CMID'].duplicated(keep=False)]
+        duplicate_CMIDs = duplicate_CMIDs['CMID'].tolist()
+        if not duplicate_CMIDs.empty:
+            raise ValueError(f"Duplicate CMIDs found in CMID column: \n{duplicate_CMIDs}")
 
     """checks if all required columns are present"""
 
@@ -1414,18 +1444,26 @@ def input_Nodes_Uses(
                 "Error: shortName already exists for: " + ", ".join(shortNames)
             )
     
-    # check for key already exists for the same CMID and datasetID for function 2
-    if uploadOption == "add_uses":
-        CMID_df = df[df["CMID"].notna() & (df["CMID"] != "")]
-        CMID_df = CMID_df.reset_index(drop=True)
-        CMID_dict = CMID_df.to_dict(orient="records")
+    #Check if (datasetID, CMID, Key) triplet already exists when:
+    # 1) Creating new uses tie for existing node (function 2)
+    # 2) Replacing Key in function 4
+    if uploadOption == "add_uses" or uploadOption == "update_replace":
+        if uploadOption == "update_replace" and optionalProperties[0] == "NewKey":
+            CMID_df = df[["CMID","NewKey","datasetID"]]
+            CMID_df.rename(columns={"NewKey": "Key"}, inplace=True)
+            CMID_dict = CMID_df.to_dict(orient="records")
+
+        if uploadOption == "add_uses":
+            CMID_df = df[df["CMID"].notna() & (df["CMID"] != "")]
+            CMID_df = CMID_df.reset_index(drop=True)
+            CMID_dict = CMID_df.to_dict(orient="records")
 
         query = """UNWIND $rows AS row
                 OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
                 RETURN row.CMID AS CMID, row.datasetID AS datasetID, row.Key AS Key, COUNT(r) AS rel_count"""
         
         with driver.session() as session:
-            results = session.run(error_query, rows=CMID_dict)
+            results = session.run(query, rows=CMID_dict)
             keyExists = [
                 (r["CMID"], r["datasetID"], r["Key"])
                 for r in results.data()
@@ -1434,9 +1472,73 @@ def input_Nodes_Uses(
 
             if keyExists:
                 raise ValueError(
-                    f"Error:CMID, Key and datasetID already exists for {keyExists}"
+                    f"Error:CMID, Key and datasetID triplet already exists for {keyExists}"
                 )
+    
+
+    query = """MATCH (n:PROPERTY) WHERE n.type="relationship" and n.metaType="string" RETURN n.CMName as n"""
+
+    string_cols = getQuery(
+            query,
+            driver,
+            type="list",
+        )
+    
+    # For function 3, if a non-null value in a string-value column already exists in the database for a given triplet of (CMID,Key and datasetID),
+    # throws an error
+    if uploadOption == "update_add":
+    
+        for i in string_cols:
+            if i in dataset.columns:
+                query = """UNWIND $rows AS row
+                    OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
+                    RETURN r.{column} AS existing_value, row"""
                 
+                result = getQuery(
+                            query,
+                            driver,
+                            params={"rows": dataset[["CMID","Key","datasetID",i]].to_dict(orient="records"),"column":i},
+                            type="list",
+                        )
+                
+                for j in result:
+                    if j["existing_value"] is not None:
+                        raise ValueError(
+                    f"Property '{i}' already exists for USES tie between "
+                    f"DATASET {result['row']['datasetID']} and CATEGORY {result['row']['CMID']} with Key {result['row']['Key']}"
+                )
+                    
+    query = """MATCH (n:PROPERTY) WHERE n.type="node" and n.metaType="string" RETURN n.CMName as n"""
+
+    node_string_cols = getQuery(
+            query,
+            driver,
+            type="list",
+        )
+    
+    # For function 5, if a non-null value in a string-value column already exists in the database for a given CMID,
+    # throws an error
+    if uploadOption == "node_add":
+    
+        for i in node_string_cols:
+            if i in dataset.columns:
+                query = """UNWIND $rows AS row
+                    OPTIONAL MATCH (a {CMID: row.CMID})
+                    RETURN a.{column} AS existing_value, row"""
+                
+                result = getQuery(
+                            query,
+                            driver,
+                            params={"rows": dataset[["CMID",i]].to_dict(orient="records"),"column":i},
+                            type="list",
+                        )
+                
+                for j in result:
+                    if j["existing_value"] is not None:
+                        raise ValueError(
+                    f"Property '{i}' already exists for CMID {result['row']['CMID']} "
+                )
+          
     '''Error checking ends here'''
 
     '''Data pre-processing starts'''
@@ -1552,7 +1654,6 @@ def input_Nodes_Uses(
 
     if "CMID" in dataset.columns:     
         if (dataset['CMID'] == "").any():
-            print("I am in")
             mask = dataset['CMID'].isna() | (dataset['CMID'].astype(str).str.strip() == '')
 
             # Step 2: Generate increasing numbers starting from 1
@@ -1562,10 +1663,10 @@ def input_Nodes_Uses(
             dataset.loc[mask, 'CMID'] = [f"auto_{i}" for i in fill_values]
     
         if uploadOption == "update_add" or uploadOption == "update_replace" or uploadOption == "add_uses":
-            dataset = combine_properties(dataset, ["CMID", "datasetID", "Key"])
+            dataset = combine_properties(dataset, ["CMID", "datasetID", "Key"], string_cols, driver)
         
         dataset['CMID'] = dataset['CMID'].replace(to_replace=r'^auto_\d+$', value='', regex=True)
-        
+            
     #convert geoCoords to the Point and Multipoint formats
     if linkProperties is not None and "geoCoords" in linkProperties:
         updateLog(
