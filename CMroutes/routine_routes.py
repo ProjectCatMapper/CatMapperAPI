@@ -34,7 +34,8 @@ def get_routines(routine, database):
             'dateEnd': request.args.get('dateEnd') or None ,
             'user': request.args.get('user') or None,
             'action': request.args.get('action') or "default",
-            'return_type': request.args.get('return_type') or "info"
+            'return_type': request.args.get('return_type') or "info",
+            'save': request.args.get('save') or True
         }
 
         # Match args to function signature
