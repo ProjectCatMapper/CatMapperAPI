@@ -1487,28 +1487,37 @@ def input_Nodes_Uses(
     # For function 3, if a non-null value in a string-value column already exists in the database for a given triplet of (CMID,Key and datasetID),
     # throws an error
     if uploadOption == "update_add":
-    
+        updateLog(
+        f"log/{user}uploadProgress.txt",
+        "checking for existing data in string columns",
+        write="a",
+    )
         for i in string_cols:
-            if i in dataset.columns:
+            if i in optionalProperties:
                 query = """UNWIND $rows AS row
                     OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
-                    RETURN r.{column} AS existing_value, row"""
-                
+                    RETURN r[$column] AS existing_value, row"""
+
                 result = getQuery(
-                            query,
-                            driver,
-                            params={"rows": dataset[["CMID","Key","datasetID",i]].to_dict(orient="records"),"column":i},
-                            type="list",
-                        )
+                    query,
+                    driver,
+                    params={"rows": dataset[["CMID","Key","datasetID",i]].to_dict(orient="records"),"column":i},
+                    type="dict",
+                    )
                 
                 for j in result:
-                    if j["existing_value"] is not None:
+                    if j.get("existing_value") is not None:
                         raise ValueError(
-                    f"Property '{i}' already exists for USES tie between "
-                    f"DATASET {result['row']['datasetID']} and CATEGORY {result['row']['CMID']} with Key {result['row']['Key']}"
-                )
-                    
-    query = """MATCH (n:PROPERTY) WHERE n.type="node" and n.metaType="string" RETURN n.CMName as n"""
+                            f"Property '{i}' already exists for USES tie between "
+                            f"DATASET {j['row']['datasetID']} and CATEGORY {j['row']['CMID']} with Key {j['row']['Key']}"
+                        )
+
+    updateLog(
+        f"log/{user}uploadProgress.txt",
+        "obtaining string-type node properties",
+        write="a",
+    )                
+    query = """MATCH (n:PROPERTY) WHERE n.type="node" and n.metaType="string" RETURN n.CMName"""
 
     node_string_cols = getQuery(
             query,
@@ -1524,7 +1533,7 @@ def input_Nodes_Uses(
             if i in dataset.columns:
                 query = """UNWIND $rows AS row
                     OPTIONAL MATCH (a {CMID: row.CMID})
-                    RETURN a.{column} AS existing_value, row"""
+                    RETURN a[$column] AS existing_value, row"""
                 
                 result = getQuery(
                             query,
@@ -1544,12 +1553,22 @@ def input_Nodes_Uses(
     '''Data pre-processing starts'''
 
     # removes the mentioned control characters and trailing\leading spaces from each cell in the dataframe
+    updateLog(
+        f"log/{user}uploadProgress.txt",
+        "removing control characters and leading/trailing spaces",
+        write="a",
+    )
     dataset[dataset.columns] = dataset[dataset.columns].applymap(
         lambda x: (
             re.sub(r"[\t\n\r\f\v]", "", x).strip() if isinstance(x, str) else x
         )
     )
 
+    updateLog(
+        f"log/{user}uploadProgress.txt",
+        "Dropping NA columns",
+        write="a",
+    )
     dataset = dataset.dropna(axis=1, how="all")
 
     properties = getPropertiesMetadata(driver)
