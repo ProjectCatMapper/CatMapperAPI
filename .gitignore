@@ -12,3 +12,6 @@ pyvenv.cfg
 tmp/*
 *.pyc
 *.jsonl
+data.json
+new.json
+poly.json

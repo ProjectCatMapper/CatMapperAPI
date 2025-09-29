@@ -929,8 +929,7 @@ def getNetworkjs():
         not isEmpty([label IN labels(e)
         WHERE label IN apoc.coll.flatten([$domain],true)])
         with collect(distinct a) as a, r, e
-        LIMIT 300
-        return a, collect(distinct r) as r, collect(distinct e) as e
+        return a,collect(distinct r) as r, collect(distinct e) as e
         """
 
         with driver.session() as session:
@@ -950,11 +949,30 @@ def getNetworkjs():
             e = result['e']
             for record in e:
                 end.append({"end": serialize_node(record)})
-
         driver.close()
-        node = [flatten_json(entry) for entry in node]
-        rel = [flatten_json(entry) for entry in rel]
-        end = [flatten_json(entry) for entry in end]
+
+        if relation == "USES":
+
+            node = [flatten_json(entry) for entry in node]
+            rel = [flatten_json(entry) for entry in rel]
+            end = [flatten_json(entry) for entry in end]
+
+            from collections import Counter
+
+            uses_per_dataset = Counter(r['start_node_id'] for r in rel)
+
+            rel_scores = [{"r":r,"score":uses_per_dataset[r["start_node_id"]]} for r in rel]
+
+            rel_scores.sort(key=lambda x: x["score"])
+
+            rel = [i["r"] for i in rel_scores[:300]]
+
+            print(rel[:15])
+
+        else:
+            node = [flatten_json(entry) for entry in node]
+            rel = [flatten_json(entry) for entry in rel]
+            end = [flatten_json(entry) for entry in end]
 
         return {"node": node, "relations": rel, "relNodes": end, "params": [{"cmid": cmid, "database": database, "domain": domain, "relation": relation}]}
     except Exception as e:
