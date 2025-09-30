@@ -1493,10 +1493,11 @@ def input_Nodes_Uses(
         write="a",
     )
         for i in string_cols:
+            # only checks for properties that are selected to be added
             if i in optionalProperties:
                 query = """UNWIND $rows AS row
                     OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
-                    RETURN r[$column] AS existing_value, row"""
+                    RETURN r.[$column] AS existing_value, row"""
 
                 result = getQuery(
                     query,
