@@ -1,23 +1,51 @@
 [
     {
         "cood": [
-            60.0277,
-            36.4438
+            -127.31,
+            50.93
         ],
-        "source": "glottolog4.2.1"
+        "source": "GlobalJukebox"
     },
     {
         "cood": [
-            60.0277,
-            36.4438
+            -127.49,
+            51
         ],
-        "source": "glottolog5.2"
+        "source": "HRAF"
     },
     {
         "cood": [
-            60.0277,
-            36.4438
+            -127,
+            50.86
         ],
-        "source": "glottolog4.4"
+        "source": "WNAI"
+    },
+    {
+        "cood": [
+            -127.49,
+            51
+        ],
+        "source": "EthnographicAtlas"
+    },
+    {
+        "cood": [
+            -126.67,
+            50.42
+        ],
+        "source": "Binford2001"
+    },
+    {
+        "cood": [
+            -126.65,
+            51.19
+        ],
+        "source": "Price1990"
+    },
+    {
+        "cood": [
+            -127.61,
+            50.65
+        ],
+        "source": "Price1990"
     }
 ]
