@@ -154,7 +154,7 @@ def checkDomains(database, mail=None, return_type="data"):
         if return_type == "data":        
             return results.to_dict(orient="records")
         elif return_type == "info":
-            return {"info": len(results), "filepath": fp1}
+            return {"info": str(len(results)), "filepath": fp1}
 
     except Exception as e:
         return str(e)
@@ -397,12 +397,12 @@ def getBadCMID(database, mail=None, return_type="data"):
             if return_type == "data":
                 return results.to_dict(orient="records")
             elif return_type == "info":
-                return {"info": len(results), "filepath": fp1}
+                return {"info": str(len(results)), "filepath": fp1}
         else:
             if return_type == "data":
                 return "No bad CMIDs found"
             elif return_type == "info":
-                return {"info": 0, "filepath": None}
+                return {"info": "0", "filepath": None}
 
     except Exception as e:
         return "Error: " + str(e)
@@ -490,13 +490,13 @@ def getMultipleLabels(database, mail=None, return_type="data"):
             if return_type == "data":        
                 return results.to_dict(orient="records")
             elif return_type == "info":
-                return {"info": len(results), "filepath": fp1}
+                return {"info": str(len(results)), "filepath": fp1}
 
         else:
             if return_type == "data":   
                 return "No multiple labels found"
             elif return_type == "info":
-                return {"info": 0, "filepath": None}
+                return {"info":" 0", "filepath": None}
 
     except Exception as e:
         return str(e)
@@ -840,7 +840,7 @@ def getBadRelations(database, mail=None, return_type="data"):
         if return_type == "data":
             return {"bad_relationship_labels_count": len(results), "bad_relationship_labels": results.to_dict(orient="records")}
         elif return_type == "info":
-            return {"info": len(results), "filepath": [fp1]}
+            return {"info": str(len(results)), "filepath": [fp1]}
 
     except Exception as e:
         result = str(e)
@@ -928,7 +928,7 @@ def CMNameNotInName(database, mail=None, return_type="data"):
         if return_type == "data":
             return {"Total": len(cmids), "Name not in CMName": cmids}
         elif return_type == "info":
-            return {"info": len(cmids), "filepath": fp1}
+            return {"info": str(len(cmids)), "filepath": fp1}
 
     except Exception as e:
         result = str(e)
@@ -1098,7 +1098,7 @@ def noUSES(database, save=True, mail=None, return_type="data"):
         if return_type == "data":
             return {"Total": len(results), "No USES": results.to_dict(orient="records")}
         elif return_type == "info":
-            return {"info": len(results), "filepath": fp1}
+            return {"info": str(len(results)), "filepath": fp1}
     except Exception as e:
         result = str(e)
         return result, 500
@@ -1200,7 +1200,7 @@ def checkUSES(database, save=True, mail=None, return_type="data"):
         if return_type == "data":
             return {"Total": len(result), "Check USES": result.to_dict(orient="records")}
         elif return_type == "info":
-            return {"info": len(result), "filepath": fp1}
+            return {"info": str(len(result)), "filepath": fp1}
 
     except Exception as e:
         result = str(e)
@@ -1486,6 +1486,29 @@ def runRoutinesStream(databases="all", mail=None):
             ) + "</tr>"
             rows.append(row)
         table_html = "<table border='1'>" + header + "".join(rows) + "</table>"
+        
+        # static routine descriptions table
+        routine_info_table = """
+        <br><h2>Routine Descriptions</h2>
+        <table border="1">
+          <tr><th>Label</th><th>Function Name</th><th>Description</th></tr>
+          <tr><td>Modifications</td><td>reportChanges</td><td>Generates a report of logged changes (nodes, relationships, merges, deletions, edits) within a date range, optionally grouped by user.</td></tr>
+          <tr><td>Check Domains</td><td>checkDomains</td><td>Detects missing or inconsistent domain/subdomain assignments in USES relationships.</td></tr>
+          <tr><td>Bad Domains</td><td>getBadDomains</td><td>Identifies invalid or missing labels: bad subdomain labels, nodes missing CATEGORY, or nodes missing DATASET.</td></tr>
+          <tr><td>Bad CMID</td><td>getBadCMID</td><td>Finds invalid or outdated CMIDs used in USES relationships, including replacements from deleted nodes.</td></tr>
+          <tr><td>Multiple Labels</td><td>getMultipleLabels</td><td>Flags USES relationships that have multiple subdomain labels assigned.</td></tr>
+          <tr><td>Bad JSON</td><td>getBadJSON</td><td>Validates JSON properties (geoCoords, parentContext) and reports invalid entries.</td></tr>
+          <tr><td>Bad Relations</td><td>getBadRelations</td><td>Checks for invalid or inconsistent parent–child category relationships and mis-specified CONTAINS links.</td></tr>
+          <tr><td>CMName Not In Name</td><td>CMNameNotInName</td><td>Finds categories where the primary CMName is missing from the alternate names list and updates them.</td></tr>
+          <tr><td>No USES</td><td>noUSES</td><td>Lists categories that are not connected to any datasets through USES relationships.</td></tr>
+          <tr><td>Check USES</td><td>checkUSES</td><td>Validates USES relationships, checking for missing or malformed label, Key, or Name fields.</td></tr>
+          <tr><td>Process USES</td><td>processUSES</td><td>Processes and reconciles USES relationships for consistency and downstream use.</td></tr>
+          <tr><td>Process DATASETs</td><td>processDATASETs</td><td>Processes dataset nodes to ensure correct structure and metadata integration.</td></tr>
+          <tr><td>Fix MetaTypes</td><td>fixMetaTypes</td><td>Validates and corrects property data types on nodes and relationships based on metadata definitions.</td></tr>
+        </table>
+        """
+
+        email_body = table_html + routine_info_table
 
         # send mail only after everything is done
         if isinstance(mail, Mail):
@@ -1493,7 +1516,7 @@ def runRoutinesStream(databases="all", mail=None):
                 mail,
                 subject=f"Routines for {' and '.join(dbs)} - {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}",
                 recipients=["rjbischo@asu.edu"],
-                body=table_html,  # IMPORTANT: table, not full log
+                body=email_body,  # IMPORTANT: table, not full log
                 sender=config['MAIL']['mail_default'],
                 attachments=files_out or []
             )
