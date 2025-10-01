@@ -12,12 +12,30 @@ def client():
     with flask_app.test_client() as client:
         yield client
         
-def test_get_separate_rows(client):
-    # Test case 1: Valid input
-    response = client.post('/separate_rows', json={
-        'table': [{'A': 'a ;b; c', 'B': 1}, {'A': 'd e f', 'B': 2}],
-        'column': 'A',
-        'separator': ';'
-    })
+def test_translate_endpoint(client):
+    # Example payload for the /translate endpoint
+    
+    example_table = [{"period": "Archaic", "country":"AM22269"}, {"period": "Classical"}, {"period": "Hellenistic"}, {"period": "Roman"},{"period": "Archaic"}]
+    
+    payload = {
+        "database": "ArchaMap",
+        "property": "Name",
+        "domain": "PERIOD",
+        "key": "false",
+        "term": "period",
+        "country": "",
+        "context": "",
+        "dataset": "",
+        "yearStart": None,
+        "yearEnd": None,
+        "query": "false",
+        "table": example_table,
+        "uniqueRows": "true"
+    }
+    
+    response = client.post('/translate', json=payload)
+    
+    assert response.status_code == 200
     data = response.get_json()
-    assert data == [{"A":"a","B":1},{"A":"b","B":1},{"A":"c","B":1},{"A":"d e f","B":2}]
+    assert 'file' in data
+    assert 'order' in data
