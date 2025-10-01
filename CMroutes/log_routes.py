@@ -1,6 +1,9 @@
 from CM import getDriver, getQuery
+from flask import Blueprint
 
+logs_bp = Blueprint('logs', __name__)
 
+@logs_bp.route('/logs/<database>/<CMID>', methods=['GET'])
 def getLogs(database, CMID):
     if not isinstance(CMID, str):
         return "Invalid CMID format. It should be a string."

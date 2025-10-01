@@ -2,7 +2,7 @@
 
 from .utils import *
 from .keys import *
-from .translate import *
+from .search import *
 import pandas as pd
 from flask import jsonify
 import os
