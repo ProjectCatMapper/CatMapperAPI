@@ -4,36 +4,6 @@ import json
 from CM import translate, unlist
 
 translate_bp = Blueprint('translate', __name__)
-
-@translate_bp.route('/separate_rows', methods=['POST'])
-def get_separate_rows():
-    data = request.get_data()
-    data = json.loads(data)
-    table = data.get('table')
-    column = data.get('column')
-    separator = data.get('separator', ' ')
-    if table is None or column is None:
-        return "table and column are required", 400
-    try:
-        df = pd.DataFrame(table)
-        if column not in df.columns:
-            return f"Column '{column}' not found in table", 400
-
-        # split into lists
-        df[column] = df[column].str.split(separator)
-
-        # trim whitespace in each split value
-        df[column] = df[column].apply(
-            lambda lst: [x.strip() for x in lst] if isinstance(lst, list) else lst
-        )
-
-        # explode into multiple rows
-        df = df.explode(column, ignore_index=True)
-
-        return df.to_dict(orient='records')
-    except Exception as e:
-        return str(e), 500
-
     
 @translate_bp.route('/translate', methods=['POST'])
 def getTranslate():
@@ -69,7 +39,8 @@ def getTranslate():
             yearEnd=yearEnd,
             query=query,
             table=table,
-            countsamename=countsamename)
+            countsamename=countsamename,
+            uniqueRows=True)
 
         data_dict = data.to_dict(orient='records')
 

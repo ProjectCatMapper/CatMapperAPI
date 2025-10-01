@@ -63,23 +63,18 @@ def search(
             if re.search("^SM|^SD|^AD|^AM", country) is None:
                 raise Exception("country must be a valid CMID")
 
-    if yearStart == "null" or yearStart == "":
-        yearStart = None
-
-    if yearEnd == "null" or yearEnd == "":
-        yearEnd = None
-
-    try:
-        if yearStart is not None:
+    # convert yearStart to integer, return yearStart as None if not provided or error in conversion
+    if yearStart is not None:
+        try:
             yearStart = int(yearStart)
-    except ValueError:
-        raise Exception("yearStart must be an integer")
+        except ValueError:
+            yearStart = None
 
-    try:
-        if yearEnd is not None:
+    if yearEnd is not None:
+        try:
             yearEnd = int(yearEnd)
-    except ValueError:
-        raise Exception("yearEnd must be an integer")
+        except ValueError:
+            yearEnd = None
 
     if yearEnd is None and yearStart is not None:
         raise Exception("must specify yearEnd property")
@@ -269,7 +264,8 @@ def translate(
         yearEnd,
         query,
         table,
-        countsamename):
+        countsamename,
+        uniqueRows=False):
     """
     database: Name or identifier of the target database; used to initialize a connection driver.
     property: The property or attribute to match against in the graph database (e.g., 'Name', 'Key', 'glottocode').
@@ -286,6 +282,12 @@ def translate(
     uniqueRows: Boolean flag that determines whether identical input rows should be grouped together or processed individually.
     """
 
+    if isinstance(uniqueRows, str):
+        if uniqueRows.lower() == 'true':
+            uniqueRows = True
+        else:
+            uniqueRows = False
+
     if query is not None:
         if query.lower() != 'true':
             query = 'false'
@@ -297,13 +299,32 @@ def translate(
     if not key is None:
         if str.lower(key) != 'true':
             key = None
+            
+    if yearStart is not None:
+        try:
+            yearStart = int(yearStart)
+        except ValueError:
+            yearStart = None
+
+    if yearEnd is not None:
+        try:
+            yearEnd = int(yearEnd)
+        except ValueError:
+            yearEnd = None
+
+    if yearEnd is None and yearStart is not None:
+        raise Exception("must specify yearEnd property")
+
+    if yearStart is None and yearEnd is not None:
+        raise Exception("must specify yearStart property")
+    
     driver = getDriver(database)
 
     # format data
     # add rowid,
     # table = [{'Name':'test1',"key": 1}, {'Name':'test1',"key": 2}, {'Name':'test2',"key": 3}]
     df = pd.DataFrame(table)
-    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
     df[term] = df[term].astype(str).str.replace('~', '', regex=False)
     df[term] = df[term].astype(str).str.replace('"', '', regex=False)
     # adding the index into the dataset (as an uniqueID) to preserve original order and later joining
@@ -329,7 +350,7 @@ def translate(
     # aggregates "rows" dataframe by columns to group by
     # it stores all the CMuniqueRowID's for that group(row) in a list
     rows = rows.groupby(columns_to_group_by)[
-        'CMuniqueRowID'].apply(list).reset_index()
+            'CMuniqueRowID'].apply(list).reset_index()
     # now adds new uniqueID for each row from the potentially new "rows"
     # CMUniqueCategoryID clumps rows that share the same term, country, contect, dataset, yearStart and yearEnd.
     rows['CMuniqueCategoryID'] = rows.index
@@ -542,6 +563,43 @@ def translate(
 
     # rejoins matches with original dataset
     data = pd.merge(df, data, on="CMuniqueRowID", how='outer')
+    if uniqueRows:
+        """
+        returns a single category row for each unique combination of term, country, context, dataset, yearStart, yearEnd
+        """
+
+        # stable identifying columns
+        grouping_cols = [
+            term,
+            f"CMID_{term}",
+            f"CMName_{term}",
+            f"label_{term}",
+            f"country_{term}" if f"country_{term}" in data.columns else None,
+            f"dataset" if "dataset" in data.columns else None,
+            f"context_{term}" if f"context_{term}" in data.columns else None,
+            f"yearStart" if "yearStart" in data.columns else None,
+            f"yearEnd" if "yearEnd" in data.columns else None,
+        ]
+        grouping_cols = [c for c in grouping_cols if c in data.columns]
+
+        # separate scalar vs list columns
+        scalar_cols = [c for c in data.columns if c not in grouping_cols and data[c].map(lambda x: isinstance(x, list)).any() is False]
+        list_cols   = [c for c in data.columns if c not in grouping_cols and c not in scalar_cols]
+
+        agg_dict = {c: "first" for c in scalar_cols}
+        agg_dict.update({
+            c: lambda x: list(dict.fromkeys(               # preserves order, removes duplicates
+                i for sub in x for i in (sub if isinstance(sub, list) else [sub])
+            ))
+            for c in list_cols
+        })
+
+        data = (
+            data.groupby(grouping_cols, dropna=False)
+            .agg(agg_dict)
+            .reset_index()
+        )
+
     data[f'matchType_{term}'] = data[f'matchType_{term}'].fillna('none')
     data.fillna('', inplace=True)
     dtypes = data.dtypes.to_dict()
