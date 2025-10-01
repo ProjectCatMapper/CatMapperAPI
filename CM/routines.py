@@ -1515,7 +1515,7 @@ def runRoutinesStream(databases="all", mail=None):
             status = sendEmail(
                 mail,
                 subject=f"Routines for {' and '.join(dbs)} - {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                recipients=["rjbischo@asu.edu"],
+                recipients=["admin@catmapper.org"],
                 body=email_body,  # IMPORTANT: table, not full log
                 sender=config['MAIL']['mail_default'],
                 attachments=files_out or []
