@@ -15,7 +15,7 @@ from .utils import *
 from .log import createLog
 from .USES import processUSES
 from .USES import addCMNameRel,processDATASETs,waitingUSES
-from .upload_optimised import updateProperty,createUSES
+from .upload import updateProperty,createUSES
 from flask import jsonify
 
 
