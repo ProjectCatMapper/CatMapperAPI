@@ -43,7 +43,7 @@ def catm():
     '''Gets the list of relations for the node'''
     relnames = []
     visible_relations = ["USES", "CONTAINS", "DISTRICT_OF",
-                         "LANGUOID_OF", "RELIGION_OF", "PERIOD_OF", "CULTURE_OF", "POLITY_OF"]
+                         "LANGUOID_OF", "RELIGION_OF", "PERIOD_OF", "CULTURE_OF", "POLITY_OF","EQUIVALENT"]
     q = "MATCH (n)-[r]-(n1) WHERE n.CMID='"+cmid + \
         "' RETURN DISTINCT TYPE(r) as relation_name"
     node_relation_types = session.run(q).data()
@@ -57,7 +57,6 @@ def catm():
     # this query gets the labels for the node
     q = f"match (a) where a.CMID = '{cmid}' return labels(a) as label"
     labels = getQuery(q,driver=driver,type='list')
-    print(labels)
     if "DATASET" in labels[0]:
         label = "DATASET"
     elif "CATEGORY" in labels[0]:
@@ -135,16 +134,29 @@ def catm():
                     Link
                 ORDER BY Source, Name
                 '''
-    # apoc.text.join([
-    #     coalesce(toString(recordStart), ''),
-    #     coalesce(toString(recordEnd), '')
-    # ], '-') AS `Time span`,
 
         qCategories = """
                     unwind $cmid as cmid
                     match (a:ADM0 {CMID: cmid})-[:DISTRICT_OF]-(c:CATEGORY)
                     unwind labels(c) as Domain with Domain, count(*) as Count
                     return distinct Domain, Count order by Domain
+                    """
+        
+        qparents = """
+                    unwind $cmid as cmid
+                    MATCH (n {CMID: cmid})
+
+                    OPTIONAL MATCH (parent)-[:CONTAINS]->(n)
+                    WITH n, collect(DISTINCT parent.CMID) AS directParents
+
+                    OPTIONAL MATCH (n)-[:CONTAINS]->(child)
+                    WITH n, directParents, collect(DISTINCT child.CMID) AS directChildren
+
+                    OPTIONAL MATCH (n)-[:CONTAINS*1..]->(descendant)
+                    RETURN 
+                    directParents,
+                    directChildren,
+                    collect(DISTINCT descendant.CMID) AS allDescendants
                     """
 
     elif label == "DATASET":
@@ -190,6 +202,23 @@ def catm():
 
                 """
         
+        qparents = """
+                    unwind $cmid as cmid
+                    MATCH (n {CMID: cmid})
+
+                    OPTIONAL MATCH (parent)-[:CONTAINS]->(n)
+                    WITH n, collect(DISTINCT parent.CMID) AS directParents
+
+                    OPTIONAL MATCH (n)-[:CONTAINS]->(child)
+                    WITH n, directParents, collect(DISTINCT child.CMID) AS directChildren
+
+                    OPTIONAL MATCH (n)-[:CONTAINS*1..]->(descendant)
+                    RETURN 
+                    directParents,
+                    directChildren,
+                    collect(DISTINCT descendant.CMID) AS allDescendants
+                    """
+        
     elif label == "DELETED":
         qInfo = '''
             unwind $cmid as cmid
@@ -204,7 +233,10 @@ def catm():
         qSamples = None
 
         qCategories = None
-        
+
+        qparents = None
+    
+    parents = []
 
     with driver.session() as session:
         info = session.run(qInfo, cmid=cmid)
@@ -294,12 +326,12 @@ def catm():
 
         else:
             samples = []
+        if qparents is not None:
+            parents = session.run(qparents, cmid=cmid)
+            parents = [dict(record) for record in parents]
         driver.close()
     
-
-
     if "Dataset Location" in info[0]:
-        print(info[0]["Dataset Location"])
         if info[0]["Dataset Location"]:
             soup = BeautifulSoup(info[0]["Dataset Location"], 'html.parser')
             link_tag = soup.find('a')
@@ -315,6 +347,8 @@ def catm():
     for point in dataset_points:
         try:
             geom = json.loads(point["geometry"])
+            if not geom:
+                continue
             coords = geom.get("coordinates")
             geom_type = geom.get("type")
 
@@ -449,6 +483,11 @@ def catm():
         if info[0]['Location'][-2:-1] == ",":
             info[0]['Location'] = info[0]['Location'][:-2].strip()
 
+    if parents is not None and label != "DELETED":    
+        info[0]['direct_Parents'] = len(parents[0].get('directParents', 0))
+        info[0]['direct_Children'] = len(parents[0].get('directChildren', 0))
+        info[0]['all_Descendants'] = len(parents[0].get('allDescendants', 0))
+
     return jsonify({
         "info": info[0],
         "samples": samples,
@@ -458,7 +497,7 @@ def catm():
         "datasetpoints": transformed_points,
         "relnames": relnames,
         "polysource": polysources,
-        "badsources": bad_sources
+        "badsources": bad_sources,
     })
 
 
@@ -478,6 +517,32 @@ def net():
     resultnet = r.data()
     return resultnet
 
+@app.route("/getTranslatedomains", methods=['GET'])
+def getTranslatedomains():
+    database = request.args.get("database")
+    driver = getDriver(database)
+    query = '''MATCH (m:METADATA)
+            WHERE m.displayOrder IS NOT NULL
+            AND NOT m.CMName IN ['ALL NODES', 'ATTRIBUTE']
+            WITH m.groupLabel AS group, m.CMName AS node, m.displayOrder AS nodeOrder
+            MATCH (g:METADATA {CMName: group})
+            WHERE g.displayOrder IS NOT NULL
+            WITH g.groupLabel AS group, g.displayOrder AS groupOrder, node, nodeOrder
+            ORDER BY group, nodeOrder, node 
+            WITH group, groupOrder, collect(node) AS nodes
+            RETURN group, nodes
+            ORDER BY groupOrder
+            '''
+    
+    result = getQuery(query,driver)
+
+    result_list = []
+    for record in result:
+        group = record["group"]
+        members = record["nodes"]
+        result_list.append({"group": group, "nodes": members})
+    
+    return jsonify(result_list)
 
 @app.route("/explore", methods=['GET'])
 def getExplore():
@@ -893,6 +958,7 @@ def getNetworkjs():
         cmid = request.args.get('cmid')
         cmid = re.split(",", cmid)
         domain = request.args.get('domain')
+        limit = int(request.args.get('limit'))
         if domain is not None:
             domain = re.split(",", domain)
         else:
@@ -965,9 +1031,7 @@ def getNetworkjs():
 
             rel_scores.sort(key=lambda x: x["score"])
 
-            rel = [i["r"] for i in rel_scores[:300]]
-
-            print(rel[:15])
+            rel = [i["r"] for i in rel_scores[:limit]]
 
         else:
             node = [flatten_json(entry) for entry in node]
@@ -1206,7 +1270,6 @@ return true as exists
             data = [dict(record) for record in result]
             driver.close()
 
-        print(data)
 
         if isinstance(data, list) and data and data[0].get("exists") is not None:
             raise Exception(
@@ -1465,8 +1528,8 @@ def getAdminEdit():
         
         result = "Nothing returned"
         if fun == "mergeNodes":
-            keepcmid = unlist(data.get('keepcmid'))
-            deletecmid = unlist(data.get('deletecmid'))
+            keepcmid = unlist(data.get('keepcmid').strip())
+            deletecmid = unlist(data.get('deletecmid').strip())
             result = mergeNodes(keepcmid, deletecmid, user, database)
         elif fun == "processUSES":
             CMID = cleanCMID(data.get('CMID'))
@@ -1524,7 +1587,6 @@ def getDataset():
         else:
             raise Exception("invalid request method")
         
-        print(cmid)
 
         driver = getDriver(database)
 
