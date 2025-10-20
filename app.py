@@ -1,5 +1,6 @@
 """First layer of contact between the frontend and backend, some functions diverge from here to other files but the rest are computed here."""
 
+from enum import unique
 from flask import request, send_file, send_from_directory, jsonify, render_template, make_response, send_from_directory
 import os
 from bs4 import BeautifulSoup
@@ -1171,7 +1172,7 @@ def getSearch():
     except Exception as e:
         return str(e), 500
     
-@app.route('/translate2', methods=['POST'])
+@app.route('/translate', methods=['POST'])
 def getTranslate2():
     try:
         data = request.get_data()
@@ -1190,7 +1191,8 @@ def getTranslate2():
         yearEnd = unlist(data.get('yearEnd'))
         query = unlist(data.get("query"))
         table = data.get("table")
-        countsamename = data.get("uniqueRows")
+        countsamename = data.get("countsamename")
+        uniqueRows = data.get("uniqueRows")
 
         data, desired_order = translate(
             database=database,
@@ -1205,7 +1207,8 @@ def getTranslate2():
             yearEnd=yearEnd,
             query=query,
             table=table,
-            countsamename=countsamename)
+            countsamename=countsamename,
+            uniqueRows=uniqueRows)
 
         data_dict = data.to_dict(orient='records')
 
