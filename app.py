@@ -2257,8 +2257,8 @@ app.add_url_rule('/test/testmsg/<database>/<msg>', 'testmsg',
 app.add_url_rule('/routines/<routine>/<database>', 'get_routines',
                  get_routines, methods=['GET'])
 
-app.add_url_rule('/admin/query/<database>', 'getRouteQuery',
-                 getRouteQuery, methods=['POST'])
+# app.add_url_rule('/admin/query/<database>', 'getRouteQuery',
+#                  getRouteQuery, methods=['POST'])
 
 app.add_url_rule('/CSVURLs/<database>', 'get_backup_csv_urls_route',
                  get_backup_csv_urls_route, methods=['GET'])
