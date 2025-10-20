@@ -451,20 +451,21 @@ def translate(
         qDataset = "with row, a, matching, score"
 
     # filter by year
+    # Limits entries to recordStart and recordEnd that overlap with inputted yearRange
     if 'yearStart' in rows[0] and 'yearEnd' in rows[0]:
         if domain == "DATASET":
             qYear = """
-    call {with row, a with row, a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
-    else a.ApplicableYears end as yearMatch, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
-    with a, years, apoc.convert.toIntList(apoc.coll.toSet(apoc.coll.flatten(collect(yearMatch),true))) as yearMatch 
+    call {with row, a with row, a,range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
+    with a, years, apoc.coll.toSet(collect(a.recordStart) + collect(a.recordEnd)) as yearMatch
     where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}
     with node as a, matching, score
     """
+                
         else:
             qYear = f"""
     call {{with row, a with row, a, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years 
-    match (a)<-[r:USES]-(:DATASET) unwind r.yearStart as yearStart 
-    unwind r.yearEnd as yearEnd with years, a, r, apoc.coll.toSet(collect(yearStart) + collect(yearEnd)) as yearMatch 
+    match (a)<-[r:USES]-(:DATASET) unwind r.recordStart as recordStart 
+    unwind r.recordEnd as recordEnd with years, a, r, apoc.coll.toSet(collect(recordStart) + collect(recordEnd)) as yearMatch 
     where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}}
     with row, node as a, matching, score order by score desc
     """
@@ -513,9 +514,6 @@ def translate(
         # data contains any matching rows found by the propose translate query
         # any rows that are not matched are not included
         data = getQuery(cypher_query, driver, params={'rows': rows})
-
-    print("--------------------------------")
-    print(data)
 
     if not data:
         data = df
