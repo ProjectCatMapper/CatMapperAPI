@@ -1,11 +1,14 @@
 import inspect
-from flask import request
+from flask import request, Blueprint
 from flask_mail import Mail
 import CM.routines as routines_module
 import CM.USES as uses_module
 
 mail = Mail()
 
+routine_bp = Blueprint('routine', __name__)
+
+@routine_bp.route('/routines/<routine>/<database>', methods=['GET'])
 def get_routines(routine, database):
     try:
         # Dynamically get function by name from the routines module
@@ -34,7 +37,8 @@ def get_routines(routine, database):
             'dateEnd': request.args.get('dateEnd') or None ,
             'user': request.args.get('user') or None,
             'action': request.args.get('action') or "default",
-            'return_type': request.args.get('return_type') or "info"
+            'return_type': request.args.get('return_type') or "info",
+            'save': request.args.get('save') or True
         }
 
         # Match args to function signature
@@ -49,6 +53,7 @@ def get_routines(routine, database):
     except Exception as e:
         return str(e), 500
 
+@routine_bp.route('/runRoutinesStream/<databases>', methods=['GET'])
 def get_runRoutinesStream(databases):
     try:
         return routines_module.runRoutinesStream(databases, mail)
