@@ -283,7 +283,7 @@ def translate(
     """
 
     if isinstance(uniqueRows, str):
-        if uniqueRows.lower() == 'true':
+        if uniqueRows.lower() == 'true' or uniqueRows == True:
             uniqueRows = True
         else:
             uniqueRows = False
@@ -330,14 +330,22 @@ def translate(
     # adding the index into the dataset (as an uniqueID) to preserve original order and later joining
     df['CMuniqueRowID'] = df.index
     # creates new dataframe with term and unique row ID
+    ## Robert
+    # Remove empty category rows
+    df_valid = df[df[term].notna()].copy()
+    df_valid = df_valid[df_valid[term] != '']
+    df_valid = df_valid[df_valid[term].astype(str).str.strip() != '']
+    df_valid = df_valid[df_valid[term] != 'None']
+
     rows = pd.DataFrame(
-        {'term': df[term], 'CMuniqueRowID': df["CMuniqueRowID"]})
+        {'term': df_valid[term], 'CMuniqueRowID': df_valid["CMuniqueRowID"]})
+
     if isinstance(country, str) and country in df.columns:
-        rows['country'] = df[country]
+        rows['country'] = df_valid[country]
     if isinstance(context, str) and context in df.columns:
-        rows['context'] = df[context]
+        rows['context'] = df_valid[context]
     if isinstance(dataset, str) and dataset in df.columns:
-        rows['dataset'] = df[dataset]
+        rows['dataset'] = df_valid[dataset]
     if isinstance(yearStart, str) and yearStart is not None:
         rows['yearStart'] = yearStart
     if isinstance(yearEnd, str) and yearEnd is not None:
@@ -607,7 +615,7 @@ def translate(
             list_cols.append(col_name)
 
     for col in list_cols:
-        data[col] = data[col].apply(lambda x: '|'.join(map(str, x)))
+        data[col] = data[col].apply(lambda x: '; '.join(map(str, x)))
 
     data = data.astype(str)
 
