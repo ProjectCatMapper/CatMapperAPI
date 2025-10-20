@@ -1,13 +1,20 @@
 from .dev_routes import *
-from .admin_routes import *
+from .merge_routes import *
 from .routine_routes import *
-from .query import *
-from .getDownloads import *
-from .getLogs import *
+from .download_routes import *
+from .log_routes import *
+from .docs_routes import *
+from .explore_routes import *
+from .upload_routes import *
+from .user_routes import *
+from .admin_routes import *
+from .homepage_routes import *
+from .metadata_routes import *
+
 from flask import Flask, abort, send_from_directory
 from .extensions import *
-from .getMetadata import *
-
+from .metadata_routes import *
+from .search_routes import *
 
 import os
 from flask_cors import CORS
