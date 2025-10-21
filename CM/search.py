@@ -569,6 +569,7 @@ def translate(
 
     # rejoins matches with original dataset
     data = pd.merge(df, data, on="CMuniqueRowID", how='outer')
+    ## Robert
     if uniqueRows:
         """
         returns a single category row for each unique combination of term, country, context, dataset, yearStart, yearEnd
