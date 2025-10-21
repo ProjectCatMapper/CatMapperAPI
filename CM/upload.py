@@ -113,19 +113,26 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
             col for col in df.columns if "label" not in col and "uniqueID" not in col
         ]
 
-        properties = getQuery(
-            "MATCH (p:PROPERTY) return p.CMName as property", driver, type="list"
-        )
-
-        missing_vars = [var for var in vars if var not in properties]
-
-        if "importID" in missing_vars:
-            missing_vars.remove("importID")
-
-        if missing_vars:
-            raise Exception(
-                f"Error: The following columns are not in properties: {', '.join(missing_vars)}"
+        if isDataset:
+            allowed_properties = getQuery(
+                "MATCH (p:PROPERTY) WHERE p.nodeType CONTAINS 'DATASET' or p.nodeType='NO EDIT' return p.CMName as property", driver, type="list"
             )
+        else:
+            allowed_properties = getQuery(
+                "MATCH (p:PROPERTY) WHERE p.nodeType CONTAINS 'CATEGORY' or p.nodeType='NO EDIT' return p.CMName as property", driver, type="list"
+            )
+        
+        vars = [v for v in vars if v in allowed_properties] + ['importID']
+        
+        # missing_vars = [var for var in vars if var not in properties]
+
+        # if "importID" in missing_vars:
+        #     missing_vars.remove("importID")
+
+        # if missing_vars:
+        #     raise Exception(
+        #         f"Error: The following columns are not in the allowed properties for the node type: {', '.join(missing_vars)}"
+        #     )
 
         updateLog(
             f"log/{user}uploadProgress.txt", "Creating variable clauses", write="a"
@@ -971,9 +978,6 @@ def input_Nodes_Uses(
         duplicate_CMIDs = duplicate_CMIDs['CMID'].tolist()
         if not duplicate_CMIDs.empty:
             raise ValueError(f"Duplicate CMIDs found in CMID column: \n{duplicate_CMIDs}")
-        
-    print("Stage 0")
-    print(dataset.head(3))
     
     # When uploading category nodes, need to make sure that CMName is added to names in case, it is not included in Name column.
     if uploadOption == "add_node" and not isDataset:
@@ -982,11 +986,7 @@ def input_Nodes_Uses(
                         else f"{row['Name']},{row['CMName']}",
                         axis=1
                     )
-    
-    print("Stage 1")
-
-    return
-        
+            
     # When uploading keys or new keys, need to make sure they follow the standard convention
         
     pattern = re.compile(r"^[^:]+:[^:]+$")
@@ -998,8 +998,6 @@ def input_Nodes_Uses(
             raise ValueError(f"Invalid 'Key' format in rows:\n{invalid_rows}. Must be of form VARIABLE : VALUE")
         
     
-        
-        
     if uploadOption == "update_replace":
         if "NewKey" in dataset.columns:
             invalid_rows = dataset.index[~dataset["NewKey"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].tolist()
