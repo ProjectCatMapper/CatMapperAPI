@@ -112,7 +112,7 @@ def validatePropertyCMID(value,proptoChange,validgroupLabel,driver):
 def add_edit_delete_USES(database,user,input):
     CMID = input.get('s1_2')
     USES_property = input.get('s1_8')
-    new_property_value = input.get('s1_3')
+    new_property_value = input.get('s1_3').strip()
     addOrEditNode = input.get('s1_1')
     indexValue = input.get('s1_7')
     key = input.get('s1_4')[indexValue-1][1]["Key"]
@@ -120,6 +120,9 @@ def add_edit_delete_USES(database,user,input):
 
     driver = getDriver(database)
 
+    metaTypes = getPropertiesMetadata(driver)
+    metaType = [item['metaType'] for item in metaTypes if item["type"] == "relationship" and item["property"] == USES_property]
+    
     # When adding or editing properties, checks to make sure CMIDs are valid and the labels are correct.
     if addOrEditNode != "delete":
         if USES_property == "parent":
@@ -127,6 +130,8 @@ def add_edit_delete_USES(database,user,input):
             if "||" in new_property_value:
                 for i in new_property_value.split("||"):
                     validatePropertyCMID(i,USES_property,groupLabel,driver)
+            else:
+                validatePropertyCMID(new_property_value,USES_property,groupLabel,driver)
         else:
             query = """
                     UNWIND $prop as prop
@@ -138,9 +143,12 @@ def add_edit_delete_USES(database,user,input):
             groupLabel = groupLabel[0]['groupLabel']
             if groupLabel:
                 validatePropertyCMID(new_property_value,USES_property,groupLabel,driver)
-        
-    if "||" in new_property_value:
-        new_property_value=new_property_value.split("||")
+    
+    if "list" in metaType:        
+        if "||" in new_property_value:
+            new_property_value=new_property_value.split("||")
+        else:
+            new_property_value=[new_property_value]
     
     if addOrEditNode == "edit" or addOrEditNode == "add":
         if USES_property == "Key":
@@ -182,8 +190,9 @@ def add_edit_delete_USES(database,user,input):
             isDataset = True
         elif CMID[1] == "M":
             isDataset = False
-
+              
         df = pd.DataFrame([data])
+        # Arguments coming from admin have already been parsed into lists
         updateProperty(df,USES_property,isDataset,database,user,updateType = "overwrite", propertyType="USES")
         processUSES(CMID=CMID,database=database,user=user)
     elif addOrEditNode == "delete":
@@ -206,7 +215,7 @@ def add_edit_delete_USES(database,user,input):
 def add_edit_delete_Node(database,user,input):
     changeNodeID = input.get('s1_2')
     changeNodeProperty = input.get('s1_7')
-    changeNodeValue = input.get('s1_3')
+    changeNodeValue = input.get('s1_3').strip()
     addOrEditNode = input.get('s1_1')
 
     driver = getDriver(database)
@@ -344,39 +353,6 @@ def replaceProperty(cmid, property, old, new, database, datasetID = None, Key = 
         return f"Completed {cmid} property {property}"
     except Exception as e:
         return str(e), 500
-
-# function to add CMName to Name property
-#Robert. Does this do the same work as addCMNameRel
-# def addCMNametoName(cmid, driver):
-#     try:
-#         if re.search("^SM", cmid) is None:
-#             dataset = "AD941"
-#         else:
-#             dataset = "SD11"
-
-#         query = """
-#         unwind $cmid as cmid
-#         match (c:CATEGORY)<-[r:USES]-(:DATASET) 
-#         where c.CMID = cmid
-#         with c, collect(r) as rels, apoc.coll.toSet(apoc.coll.flatten(collect(r.Name),true)) as names 
-#         where not c.CMName in names 
-#         with c
-#         match (d:DATASET {CMID: $dataset}) 
-#         merge (c)<-[r:USES]-(d) 
-#         on create set r.Key = "Key: " + c.CMID, r.Name = [c.CMName], r.log = [toString(date()) + ": automatically added CMName to USES relationship"]
-#         on match set r.Name = apoc.coll.flatten([c.CMName,r.Name],true),
-#         r.log = apoc.coll.flatten([r.log,toString(date()) + ": automatically added CMName to USES relationship"],true)  
-#         return c,d
-#         """
-
-#         with driver.session() as session:
-#             results = session.run(query, cmid=cmid, dataset=dataset)
-#             driver.close()
-
-#         return f"Completed adding names to {cmid}"
-
-#     except Exception as e:
-#         return str(e), 500
 
 #Main function for merging nodes
 def mergeNodes(keepcmid,deletecmid,user,database):
@@ -552,7 +528,6 @@ def mergeNodes(keepcmid,deletecmid,user,database):
 ############################
 #section for moving USES ties
 
-
 def USESLogText(relid, driver):
     """
     Creates a custom log text for the uses tie that is to be moved.
@@ -652,12 +627,17 @@ def check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id):
 #Function that moves uses tie from one category node to another category node
 def moveUSESties(database,user,input,dataset,tabledata): 
     driver = getDriver(database)
-    CMID_from = input.get('s1_2')
-    CMID_to = input.get('s1_3')
+    CMID_from = input.get('s1_2').strip()
+    CMID_to = input.get('s1_3').strip()
     USES_property = json.loads(input.get('s1_7'))
     rel_id = USES_property[1]["id"]
     # only need to revise operation if user wants to keep some parent-child ties with the FROM node.
     USES_to_change = [row for row in tabledata if row['optionA'] != 'From']
+
+    print(CMID_from)
+    print(CMID_to)
+
+    return
     
     try:
         if len(USES_to_change) > 0:
@@ -870,6 +850,10 @@ def deleteNode(database,user,input):
                     createLog(id=[row['ids'] for row in ids], type="node",
                           log=f"removed reference to deleted node {input.get('s1_2')} from {prop}",
                           user=user, driver=driver)
+            
+            # if a merging template is being deleted, need to remove references to that merging template from all equivalence ties.            
+            if "MERGING" in label:
+                pass
 
 
         # If you delete a category node, need to remove it’s CMID from all properties (including parentContext) 
@@ -1019,8 +1003,10 @@ def createLabel(database,user,input):
 
     if input.get('s1_7') == "NA":
         grouplabel = input.get('s1_2').strip()
+        displayOrder = 4
     else:
         grouplabel = input.get('s1_7').strip()
+        displayOrder = 100
     
     if input.get('s1_6') == "":
         color = "#404040"
@@ -1028,9 +1014,9 @@ def createLabel(database,user,input):
         color = input.get('s1_6')
     
     if input.get('s1_3').strip() != "":       
-        q = f"""CREATE (n:METADATA:LABEL {{CMID:'{CMID}',CMName:'{input.get('s1_2')}',groupLabel:'{grouplabel}',relationship:'{input.get('s1_3')}',description:'{input.get('s1_4')}',displayName:'{input.get('s1_5')}',color:'{color}',label:'{input.get('s1_5')}',public:"TRUE"}})"""
+        q = f"""CREATE (n:METADATA:LABEL {{CMID:'{CMID}',CMName:'{input.get('s1_2')}',groupLabel:'{grouplabel}',relationship:'{input.get('s1_3')}',description:'{input.get('s1_4')}',displayName:'{input.get('s1_5')}',color:'{color}',label:'{input.get('s1_5')}',displayOrder:'{displayOrder}',public:"TRUE"}})"""
     else:
-        q = f"""CREATE (n:METADATA:LABEL {{CMID:'{CMID}',CMName:'{input.get('s1_2')}',groupLabel:'{grouplabel}',description:'{input.get('s1_4')}',displayName:'{input.get('s1_5')}',color:'{color}',label:'{input.get('s1_5')}',public:"TRUE"}})"""
+        q = f"""CREATE (n:METADATA:LABEL {{CMID:'{CMID}',CMName:'{input.get('s1_2')}',groupLabel:'{grouplabel}',description:'{input.get('s1_4')}',displayName:'{input.get('s1_5')}',color:'{color}',label:'{input.get('s1_5')}',displayOrder:'{displayOrder}',public:"TRUE"}})"""
 
 
     result = getQuery(q,driver=driver)
@@ -1039,21 +1025,3 @@ def createLabel(database,user,input):
 
 ############################
 #section for potentially deprecating functions
-# def moveUSESValidate(relid, database):
-    
-#     driver = getDriver(database)
-
-#     query = """
-#     match (p:CATEGORY)<-[r:USES]-(d:DATASET)
-#     where elementId(r) = $relid
-#     match (p)<-[r2:USES]-(d)
-#     with p,d, collect(r2) as rels, count(*) as n
-#     where n > 1
-#     with p,d
-#     match (p)-[rel]->(c:CATEGORY)<-[r3:USES]-(d)
-#     where not isEmpty([i in keys(r3) where p.CMID in r3[i]])
-#     return c.CMID as childCMID, c.CMName as childCMName, r3.Key as childKey, type(rel) as relationship
-#     """
-#     result = getQuery(query, driver, params={"relid": relid})
-
-#     return result

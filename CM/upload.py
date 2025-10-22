@@ -26,8 +26,8 @@ data = [
         "yearStart": 2011,
     }
 ]
-df = pd.DataFrame(data)
 
+test_df = pd.DataFrame(data)
 
 #Returns boolean if input is integer
 def is_valid_integer(value):
@@ -53,7 +53,7 @@ def is_valid_float(value):
 
 #Returns invalid rows where End years are lesser than Start years
 def get_invalid_ranges(df, col1, col2):   
-    invalid_mask = (~df[col2].isna()) & (df[col2] != '') & (df[col2] < df[col1])
+    invalid_mask = (~df[col2].isna()) & (df[col2] != '') & (pd.to_numeric(df[col2], errors='coerce') < pd.to_numeric(df[col1], errors='coerce'))
     return df[invalid_mask][[col1, col2]]
 
 #writes the log text to console and also saves logs to text file.
@@ -113,19 +113,26 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
             col for col in df.columns if "label" not in col and "uniqueID" not in col
         ]
 
-        properties = getQuery(
-            "MATCH (p:PROPERTY) return p.CMName as property", driver, type="list"
-        )
-
-        missing_vars = [var for var in vars if var not in properties]
-
-        if "importID" in missing_vars:
-            missing_vars.remove("importID")
-
-        if missing_vars:
-            raise Exception(
-                f"Error: The following columns are not in properties: {', '.join(missing_vars)}"
+        if isDataset:
+            allowed_properties = getQuery(
+                "MATCH (p:PROPERTY) WHERE p.nodeType CONTAINS 'DATASET' or p.nodeType='NO EDIT' return p.CMName as property", driver, type="list"
             )
+        else:
+            allowed_properties = getQuery(
+                "MATCH (p:PROPERTY) WHERE p.nodeType CONTAINS 'CATEGORY' or p.nodeType='NO EDIT' return p.CMName as property", driver, type="list"
+            )
+        
+        vars = [v for v in vars if v in allowed_properties] + ['importID']
+        
+        # missing_vars = [var for var in vars if var not in properties]
+
+        # if "importID" in missing_vars:
+        #     missing_vars.remove("importID")
+
+        # if missing_vars:
+        #     raise Exception(
+        #         f"Error: The following columns are not in the allowed properties for the node type: {', '.join(missing_vars)}"
+        #     )
 
         updateLog(
             f"log/{user}uploadProgress.txt", "Creating variable clauses", write="a"
@@ -333,7 +340,10 @@ def createUSES(links, database, user):
 
 
 # function to update or replace properties of USES ties or nodes, (functions 3 to 6)
-def updateProperty(df,optionalProperties,isDataset, database, user, updateType, propertyType="USES"):
+# This function does 3 things : it creates the correct datatyper for calls from upload, it changes the database
+# and it logs those changes.
+# If no seperator is specified, quadruple stove pipe should lead to no parsing.
+def updateProperty(df,optionalProperties,isDataset, database, user, updateType, propertyType="USES",sep = "||||"):
     try:
         # double checking for errors, if in future we call this function elsewhere outside this pipeline
         if not updateType in ["overwrite", "update"]:
@@ -355,12 +365,9 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
             if required not in df.columns:
                 raise ValueError(f"Missing required column {required}")
 
-        #Every column excluding the required columns in the dataframe                
-        # vars = df.drop(
-        #     columns=[col for col in requiredCols if col in df.columns]
-        # ).columns.tolist()
-
-        vars = optionalProperties
+        # Every column excluding the required columns in the dataframe
+        # This carries forwaard geoCoords and parentContext even though they are not in optionalProperties               
+        vars = df.drop(columns=[col for col in requiredCols if col in df.columns]).columns.tolist()
 
         if "NewKey" in vars:
             for x in range(len(vars)):
@@ -425,11 +432,11 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
             metaType = metaTypeDict.get(var)
             if updateType == "overwrite" and var != "log":
                 props.append(
-                    f"{node_or_tie}.{var} = custom.formatProperties(['',row.{var}],'{metaType}',';')[0].prop"
+                    f"{node_or_tie}.{var} = custom.formatProperties(['',row.{var}],'{metaType}','{sep}')[0].prop"
                 )
             else:
                 props.append(
-                    f"{node_or_tie}.{var} = custom.formatProperties([{node_or_tie}.{var},row.{var}],'{metaType}',';')[0].prop"
+                    f"{node_or_tie}.{var} = custom.formatProperties([{node_or_tie}.{var},row.{var}],'{metaType}','{sep}')[0].prop"
                 )
         
 
@@ -631,6 +638,8 @@ def combine_properties(df, group_by_cols, string_cols, driver):
         return "; ".join(unique_vals)
 
     grouped_df = df.groupby(group_by_cols, as_index=False).agg(lambda x: x.tolist())
+
+    print(grouped_df)
 
     for col in grouped_df.columns:
         if col not in group_by_cols:
@@ -927,8 +936,18 @@ def input_Nodes_Uses(
                 results = session.run(link_query)
                 linkProperties = [record["property"] for record in results.data() if record["property"] in optionalProperties]
     
+    # If we are editing Key and NewKey is in optional Columns, add that to linkProperties since the database doesnt have a NewKey
     if "NewKey" in optionalProperties:
         linkProperties.append("NewKey")
+
+    # When uploading category nodes, if CMName is absent, use Name column to populate CMName and vice versa.
+    if uploadOption == "add_node" and not isDataset:
+        if "CMName" in dataset.columns and "Name" not in dataset.columns:
+            dataset["Name"] = dataset["CMName"]
+        
+        if "Name" in dataset.columns and "CMName" not in dataset.columns:
+            dataset["CMName"] = dataset["Name"]
+
     
     """............................"""
     """ Error checking starts here """
@@ -959,6 +978,53 @@ def input_Nodes_Uses(
         duplicate_CMIDs = duplicate_CMIDs['CMID'].tolist()
         if not duplicate_CMIDs.empty:
             raise ValueError(f"Duplicate CMIDs found in CMID column: \n{duplicate_CMIDs}")
+    
+    # When uploading category nodes, need to make sure that CMName is added to names in case, it is not included in Name column.
+    if uploadOption == "add_node" and not isDataset:
+        dataset['Name'] = dataset.apply(
+                        lambda row: row['Name'] if pd.isna(row['CMName']) or str(row['CMName']) in str(row['Name'])
+                        else f"{row['Name']},{row['CMName']}",
+                        axis=1
+                    )
+            
+    # When uploading keys or new keys, need to make sure they follow the standard convention
+        
+    pattern = re.compile(r"^[^:]+:[^:]+$")
+
+    if (uploadOption == "add_node" and not isDataset) or uploadOption == "add_uses":
+        invalid_rows = dataset.index[~dataset["Key"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].tolist()
+
+        if invalid_rows:
+            raise ValueError(f"Invalid 'Key' format in rows:\n{invalid_rows}. Must be of form VARIABLE : VALUE")
+        
+    
+    if uploadOption == "update_replace":
+        if "NewKey" in dataset.columns:
+            invalid_rows = dataset.index[~dataset["NewKey"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].tolist()
+
+            if invalid_rows:
+                raise ValueError(f"Invalid 'NewKey' format in rows:\n{invalid_rows}. Must be of form VARIABLE : VALUE")
+
+    # When uploading uses ties, if we need to create new nodes and CMName is not present, then create CMName from Name
+    if uploadOption == "add_uses":
+        if dataset['CMID'].isna().any():
+            if "CMName" not in dataset.columns:
+                dataset['CMName'] = dataset['Name']
+            else:
+                dataset['CMName'] = dataset['CMName'].fillna(dataset['Name'])
+    
+    # When adding a new node, CMName is required    
+    if uploadOption == "add_node" or uploadOption == "add_uses":
+        mask = pd.Series(False, index=dataset.index)
+
+        if uploadOption == "add_uses" and dataset['CMID'].isna().any() :
+            mask = dataset['CMID'].isna() & dataset['CMName'].isna()
+        elif uploadOption == "add_node":
+            mask = dataset['CMName'].isna()
+
+        if mask.any():
+            invalid_rows = dataset[mask]
+            raise ValueError(f"When adding new nodes, new node must have non-empty Name or CMName. Check : {invalid_rows}")
 
     """checks if all required columns are present"""
 
@@ -1013,7 +1079,7 @@ def input_Nodes_Uses(
                 
         if "CATEGORY" in dataset["label"].values:
             raise Exception("Error: label must be more specific than CATEGORY")
-        
+                
 
     """Numeric checks"""
 
@@ -1078,7 +1144,7 @@ def input_Nodes_Uses(
         invalid_rows = get_invalid_ranges(dataset, "yearStart", "yearEnd")
         if not invalid_rows.empty:
             raise ValueError(f"Found {len(invalid_rows)} invalid rows where 'yearEnd' < 'yearStart'")
-        
+                
     #Confirms that all latitude and longitudes are in range
     if {"latitude", "longitude"}.issubset(dataset.columns):
         for index, row in dataset.iterrows():
@@ -1152,6 +1218,8 @@ def input_Nodes_Uses(
             
             if i == "datasetID":
                 search_label = "DATASET"
+            
+            print(search_label)
 
             query = f"""
             UNWIND $rows AS row
@@ -1177,9 +1245,13 @@ def input_Nodes_Uses(
             if not rows_to_check:
                 continue
 
+            print(rows_to_check)
+
             with driver.session() as session:
                 results = session.run(query, rows=rows_to_check)
                 missing_values = [r["value"] for r in results.data() if r["count"] == 0]
+            
+            print(missing_values)
 
             if missing_values:
                 if i == "datasetID":
@@ -1444,18 +1516,20 @@ def input_Nodes_Uses(
                 "Error: shortName already exists for: " + ", ".join(shortNames)
             )
     
-    #Check if (datasetID, CMID, Key) triplet already exists when:
+    #Check if (datasetID, CMID, Key) triplet already exists when creating a new Key in one of two ways:
     # 1) Creating new uses tie for existing node (function 2)
     # 2) Replacing Key in function 4
-    if uploadOption == "add_uses" or uploadOption == "update_replace":
-        if uploadOption == "update_replace" and optionalProperties[0] == "NewKey":
-            CMID_df = df[["CMID","NewKey","datasetID"]]
-            CMID_df.rename(columns={"NewKey": "Key"}, inplace=True)
-            CMID_dict = CMID_df.to_dict(orient="records")
-
+    if uploadOption == "add_uses" or (uploadOption == "update_replace" and optionalProperties[0] == "NewKey"):
+        # only check rows with non-empty CMID value
         if uploadOption == "add_uses":
-            CMID_df = df[df["CMID"].notna() & (df["CMID"] != "")]
+            CMID_df = dataset[dataset["CMID"].notna() & (dataset["CMID"] != "")]
             CMID_df = CMID_df.reset_index(drop=True)
+            CMID_dict = CMID_df.to_dict(orient="records")
+        
+        # We only check for triplet in function 4, because triplet consisting of new key should not exist already
+        if uploadOption == "update_replace":
+            CMID_df = dataset[["CMID","NewKey","datasetID"]]
+            CMID_df.rename(columns={"NewKey": "Key"}, inplace=True)
             CMID_dict = CMID_df.to_dict(orient="records")
 
         query = """UNWIND $rows AS row
@@ -1483,32 +1557,57 @@ def input_Nodes_Uses(
             driver,
             type="list",
         )
-    
+        
+    # For function 2, if two rows have the same uses tie(CMID,Key,datasetID) triplet and they both contain different values for
+    # string type variable, throw an error
+    if uploadOption == "add_uses":
+
+        group_cols = ["CMID", "Key", "datasetID"]
+
+        present_String_cols = [col for col in string_cols if col in optionalProperties]
+
+        violations = (dataset[dataset["CMID"].notna() & (dataset["CMID"] != "")].groupby(group_cols)[present_String_cols].nunique(dropna=False).reset_index())
+
+        invalid_rows = violations[(violations[present_String_cols] > 1).any(axis=1)]
+
+        if not invalid_rows.empty:
+            raise ValueError(f"Rows with same CMID, Key and datasetID cannot have different values for string type variables:\n{invalid_rows[group_cols].to_dict(orient='records')}")
+          
     # For function 3, if a non-null value in a string-value column already exists in the database for a given triplet of (CMID,Key and datasetID),
     # throws an error
     if uploadOption == "update_add":
-    
+        updateLog(
+        f"log/{user}uploadProgress.txt",
+        "checking for existing data in string columns",
+        write="a",
+    )
         for i in string_cols:
-            if i in dataset.columns:
+            # only checks for properties that are selected to be added
+            if i in optionalProperties:
                 query = """UNWIND $rows AS row
                     OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
-                    RETURN r.{column} AS existing_value, row"""
-                
+                    RETURN r.[$column] AS existing_value, row"""
+
                 result = getQuery(
-                            query,
-                            driver,
-                            params={"rows": dataset[["CMID","Key","datasetID",i]].to_dict(orient="records"),"column":i},
-                            type="list",
-                        )
+                    query,
+                    driver,
+                    params={"rows": dataset[["CMID","Key","datasetID",i]].to_dict(orient="records"),"column":i},
+                    type="dict",
+                    )
                 
                 for j in result:
-                    if j["existing_value"] is not None:
+                    if j.get("existing_value") is not None:
                         raise ValueError(
-                    f"Property '{i}' already exists for USES tie between "
-                    f"DATASET {result['row']['datasetID']} and CATEGORY {result['row']['CMID']} with Key {result['row']['Key']}"
-                )
-                    
-    query = """MATCH (n:PROPERTY) WHERE n.type="node" and n.metaType="string" RETURN n.CMName as n"""
+                            f"Property '{i}' already exists for USES tie between "
+                            f"DATASET {j['row']['datasetID']} and CATEGORY {j['row']['CMID']} with Key {j['row']['Key']}"
+                        )
+
+    updateLog(
+        f"log/{user}uploadProgress.txt",
+        "obtaining string-type node properties",
+        write="a",
+    )                
+    query = """MATCH (n:PROPERTY) WHERE n.type="node" and n.metaType="string" RETURN n.CMName"""
 
     node_string_cols = getQuery(
             query,
@@ -1524,7 +1623,7 @@ def input_Nodes_Uses(
             if i in dataset.columns:
                 query = """UNWIND $rows AS row
                     OPTIONAL MATCH (a {CMID: row.CMID})
-                    RETURN a.{column} AS existing_value, row"""
+                    RETURN a[$column] AS existing_value, row"""
                 
                 result = getQuery(
                             query,
@@ -1544,12 +1643,22 @@ def input_Nodes_Uses(
     '''Data pre-processing starts'''
 
     # removes the mentioned control characters and trailing\leading spaces from each cell in the dataframe
+    updateLog(
+        f"log/{user}uploadProgress.txt",
+        "removing control characters and leading/trailing spaces",
+        write="a",
+    )
     dataset[dataset.columns] = dataset[dataset.columns].applymap(
         lambda x: (
             re.sub(r"[\t\n\r\f\v]", "", x).strip() if isinstance(x, str) else x
         )
     )
 
+    updateLog(
+        f"log/{user}uploadProgress.txt",
+        "Dropping NA columns",
+        write="a",
+    )
     dataset = dataset.dropna(axis=1, how="all")
 
     properties = getPropertiesMetadata(driver)
@@ -1646,6 +1755,8 @@ def input_Nodes_Uses(
                 if col in dataset.columns
             ]
         )
+    
+    print(dataset)
 
     #For function 1, each row creates a new node
     #For function 2, each row without a CMID creates a new node.  All rows with a CMID are grouped by the CMID, datasetID, key triplet
@@ -1812,6 +1923,7 @@ def input_Nodes_Uses(
                         database=database,
                         user=user,
                         updateType="overwrite",
+                        sep=";"
                     )
                 elif uploadOption == "update_add":
                     updateLog(
@@ -1824,6 +1936,7 @@ def input_Nodes_Uses(
                         database=database,
                         user=user,
                         updateType="update",
+                        sep=";"
                     )
                 elif uploadOption == "add_node" or uploadOption == "add_uses":
                     updateLog(
@@ -1896,6 +2009,7 @@ def input_Nodes_Uses(
                         user=user,
                         updateType="overwrite",
                         propertyType="NODE",
+                        sep=";"
                     )
                 elif uploadOption == "node_add":
                     updateLog(
@@ -1911,6 +2025,7 @@ def input_Nodes_Uses(
                         user=user,
                         updateType="update",
                         propertyType="NODE",
+                        sep=";"
                     )
 
                 updateLog(

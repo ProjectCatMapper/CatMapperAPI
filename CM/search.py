@@ -283,7 +283,7 @@ def translate(
     """
 
     if isinstance(uniqueRows, str):
-        if uniqueRows.lower() == 'true':
+        if uniqueRows.lower() == 'true' or uniqueRows == True:
             uniqueRows = True
         else:
             uniqueRows = False
@@ -330,14 +330,22 @@ def translate(
     # adding the index into the dataset (as an uniqueID) to preserve original order and later joining
     df['CMuniqueRowID'] = df.index
     # creates new dataframe with term and unique row ID
+    ## Robert
+    # Remove empty category rows
+    df_valid = df[df[term].notna()].copy()
+    df_valid = df_valid[df_valid[term] != '']
+    df_valid = df_valid[df_valid[term].astype(str).str.strip() != '']
+    df_valid = df_valid[df_valid[term] != 'None']
+
     rows = pd.DataFrame(
-        {'term': df[term], 'CMuniqueRowID': df["CMuniqueRowID"]})
+        {'term': df_valid[term], 'CMuniqueRowID': df_valid["CMuniqueRowID"]})
+
     if isinstance(country, str) and country in df.columns:
-        rows['country'] = df[country]
+        rows['country'] = df_valid[country]
     if isinstance(context, str) and context in df.columns:
-        rows['context'] = df[context]
+        rows['context'] = df_valid[context]
     if isinstance(dataset, str) and dataset in df.columns:
-        rows['dataset'] = df[dataset]
+        rows['dataset'] = df_valid[dataset]
     if isinstance(yearStart, str) and yearStart is not None:
         rows['yearStart'] = yearStart
     if isinstance(yearEnd, str) and yearEnd is not None:
@@ -472,20 +480,21 @@ def translate(
         qDataset = "with row, a, matching, score"
 
     # filter by year
+    # Limits entries to recordStart and recordEnd that overlap with inputted yearRange
     if 'yearStart' in rows[0] and 'yearEnd' in rows[0]:
         if domain == "DATASET":
             qYear = """
-    call {with row, a with row, a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-') 
-    else a.ApplicableYears end as yearMatch, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
-    with a, years, apoc.convert.toIntList(apoc.coll.toSet(apoc.coll.flatten(collect(yearMatch),true))) as yearMatch 
+    call {with row, a with row, a,range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
+    with a, years, apoc.coll.toSet(collect(a.recordStart) + collect(a.recordEnd)) as yearMatch
     where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}
     with node as a, matching, score
     """
+                
         else:
             qYear = f"""
     call {{with row, a with row, a, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years 
-    match (a)<-[r:USES]-(:DATASET) unwind r.yearStart as yearStart 
-    unwind r.yearEnd as yearEnd with years, a, r, apoc.coll.toSet(collect(yearStart) + collect(yearEnd)) as yearMatch 
+    match (a)<-[r:USES]-(:DATASET) unwind r.recordStart as recordStart 
+    unwind r.recordEnd as recordEnd with years, a, r, apoc.coll.toSet(collect(recordStart) + collect(recordEnd)) as yearMatch 
     where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}}
     with row, node as a, matching, score order by score desc
     """
@@ -535,9 +544,6 @@ def translate(
         # any rows that are not matched are not included
         data = getQuery(cypher_query, driver, params={'rows': rows})
 
-    print("--------------------------------")
-    print(data)
-
     if not data:
         data = df
         data[f'matchType_{term}'] = "None"
@@ -563,6 +569,7 @@ def translate(
 
     # rejoins matches with original dataset
     data = pd.merge(df, data, on="CMuniqueRowID", how='outer')
+    ## Robert
     if uniqueRows:
         """
         returns a single category row for each unique combination of term, country, context, dataset, yearStart, yearEnd
@@ -609,7 +616,7 @@ def translate(
             list_cols.append(col_name)
 
     for col in list_cols:
-        data[col] = data[col].apply(lambda x: '|'.join(map(str, x)))
+        data[col] = data[col].apply(lambda x: '; '.join(map(str, x)))
 
     data = data.astype(str)
 
