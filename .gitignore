@@ -11,5 +11,7 @@ lib64/*
 pyvenv.cfg
 tmp/*
 *.pyc
-*.json
 *.jsonl
+data.json
+new.json
+poly.json

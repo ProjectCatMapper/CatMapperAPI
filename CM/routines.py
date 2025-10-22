@@ -17,6 +17,9 @@ config = ConfigParser()
 config.read('config.ini')
 
 def is_valid_json(json_string):
+    """
+    Helper function to check if a string is valid JSON.
+    """
     try:
         json.loads(json_string)
         return True
@@ -25,6 +28,9 @@ def is_valid_json(json_string):
 
 
 def validateJSON(database, property='parentContext', path="/mnt/storage/app/tmp/invalid_json.xlsx"):
+    """
+    Helper function to validate JSON properties in a Neo4j database.
+    """
     try:
 
         driver = getDriver(database)
@@ -52,6 +58,59 @@ def validateJSON(database, property='parentContext', path="/mnt/storage/app/tmp/
 
 
 def checkDomains(database, mail=None, return_type="data"):
+    """
+    Check for missing or inconsistent domain and subdomain labels 
+    in a Neo4j database, and optionally export results to Excel or send via email.
+
+    This function runs a series of Cypher queries to identify four categories of errors:
+      1. Nodes labeled only as `CATEGORY` (no additional labels).
+      2. Nodes missing the `CATEGORY` label that are used in `USES` relationships.
+      3. Subdomains in `USES` relationships that are not present in the category's labels.
+      4. Domains inferred from `LABEL` nodes that are not present in the category's labels.
+
+    Errors are returned as either structured data or summary info. If errors exist,
+    the results are also written to an Excel file in `/tmp`. If a valid `Mail` object 
+    is provided, the Excel file is attached and sent via email.
+
+    Parameters
+    ----------
+    database : str
+        The database name used to obtain a Neo4j driver instance.
+    mail : Mail, optional
+        A Mail object for sending notifications (default: None).
+        If provided, an email with the results file attached is sent to `admin@catmapper.org`.
+    return_type : {"data", "info"}, default="data"
+        Determines the format of the return value:
+        - "data" : return results as a list of dictionaries (records).
+        - "info" : return a dictionary with:
+            * "info": number of errors found
+            * "filepath": path to the generated Excel file (or None if no file was created)
+
+    Returns
+    -------
+    list of dict or dict or str
+        If return_type == "data":
+            A list of dictionaries, each containing:
+                - query: type of error ("CATEGORY", "MissingCATEGORY", "MissingSubDomain", "MissingDomain")
+                - CMID: category ID
+                - CMName: category name
+                - subdomain: subdomain label (if present)
+                - domain: domain label (if present)
+                - datasetID: dataset ID
+        If return_type == "info":
+            A dict with summary info and the file path to the exported Excel file.
+        If an error occurs:
+            A string containing the exception message.
+
+    Side Effects
+    ------------
+    - Creates a temporary Excel file under `/tmp` if errors are found.
+    - Sends an email with the results file attached if a Mail object is provided.
+
+    Raises
+    ------
+    None directly. Exceptions are caught and returned as strings.
+    """
     try:
         driver = getDriver(database)
         query = """
@@ -95,7 +154,7 @@ def checkDomains(database, mail=None, return_type="data"):
         if return_type == "data":        
             return results.to_dict(orient="records")
         elif return_type == "info":
-            return {"info": f"Domains check: {len(results)} results","filepath": fp1}
+            return {"info": str(len(results)), "filepath": fp1}
 
     except Exception as e:
         return str(e)
@@ -105,6 +164,48 @@ def checkDomains(database, mail=None, return_type="data"):
 # with "eventType" as prop match (a)-[r]->(b) where not r[prop] is null and r[prop] = [] call apoc.cypher.doIt("with r set r." + prop + " = NULL",{r:r}) yield value return count(*)
 
 def backup2CSV(database, mail=None):
+    """
+    Export key entities and relationships from a Neo4j database to CSV files 
+    using APOC procedures, and optionally send a notification email.
+
+    This function generates CSV backups of the following components:
+      - **DATASET** nodes and their properties
+      - **CATEGORY** nodes, their labels, and names
+      - **USES** relationships between datasets and categories
+      - **DELETED** nodes and their corresponding replacement nodes
+      - **METADATA** nodes and their properties
+      - **MERGING** structures (merging nodes, stacks, datasets, categories, 
+        equivalents, and transformation properties)
+
+    Each component is exported into a dated CSV file under 
+    `/backups/download/` using `apoc.export.csv.query`.
+
+    Parameters
+    ----------
+    database : str
+        The name of the database to back up.
+    mail : Mail, optional
+        A Mail object for sending notifications (default: None).
+        If provided, a completion email is sent to `rjbischo@catmapper.org` 
+        after the exports are generated.
+
+    Returns
+    -------
+    str
+        A message confirming successful completion, e.g.:
+        `"backup2CSV completed for <database>"`.
+        If an error occurs, a string containing the exception message.
+
+    Side Effects
+    ------------
+    - Creates multiple CSV files in `/backups/download/`, one per exported 
+      component.
+    - Optionally sends a notification email after backup completion.
+
+    Raises
+    ------
+    None directly. Exceptions are caught and returned as error messages.
+    """
     try:
         driver = getDriver(database)
 
@@ -184,6 +285,63 @@ def backup2CSV(database, mail=None):
 
 
 def getBadCMID(database, mail=None, return_type="data"):
+    """
+    Identify invalid or outdated CMIDs used in dataset relationships within a Neo4j database,
+    and optionally export results to Excel or send via email.
+
+    This function iterates over all relationship properties in the graph metadata, checking
+    whether CMIDs referenced in `USES` relationships correspond to valid `CATEGORY` nodes.
+    It also detects CMIDs that have been deleted and replaced, returning the mapping to
+    their current valid IDs when available.
+
+    Results can be returned as structured data, summary information, and/or saved to an
+    Excel file. If a valid `Mail` object is provided, the file is also sent via email.
+
+    Parameters
+    ----------
+    database : str
+        The database name used to obtain a Neo4j driver instance.
+    mail : Mail, optional
+        A Mail object for sending notifications (default: None).
+        If provided, an email with the results file attached is sent to `admin@catmapper.org`.
+    return_type : {"data", "info"}, default="data"
+        Determines the format of the return value:
+        - "data" : return results as a list of dictionaries (records).
+        - "info" : return a dictionary with:
+            * "info": number of invalid CMIDs found
+            * "filepath": path to the generated Excel file (or None if no file was created)
+
+    Returns
+    -------
+    list of dict or dict or str
+        If return_type == "data":
+            A list of dictionaries, each containing:
+                - CMID: category ID
+                - CMName: category name
+                - Key: relationship key
+                - datasetID: dataset ID
+                - dataset: dataset name
+                - propertyType: the relationship property type checked
+                - property: list of CMIDs in the relationship
+                - badCMID: invalid CMID
+                - newCMID (optional): replacement CMID if found in the `DELETED` mapping
+        If return_type == "info":
+            A dict with summary info and the file path to the exported Excel file.
+        If no invalid CMIDs are found:
+            "No bad CMIDs found" (if return_type == "data"),
+            or {"info": 0, "filepath": None} (if return_type == "info").
+        If an error occurs:
+            A string starting with "Error: " containing the exception message.
+
+    Side Effects
+    ------------
+    - Creates a temporary Excel file under `/tmp` if bad CMIDs are found.
+    - Sends an email with the results file attached if a Mail object is provided.
+
+    Raises
+    ------
+    None directly. Exceptions are caught and returned as strings.
+    """
     try:
 
         driver = getDriver(database)
@@ -239,18 +397,78 @@ def getBadCMID(database, mail=None, return_type="data"):
             if return_type == "data":
                 return results.to_dict(orient="records")
             elif return_type == "info":
-                return {"info": f"Bad Domains check: {len(results)} results", "filepath": fp1}
+                return {"info": str(len(results)), "filepath": fp1}
         else:
             if return_type == "data":
                 return "No bad CMIDs found"
             elif return_type == "info":
-                return {"info": "No bad CMIDs found", "filepath": None}
+                return {"info": "0", "filepath": None}
 
     except Exception as e:
         return "Error: " + str(e)
 
 
 def getMultipleLabels(database, mail=None, return_type="data"):
+    """
+    Identify `USES` relationships in which multiple labels are assigned 
+    to a dataset–category link in a Neo4j database, and optionally 
+    export results to Excel or send via email.
+
+    This function detects cases where the `r.label` property of a 
+    `USES` relationship is a list of strings containing more than one 
+    label. These indicate datasets assigned to multiple subdomains 
+    simultaneously, which may represent data modeling errors.
+
+    Results can be returned as structured data, summary information, 
+    and/or saved to an Excel file. If a valid `Mail` object is provided, 
+    the file is also sent via email.
+
+    Parameters
+    ----------
+    database : str
+        The database name used to obtain a Neo4j driver instance.
+    mail : Mail, optional
+        A Mail object for sending notifications (default: None).
+        If provided, an email with the results file attached is sent 
+        to `admin@catmapper.org`.
+    return_type : {"data", "info"}, default="data"
+        Determines the format of the return value:
+        - "data" : return results as a list of dictionaries (records).
+        - "info" : return a dictionary with:
+            * "info": number of relationships with multiple labels
+            * "filepath": path to the generated Excel file 
+              (or None if no file was created)
+
+    Returns
+    -------
+    list of dict or dict or str
+        If return_type == "data":
+            A list of dictionaries, each containing:
+                - CMID: category ID
+                - CMName: category name
+                - datasetID: dataset ID
+                - Key: relationship key
+                - label: semicolon-delimited string of labels assigned
+        If return_type == "info":
+            A dict with summary info and the file path to the exported 
+            Excel file.
+        If no relationships with multiple labels are found:
+            "No multiple labels found" (if return_type == "data"),
+            or {"info": 0, "filepath": None} (if return_type == "info").
+        If an error occurs:
+            A string containing the exception message.
+
+    Side Effects
+    ------------
+    - Creates a temporary Excel file under `/tmp` if multiple-label 
+      relationships are found.
+    - Sends an email with the results file attached if a Mail object 
+      is provided.
+
+    Raises
+    ------
+    None directly. Exceptions are caught and returned as strings.
+    """
     try:
         driver = getDriver(database)
         query = """
@@ -272,19 +490,77 @@ def getMultipleLabels(database, mail=None, return_type="data"):
             if return_type == "data":        
                 return results.to_dict(orient="records")
             elif return_type == "info":
-                return {"info": f"Multiple labels check: {len(results)} results","filepath": fp1}
+                return {"info": str(len(results)), "filepath": fp1}
 
         else:
             if return_type == "data":   
                 return "No multiple labels found"
             elif return_type == "info":
-                return {"info": "No multiple labels found", "filepath": None}   
+                return {"info":" 0", "filepath": None}
 
     except Exception as e:
         return str(e)
 
 
 def getBadJSON(database, mail=None, return_type="data"):
+    """
+    Validate JSON properties stored in a Neo4j database and identify 
+    invalid records for specific fields, optionally exporting results 
+    to Excel or sending via email.
+
+    This function checks two JSON-encoded properties on nodes:
+      - `geoCoords`
+      - `parentContext`
+
+    It validates the JSON structure of each property and collects 
+    any invalid entries. Results are written to separate Excel files 
+    under `/tmp`. If a valid `Mail` object is provided, these files 
+    are attached and sent via email.
+
+    Parameters
+    ----------
+    database : str
+        The database name used to obtain a Neo4j driver instance.
+    mail : Mail, optional
+        A Mail object for sending notifications (default: None).
+        If provided, separate emails with attachments are sent for 
+        invalid `geoCoords` and `parentContext` records.
+    return_type : {"data", "info"}, default="data"
+        Determines the format of the return value:
+        - "data" : return results as a dictionary containing full 
+          validation output.
+        - "info" : return a dictionary with a summary string and 
+          file paths for the generated Excel files.
+
+    Returns
+    -------
+    dict or tuple
+        If return_type == "data":
+            A dict with keys:
+                - "geoCoords": list of invalid `geoCoords` records
+                - "parentContext": list of invalid `parentContext` records
+                - "emailSent": string "True" if any emails were sent, 
+                  "False" otherwise
+        If return_type == "info":
+            A dict with:
+                - "info": summary string of counts for invalid properties
+                - "filepath": list containing file paths for the Excel 
+                  files (or None if no invalid entries were found)
+        If an error occurs:
+            A tuple of (error_message, 500).
+
+    Side Effects
+    ------------
+    - Creates up to two temporary Excel files under `/tmp` for invalid 
+      JSON records, one for each property checked.
+    - Sends one or two emails (depending on which properties fail) with 
+      the results attached if a Mail object is provided.
+
+    Raises
+    ------
+    None directly. Exceptions are caught and returned as error messages 
+    with HTTP status 500.
+    """
     try:
         fd, fp1 = tempfile.mkstemp(prefix = f"geoCoords_{database}_", suffix=".xlsx", dir="/tmp")
         os.close(fd)
@@ -314,13 +590,74 @@ def getBadJSON(database, mail=None, return_type="data"):
                 fp1 = None
             if len(results2) == 0:
                 fp2 = None
-            return {"info": f"Bad JSON check: {len(results1) + len(results2)} results", "filepath": [fp1, fp2]}
+            return {"info": f"Invalid geoCoords: {len(results1)}; Invalid parentContext: {len(results2)}", "filepath": [fp1, fp2]}
     except Exception as e:
         result = str(e)
         return result, 500
 
 
 def getBadDomains(database, mail=None, return_type="data"):
+    """
+    Identify invalid or missing labels in a Neo4j database, and optionally 
+    export results to Excel or send via email.
+
+    This function performs three main checks:
+      1. **Bad subdomain labels**: Nodes with labels belonging to a group 
+         but not defined in that group's allowed label list.
+      2. **Missing CATEGORY label**: Nodes referenced by `USES` relationships 
+         that are missing the `CATEGORY` label.
+      3. **Missing DATASET label**: Nodes linked to categories by `USES` 
+         relationships that are missing the `DATASET` label.
+
+    Results for each check are written to separate Excel files under `/tmp` 
+    if issues are found. If a valid `Mail` object is provided, the files are 
+    sent via email.
+
+    Parameters
+    ----------
+    database : str
+        The database name used to obtain a Neo4j driver instance.
+    mail : Mail, optional
+        A Mail object for sending notifications (default: None).
+        If provided, separate emails with attachments are sent for each 
+        type of issue found.
+    return_type : {"data", "info"}, default="data"
+        Determines the format of the return value:
+        - "data" : return results as a dictionary containing detailed 
+          records for all checks.
+        - "info" : return a dictionary with summary strings and file 
+          paths for the generated Excel files.
+
+    Returns
+    -------
+    dict or tuple
+        If return_type == "data":
+            A dict with keys:
+                - "bad_labels_count": number of nodes with invalid labels
+                - "missing_category_count": number of nodes missing `CATEGORY`
+                - "missing_dataset_count": number of nodes missing `DATASET`
+                - "bad_labels": list of dicts with CMID, CMName, and invalid label(s)
+                - "missing_category": list of dicts for nodes missing `CATEGORY`
+                - "missing_dataset": list of dicts for nodes missing `DATASET`
+        If return_type == "info":
+            A dict with:
+                - "info": summary string of counts for all three checks
+                - "filepath": list of file paths for the Excel files 
+                  ([bad_labels_path, missing_category_path, missing_dataset_path])
+        If an error occurs:
+            A tuple of (error_message, 500).
+
+    Side Effects
+    ------------
+    - Creates up to three temporary Excel files under `/tmp` if issues are found.
+    - Sends one or more emails with attachments if a Mail object is provided.
+
+    Raises
+    ------
+    None directly. Exceptions are caught and returned as error messages 
+    with HTTP status 500.
+    """
+
     try:
         driver = getDriver(database)
         labels = getQuery(
@@ -376,7 +713,7 @@ def getBadDomains(database, mail=None, return_type="data"):
                           "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
 
         missing_dataset = getQuery(
-            "match (c)<-[:USES]-(d:DATASET) where not 'DATASET' in labels(d) return d.CMID as CMID, d.CMName as CMName", driver, type="df")
+            "match (c:CATEGORY)<-[:USES]-(d) where not 'DATASET' in labels(d) return d.CMID as CMID, d.CMName as CMName", driver, type="df")
 
         fp3 = None
         if isinstance(missing_dataset, pd.DataFrame) and not missing_dataset.empty:
@@ -390,13 +727,73 @@ def getBadDomains(database, mail=None, return_type="data"):
         if return_type == "data":
             return {"bad_labels_count": len(bad_labels), "missing_category_count": len(missing_category), "missing_dataset_count": len(missing_dataset), "bad_labels": bad_labels.to_dict(orient="records"), "missing_category": missing_category.to_dict(orient="records"), "missing_dataset": missing_dataset.to_dict(orient="records")}
         elif return_type == "info":
-            return {"info": f"Bad Domains check: {len(bad_labels) + len(missing_category) + len(missing_dataset)} results", "filepath": [fp1, fp2, fp3]}
+            return {"info": f"Wrong Subdomain: {len(bad_labels)}; Missing CATEGORY domain: {len(missing_category)}; Missing DATASET domain: {len(missing_dataset)}", "filepath": [fp1, fp2, fp3]}
     except Exception as e:
         result = str(e)
         return result, 500
 
 
 def getBadRelations(database, mail=None, return_type="data"):
+    """
+    Detect invalid or inconsistent relationship structures between categories 
+    and subdomains in a Neo4j database, and optionally export results to Excel 
+    or send via email.
+
+    This function checks relationship integrity for category hierarchies and 
+    subdomain assignments. It verifies whether parent–child category relationships 
+    (`CONTAINS` and other defined relationships) align correctly with expected 
+    group labels. It also handles special cases for `ETHNICITY` in the SocioMap 
+    database.
+
+    The results include:
+      - Categories assigned as parents to child groups where the parent is 
+        missing the appropriate group label.
+      - Mis-specified `CONTAINS` relationships between categories.
+      - Invalid relationships involving `ETHNICITY` categories (SocioMap only).
+
+    Parameters
+    ----------
+    database : str
+        The database name used to obtain a Neo4j driver instance.
+    mail : Mail, optional
+        A Mail object for sending notifications (default: None).
+        If provided, an email with the results file attached is sent 
+        to `admin@catmapper.org`.
+    return_type : {"data", "info"}, default="data"
+        Determines the format of the return value:
+        - "data" : return detailed results as a dictionary.
+        - "info" : return a dictionary with summary information 
+          and file paths for the exported Excel file.
+
+    Returns
+    -------
+    dict or tuple
+        If return_type == "data":
+            A dict with keys:
+                - "bad_relationship_labels_count": number of invalid 
+                  relationship entries found
+                - "bad_relationship_labels": list of dicts with details, 
+                  including parent/child CMIDs, names, domains, relationship 
+                  type, dataset references, and property values
+        If return_type == "info":
+            A dict with:
+                - "info": number of invalid relationships
+                - "filepath": list with the path to the generated Excel file 
+                  (or None if no issues were found)
+        If an error occurs:
+            A tuple of (error_message, 500).
+
+    Side Effects
+    ------------
+    - Creates a temporary Excel file under `/tmp` if invalid relationships 
+      are found.
+    - Sends an email with the results file attached if a Mail object is provided.
+
+    Raises
+    ------
+    None directly. Exceptions are caught and returned as error messages 
+    with HTTP status 500.
+    """
     try:
         driver = getDriver(database)
         labels = getQuery(
@@ -443,7 +840,7 @@ def getBadRelations(database, mail=None, return_type="data"):
         if return_type == "data":
             return {"bad_relationship_labels_count": len(results), "bad_relationship_labels": results.to_dict(orient="records")}
         elif return_type == "info":
-            return {"info": f"Bad Relationship Labels for {database}: {len(results)} results", "filepath": [fp1]}
+            return {"info": str(len(results)), "filepath": [fp1]}
 
     except Exception as e:
         result = str(e)
@@ -452,6 +849,59 @@ def getBadRelations(database, mail=None, return_type="data"):
 
 
 def CMNameNotInName(database, mail=None, return_type="data"):
+    """
+    Identify categories where the primary `CMName` is missing from 
+    the list of alternate names, and optionally correct, export, 
+    or email the results.
+
+    This function queries all `CATEGORY` nodes to find cases where 
+    the `CMName` field is not included in the `names` property. 
+    For each invalid category:
+      - A relationship update is triggered (`addCMNameRel`).
+      - Alternate names are updated in the database (`updateAltNames`).
+    The affected CMIDs are written to an Excel file if any are found.
+    If a valid `Mail` object is provided, the file is sent via email.
+
+    Parameters
+    ----------
+    database : str
+        The database name used to obtain a Neo4j driver instance.
+    mail : Mail, optional
+        A Mail object for sending notifications (default: None).
+        If provided, the Excel file is sent to `admin@catmapper.org`.
+    return_type : {"data", "info"}, default="data"
+        Determines the format of the return value:
+        - "data" : return results as a dictionary with details.
+        - "info" : return a dictionary with summary information 
+          and the file path.
+
+    Returns
+    -------
+    dict or tuple
+        If return_type == "data":
+            A dict with keys:
+                - "Total": number of categories with mismatched names
+                - "Name not in CMName": DataFrame of affected CMIDs
+        If return_type == "info":
+            A dict with:
+                - "info": number of mismatched categories
+                - "filepath": path to the generated Excel file 
+                  (or None if no mismatches were found)
+        If an error occurs:
+            A tuple of (error_message, 500).
+
+    Side Effects
+    ------------
+    - Updates relationships and alternate names in the database 
+      for categories with invalid naming.
+    - Creates a temporary Excel file under `/tmp` if mismatches are found.
+    - Sends an email with the file attached if a Mail object is provided.
+
+    Raises
+    ------
+    None directly. Exceptions are caught and returned as error messages 
+    with HTTP status 500.
+    """
     try:
         driver = getDriver(database)
 
@@ -478,7 +928,7 @@ def CMNameNotInName(database, mail=None, return_type="data"):
         if return_type == "data":
             return {"Total": len(cmids), "Name not in CMName": cmids}
         elif return_type == "info":
-            return {"info": f"CMName not in names check: {len(cmids)} results", "filepath": fp1}
+            return {"info": str(len(cmids)), "filepath": fp1}
 
     except Exception as e:
         result = str(e)
@@ -486,6 +936,56 @@ def CMNameNotInName(database, mail=None, return_type="data"):
 
 
 def fixMetaTypes(database, return_type="data"):
+    """
+    Validate and correct property types for nodes and relationships 
+    in a Neo4j database based on metadata definitions.
+
+    This function retrieves property metadata (from `getPropertiesMetadata`) 
+    and ensures that stored values match their expected `metaType`. If a 
+    property’s type does not match, it is reformatted using 
+    `custom.formatProperties` to conform to the correct type.
+
+    Specifically:
+      - Node properties and relationship properties are validated separately.
+      - Each property is checked against its expected metaType:
+          * "STRING" → Neo4j type "STRING"
+          * other types → Neo4j type "LIST OF STRING"
+      - Properties with mismatched types are reformatted and updated in place.
+
+    Parameters
+    ----------
+    database : str
+        The database name used to obtain a Neo4j driver instance.
+    mail : Mail, optional
+        Currently unused in this function (included for consistency with 
+        other validation functions).
+    return_type : {"data", "info"}, default="data"
+        Determines the format of the return value:
+        - "data" : return a status dictionary confirming the updates.
+        - "info" : return a simplified dictionary with a completion message.
+
+    Returns
+    -------
+    dict or tuple
+        If return_type == "data":
+            {"status": "success", "message": "Meta types updated successfully"}
+        If return_type == "info":
+            {"info": "Completed updating metatypes"}
+        If an error occurs:
+            A tuple of (error_message, 500).
+
+    Side Effects
+    ------------
+    - Executes Cypher queries to reformat and update properties 
+      on nodes and relationships whose stored types do not match 
+      their expected metaTypes.
+    - Logs the number of updated values for each property via `print`.
+
+    Raises
+    ------
+    None directly. Exceptions are caught and returned as error messages 
+    with HTTP status 500.
+    """
     try:
         driver = getDriver(database)
         properties = getPropertiesMetadata(driver)
@@ -521,20 +1021,62 @@ def fixMetaTypes(database, return_type="data"):
         if return_type == "data":
             return {"status": "success", "message": "Meta types updated successfully"}
         elif return_type == "info":
-            return {"info": "Meta types updated successfully"}
+            return {"info": "Completed updating metatypes"}
     except Exception as e:
         result = str(e)
         return result, 500
 
 def noUSES(database, save=True, mail=None, return_type="data"):
     """
-    This function checks for categories that do not have any USES relationships with datasets.
-    Parameters:
-    - database: The name of the database to check.
-    - save: If True, saves the results to an Excel file.
-    Returns:
-    - A dictionary with the total count and a list of categories without USES relationships.
+    Identify categories in a Neo4j database that are not connected 
+    to any datasets via `USES` relationships, and optionally 
+    export results to Excel or send via email.
+
+    This function searches for `CATEGORY` nodes that have no incoming 
+    `USES` edges from any `DATASET` nodes. These represent categories 
+    that are defined in the graph but not actually used.
+
+    Parameters
+    ----------
+    database : str
+        The database name used to obtain a Neo4j driver instance.
+    save : bool, default=True
+        If True, save the results to an Excel file in `/tmp`.
+    mail : Mail, optional
+        A Mail object for sending notifications (default: None).
+        If provided and results exist, the Excel file is attached 
+        and sent via email to `admin@catmapper.org`.
+    return_type : {"data", "info"}, default="data"
+        Determines the format of the return value:
+        - "data" : return detailed results as a dictionary.
+        - "info" : return a dictionary with summary information 
+          and the file path.
+
+    Returns
+    -------
+    dict or tuple
+        If return_type == "data":
+            {"Total": number of unused categories,
+             "No USES": list of dicts with CMID and CMName}
+        If return_type == "info":
+            {"info": number of unused categories,
+             "filepath": path to the Excel file or None}
+        If an error occurs:
+            A tuple of (error_message, 500).
+
+    Side Effects
+    ------------
+    - Optionally creates a temporary Excel file under `/tmp` with 
+      the unused categories.
+    - Optionally sends an email with the results file attached if 
+      a Mail object is provided.
+
+    Raises
+    ------
+    None directly. Exceptions are caught and returned as error messages 
+    with HTTP status 500.
     """
+
     try:
         driver = getDriver(database)
         query = """
@@ -556,21 +1098,70 @@ def noUSES(database, save=True, mail=None, return_type="data"):
         if return_type == "data":
             return {"Total": len(results), "No USES": results.to_dict(orient="records")}
         elif return_type == "info":
-            return {"info": f"Categories with no USES relationships found: {len(results)}", "filepath": fp1}
+            return {"info": str(len(results)), "filepath": fp1}
     except Exception as e:
         result = str(e)
         return result, 500
     
-def checkUSES(database, save = True, mail=None, return_type="data"):
+def checkUSES(database, save=True, mail=None, return_type="data"):
     """
-    This function checks for categories that have USES relationships with datasets but various properties are not included. These categories are: label, Key, and Name.
-    Parameters:
-    - database: The name of the database to check.
-    - save: If True, saves the results to an Excel file.
-    - mail: mail object used to send an email with the results.
-    Returns:
-    - A dictionary with the total count and a list of categories with USES relationships.
+    Validate `USES` relationships in a Neo4j database by checking for 
+    missing or malformed properties, and optionally export results to 
+    Excel or send via email.
+
+    This function inspects all `USES` relationships between `CATEGORY` 
+    and `DATASET` nodes to detect the following issues:
+      - Missing or empty `label`
+      - Missing or empty `Key`
+      - `Key` values not containing the required ": " delimiter
+      - Missing or empty `Name`
+
+    Detected issues are aggregated into a single result set. Results are 
+    written to an Excel file under `/tmp` if issues exist. If a valid 
+    `Mail` object is provided, the file is sent via email.
+
+    Parameters
+    ----------
+    database : str
+        The database name used to obtain a Neo4j driver instance.
+    save : bool, default=True
+        If True, save the results to an Excel file in `/tmp`.
+    mail : Mail, optional
+        A Mail object for sending notifications (default: None).
+        If provided and results exist, the Excel file is attached 
+        and sent via email to `admin@catmapper.org`.
+    return_type : {"data", "info"}, default="data"
+        Determines the format of the return value:
+        - "data" : return detailed results as a dictionary.
+        - "info" : return a dictionary with summary information 
+          and the file path.
+
+    Returns
+    -------
+    dict or tuple
+        If return_type == "data":
+            {"Total": number of invalid relationships,
+             "Check USES": list of dicts with details of each issue 
+                            (error type, CMID, CMName, Key, datasetID, dataset)}
+        If return_type == "info":
+            {"info": number of invalid relationships,
+             "filepath": path to the Excel file or None}
+        If an error occurs:
+            A tuple of (error_message, 500).
+
+    Side Effects
+    ------------
+    - Optionally creates a temporary Excel file under `/tmp` with 
+      invalid relationship records.
+    - Optionally sends an email with the results file attached if 
+      a Mail object is provided.
+
+    Raises
+    ------
+    None directly. Exceptions are caught and returned as error messages 
+    with HTTP status 500.
     """
+
     try:
         driver = getDriver(database)
         
@@ -609,25 +1200,87 @@ def checkUSES(database, save = True, mail=None, return_type="data"):
         if return_type == "data":
             return {"Total": len(result), "Check USES": result.to_dict(orient="records")}
         elif return_type == "info":
-            return {"info": f"Errors in USES ties: {len(result)}", "filepath": fp1}
+            return {"info": str(len(result)), "filepath": fp1}
 
     except Exception as e:
         result = str(e)
         return result, 500
 
 
-def reportChanges(database, dateStart = None, dateEnd = None, action = "default", user = None, mail = None, return_type = "data"):
+def reportChanges(database, dateStart=None, dateEnd=None, action="default", user=None, mail=None, return_type="data"):
     """
-    This function generates a report of changes in the database based on the logs.
-    Parameters:
-    - database: The name of the database to check.
-    - dateStart: The start date to filter changes (optional) -- returns yesterday's date if not provided.
-    - dateEnd: The end date to filter changes (optional) -- returns today's date if not provided.
-    - action: The type of action to filter changes (optional) -- default value is "default" which returns all of these actions "created node", "created relationship", "deleted", "merged", "changed". Can be passed as a list.
-    - user: The user who made the changes (optional) -- defaults to None.
-    Returns:
-    - A json object containing the reported changes.
+    Generate a report of logged changes in a Neo4j database, filtered 
+    by date range, action type, and user, and optionally export results 
+    to Excel or send via email.
+
+    This function queries the `LOG` nodes to summarize database changes. 
+    Supported filters include:
+      - **Date range**: defaults to yesterday through today if not provided.
+      - **Action type**: defaults to all major actions 
+        ("created node", "created relationship", "deleted", "merged", "changed").
+      - **User**: restricts results to changes by a given user.
+
+    Results include counts of actions grouped by date and user. If valid 
+    user information exists in a separate `userdb`, usernames and full 
+    names are joined into the results.
+
+    Parameters
+    ----------
+    database : str
+        The database name used to obtain a Neo4j driver instance.
+    dateStart : str or datetime-like, optional
+        Start date for filtering logs (default: yesterday).
+    dateEnd : str or datetime-like, optional
+        End date for filtering logs (default: today).
+    action : str or list of str, default="default"
+        Action(s) to filter on. 
+        - "default": include ["created node", "created relationship", 
+          "deleted", "merged", "changed"].
+        - str: a single action string.
+        - list: list of action strings.
+    user : str, optional
+        User ID to filter on. Defaults to None (all users).
+    mail : Mail, optional
+        A Mail object for sending notifications (default: None).
+        If provided, the Excel file with results is emailed to 
+        `admin@catmapper.org`.
+    return_type : {"data", "info"}, default="data"
+        Determines the format of the return value:
+        - "data" : return full results as a list of dictionaries.
+        - "info" : return an HTML summary of counts per action and 
+          the path to the Excel file.
+
+    Returns
+    -------
+    list of dict or dict or str
+        If return_type == "data":
+            List of dictionaries, one per log entry, including:
+                - action
+                - date
+                - user
+                - count
+                - username
+                - fullname
+        If return_type == "info":
+            {"info": HTML summary table of action counts,
+             "filepath": path to the Excel file}
+        If no changes are found:
+            [] (if return_type == "data") or
+            {"info": "No changes...", "filepath": None}
+        If an error occurs:
+            A string beginning with "Error in reportChanges: ...".
+
+    Side Effects
+    ------------
+    - Creates a temporary Excel file under `/tmp` containing the results.
+    - Optionally sends an email with the results file attached if a 
+      Mail object is provided.
+
+    Raises
+    ------
+    None directly. Exceptions are caught and returned as error messages.
     """
+
     try:
         driver = getDriver(database)
         if action == "default":
@@ -707,127 +1360,58 @@ def reportChanges(database, dateStart = None, dateEnd = None, action = "default"
     except Exception as e:
         return "Error in reportChanges: " + str(e)
     
-# def runRoutines(databases = "all",mail = None):
-#     files = []
-#     info = []
-#     info.append("Routines started at " + pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'))
-    
-#     if databases == "all":
-#         databases = ["SocioMap","ArchaMap"]
-#     elif isinstance(databases, str):
-#         databases = [databases]
-
-#     for database in databases:
-
-#         info.append("<h1>Running routines for " + database + "</h1>")
-
-#         info.append("<h2>Modifications to " + database + ":</h2>")
-#         data_changes = reportChanges(database, return_type = "info")
-#         if isinstance(data_changes, str):
-#             return "Error in reportChanges: " + data_changes
-#         info.append(data_changes.get("info"))
-#         files.append(data_changes.get("filepath"))
-        
-#         info.append("<h3>Check Domains for " + database + ":</h3>")
-#         data_domains = checkDomains(database, mail=None, return_type="info")
-#         if isinstance(data_domains, str):
-#             return "Error in checkDomains: " + data_domains
-#         info.append(data_domains.get("info"))
-#         files.append(data_domains.get("filepath"))    
-        
-#         info.append("<h3>Return bad domains for " + database + ":</h3>")
-#         data_badDomains = getBadDomains(database, mail=None, return_type="info")
-#         if isinstance(data_badDomains, str):
-#             return "Error in getBadDomains: " + data_badDomains
-#         info.append(data_badDomains.get("info"))
-#         files.append(data_badDomains.get("filepath"))
-        
-#         info.append("<h3>Check CMIDs for " + database + ":</h3>")
-#         data_badCMID = getBadCMID(database, mail=None, return_type="info")
-#         if isinstance(data_badCMID, str):
-#             return "Error in getBadCMID: " + data_badCMID
-#         info.append(data_badCMID.get("info"))
-#         files.append(data_badCMID.get("filepath"))
-        
-#         info.append("<h3>Check Labels for " + database + ":</h3>")
-#         data_labels = getMultipleLabels(database, mail=None, return_type="info")
-#         if isinstance(data_labels, str):
-#             return "Error in getMultipleLabels: " + data_labels
-#         info.append(data_labels.get("info"))
-#         files.append(data_labels.get("filepath"))
-        
-#         info.append("<h3>Check JSON for " + database + ":</h3>")
-#         data_badJSON = getBadJSON(database, mail=None, return_type="info")
-#         if isinstance(data_badJSON, str):
-#             return "Error in getBadJSON: " + data_badJSON
-#         info.append(data_badJSON.get("info"))
-#         files.append(data_badJSON.get("filepath"))
-
-#         info.append("<h3>Check Relationships for " + database + ":</h3>")
-#         data_badRelations = getBadRelations(database, mail=None, return_type="info")
-#         if isinstance(data_badRelations, str):
-#             return "Error in getBadRelations: " + data_badRelations
-#         info.append(data_badRelations.get("info"))
-#         files.append(data_badRelations.get("filepath"))
-
-#         info.append("<h3>Check CMName in names for " + database + ":</h3>")
-#         data_CMName = CMNameNotInName(database, mail=None, return_type="info")
-#         if isinstance(data_CMName, str):
-#             return "Error in CMNameNotInName: " + data_CMName
-#         info.append(data_CMName.get("info"))
-#         files.append(data_CMName.get("filepath"))
-        
-#         info.append("<h3>Check for categories with no USES ties for " + database + ":</h3>")
-#         data_noUSES = noUSES(database, save=True, mail=None, return_type="info")
-#         if isinstance(data_noUSES, str):
-#             return "Error in noUSES: " + data_noUSES
-#         info.append(data_noUSES.get("info"))
-#         files.append(data_noUSES.get("filepath"))
-
-#         info.append("<h3>Check for errors in USES ties for " + database + ":</h3>")
-#         data_checkUSES = checkUSES(database, save=True, mail=None, return_type="info")
-#         if isinstance(data_checkUSES, str):
-#             return "Error in checkUSES: " + data_checkUSES
-#         info.append(data_checkUSES.get("info"))
-#         files.append(data_checkUSES.get("filepath"))        
-
-#         info.append("<h3>Processing USES for " + database + ":</h3>")
-#         data_USES = processUSES(database, detailed = False)
-#         info.append(data_USES)
-        
-#         info.append("<h3>Processing DATASETs for " + database + ":</h3>")
-#         data_Dataset = processDATASETs(database)
-#         info.append(data_Dataset)
-        
-#         info.append("<h3>Fixing metaTypes for " + database + ":</h3>")
-#         data_meta = fixMetaTypes(database, return_type="info")
-#         info.append(data_meta.get("info"))
-    
-#     flattened = []
-#     for x in files:
-#         if isinstance(x, list):
-#             flattened.extend(x)
-#         else:
-#             flattened.append(x)
-#     files = [f for f in flattened if f is not None]
-
-#     if isinstance(mail, Mail):
-#         status = sendEmail(mail, subject=f"Routines for {' and '.join(databases)} - {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}", recipients=["rjbischo@asu.edu"], body="<br>".join(info), sender=config['MAIL']['mail_default'], attachments=files or [])
-#         return f"""
-#         Routines completed with status "{status or 'no status returned'}": <br>
-#         Files: <br>
-#         {"<br>".join(str(f) for f in (files or []) if f is not None)}
-#         <br>
-#         Info: <br>
-#         {"<br>".join(str(i) for i in (info or []) if i is not None)}
-#         """
-#     else:
-#         return info
-    
-    
 def runRoutinesStream(databases="all", mail=None):
+    """
+    Run a sequence of validation and processing routines for one or more 
+    Neo4j databases, stream progress logs to the client, and optionally 
+    send an email summary table with attachments.
+
+    This function executes multiple predefined routines (e.g., `reportChanges`, 
+    `checkDomains`, `getBadCMID`, `noUSES`, `checkUSES`, `processUSES`) 
+    against the selected databases. While running, results are streamed 
+    incrementally to the client as HTML. At the end of execution, results 
+    are compiled into a summary HTML table. If a valid `Mail` object is 
+    provided, this table is sent via email along with any generated files.
+
+    Parameters
+    ----------
+    databases : {"all", str, list}, default="all"
+        Specifies which databases to run routines against.
+        - "all" : run against both "ArchaMap" and "SocioMap".
+        - str   : run against a single named database.
+        - list  : run against a list of database names.
+    mail : Mail, optional
+        A Mail object for sending notifications (default: None).
+        If provided, the final HTML table and attachments are emailed 
+        to `rjbischo@asu.edu`.
+
+    Returns
+    -------
+    flask.Response
+        A streaming HTTP response (`text/html` MIME type) that:
+        - Streams incremental routine progress as HTML output.
+        - At the end, yields a message about email status if mail was sent.
+
+    Side Effects
+    ------------
+    - Executes multiple validation and processing routines against 
+      the given databases.
+    - Creates one or more temporary Excel files in `/tmp` for routines 
+      that generate outputs.
+    - Sends an email with the summary table and attachments if a 
+      Mail object is provided.
+    - Produces streaming output viewable in a web browser.
+
+    Raises
+    ------
+    None directly. Exceptions raised by individual routines are caught 
+    and streamed back as error messages in the output. The summary table 
+    records exceptions in place of results.
+    """
+    
     files = []
-    info = []
+    info = []  # keeps full streaming log
+    results = {}  # keeps table values
 
     def emit(msg):
         info.append(msg)
@@ -837,106 +1421,52 @@ def runRoutinesStream(databases="all", mail=None):
         yield emit("Routines started at " + pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S') + "<br>")
 
         if databases == "all":
-            dbs = ["SocioMap","ArchaMap"]
+            dbs = ["ArchaMap", "SocioMap"]
         elif isinstance(databases, str):
             dbs = [databases]
         else:
             dbs = databases
 
-        for database in dbs:
-            yield emit(f"<h1>Running routines for {database}</h1>")
+        routines = [
+            ("Modifications", lambda db: reportChanges(db, return_type="info")),
+            ("Check Domains", lambda db: checkDomains(db, mail=None, return_type="info")),
+            ("Bad Domains", lambda db: getBadDomains(db, mail=None, return_type="info")),
+            ("Bad CMID", lambda db: getBadCMID(db, mail=None, return_type="info")),
+            ("Multiple Labels", lambda db: getMultipleLabels(db, mail=None, return_type="info")),
+            ("Bad JSON", lambda db: getBadJSON(db, mail=None, return_type="info")),
+            ("Bad Relations", lambda db: getBadRelations(db, mail=None, return_type="info")),
+            ("CMName Not In Name", lambda db: CMNameNotInName(db, mail=None, return_type="info")),
+            ("No USES", lambda db: noUSES(db, save=True, mail=None, return_type="info")),
+            ("Check USES", lambda db: checkUSES(db, save=True, mail=None, return_type="info")),
+            ("Process USES", lambda db: processUSES(db, detailed=False)),
+            ("Process DATASETs", lambda db: processDATASETs(db)),
+            ("Fix MetaTypes", lambda db: fixMetaTypes(db, return_type="info")),
+        ]
 
-            yield emit(f"<h2>Modifications to {database}:</h2>")
-            data_changes = reportChanges(database, return_type="info")
-            if isinstance(data_changes, str):
-                yield emit("Error in reportChanges: " + data_changes)
-                return
-            yield emit(str(data_changes.get("info")))
-            files.append(data_changes.get("filepath"))
-            
-            yield emit("<h3>Check Domains for " + database + ":</h3>")
-            data_domains = checkDomains(database, mail=None, return_type="info")
-            if isinstance(data_domains, str):
-                yield emit("Error in checkDomains: " + data_domains)
-                return 
-            yield emit(data_domains.get("info"))
-            files.append(data_domains.get("filepath"))    
-            
-            yield emit("<h3>Return bad domains for " + database + ":</h3>")
-            data_badDomains = getBadDomains(database, mail=None, return_type="info")
-            if isinstance(data_badDomains, str):
-                yield emit("Error in getBadDomains: " + data_badDomains)
-                return
-            yield emit(data_badDomains.get("info"))
-            files.append(data_badDomains.get("filepath"))
-            
-            yield emit("<h3>Check CMIDs for " + database + ":</h3>")
-            data_badCMID = getBadCMID(database, mail=None, return_type="info")
-            if isinstance(data_badCMID, str):
-                yield emit("Error in getBadCMID: " + data_badCMID)
-                return
-            yield emit(data_badCMID.get("info"))
-            files.append(data_badCMID.get("filepath"))
-            
-            yield emit("<h3>Check Labels for " + database + ":</h3>")
-            data_labels = getMultipleLabels(database, mail=None, return_type="info")
-            if isinstance(data_labels, str):
-                yield emit("Error in getMultipleLabels: " + data_labels)
-                return
-            yield emit(data_labels.get("info"))
-            files.append(data_labels.get("filepath"))
-            
-            yield emit("<h3>Check JSON for " + database + ":</h3>")
-            data_badJSON = getBadJSON(database, mail=None, return_type="info")
-            if isinstance(data_badJSON, str):
-                yield emit("Error in getBadJSON: " + data_badJSON)
-                return
-            yield emit(data_badJSON.get("info"))
-            files.append(data_badJSON.get("filepath"))
+        # initialize results dict
+        results.update({name: {db: "" for db in dbs} for name, _ in routines})
 
-            yield emit("<h3>Check Relationships for " + database + ":</h3>")
-            data_badRelations = getBadRelations(database, mail=None, return_type="info")
-            if isinstance(data_badRelations, str):
-                yield emit("Error in getBadRelations: " + data_badRelations)
-                return
-            yield emit(data_badRelations.get("info"))
-            files.append(data_badRelations.get("filepath"))
+        for db in dbs:
+            yield emit(f"<h1>Running routines for {db}</h1>")
 
-            yield emit("<h3>Check CMName in names for " + database + ":</h3>")
-            data_CMName = CMNameNotInName(database, mail=None, return_type="info")
-            if isinstance(data_CMName, str):
-                yield emit("Error in CMNameNotInName: " + data_CMName)
-                return
-            yield emit(data_CMName.get("info"))
-            files.append(data_CMName.get("filepath"))
-            
-            yield emit("<h3>Check for categories with no USES ties for " + database + ":</h3>")
-            data_noUSES = noUSES(database, save=True, mail=None, return_type="info")
-            if isinstance(data_noUSES, str):
-                yield emit("Error in noUSES: " + data_noUSES)
-                return
-            yield emit(data_noUSES.get("info"))
-            files.append(data_noUSES.get("filepath"))
-
-            yield emit("<h3>Check for errors in USES ties for " + database + ":</h3>")
-            data_checkUSES = checkUSES(database, save=True, mail=None, return_type="info")
-            if isinstance(data_checkUSES, str):
-                yield emit("Error in checkUSES: " + data_checkUSES)
-                return
-            yield emit(data_checkUSES.get("info"))
-            files.append(data_checkUSES.get("filepath"))        
-
-            yield emit("<h3>Processing USES for " + database + ":</h3>")
-            data_USES = processUSES(database, detailed = False)
-            yield emit(data_USES)
-            
-            yield emit("<h3>Processing DATASETs for " + database + ":</h3>")
-            data_Dataset = processDATASETs(database)
-            yield emit(data_Dataset)
-            
-            yield emit("<h3>Fixing metaTypes for " + database + ":</h3>")
-            data_meta = fixMetaTypes(database, return_type="info")
-            yield emit(data_meta.get("info"))
+            for name, func in routines:
+                yield emit(f"<h2>{name} for {db}:</h2>")
+                try:
+                    res = func(db)
+                    if isinstance(res, str):
+                        results[name][db] = res
+                        yield emit(results[name][db])
+                    elif isinstance(res, dict) and "info" in res:
+                        results[name][db] = res["info"]
+                        yield emit(results[name][db])
+                        if res.get("filepath"):
+                            files.append(res["filepath"])
+                    else:
+                        results[name][db] = str(res)
+                        yield emit(results[name][db])
+                except Exception as e:
+                    results[name][db] = f"Exception: {e}"
+                    yield emit(results[name][db])
 
         # flatten file list
         flattened = []
@@ -947,13 +1477,46 @@ def runRoutinesStream(databases="all", mail=None):
                 flattened.append(x)
         files_out = [f for f in flattened if f is not None]
 
+        # build HTML table for email
+        header = "<tr><th>Routine</th>" + "".join([f"<th>{db}</th>" for db in dbs]) + "</tr>"
+        rows = []
+        for name in results:
+            row = f"<tr><td>{name}</td>" + "".join(
+                [f"<td>{results[name][db]}</td>" for db in dbs]
+            ) + "</tr>"
+            rows.append(row)
+        table_html = "<table border='1'>" + header + "".join(rows) + "</table>"
+        
+        # static routine descriptions table
+        routine_info_table = """
+        <br><h2>Routine Descriptions</h2>
+        <table border="1">
+          <tr><th>Label</th><th>Function Name</th><th>Description</th></tr>
+          <tr><td>Modifications</td><td>reportChanges</td><td>Generates a report of logged changes (nodes, relationships, merges, deletions, edits) within a date range, optionally grouped by user.</td></tr>
+          <tr><td>Check Domains</td><td>checkDomains</td><td>Detects missing or inconsistent domain/subdomain assignments in USES relationships.</td></tr>
+          <tr><td>Bad Domains</td><td>getBadDomains</td><td>Identifies invalid or missing labels: bad subdomain labels, nodes missing CATEGORY, or nodes missing DATASET.</td></tr>
+          <tr><td>Bad CMID</td><td>getBadCMID</td><td>Finds invalid or outdated CMIDs used in USES relationships, including replacements from deleted nodes.</td></tr>
+          <tr><td>Multiple Labels</td><td>getMultipleLabels</td><td>Flags USES relationships that have multiple subdomain labels assigned.</td></tr>
+          <tr><td>Bad JSON</td><td>getBadJSON</td><td>Validates JSON properties (geoCoords, parentContext) and reports invalid entries.</td></tr>
+          <tr><td>Bad Relations</td><td>getBadRelations</td><td>Checks for invalid or inconsistent parent–child category relationships and mis-specified CONTAINS links.</td></tr>
+          <tr><td>CMName Not In Name</td><td>CMNameNotInName</td><td>Finds categories where the primary CMName is missing from the alternate names list and updates them.</td></tr>
+          <tr><td>No USES</td><td>noUSES</td><td>Lists categories that are not connected to any datasets through USES relationships.</td></tr>
+          <tr><td>Check USES</td><td>checkUSES</td><td>Validates USES relationships, checking for missing or malformed label, Key, or Name fields.</td></tr>
+          <tr><td>Process USES</td><td>processUSES</td><td>Processes and reconciles USES relationships for consistency and downstream use.</td></tr>
+          <tr><td>Process DATASETs</td><td>processDATASETs</td><td>Processes dataset nodes to ensure correct structure and metadata integration.</td></tr>
+          <tr><td>Fix MetaTypes</td><td>fixMetaTypes</td><td>Validates and corrects property data types on nodes and relationships based on metadata definitions.</td></tr>
+        </table>
+        """
+
+        email_body = table_html + routine_info_table
+
         # send mail only after everything is done
         if isinstance(mail, Mail):
             status = sendEmail(
                 mail,
                 subject=f"Routines for {' and '.join(dbs)} - {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}",
                 recipients=["admin@catmapper.org"],
-                body="<br>".join(info),
+                body=email_body,  # IMPORTANT: table, not full log
                 sender=config['MAIL']['mail_default'],
                 attachments=files_out or []
             )
