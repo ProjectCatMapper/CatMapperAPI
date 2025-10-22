@@ -565,7 +565,7 @@ return count(*)
 
         updateAltNames(database, CMID=CMID)
         
-        return "Completed processing DATASETs"
+        return "Completed processing DATASET nodes"
 
     except Exception as e:
         try:

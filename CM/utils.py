@@ -57,7 +57,7 @@ def getPropertiesMetadata(driver):
     try:
 
         query = """
-match (n:METADATA:PROPERTY) 
+match (n:PROPERTY) 
 return n.CMName as property, n.type as type, 
 n.relationship as relationship, n.description as description, 
 n.display as display, n.group as group,
