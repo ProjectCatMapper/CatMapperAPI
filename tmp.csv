@@ -1,121 +1,869 @@
-,CMName,CMID,Key_AD933,Name_AD933,Key_AD42141,Name_AD42141
-0,Agate Basin,AM23986,Type: Agate Basin,Agate Basin; Mahaffey,,
-1,Awatovi Side Notched,AM23987,Type: Awatovi Side Notched,Awatovi Side Notched,,
-2,Bajada,AM23988,Type: Bajada,"Bajada; Rio Grande; Escobas; Sandia II, III",,
-3,Bare Island,AM42356,,,Major NJ Type: Bare Island,Bare Island; Piney Island; Pequea2B
-4,Black Mesa Narrow Neck,AM23989,Type: Black Mesa Narrow Neck,Black Mesa Narrow Neck; Western Basketmaker II,,
-5,Bonito Notched,AM23990,Type: Bonito Notched,Bonito Notched; Pojoaque Wide Base,,
-6,Brewerton CN,AM42357,,,Major NJ Type: Brewerton CN,Brewerton CN; Shriver
-7,Brewerton EN,AM42358,,,Major NJ Type: Brewerton EN,Brewerton EN
-8,Brewerton ET,AM42359,,,Major NJ Type: Brewerton ET,Brewerton ET
-9,Brewerton SN,AM42360,,,Major NJ Type: Brewerton SN,Brewerton SN
-10,Buck Taylor Notched,AM23991,Type: Buck Taylor Notched,Buck Taylor Notched,,
-11,Bull Creek,AM23992,Type: Bull Creek,Bull Creek; Tulamniu Cottonwood; Cohonino Triangular; Flagstaff Triangular,,
-12,Carlsbad,AM23993,Type: Carlsbad,Carlsbad,,
-13,Chaco Corner Notched,AM23994,Type: Chaco Corner Notched,Chaco Corner Notched,,
-14,Citrus Side Notched,AM23995,Type: Citrus Side Notched,Citrus Side Notched,,
-15,Clovis,AM23996,Type: Clovis,Clovis,Major NJ Type: Clovis,Clovis
-16,Cody Knife,AM23997,Type: Cody Knife,Cody Knife; Cody Points; Firstview; San Jon; Kersey; Yuma; Alberta,,
-17,Cohonina,AM23998,Type: Cohonina,Cohonina; Coho; Red Lake Serrated & Nonserrated; Tulamniu Cottonwood; Cohonino Triangular; Flagstaff Triangular,,
-18,Cortaro,AM23999,Type: Cortaro,Cortaro,,
-19,Cottonwood Triangular,AM24000,Type: Cottonwood Triangular,Cottonwood Triangular; Fresno; El Muerto; Coastal Cottonwood; Medicine Valley Triangular; Tulamniu Cottonwood; Cohonino Triangular; Flagstaff Triangular,,
-20,Cresap stemmed,AM42363,,,Major NJ Type: Cresap stemmed,Cresap stemmed
-21,Crowfield,AM42364,,,Major NJ Type: Crowfield,Crowfield
-22,Dalton,AM42365,,,Major NJ Type: Dalton,Dalton
-23,Datil,AM24001,Type: Datil,Datil; Bat Cave Type 14,,
-24,Dolores Expanding Stem,AM24002,Type: Dolores Expanding Stem,"Dolores Expanding Stem; Anasazi style A, B; Abajo Stemmed; Chippean Convex Stemmed",,
-25,Dolores Straight Stem,AM24003,Type: Dolores Straight Stem,"Dolores Straight Stem; Anasazi style A, B; Abajo Stemmed; Chippean Convex Stemmed",,
-26,Durango Notched,AM24004,Type: Durango Notched,Durango Notched,,
-27,Early Woodland stemmed cluster,AM42369,,,Major NJ Type: Early Woodland stemmed cluster,Early Woodland stemmed cluster
-28,Eden,AM24005,Type: Eden,Eden; Eden Valley Yuma,,
-29,Eshback,AM42371,,,Major NJ Type: Eshback,Eshback; Milford5B
-30,Fishtail (Orient),AM42372,,,Major NJ Type: Fishtail (Orient),Dry Brook4E; Fishtail (Orient)
-31,Folsom,AM24006,Type: Folsom,Folsom,,
-32,Fox Creek,AM42373,,,Major NJ Type: Fox Creek,Fox Creek; Steubenville
-33,Fox Creek Stemmed,AM42375,,,Major NJ Type: Fox Creek Stemmed,Fox Creek Stemmed; Steubenville
-34,Gatlin Side Notched,AM24007,Type: Gatlin Side Notched,Gatlin Side Notched,,
-35,Gila River Corner Notched,AM24008,Type: Gila River Corner Notched,Gila River Corner Notched; Scorpion; Colinas Serrated; Estrella Side Notched; Solares Corner Notched; Snaketown Serrated; Santan Barbed,,
-36,Guadalupe,AM24009,Type: Guadalupe,Guadalupe; Cienega Flared,,
-37,Gypsum,AM24010,Type: Gypsum,Gypsum; Augustin; Pelona; Manzano; Elko Contracting Stem; Gypsum series A; Gypsum series B; Gatecliff Contracting Stem; Chippean Stemmed,,
-38,Hellgramite,AM42378,,,Major NJ Type: Hellgramite,Hellgramite
-39,Hodges Contracting Stem,AM24011,Type: Hodges Contracting Stem,Hodges Contracting Stem; Sonoran Tanged; Snaketown Stemmed; Scorpion; Colinas Serrated; Estrella Side Notched; Solares Corner Notched; Snaketown Serrated; Santan Barbed,,
-40,Jack's Reef corner notched,AM42382,,,Major NJ Type: Jack's Reef corner notched,Jack's Reef corner notched
-41,Jack's Reef pentangonal,AM42383,,,Major NJ Type: Jack's Reef pentangonal,8A; Jack's Reef pentangonal
-42,Kanawha stemmed (bifurcate),AM42385,,,Major NJ Type: Kanawha stemmed (bifurcate),6B; 6C; Kanawha stemmed (bifurcate)
-43,Kin Kletso Side Notched,AM24012,Type: Kin Kletso Side Notched,Kin Kletso Side Notched,,
-44,Kirk Corner Notched Cluster,AM42387,,,Major NJ Type: Kirk Corner Notched Cluster,Abbott; Kline; Swanton; Vestal Notched Shawnee-Minisink site; Kirk Corner Notched Cluster
-45,Kirk Stemmed Cluster,AM42390,,,Major NJ Type: Kirk Stemmed Cluster,Kirk Stemmed Cluster
-46,Kirk corner notched,AM42386,,,Major NJ Type: Kirk corner notched,Abbott; Kline; Swanton; Vestal Notched Shawnee-Minisink site; Kirk corner notched
-47,Kirk stemmed,AM42389,,,Major NJ Type: Kirk stemmed,Kirk stemmed
-48,Kittatinny,AM42391,,,Major NJ Type: Kittatinny,Kittatinny
-49,Lackawanna,AM42394,,,Major NJ Type: Lackawanna??,Lackawanna??
-50,Lackawaxen,AM42395,,,Major NJ Type: Lackawaxen,Lackawaxen
-51,Lackawaxen expanding stem,AM42396,,,Major NJ Type: Lackawaxen expanding stem,Lackawaxen expanding stem
-52,Lackawaxen straight stem,AM42397,,,Major NJ Type: Lackawaxen straight stem,Lackawaxen straight stem
-53,Lagoon,AM42398,,,Major NJ Type: Lagoon,Lagoon
-54,Lake Erie bifurcated base,AM42399,,,Major NJ Type: Lake Erie bifurcated base,Lake Erie bifurcated base
-55,Lake Mojave,AM24013,Type: Lake Mojave,"Lake Mojave; Rio Grande subtype 1; Panamint Stemmed; Mount Moriah, Smith Creek Stemmed; Cougar Mountain; Little Colorado Stemmed; Jay",,
-56,Lamoka,AM42400,,,Major NJ Type: Lamoka,Lamoka
-57,Lanceolate Plano Cluster,AM42401,,,Major NJ Type: Lanceolate Plano Cluster,Lanceolate Plano Cluster
-58,LeCroy bifurcate base,AM42402,,,Major NJ Type: LeCroy bifurcate base,LeCroy bifurcate base
-59,Levanna (triangle),AM42405,,,Major NJ Type: Levanna (triangle),Levanna (triangle); Monongahela triangle; Scarem; Susquehannock-serrated
-60,Livermore,AM24014,Type: Livermore,Livermore; Ahumada,,
-61,MacCorkle Stemmed,AM42406,,,Major NJ Type: MacCorkle Stemmed,MacCorkle Stemmed
-62,MacPherson,AM42407,,,Major NJ Type: MacPherson,MacPherson
-63,Maljamar,AM24015,Type: Maljamar,Maljamar; Type 10,,
-64,Meadowood,AM42409,,,Major NJ Type: Meadowood,Meadowood
-65,Meadowood Cluster,AM42410,,,Major NJ Type: Meadowood Cluster,Meadowood Cluster
-66,Midland,AM24016,Type: Midland,Midland,,
-67,Milnesand,AM24017,Type: Milnesand,Milnesand,,
-68,Morrow Mountain II,AM42414,,,Major NJ Type: Morrow Mountain II,Morrow Mountain II
-69,Normanskill,AM42416,,,Major NJ Type: Normanskill,Normanskill
-70,Northern Side Notched,AM24018,Type: Northern Side Notched,Northern Side Notched; Cold Springs; Bitterroot Side Notched; Elko Side Notched; Madeline Dunes Side Notched,,
-71,Pandale,AM24019,Type: Pandale,"Pandale; Leoncita I, II; Nolan; Zorra",,
-72,Perkiomen,AM42419,,,Major NJ Type: Perkiomen,Perkiomen
-73,Perkiomen Broad,AM42420,,,Major NJ Type: Perkiomen Broad,Perkiomen Broad
-74,Piney Island (see Bare Island),AM42421,,,Major NJ Type: Piney Island (see Bare Island),Piney Island (see Bare Island)
-75,Pinto,AM24020,Type: Pinto,Pinto; Little Lake; Little Colorado Eared; Gatecliff Split Stem,,
-76,Plainview,AM24021,Type: Plainview,Plainview,,
-77,Point of Pines Side Notched,AM24022,Type: Point of Pines Side Notched,Point of Pines Side Notched,,
-78,Poplar Island,AM42423,,,Major NJ Type: Poplar Island,Poplar Island; Schuylkill; Morrow Mountain
-79,Pueblo Alto Side Notched,AM24023,Type: Pueblo Alto Side Notched,Pueblo Alto Side Notched,,
-80,Pueblo Del Arroyo Side Notched,AM24024,Type: Pueblo Del Arroyo Side Notched,Pueblo Del Arroyo Side Notched,,
-81,Pueblo Side Notched,AM24025,Type: Pueblo Side Notched,Pueblo Side Notched,,
-82,Pueblo Side Notched Concave Base,AM24026,Type: Pueblo Side Notched Concave Base,Pueblo Side Notched Concave Base,,
-83,Pueblo Side Notched Straight Base,AM24027,Type: Pueblo Side Notched Straight Base,Pueblo Side Notched Straight Base,,
-84,Rice Lobbed Cluster,AM42424,,,Major NJ Type: Rice Lobbed Cluster,Rice Lobbed Cluster
-85,Ridge Ruin Side Notched,AM24028,Type: Ridge Ruin Side Notched,Ridge Ruin Side Notched,,
-86,Robbins,AM42425,,,Major NJ Type: Robbins,4C (sphd); Robbins
-87,Rossville,AM42426,,,Major NJ Type: Rossville,Rossville
-88,Salt River Indented Base,AM24029,Type: Salt River Indented Base,Salt River Indented Base; Scorpion; Colinas Serrated; Estrella Side Notched; Solares Corner Notched; Snaketown Serrated; Santan Barbed,,
-89,San Jose,AM24030,Type: San Jose,San Jose; Grants; Rio Grande; Bat Cave; Armijo; Little Colorado Corner Notched,,
-90,San Pedro,AM24031,Type: San Pedro,San Pedro; Type 5a; Type 7; Type 10,,
-91,San Rafael Side Notched,AM24032,Type: San Rafael Side Notched,San Rafael Side Notched,,
-92,Savannah River Broadspear,AM42427,,,Major NJ Type: Savannah River Broadspear,Marcey Creek; Buffalo straight stemmed; Savannah River Broadspear
-93,Savannah River Cluster,AM42428,,,Major NJ Type: Savannah River Cluster,Marcey Creek; Buffalo straight stemmed; Savannah River Cluster
-94,Savannah River Stemmed,AM42429,,,Major NJ Type: Savannah River Stemmed,Savannah River Stemmed
-95,Scottsbluff,AM24033,Type: Scottsbluff,"Scottsbluff; Scottsbluff I, II, III",,
-96,Selby Bay,AM42430,,,Major NJ Type: Selby Bay,Selby Bay
-97,Silver Lake,AM24034,Type: Silver Lake,Silver Lake; Parman; Lind Coulee; Haskett,,
-98,Snaketown Side Notched,AM24035,Type: Snaketown Side Notched,Snaketown Side Notched,,
-99,Snaketown Triangular Concave Base,AM24036,Type: Snaketown Triangular Concave Base,Snaketown Triangular Concave Base; Sitgreaves Serrated; Scorpion; Colinas Serrated; Estrella Side Notched; Solares Corner Notched; Snaketown Serrated; Santan Barbed,,
-100,Snaketown Triangular Straight Base,AM24037,Type: Snaketown Triangular Straight Base,Snaketown Triangular Straight Base; Scorpion; Colinas Serrated; Estrella Side Notched; Solares Corner Notched; Snaketown Serrated; Santan Barbed,,
-101,Snook Kill,AM42431,,,Major NJ Type: Snook Kill,Lehigh Broadspear; Broadspears; Snook Kill
-102,Sobaipuri,AM24038,Type: Sobaipuri,Sobaipuri; Upper Piman; Tulamniu Cottonwood; Cohonino Triangular; Flagstaff Triangular,,
-103,Stanly/Neville,AM42434,,,Major NJ Type: Stanly/Neville,Stanly/Neville
-104,Ste. Anne / Varney,AM42435,,,Major NJ Type: Ste. Anne / Varney,Agate Basin; Ste. Anne / Varney
-105,Stillwell,AM42436,,,Major NJ Type: Stillwell,Stillwell
-106,Sudden Side Notched,AM24039,Type: Sudden Side Notched,Sudden Side Notched,,
-107,Susquehanna Broad,AM42437,,,Major NJ Type: Susquehanna Broad,Susquehanna Broad
-108,Susquehannah Cluster,AM42438,,,Major NJ Type: Susquehannah Cluster,Susquehannah Cluster
-109,Sylvan,AM42439,,,Major NJ Type: Sylvan,Sylvan; like Vosberg
-110,Teardrop,AM42440,,,Major NJ Type: Teardrop,9; Teardrop
-111,Temporal,AM24040,Type: Temporal,Temporal,,
-112,Triangle (Archaic),AM42442,,,Major NJ Type: Triangle (Archaic),Triangle (Archaic)
-113,Tularosa Basal Notched,AM24041,Type: Tularosa Basal Notched,Tularosa Basal Notched; Little Colorado Diagonal Notched; cienega Long and Short,,
-114,Tularosa Corner Notched,AM24042,Type: Tularosa Corner Notched,Tularosa Corner Notched; Tularosa and Cordova Caves multiple types; Bat Cave multiple types; Ventana Cave multiple types; Little Colorado Diagonal Notched,,
-115,Unnotched Pentagonal Cluster,AM42443,,,Cluster (Justice 1987): Unnotched Pentagonal Cluster,8A; Unnotched Pentagonal Cluster
-116,Ventana Side Notched,AM24043,Type: Ventana Side Notched,Ventana Side Notched; Chiricahua; Leupp Side Notched,,
-117,Vosburg,AM42444,,,Major NJ Type: Vosburg,Vosburg
-118,Walnut Canyon Side Notched,AM24044,Type: Walnut Canyon Side Notched,Walnut Canyon Side Notched,,
-119,White Mountain Side Notched,AM24045,Type: White Mountain Side Notched,White Mountain Side Notched,,
+,CMName,CMID,Key_SD5,Name_SD5,Key_SD6,Name_SD6
+0,Acholi,SM250008,Q84: 788; COUNTRY: 18,Acholi,Q87: 788; COUNTRY: 34,Acholi
+1,"Adamawa Fulani (Cameroon, Chad, Sudan)",SM251028,Q84: 1243; COUNTRY: 26,Foulbé,Q87: 2220; COUNTRY: 6,Peule
+2,"Adamawa Fulani (Cameroon, Chad, Sudan)",SM251028,Q84: 2223; COUNTRY: 26,Peule,Q87: 2220; COUNTRY: 6,Peule
+3,Adhola,SM250891,Q84: 792; COUNTRY: 18,Japhadhola,Q87: 792; COUNTRY: 34,Japhadhola
+4,Adja,SM250838,Q84: 1; COUNTRY: 24,Adja,Q87: 5; COUNTRY: 2,Adja
+5,Adja,SM250838,Q84: 1; COUNTRY: 24,Adja,Q87: 5; COUNTRY: 32,Adja
+6,Adja,SM250838,Q84: 1; COUNTRY: 1,Adja,Q87: 5; COUNTRY: 2,Adja
+7,Adja,SM250838,Q84: 1; COUNTRY: 1,Adja,Q87: 5; COUNTRY: 32,Adja
+8,Afrikaaner,SM250839,Q84: 2; COUNTRY: 13,Afrikaaner,Q87: 7; COUNTRY: 28,Afrikaner
+9,Afrikaaner,SM250839,Q84: 2; COUNTRY: 13,Afrikaaner,Q87: 7; COUNTRY: 22,Afrikaner
+10,Afrikaaner,SM250839,Q84: 2; COUNTRY: 16,Afrikaaner,Q87: 7; COUNTRY: 28,Afrikaner
+11,Afrikaaner,SM250839,Q84: 2; COUNTRY: 16,Afrikaaner,Q87: 7; COUNTRY: 22,Afrikaner
+12,Akan,SM250988,Q84: 3; COUNTRY: 27,Akan,Q87: 8; COUNTRY: 8,Akan
+13,Akan,SM250988,Q84: 3; COUNTRY: 27,Akan,Q87: 8; COUNTRY: 11,Akan
+14,Akan,SM250988,Q84: 3; COUNTRY: 5,Akan,Q87: 8; COUNTRY: 8,Akan
+15,Akan,SM250988,Q84: 3; COUNTRY: 5,Akan,Q87: 8; COUNTRY: 11,Akan
+16,Akebou,SM251082,Q84: 1153; COUNTRY: 24,Akébou,Q87: 1151; COUNTRY: 32,Akebou
+17,Akele,SM250355,,,Q87: 1707; COUNTRY: 10,Kélè
+18,Aklobo,SM250841,Q84: 1159; COUNTRY: 24,Aklobo,,
+19,Akposso,SM251513,Q84: 1148; COUNTRY: 24,Ikposso (Akposso),Q87: 1148; COUNTRY: 32,Ikposso (Akposso)
+20,Alago,SM250018,,,Q87: 645; COUNTRY: 24,Alago
+21,Algeria-Arab,SM251083,,,Q87: 9; COUNTRY: 1,Arab
+22,Algeria-DK,SM251145,,,Q87: 9999; COUNTRY: 1,Don't know
+23,Algeria-Refused,SM251147,,,Q87: 9998; COUNTRY: 1,Refused to answer
+24,Algerian,SM251146,,,Q87: 9990; COUNTRY: 1,"National identity only, or 'doesnt think of self in those terms'"
+25,Aliba (classified as clan of Lugbara),SM250842,Q84: 808; COUNTRY: 18,Aliba,,
+26,Alur,SM250028,Q84: 789; COUNTRY: 18,Alur,Q87: 789; COUNTRY: 34,Alur
+27,Annang,SM251632,Q84: 646; COUNTRY: 14,Anang,,
+28,Antakarana,SM250843,Q84: 420; COUNTRY: 9,Antakarana,Q87: 420; COUNTRY: 16,Antakarana
+29,Antandroy,SM250738,Q84: 422; COUNTRY: 9,Antandroy,Q87: 422; COUNTRY: 16,Antandroy
+30,Antanosy,SM250845,Q84: 423; COUNTRY: 9,Antanosy,Q87: 423; COUNTRY: 16,Antanosy
+31,Antefasy,SM251012,Q84: 424; COUNTRY: 9,Antefasy,Q87: 424; COUNTRY: 16,Antefasy
+32,Appolo Ou N'Zima,SM250956,Q84: 282; COUNTRY: 5,Nzema,,
+33,Arab-Kenya,SM250847,Q84: 4; COUNTRY: 6,Arabe,,
+34,Arabe Choua,SM251015,Q84: 1228; COUNTRY: 26,Arabe choua,Q87: 10; COUNTRY: 23,Arabe
+35,Arabe Choua,SM251015,Q84: 1228; COUNTRY: 26,Arabe choua,Q87: 1228; COUNTRY: 6,Arabe Choua
+36,Arabe Choua,SM251015,Q84: 4; COUNTRY: 23,Arabe,Q87: 10; COUNTRY: 23,Arabe
+37,Arabe Choua,SM251015,Q84: 4; COUNTRY: 23,Arabe,Q87: 1228; COUNTRY: 6,Arabe Choua
+38,Arabe Choua,SM251015,Q84: 642; COUNTRY: 14,Shuwa-Arab,Q87: 10; COUNTRY: 23,Arabe
+39,Arabe Choua,SM251015,Q84: 642; COUNTRY: 14,Shuwa-Arab,Q87: 1228; COUNTRY: 6,Arabe Choua
+40,Aringa,SM250848,Q84: 804; COUNTRY: 18,Aringa,,
+41,Arusha,SM251103,Q84: 778; COUNTRY: 17,Muarusha,Q87: 759; COUNTRY: 31,Waarusha
+42,Ateso,SM250751,Q84: 314; COUNTRY: 6,Teso,Q87: 313; COUNTRY: 13,Teso
+43,Ateso,SM250751,Q84: 314; COUNTRY: 6,Teso,Q87: 787; COUNTRY: 34,Ateso
+44,Ateso,SM250751,Q84: 787; COUNTRY: 18,Ateso,Q87: 313; COUNTRY: 13,Teso
+45,Ateso,SM250751,Q84: 787; COUNTRY: 18,Ateso,Q87: 787; COUNTRY: 34,Ateso
+46,Awori,SM250849,Q84: 638; COUNTRY: 14,Awori,,
+47,BF-Refused,SM251306,Q84: 9998; COUNTRY: 3,Refused,,
+48,Bafia,SM250054,Q84: 1229; COUNTRY: 26,Bafia,Q87: 1229; COUNTRY: 6,Bafia
+49,Bafokeng,SM251044,Q84: 343; COUNTRY: 7,Mofokeng,Q87: 343; COUNTRY: 14,Mofokeng
+50,Bafumbira,SM251060,Q84: 801; COUNTRY: 18,Mufumbira,,
+51,Bafut,SM250055,Q84: 1230; COUNTRY: 26,Bafut,Q87: 1230; COUNTRY: 6,Bafut
+52,Bagwere,SM250945,Q84: 794; COUNTRY: 18,Mugwere,Q87: 794; COUNTRY: 34,Mugwere
+53,Bainounk,SM250058,Q84: 668; COUNTRY: 15,BAYNOUK,,
+54,Bajju,SM250850,Q84: 654; COUNTRY: 14,Bajju,,
+55,Bajuni,SM250059,Q84: 2760; COUNTRY: 17,Mgunya,,
+56,Bakiga,SM250161,Q84: 795; COUNTRY: 18,Mukiga,Q87: 795; COUNTRY: 34,Mukiga
+57,Bakonjo,SM250382,Q84: 785; COUNTRY: 18,Mukhonjo,Q87: 785; COUNTRY: 34,Mukhonjo
+58,Bakossi,SM250016,Q84: 1231; COUNTRY: 26,Bakassi,,
+59,Bakundu-Oroko,SM250624,Q84: 1232; COUNTRY: 26,Bakundu,Q87: 1232; COUNTRY: 6,Bakundu
+60,Bakweri,SM250520,Q84: 1225; COUNTRY: 26,Bakweri,Q87: 1225; COUNTRY: 6,Bakweri
+61,Balanta,SM250063,Q84: 669; COUNTRY: 15,BALANTE,Q87: 669; COUNTRY: 26,Balante
+62,Bambara,SM250065,Q84: 501; COUNTRY: 11,Bambara,Q87: 501; COUNTRY: 18,Bambara
+63,Bamilike-Central,SM250066,Q84: 1221; COUNTRY: 26,Bameleké,Q87: 1221; COUNTRY: 6,Bamiléké
+64,Bamoun,SM250067,Q84: 1235; COUNTRY: 26,Bamoun,Q87: 1235; COUNTRY: 6,Bamoun
+65,Bangwa,SM250852,Q84: 1236; COUNTRY: 26,Bangwa,Q87: 1236; COUNTRY: 6,Bangwa
+66,Banyang,SM250855,Q84: 1239; COUNTRY: 26,Bayangi,Q87: 1239; COUNTRY: 6,Bayangi
+67,Banyankole,SM251062,Q84: 781; COUNTRY: 18,Munyankole,Q87: 781; COUNTRY: 34,Munyankole
+68,Banyoro,SM250616,Q84: 782; COUNTRY: 18,Munyoro,Q87: 782; COUNTRY: 34,Munyoro
+69,Bapuna,SM252043,,,Q87: 1701; COUNTRY: 10,Punu/Mériè
+70,Bara,SM250078,Q84: 427; COUNTRY: 9,Bara,Q87: 427; COUNTRY: 16,Bara
+71,Bariba,SM250051,Q84: 102; COUNTRY: 1,Bariba,Q87: 102; COUNTRY: 2,Briba
+72,Baruuli,SM250946,Q84: 803; COUNTRY: 18,Mululi,,
+73,Basa (Cameroon),SM250853,Q84: 1226; COUNTRY: 26,Basa,Q87: 11; COUNTRY: 6,Bassa
+74,Basoga,SM250687,Q84: 783; COUNTRY: 18,Musoga,Q87: 783; COUNTRY: 34,Musoga
+75,Basotho,SM251171,,,Q87: 9990; COUNTRY: 14,"National identity only, or 'doesnt think of self in those terms'"
+76,Bassa (Liberia),SM250598,Q84: 380; COUNTRY: 8,Bassa,Q87: 11; COUNTRY: 15,Bassa
+77,Baster,SM250854,Q84: 594; COUNTRY: 13,Baster,Q87: 594; COUNTRY: 22,Baster
+78,Batagwenda,SM251065,Q84: 800; COUNTRY: 18,Mutagwenda,,
+79,Batanga,SM250083,Q84: 1237; COUNTRY: 26,Batanga,Q87: 1237; COUNTRY: 6,Batanga
+80,Batoro,SM250764,Q84: 796; COUNTRY: 18,Mutooro,Q87: 796; COUNTRY: 34,Mutooro
+81,Batwa,SM251077,Q84: 1182; COUNTRY: 25,Twa,,
+82,Belle,SM250856,Q84: 381; COUNTRY: 8,Belle,Q87: 381; COUNTRY: 15,Belle
+83,Bemba,SM250089,Q84: 820; COUNTRY: 19,Bemba,Q87: 820; COUNTRY: 35,Bemba
+84,Ben (Moba),SM251019,Q84: 1144; COUNTRY: 24,Ben (Moba),Q87: 1144; COUNTRY: 32,Ben (Moba)
+85,Bena,SM250091,Q84: 759; COUNTRY: 17,Mbena,Q87: 760; COUNTRY: 31,Wabena
+86,Berom,SM250096,Q84: 641; COUNTRY: 14,Birom,,
+87,Betamariba,SM250193,Q84: 105; COUNTRY: 1,Ditamari,Q87: 105; COUNTRY: 2,Ditamari
+88,Beti,SM250857,Q84: 1220; COUNTRY: 26,Beti,Q87: 1220; COUNTRY: 6,Beti
+89,Betsileo,SM250101,Q84: 428; COUNTRY: 9,Betsileo,Q87: 428; COUNTRY: 16,Betsileo
+90,Betsimisaraka,SM250586,Q84: 429; COUNTRY: 9,Betsimisaraka,Q87: 429; COUNTRY: 16,Betsimisaraka
+91,Bezanozano,SM250858,Q84: 430; COUNTRY: 9,Bezanozano,Q87: 430; COUNTRY: 16,Bezanozano
+92,Bimoba,SM251020,Q84: 274; COUNTRY: 5,Bimoba,,
+93,Birifor,SM250109,Q84: 187; COUNTRY: 3,Birifor,Q87: 187; COUNTRY: 4,Birifor
+94,Bisa,SM250411,Q84: 831; COUNTRY: 19,Bisa,Q87: 831; COUNTRY: 35,Bisa
+95,Bissa,SM250112,Q84: 185; COUNTRY: 3,Bissa,Q87: 274; COUNTRY: 11,Buzanga
+96,Bissa,SM250112,Q84: 185; COUNTRY: 3,Bissa,Q87: 185; COUNTRY: 4,Bissa
+97,Bitonga (Mozambique),SM250859,Q84: 546; COUNTRY: 12,Bitonga,Q87: 546; COUNTRY: 21,Bitonga
+98,Bobo Fing (Mande),SM250114,Q84: 5; COUNTRY: 3,Bobo,Q87: 12; COUNTRY: 18,Bobo
+99,Bobo Fing (Mande),SM250114,Q84: 5; COUNTRY: 3,Bobo,Q87: 12; COUNTRY: 4,Bobo
+100,Bobo Fing (Mande),SM250114,Q84: 5; COUNTRY: 11,Bobo,Q87: 12; COUNTRY: 18,Bobo
+101,Bobo Fing (Mande),SM250114,Q84: 5; COUNTRY: 11,Bobo,Q87: 12; COUNTRY: 4,Bobo
+102,Bocha,SM251021,Q84: 875; COUNTRY: 20,Bocha,,
+103,Boran,SM250125,Q84: 320; COUNTRY: 6,Borana,Q87: 317; COUNTRY: 13,Borana
+104,"Borgu Fulfulde (Benin,Togo)",SM250962,Q84: 27; COUNTRY: 1,Peulh,Q87: 29; COUNTRY: 32,Peulh
+105,"Borgu Fulfulde (Benin,Togo)",SM250962,Q84: 27; COUNTRY: 1,Peulh,Q87: 29; COUNTRY: 2,Peulh
+106,"Borgu Fulfulde (Benin,Togo)",SM250962,Q84: 27; COUNTRY: 24,Peulh,Q87: 29; COUNTRY: 32,Peulh
+107,"Borgu Fulfulde (Benin,Togo)",SM250962,Q84: 27; COUNTRY: 24,Peulh,Q87: 29; COUNTRY: 2,Peulh
+108,Botswana-DK,SM251149,Q84: 9999; COUNTRY: 2,Don't know,Q87: 9999; COUNTRY: 3,Don't know
+109,Botswana-Refused,SM251305,Q84: 9998; COUNTRY: 2,Refused,,
+110,Botswanan,SM251150,Q84: 9990; COUNTRY: 2,"National identity only, or ""doesn't think of self in those terms""",Q87: 9990; COUNTRY: 3,"National identity only, or 'doesnt think of self in those terms'"
+111,Bozo,SM250126,Q84: 504; COUNTRY: 11,Bozo,Q87: 504; COUNTRY: 18,Bozo
+112,Buja,SM251022,Q84: 874; COUNTRY: 20,Buja,Q87: 870; COUNTRY: 36,Buja
+113,Bulsa,SM250132,Q84: 275; COUNTRY: 5,Bulsa,Q87: 277; COUNTRY: 11,Bulsa
+114,Burundi-DK,SM251310,Q84: 9999; COUNTRY: 25,Don't know,,
+115,Burundi-Others,SM251308,Q84: 9995; COUNTRY: 25,Others,,
+116,Burundi-Refused,SM251309,Q84: 9998; COUNTRY: 25,Refused,,
+117,Burundian,SM251307,Q84: 9990; COUNTRY: 25,"National identity only, or ""doesn't think of self in those terms""",,
+118,Busa,SM250137,Q84: 108; COUNTRY: 1,Boo,,
+119,Buzu,SM250990,Q84: 502; COUNTRY: 11,Bella,Q87: 502; COUNTRY: 18,Bella
+120,Bwamu,SM7385,Q84: 192; COUNTRY: 3,Bwaba,Q87: 192; COUNTRY: 4,Bwana
+121,Bwile,SM250861,Q84: 848; COUNTRY: 19,Bwile,,
+122,Cameroon-DK,SM251153,Q84: 9999; COUNTRY: 26,Don't know,Q87: 9999; COUNTRY: 6,Don't know
+123,Cameroon-Missing,SM251154,Q84: -1; COUNTRY: 26,Missing,Q87: -1; COUNTRY: 6,Missing
+124,Cameroon-Refused,SM251312,Q84: 9998; COUNTRY: 26,Refused,,
+125,Cameroonian,SM251311,Q84: 9990; COUNTRY: 26,"National identity only, or ""doesn't think of self in those terms""",,
+126,Cape Coloured,SM454490,Q84: 7; COUNTRY: 16,Coloured,Q87: 14; COUNTRY: 28,Coloured
+127,Cape Verde-African,SM251156,Q84: 221; COUNTRY: 4,African,Q87: 6; COUNTRY: 7,African
+128,Cape Verde-American or European,SM251157,Q84: 222; COUNTRY: 4,American or european,Q87: 222; COUNTRY: 7,American or European
+129,Cape Verde-DK,SM251158,Q84: 9999; COUNTRY: 4,Don't know,Q87: 9999; COUNTRY: 7,Don't know
+130,Cape Verde-Other,SM251160,Q84: 9995; COUNTRY: 4,Others,Q87: 9995; COUNTRY: 7,Other
+131,Cape Verde-Refused to answer,SM251161,Q84: 9998; COUNTRY: 4,Refused,Q87: 9998; COUNTRY: 7,Refused to answer
+132,Cape Verdean,SM252595,Q84: 9990; COUNTRY: 4,"National identity only, or ""doesn't think of self in those terms""",Q87: 9990; COUNTRY: 7,"National identity only, or 'doesnt think of self in those terms'"
+133,Caprivi languages (excluding Lozi),SM250862,Q84: 582; COUNTRY: 13,Caprivian,Q87: 582; COUNTRY: 22,Caprivian
+134,Central Kanuri,SM250344,Q84: 628; COUNTRY: 14,Kanuri,Q87: 18; COUNTRY: 23,Kanuri
+135,Central Kanuri,SM250344,Q84: 628; COUNTRY: 14,Kanuri,Q87: 18; COUNTRY: 24,Kanuri
+136,Central Kanuri,SM250344,Q84: 1104; COUNTRY: 23,Kanouri,Q87: 18; COUNTRY: 23,Kanuri
+137,Central Kanuri,SM250344,Q84: 1104; COUNTRY: 23,Kanouri,Q87: 18; COUNTRY: 24,Kanuri
+138,Chagga,SM250156,Q84: 741; COUNTRY: 17,Kichaga,Q87: 741; COUNTRY: 31,Wachaga
+139,Chakosi,SM250037,Q84: 1160; COUNTRY: 24,Tchokossi (Anoufom),Q87: 1160; COUNTRY: 32,Tchokossi (Anoufom)
+140,Chamba (Daka and Leko),SM250661,Q84: 2621; COUNTRY: 14,Chamba,,
+141,"Chaouia (Aures, Algeria)",SM250727,,,Q87: 1421; COUNTRY: 1,Chaoui
+142,Chewa,SM250160,Q84: 6; COUNTRY: 12,Chewa,Q87: 13; COUNTRY: 35,Chewa
+143,Chewa,SM250160,Q84: 6; COUNTRY: 12,Chewa,Q87: 463; COUNTRY: 17,Chewu
+144,Chewa,SM250160,Q84: 6; COUNTRY: 12,Chewa,Q87: 13; COUNTRY: 36,Chewa
+145,Chewa,SM250160,Q84: 881; COUNTRY: 20,Chewa,Q87: 13; COUNTRY: 35,Chewa
+146,Chewa,SM250160,Q84: 881; COUNTRY: 20,Chewa,Q87: 463; COUNTRY: 17,Chewu
+147,Chewa,SM250160,Q84: 881; COUNTRY: 20,Chewa,Q87: 13; COUNTRY: 36,Chewa
+148,Chewa,SM250160,Q84: 463; COUNTRY: 10,Chewa,Q87: 13; COUNTRY: 35,Chewa
+149,Chewa,SM250160,Q84: 463; COUNTRY: 10,Chewa,Q87: 463; COUNTRY: 17,Chewu
+150,Chewa,SM250160,Q84: 463; COUNTRY: 10,Chewa,Q87: 13; COUNTRY: 36,Chewa
+151,Chewa,SM250160,Q84: 6; COUNTRY: 19,Chewa,Q87: 13; COUNTRY: 35,Chewa
+152,Chewa,SM250160,Q84: 6; COUNTRY: 19,Chewa,Q87: 463; COUNTRY: 17,Chewu
+153,Chewa,SM250160,Q84: 6; COUNTRY: 19,Chewa,Q87: 13; COUNTRY: 36,Chewa
+154,Chibarue,SM251017,Q84: 551; COUNTRY: 12,Barue,,
+155,Chigorogonza,SM251031,Q84: 564; COUNTRY: 12,Gorongozi,,
+156,Chikunda,SM251128,Q84: 880; COUNTRY: 20,Chikunda,Q87: 841; COUNTRY: 35,Kunda
+157,Chikunda,SM251128,Q84: 841; COUNTRY: 19,Kunda,Q87: 841; COUNTRY: 35,Kunda
+158,Chimanica,SM251041,Q84: 562; COUNTRY: 12,Manica,Q87: 865; COUNTRY: 36,Manyika
+159,Chimanica,SM251041,Q84: 865; COUNTRY: 20,Manyika,Q87: 865; COUNTRY: 36,Manyika
+160,Chinese-Mauritius,SM250863,Q84: 901; COUNTRY: 21,Chenese,Q87: 901; COUNTRY: 19,Chinese
+161,Chokwe,SM250162,,,Q87: 839; COUNTRY: 35,Chokwe
+162,Chopi,SM487666,Q84: 545; COUNTRY: 12,Chope,Q87: 545; COUNTRY: 21,Chope
+163,Cote D'Ivoiren,SM251162,Q84: 9990; COUNTRY: 27,"National identity only, or ""doesn't think of self in those terms""",Q87: 9990; COUNTRY: 8,"National identity only, or 'doesnt think of self in those terms'"
+164,Cote d’Ivoire-DK,SM251314,Q84: 9999; COUNTRY: 27,Don't know,,
+165,Cote d’Ivoire-Refused,SM251313,Q84: 9998; COUNTRY: 27,Refused,,
+166,Daba,SM250867,Q84: 1240; COUNTRY: 26,Daba,Q87: 1240; COUNTRY: 6,Daba
+167,Dafing,SM251025,Q84: 8; COUNTRY: 11,Dafing,Q87: 195; COUNTRY: 4,Marka
+168,Dafing,SM251025,Q84: 8; COUNTRY: 11,Dafing,Q87: 505; COUNTRY: 18,Daffing
+169,Dafing,SM251025,Q84: 8; COUNTRY: 3,Dafing,Q87: 195; COUNTRY: 4,Marka
+170,Dafing,SM251025,Q84: 8; COUNTRY: 3,Dafing,Q87: 505; COUNTRY: 18,Daffing
+171,Dafing,SM251025,Q84: 195; COUNTRY: 3,Marka,Q87: 195; COUNTRY: 4,Marka
+172,Dafing,SM251025,Q84: 195; COUNTRY: 3,Marka,Q87: 505; COUNTRY: 18,Daffing
+173,Dagomba,SM7416,Q84: 263; COUNTRY: 5,Dagomba,Q87: 263; COUNTRY: 11,Dagomba
+174,Damara,SM250175,Q84: 589; COUNTRY: 13,Damara,Q87: 589; COUNTRY: 22,Damara
+175,Damara,SM250175,Q84: 157; COUNTRY: 2,Modamara,Q87: 589; COUNTRY: 22,Damara
+176,Dan,SM250177,Q84: 384; COUNTRY: 8,Gio,Q87: 384; COUNTRY: 15,Gio
+177,Degema,SM251085,,,Q87: 646; COUNTRY: 24,Degema
+178,Dendi,SM250183,Q84: 103; COUNTRY: 1,Dendi,Q87: 103; COUNTRY: 2,Dendi
+179,Dey,SM250868,Q84: 382; COUNTRY: 8,Dei,Q87: 382; COUNTRY: 15,Dei
+180,Dii,SM250870,Q84: 1241; COUNTRY: 26,Dii,Q87: 1241; COUNTRY: 6,Dii
+181,Diola,SM250332,Q84: 665; COUNTRY: 15,Diola,Q87: 665; COUNTRY: 26,Diola
+182,Dioula,SM250216,Q84: 181; COUNTRY: 3,Dioula,Q87: 181; COUNTRY: 4,Dioula
+183,Doe,SM250922,Q84: 777; COUNTRY: 17,Mdoe,,
+184,Dogon,SM250209,Q84: 506; COUNTRY: 11,Dogon,Q87: 506; COUNTRY: 18,Dogon
+185,Ebira,SM250222,Q84: 624; COUNTRY: 14,Ebira,Q87: 624; COUNTRY: 24,Ebira
+186,Echuwabo,SM250164,Q84: 548; COUNTRY: 12,Chuabo,Q87: 548; COUNTRY: 21,Chuabo
+187,Edo,SM250106,Q84: 632; COUNTRY: 14,Edo,Q87: 632; COUNTRY: 24,Edo
+188,Efik,SM250871,Q84: 623; COUNTRY: 14,Efik,Q87: 623; COUNTRY: 24,Efik
+189,Eggon,SM251086,,,Q87: 647; COUNTRY: 24,Eggon
+190,English-Kenya,SM251087,,,Q87: 1; COUNTRY: 13,English
+191,English-Liberia,SM250873,Q84: 9; COUNTRY: 8,English,Q87: 1; COUNTRY: 15,English
+192,English-South Africa,SM250874,Q84: 9; COUNTRY: 16,English,Q87: 1; COUNTRY: 28,English
+193,English-Zambia,SM250875,Q84: 9; COUNTRY: 19,English,,
+194,Esan,SM250876,Q84: 650; COUNTRY: 14,Esan,,
+195,Ewe,SM250232,Q84: 1140; COUNTRY: 24,Ewé,Q87: 1140; COUNTRY: 32,Ewe
+196,Ewe,SM250232,Q84: 1140; COUNTRY: 24,Ewé,Q87: 261; COUNTRY: 11,Ewe/Anglo
+197,Ewe,SM250232,Q84: 261; COUNTRY: 5,Ewe/Anglo,Q87: 1140; COUNTRY: 32,Ewe
+198,Ewe,SM250232,Q84: 261; COUNTRY: 5,Ewe/Anglo,Q87: 261; COUNTRY: 11,Ewe/Anglo
+199,Fali (Cameroon),SM253361,Q84: 1242; COUNTRY: 26,Fali,Q87: 1242; COUNTRY: 6,Fali
+200,Fang-generic,SM250234,,,Q87: 1700; COUNTRY: 10,Fang
+201,Fipa,SM250237,Q84: 755; COUNTRY: 17,Kifipa,Q87: 755; COUNTRY: 31,Wafipa
+202,Fon-generic,SM462058,Q84: 10; COUNTRY: 1,Fon,Q87: 15; COUNTRY: 32,Fon
+203,Fon-generic,SM462058,Q84: 10; COUNTRY: 1,Fon,Q87: 15; COUNTRY: 2,Fon
+204,Fon-generic,SM462058,Q84: 10; COUNTRY: 24,Fon,Q87: 15; COUNTRY: 32,Fon
+205,Fon-generic,SM462058,Q84: 10; COUNTRY: 24,Fon,Q87: 15; COUNTRY: 2,Fon
+206,Frafra,SM250878,Q84: 272; COUNTRY: 5,Frafra,Q87: 272; COUNTRY: 11,Frafra
+207,Franco-Mauritians,SM250877,Q84: 902; COUNTRY: 21,Euro-Mauritian (white),Q87: 902; COUNTRY: 19,Euro-Mauritian (White)
+208,"Fulani-Western Niger (BF, Niger)",SM250807,Q84: 182; COUNTRY: 3,Peulh,Q87: 182; COUNTRY: 4,Peuhl
+209,"Fulani-Western Niger (BF, Niger)",SM250807,Q84: 182; COUNTRY: 3,Peulh,Q87: 1102; COUNTRY: 23,Fulfuldé
+210,"Fulani-Western Niger (BF, Niger)",SM250807,Q84: 27; COUNTRY: 23,Peulh,Q87: 182; COUNTRY: 4,Peuhl
+211,"Fulani-Western Niger (BF, Niger)",SM250807,Q84: 27; COUNTRY: 23,Peulh,Q87: 1102; COUNTRY: 23,Fulfuldé
+212,GaDAngme,SM250991,Q84: 262; COUNTRY: 5,Ga/Adangbe,Q87: 262; COUNTRY: 11,Ga/Adangbe
+213,Gana,SM251088,,,Q87: 507; COUNTRY: 18,Gana
+214,Garre,SM251089,,,Q87: 316; COUNTRY: 13,Garre
+215,Gbagyi,SM250880,Q84: 652; COUNTRY: 14,Gbagyi,,
+216,Gbandi,SM250071,Q84: 383; COUNTRY: 8,Gbandi,Q87: 383; COUNTRY: 15,Gbandi
+217,Ge,SM250252,Q84: 1141; COUNTRY: 24,Mina (Guen),Q87: 1141; COUNTRY: 32,Mina (Guen)
+218,German Namibians,SM493648,Q84: 584; COUNTRY: 13,German,Q87: 584; COUNTRY: 22,German
+219,Ghana-DK,SM251315,Q84: 9999; COUNTRY: 5,Don't know,,
+220,Ghana-other northern tribes,SM251004,Q84: 283; COUNTRY: 5,Other Northern tribes,Q87: 9995; COUNTRY: 11,Other
+221,Ghanaian,SM251164,,,Q87: 9990; COUNTRY: 11,"National identity only, or 'doesnt think of self in those terms'"
+222,Gogo,SM250259,Q84: 753; COUNTRY: 17,Kigogo,Q87: 753; COUNTRY: 31,Wagogo
+223,Goin,SM250151,Q84: 193; COUNTRY: 3,Goin,Q87: 193; COUNTRY: 4,Goin
+224,Gola,SM250260,Q84: 385; COUNTRY: 8,Gola,Q87: 385; COUNTRY: 15,Gola
+225,Gonja,SM251030,Q84: 281; COUNTRY: 5,Gonja,Q87: 271; COUNTRY: 11,Gonja
+226,Gourmatches,SM250264,Q84: 1105; COUNTRY: 23,Gourmatché,Q87: 183; COUNTRY: 4,Gourmantchéma
+227,Gourmatches,SM250264,Q84: 1105; COUNTRY: 23,Gourmatché,Q87: 1105; COUNTRY: 23,Gourmantchéma
+228,Gourmatches,SM250264,Q84: 1105; COUNTRY: 23,Gourmatché,Q87: 1152; COUNTRY: 32,Gourmantchéma
+229,Gourmatches,SM250264,Q84: 1105; COUNTRY: 23,Gourmatché,Q87: 276; COUNTRY: 11,Gourmantchéma
+230,Gourmatches,SM250264,Q84: 1154; COUNTRY: 24,Gourma,Q87: 183; COUNTRY: 4,Gourmantchéma
+231,Gourmatches,SM250264,Q84: 1154; COUNTRY: 24,Gourma,Q87: 1105; COUNTRY: 23,Gourmantchéma
+232,Gourmatches,SM250264,Q84: 1154; COUNTRY: 24,Gourma,Q87: 1152; COUNTRY: 32,Gourmantchéma
+233,Gourmatches,SM250264,Q84: 1154; COUNTRY: 24,Gourma,Q87: 276; COUNTRY: 11,Gourmantchéma
+234,Gourmatches,SM250264,Q84: 273; COUNTRY: 5,Gruma,Q87: 183; COUNTRY: 4,Gourmantchéma
+235,Gourmatches,SM250264,Q84: 273; COUNTRY: 5,Gruma,Q87: 1105; COUNTRY: 23,Gourmantchéma
+236,Gourmatches,SM250264,Q84: 273; COUNTRY: 5,Gruma,Q87: 1152; COUNTRY: 32,Gourmantchéma
+237,Gourmatches,SM250264,Q84: 273; COUNTRY: 5,Gruma,Q87: 276; COUNTRY: 11,Gourmantchéma
+238,Gourmatches,SM250264,Q84: 183; COUNTRY: 3,Goumantche,Q87: 183; COUNTRY: 4,Gourmantchéma
+239,Gourmatches,SM250264,Q84: 183; COUNTRY: 3,Goumantche,Q87: 1105; COUNTRY: 23,Gourmantchéma
+240,Gourmatches,SM250264,Q84: 183; COUNTRY: 3,Goumantche,Q87: 1152; COUNTRY: 32,Gourmantchéma
+241,Gourmatches,SM250264,Q84: 183; COUNTRY: 3,Goumantche,Q87: 276; COUNTRY: 11,Gourmantchéma
+242,Gowa,SM251029,Q84: 852; COUNTRY: 19,Goba,,
+243,Grunshi,SM250992,Q84: 184; COUNTRY: 3,Gourounsi,Q87: 184; COUNTRY: 4,Gourounsi
+244,Guan,SM251032,Q84: 280; COUNTRY: 5,Guan,,
+245,Guerze,SM253725,Q84: 1303; COUNTRY: 28,Guérzé,Q87: 1303; COUNTRY: 12,Guerzé
+246,Guidar,SM250882,Q84: 1245; COUNTRY: 26,Guidar,Q87: 1243; COUNTRY: 6,Guider
+247,Guinea-DK,SM251317,Q84: 9999; COUNTRY: 28,Don't know,,
+248,Guinean,SM251316,Q84: 9990; COUNTRY: 28,"National identity only, or ""doesn't think of self in those terms""",,
+249,Guiziga,SM250587,Q84: 1246; COUNTRY: 26,Guiziga,Q87: 2225; COUNTRY: 6,Guiziga
+250,Gur (Voltaique),SM250993,Q84: 1264; COUNTRY: 27,Gur (Voltaïque),Q87: 1264; COUNTRY: 8,Gur (Voltaïque)
+251,Gwari,SM250247,Q84: 644; COUNTRY: 14,Gwari,Q87: 644; COUNTRY: 24,Gwari
+252,Gwoza,SM250883,Q84: 655; COUNTRY: 14,Gwoza,,
+253,Ha,SM250279,Q84: 760; COUNTRY: 17,Mha,Q87: 761; COUNTRY: 31,Waha
+254,Hangaza,SM250923,Q84: 761; COUNTRY: 17,Mhangaza,,
+255,Hausa Niger & Nigeria,SM253862,Q84: 11; COUNTRY: 23,Haoussa,Q87: 17; COUNTRY: 24,Hausa
+256,Hausa Niger & Nigeria,SM253862,Q84: 11; COUNTRY: 23,Haoussa,Q87: 16; COUNTRY: 23,Haoussa
+257,Hausa Niger & Nigeria,SM253862,Q84: 12; COUNTRY: 14,Hausa,Q87: 17; COUNTRY: 24,Hausa
+258,Hausa Niger & Nigeria,SM253862,Q84: 12; COUNTRY: 14,Hausa,Q87: 16; COUNTRY: 23,Haoussa
+259,Hausa-Cameroon/CAR,SM253863,Q84: 11; COUNTRY: 26,Haoussa,Q87: 16; COUNTRY: 6,Haoussa
+260,"Hausa-Far West (Togo, Benin, BF, Mali)",SM250039,Q84: 11; COUNTRY: 24,Haoussa,Q87: 17; COUNTRY: 11,Haoussa
+261,"Hausa-Far West (Togo, Benin, BF, Mali)",SM250039,Q84: 11; COUNTRY: 24,Haoussa,Q87: 16; COUNTRY: 32,Haoussa
+262,"Hausa-Far West (Togo, Benin, BF, Mali)",SM250039,Q84: 11; COUNTRY: 3,Haoussa,Q87: 17; COUNTRY: 11,Haoussa
+263,"Hausa-Far West (Togo, Benin, BF, Mali)",SM250039,Q84: 11; COUNTRY: 3,Haoussa,Q87: 16; COUNTRY: 32,Haoussa
+264,"Hausa-Far West (Togo, Benin, BF, Mali)",SM250039,Q84: 12; COUNTRY: 5,Hausa,Q87: 17; COUNTRY: 11,Haoussa
+265,"Hausa-Far West (Togo, Benin, BF, Mali)",SM250039,Q84: 12; COUNTRY: 5,Hausa,Q87: 16; COUNTRY: 32,Haoussa
+266,Haya,SM250296,Q84: 742; COUNTRY: 17,Kihaya,Q87: 742; COUNTRY: 31,Wahaya
+267,Hehe,SM250297,Q84: 746; COUNTRY: 17,Kihehe,Q87: 746; COUNTRY: 31,Wahehe
+268,Herero,SM250298,Q84: 581; COUNTRY: 13,Herero,Q87: 145; COUNTRY: 3,Moherero
+269,Herero,SM250298,Q84: 581; COUNTRY: 13,Herero,Q87: 581; COUNTRY: 22,Herero
+270,Herero,SM250298,Q84: 145; COUNTRY: 2,Moherero,Q87: 145; COUNTRY: 3,Moherero
+271,Herero,SM250298,Q84: 145; COUNTRY: 2,Moherero,Q87: 581; COUNTRY: 22,Herero
+272,Hindu,SM253897,Q84: 903; COUNTRY: 21,Hindu,Q87: 903; COUNTRY: 19,Hindu
+273,Hlengwe,SM250299,Q84: 555; COUNTRY: 12,Matswa,,
+274,Hurutshe,SM251046,Q84: 153; COUNTRY: 2,Mohurutshe,Q87: 153; COUNTRY: 3,Mohurutshe
+275,Hutu,SM251033,Q84: 1180; COUNTRY: 25,Hutu,,
+276,Hwesa,SM250886,Q84: 879; COUNTRY: 20,Hwesa,,
+277,Hyam,SM250890,Q84: 2622; COUNTRY: 14,Jaba,,
+278,Ibaji,SM251034,Q84: 656; COUNTRY: 14,Ibaji,,
+279,Ibibio,SM250308,Q84: 627; COUNTRY: 14,Ibibio,Q87: 627; COUNTRY: 24,Ibibio
+280,Idoma,SM250309,Q84: 635; COUNTRY: 14,Idoma,Q87: 635; COUNTRY: 24,Idoma
+281,Ifè (Ana),SM250996,Q84: 1147; COUNTRY: 24,Ifè (Ana),Q87: 1147; COUNTRY: 32,Ife (Ana)
+282,Igala,SM251035,Q84: 633; COUNTRY: 14,Igala,Q87: 633; COUNTRY: 24,Igala
+283,Igbo,SM250597,Q84: 621; COUNTRY: 14,Igbo,Q87: 621; COUNTRY: 24,Igbo
+284,Ijaw,SM250324,Q84: 631; COUNTRY: 14,Ijaw,Q87: 631; COUNTRY: 24,Ijaw
+285,Ika,SM250887,Q84: 651; COUNTRY: 14,Ika,,
+286,Ikalanga,SM250894,Q84: 148; COUNTRY: 2,Mokalaka/Mokalanga,Q87: 148; COUNTRY: 3,Mkalanga
+287,Ikalanga,SM250894,Q84: 148; COUNTRY: 2,Mokalaka/Mokalanga,Q87: 868; COUNTRY: 36,Kalanga
+288,Ikalanga,SM250894,Q84: 868; COUNTRY: 20,Kalanga,Q87: 148; COUNTRY: 3,Mkalanga
+289,Ikalanga,SM250894,Q84: 868; COUNTRY: 20,Kalanga,Q87: 868; COUNTRY: 36,Kalanga
+290,Ikwere,SM250888,Q84: 637; COUNTRY: 14,Ikwere,Q87: 637; COUNTRY: 24,Ikwere
+291,Ila,SM250317,Q84: 837; COUNTRY: 19,Ila,Q87: 837; COUNTRY: 35,Ila
+292,Indian-SA,SM250889,Q84: 713; COUNTRY: 16,Indian,Q87: 713; COUNTRY: 28,Indian
+293,Iragw,SM250319,Q84: 2743; COUNTRY: 17,Mmbulu,Q87: 768; COUNTRY: 31,Wambulu
+294,Iragw,SM250319,Q84: 2743; COUNTRY: 17,Mmbulu,Q87: 762; COUNTRY: 31,Wairaq
+295,Iragw,SM250319,Q84: 762; COUNTRY: 17,Muiraqi,Q87: 768; COUNTRY: 31,Wambulu
+296,Iragw,SM250319,Q84: 762; COUNTRY: 17,Muiraqi,Q87: 762; COUNTRY: 31,Wairaq
+297,Iramba,SM250571,Q84: 757; COUNTRY: 17,Kinyiramba,Q87: 757; COUNTRY: 31,Wanyiramba
+298,Ishinde/Luapula/Ndembu Lunda,SM250450,Q84: 830; COUNTRY: 19,Lunda,Q87: 830; COUNTRY: 35,Lunda
+299,Isoko,SM250321,Q84: 626; COUNTRY: 14,Isoko,Q87: 626; COUNTRY: 24,Isoko
+300,Itsekiri,SM250320,Q84: 636; COUNTRY: 14,Itsekiri,,
+301,Iyala,SM250576,,,Q87: 655; COUNTRY: 24,Yala
+302,Jakhanke,SM250869,Q84: 1309; COUNTRY: 28,Diakanké,,
+303,Jita,SM250927,Q84: 764; COUNTRY: 17,Mjita,Q87: 764; COUNTRY: 31,Wajita
+304,Jukun Takum,SM250803,Q84: 643; COUNTRY: 14,Jukun,Q87: 643; COUNTRY: 24,Jukun
+305,Kabye Togo,SM251080,Q84: 1142; COUNTRY: 24,Kabyè,Q87: 1142; COUNTRY: 32,Kabye
+306,Kabyle,SM250334,,,Q87: 1422; COUNTRY: 1,Kabyle
+307,Kagoma,SM251090,,,Q87: 648; COUNTRY: 24,Kagoma
+308,Kaguru,SM251104,,,Q87: 765; COUNTRY: 31,Wakaguru
+309,Kakwa,SM250892,Q84: 806; COUNTRY: 18,Kakwa,,
+310,Kalabari,SM250893,Q84: 640; COUNTRY: 14,Kalabari,Q87: 640; COUNTRY: 24,Kalabari
+311,Kalenjin,SM250895,Q84: 304; COUNTRY: 6,Kalenjin,Q87: 304; COUNTRY: 13,Kalenjin
+312,Kamba,SM250338,Q84: 303; COUNTRY: 6,Kamba,Q87: 303; COUNTRY: 13,Kamba
+313,Kamwe,SM250342,Q84: 1248; COUNTRY: 26,Kapsiki,Q87: 1245; COUNTRY: 6,Kapsiki
+314,Kaonde subgoup,SM250345,Q84: 827; COUNTRY: 19,Kaonde,Q87: 827; COUNTRY: 35,Kaonde
+315,Karago,SM250337,Q84: 509; COUNTRY: 11,Kakolo,Q87: 509; COUNTRY: 18,Kakolo
+316,Karamojong,SM250349,Q84: 799; COUNTRY: 18,Karamajong,Q87: 799; COUNTRY: 34,Karamajong
+317,Karanga (Shona),SM250347,Q84: 864; COUNTRY: 20,Karanga,Q87: 864; COUNTRY: 36,Karanga
+318,Kasem,SM250896,Q84: 196; COUNTRY: 3,Kassena,Q87: 196; COUNTRY: 4,Kassena
+319,Kasem,SM250896,Q84: 271; COUNTRY: 5,Kasina,Q87: 196; COUNTRY: 4,Kassena
+320,Katab/Atyap/Kagoro,SM250784,Q84: 657; COUNTRY: 14,Kataf,,
+321,"Kavango (Rukwangali, Rumanyo, Hambukushu)",SM250998,Q84: 583; COUNTRY: 13,"Kavango (Rukwangali, Rumanyo, Hambukushu)",Q87: 583; COUNTRY: 22,"Kavango (Rukwangali, Rumanyo, Hambukushu)"
+322,Kenya-Missing,SM251167,Q84: -1; COUNTRY: 6,Missing,Q87: -1; COUNTRY: 13,Missing
+323,Kenya-Refused,SM251318,Q84: 9998; COUNTRY: 6,Refused,,
+324,Kenyan,SM251168,Q84: 9990; COUNTRY: 6,"National identity only, or ""doesn't think of self in those terms""",Q87: 9990; COUNTRY: 13,"National identity only, or 'doesnt think of self in those terms'"
+325,Kerewe,SM250359,Q84: 2742; COUNTRY: 17,Mkerewe,,
+326,Kgatla,SM251048,Q84: 140; COUNTRY: 2,Mokgatla,Q87: 355; COUNTRY: 14,Mokhatla
+327,Kgatla,SM251048,Q84: 140; COUNTRY: 2,Mokgatla,Q87: 140; COUNTRY: 3,Mokgatla
+328,Kgatla,SM251048,Q84: 355; COUNTRY: 7,Mokhatla,Q87: 355; COUNTRY: 14,Mokhatla
+329,Kgatla,SM251048,Q84: 355; COUNTRY: 7,Mokhatla,Q87: 140; COUNTRY: 3,Mokgatla
+330,Khassonke,SM250813,Q84: 510; COUNTRY: 11,Khassonké,Q87: 510; COUNTRY: 18,Khassonké
+331,Khoakhoa,SM251092,Q84: 352; COUNTRY: 7,Lekhoakhoa,Q87: 352; COUNTRY: 14,Lekhoakhoa
+332,Khurutshe,SM251050,Q84: 154; COUNTRY: 2,Mokhurutshe,Q87: 154; COUNTRY: 3,Mokhurutshe
+333,Kikuyu,SM250365,Q84: 300; COUNTRY: 6,Kikuyu,Q87: 300; COUNTRY: 13,Kikuyu
+334,Kimuani,SM250944,Q84: 557; COUNTRY: 12,Muani,,
+335,Kinga,SM250594,Q84: 765; COUNTRY: 17,Mkinga,Q87: 2748; COUNTRY: 31,Wazanaki
+336,Kisii,SM250277,Q84: 305; COUNTRY: 6,Kisii,Q87: 305; COUNTRY: 13,Kisii
+337,Kissi (Northern),SM250582,Q84: 13; COUNTRY: 22,Kissi,Q87: 19; COUNTRY: 27,Kissi
+338,Kissi (Northern),SM250582,Q84: 13; COUNTRY: 22,Kissi,Q87: 1304; COUNTRY: 12,Kissien
+339,Kissi (Northern),SM250582,Q84: 1304; COUNTRY: 28,Kissien,Q87: 19; COUNTRY: 27,Kissi
+340,Kissi (Northern),SM250582,Q84: 1304; COUNTRY: 28,Kissien,Q87: 1304; COUNTRY: 12,Kissien
+341,Kissi Southern,SM254768,Q84: 13; COUNTRY: 8,Kissi,Q87: 19; COUNTRY: 15,Kissi
+342,Kita Maninkanan,SM250372,Q84: 20; COUNTRY: 11,Malinké,Q87: 23; COUNTRY: 18,Malinké
+343,Klao,SM254978,Q84: 16; COUNTRY: 22,Kru,Q87: 21; COUNTRY: 27,Kru
+344,Klao,SM254978,Q84: 16; COUNTRY: 22,Kru,Q87: 21; COUNTRY: 15,Kru
+345,Klao,SM254978,Q84: 16; COUNTRY: 8,Kru,Q87: 21; COUNTRY: 27,Kru
+346,Klao,SM254978,Q84: 16; COUNTRY: 8,Kru,Q87: 21; COUNTRY: 15,Kru
+347,Konkomba,SM250377,Q84: 14; COUNTRY: 24,Konkomba,Q87: 20; COUNTRY: 11,Konkomba
+348,Konkomba,SM250377,Q84: 14; COUNTRY: 24,Konkomba,Q87: 20; COUNTRY: 32,Konkomba
+349,Konkomba,SM250377,Q84: 14; COUNTRY: 5,Konkomba,Q87: 20; COUNTRY: 11,Konkomba
+350,Konkomba,SM250377,Q84: 14; COUNTRY: 5,Konkomba,Q87: 20; COUNTRY: 32,Konkomba
+351,Kono (Sierra Leone),SM250379,Q84: 933; COUNTRY: 22,Kono,Q87: 933; COUNTRY: 27,Kono
+352,Koranko,SM250396,Q84: 1307; COUNTRY: 28,Kouranko,Q87: 935; COUNTRY: 27,Kuranko
+353,Koranko,SM250396,Q84: 935; COUNTRY: 22,Kuranko,Q87: 935; COUNTRY: 27,Kuranko
+354,Korekore,SM250384,Q84: 863; COUNTRY: 20,Korekore,Q87: 863; COUNTRY: 36,Korekore
+355,Koro (Nigeria),SM250088,Q84: 15; COUNTRY: 14,Koro,,
+356,Koromfe,SM250385,Q84: 197; COUNTRY: 3,Fulse,,
+357,Kota-generic,SM250265,,,Q87: 1702; COUNTRY: 10,Kota
+358,Kotoko,SM250408,Q84: 1249; COUNTRY: 26,Kotoko,Q87: 1247; COUNTRY: 6,Kotoko
+359,Kpelle (Liberia),SM250424,Q84: 388; COUNTRY: 8,Kpelle,Q87: 388; COUNTRY: 15,Kpelle
+360,Krahn,SM250808,Q84: 389; COUNTRY: 8,Krahn,Q87: 389; COUNTRY: 15,Krahn
+361,Kriole,SM250866,Q84: 930; COUNTRY: 22,Creole,Q87: 930; COUNTRY: 27,Creole
+362,Kru-generic,SM462205,Q84: 1261; COUNTRY: 27,Krou,Q87: 1261; COUNTRY: 8,Krou
+363,Kumam,SM250901,Q84: 805; COUNTRY: 18,Kumam,,
+364,Kupsabiny,SM250964,Q84: 798; COUNTRY: 18,Sabinyi,Q87: 798; COUNTRY: 34,Sabini
+365,Kuria,SM250898,Q84: 319; COUNTRY: 6,Kuria,Q87: 315; COUNTRY: 13,Kuria
+366,Kuria,SM250898,Q84: 319; COUNTRY: 6,Kuria,Q87: 752; COUNTRY: 31,Wakurya
+367,Kuria,SM250898,Q84: 752; COUNTRY: 17,Kikurya,Q87: 315; COUNTRY: 13,Kuria
+368,Kuria,SM250898,Q84: 752; COUNTRY: 17,Kikurya,Q87: 752; COUNTRY: 31,Wakurya
+369,Kusaal,SM250903,Q84: 277; COUNTRY: 5,Kusasi,Q87: 269; COUNTRY: 11,Kusasi
+370,Kwaya,SM250928,Q84: 2746; COUNTRY: 17,Mkwaya,,
+371,Kwena,SM250402,Q84: 141; COUNTRY: 2,Mokwena,Q87: 342; COUNTRY: 14,Mohlakoana/Motebang
+372,Kwena,SM250402,Q84: 141; COUNTRY: 2,Mokwena,Q87: 141; COUNTRY: 3,Mokwena
+373,Kwena,SM250402,Q84: 141; COUNTRY: 2,Mokwena,Q87: 340; COUNTRY: 14,Mokoena
+374,Kwena,SM250402,Q84: 342; COUNTRY: 7,Mohlakoana/Motebang,Q87: 342; COUNTRY: 14,Mohlakoana/Motebang
+375,Kwena,SM250402,Q84: 342; COUNTRY: 7,Mohlakoana/Motebang,Q87: 141; COUNTRY: 3,Mokwena
+376,Kwena,SM250402,Q84: 342; COUNTRY: 7,Mohlakoana/Motebang,Q87: 340; COUNTRY: 14,Mokoena
+377,Kwena,SM250402,Q84: 340; COUNTRY: 7,Mokoena,Q87: 342; COUNTRY: 14,Mohlakoana/Motebang
+378,Kwena,SM250402,Q84: 340; COUNTRY: 7,Mokoena,Q87: 141; COUNTRY: 3,Mokwena
+379,Kwena,SM250402,Q84: 340; COUNTRY: 7,Mokoena,Q87: 340; COUNTRY: 14,Mokoena
+380,Kwere,SM250403,Q84: 744; COUNTRY: 17,Kikwere,Q87: 744; COUNTRY: 31,Wakwere
+381,Lala (Zambia),SM255172,Q84: 842; COUNTRY: 19,Lala,Q87: 842; COUNTRY: 35,Lala
+382,Lama,SM250904,Q84: 1146; COUNTRY: 24,Lama (Lamba),Q87: 1146; COUNTRY: 32,Lama (Lamba)
+383,Lamba,SM250412,Q84: 843; COUNTRY: 19,Lamba,Q87: 843; COUNTRY: 35,Lamba
+384,Lambya,SM250413,Q84: 462; COUNTRY: 10,Lambya,Q87: 462; COUNTRY: 17,Lambya
+385,Landouma,SM250415,Q84: 1308; COUNTRY: 28,Landouma,,
+386,Langi,SM255186,Q84: 797; COUNTRY: 18,Langi,Q87: 797; COUNTRY: 34,Langi
+387,Lantang,SM251091,,,Q87: 649; COUNTRY: 24,Lanta
+388,Lekholokoe,SM251037,Q84: 351; COUNTRY: 7,Lekholokoe,Q87: 351; COUNTRY: 14,Lekholokoe
+389,Lenje,SM250422,Q84: 834; COUNTRY: 19,Lenje,Q87: 834; COUNTRY: 35,Lenje
+390,Lesotho-DK,SM251170,,,Q87: 9999; COUNTRY: 14,Don't know
+391,Lesotho-Other,SM251172,Q84: 9995; COUNTRY: 7,Others,Q87: 9995; COUNTRY: 14,Other
+392,Lesotho-Refused,SM251319,Q84: 9998; COUNTRY: 7,Refused,,
+393,Lete,SM250936,Q84: 159; COUNTRY: 2,Molete,Q87: 159; COUNTRY: 3,Molete
+394,Liberia-DK,SM251321,Q84: 9999; COUNTRY: 8,Don't know,,
+395,Liberia-Missing,SM251173,Q84: -1; COUNTRY: 8,Missing,Q87: -1; COUNTRY: 15,Missing
+396,Liberia-Refused to answer,SM251175,,,Q87: 9998; COUNTRY: 15,Refused to answer
+397,Liberian,SM251174,,,Q87: 9990; COUNTRY: 15,"National identity only, or 'doesnt think of self in those terms'"
+398,Liberian Grebo,SM250266,Q84: 386; COUNTRY: 8,Grebo,Q87: 386; COUNTRY: 15,Grebo
+399,Limba (Sierra Leone),SM250433,Q84: 936; COUNTRY: 22,Limba,Q87: 936; COUNTRY: 27,Limba
+400,Limbum,SM255247,Q84: 2226; COUNTRY: 26,Wimbum,Q87: 2223; COUNTRY: 6,Wimbum
+401,Lobi,SM250435,Q84: 189; COUNTRY: 3,Lobi,Q87: 189; COUNTRY: 4,Lobi
+402,Loko,SM250438,Q84: 937; COUNTRY: 22,Loko,Q87: 937; COUNTRY: 27,Loko
+403,Lomwe,SM250441,Q84: 17; COUNTRY: 12,Lomwe,Q87: 550; COUNTRY: 21,Lomue
+404,Lomwe,SM250441,Q84: 17; COUNTRY: 12,Lomwe,Q87: 466; COUNTRY: 17,Lomwe
+405,Lomwe,SM250441,Q84: 17; COUNTRY: 10,Lomwe,Q87: 550; COUNTRY: 21,Lomue
+406,Lomwe,SM250441,Q84: 17; COUNTRY: 10,Lomwe,Q87: 466; COUNTRY: 17,Lomwe
+407,Lorma,SM250905,Q84: 391; COUNTRY: 8,Lorma,Q87: 391; COUNTRY: 15,Lorma
+408,Lozi,SM250443,Q84: 18; COUNTRY: 13,Lozi,Q87: 22; COUNTRY: 35,Lozi
+409,Lozi,SM250443,Q84: 18; COUNTRY: 13,Lozi,Q87: 22; COUNTRY: 22,Lozi
+410,Lozi,SM250443,Q84: 18; COUNTRY: 19,Lozi,Q87: 22; COUNTRY: 35,Lozi
+411,Lozi,SM250443,Q84: 18; COUNTRY: 19,Lozi,Q87: 22; COUNTRY: 22,Lozi
+412,Luganda,SM250245,Q84: 780; COUNTRY: 18,Muganda,Q87: 780; COUNTRY: 34,Muganda
+413,Lugbara,SM250446,Q84: 790; COUNTRY: 18,Lugbara,Q87: 790; COUNTRY: 34,Lugbara
+414,Luguru,SM250447,Q84: 754; COUNTRY: 17,Kiluguru,Q87: 754; COUNTRY: 31,Waluguru
+415,Luhya,SM250906,Q84: 302; COUNTRY: 6,Luhya,Q87: 302; COUNTRY: 13,Luhya
+416,Lungu,SM250650,Q84: 844; COUNTRY: 19,Lungu,Q87: 844; COUNTRY: 35,Lungu
+417,Luo (Tanzania and Kenya),SM250451,Q84: 763; COUNTRY: 17,Mjaluo,Q87: 763; COUNTRY: 31,Wajaluo
+418,Luo (Tanzania and Kenya),SM250451,Q84: 763; COUNTRY: 17,Mjaluo,Q87: 301; COUNTRY: 13,Luo
+419,Luo (Tanzania and Kenya),SM250451,Q84: 301; COUNTRY: 6,Luo,Q87: 763; COUNTRY: 31,Wajaluo
+420,Luo (Tanzania and Kenya),SM250451,Q84: 301; COUNTRY: 6,Luo,Q87: 301; COUNTRY: 13,Luo
+421,Luvale,SM250454,Q84: 828; COUNTRY: 19,Luvale,Q87: 828; COUNTRY: 35,Luvale
+422,"Maasina Fulfulde (Mali, Ghana)",SM250457,Q84: 514; COUNTRY: 11,Peulh / Fulfude,Q87: 514; COUNTRY: 18,Peulh/Fulfude
+423,Mada (Nigeria),SM250460,Q84: 19; COUNTRY: 14,Mada,,
+424,Mada Cameroon,SM251094,Q84: 19; COUNTRY: 26,Mada,Q87: 1248; COUNTRY: 6,Mada
+425,Madagascar-DK,SM251323,Q84: 9999; COUNTRY: 9,Don't know,,
+426,Madagascar-Others,SM251322,Q84: 9995; COUNTRY: 9,Others,,
+427,Madi,SM250461,Q84: 791; COUNTRY: 18,Madi,Q87: 791; COUNTRY: 34,Madi
+428,Mafa,SM250462,Q84: 1251; COUNTRY: 26,Mafa,Q87: 1249; COUNTRY: 6,Mafa
+429,Mahafaly,SM250463,Q84: 431; COUNTRY: 9,Mahafaly,Q87: 431; COUNTRY: 16,Mahafaly
+430,Makoa,SM250908,Q84: 438; COUNTRY: 9,Makoa,,
+431,Makonde,SM250468,Q84: 547; COUNTRY: 12,Makonde,Q87: 547; COUNTRY: 21,Makonde
+432,Makonde,SM250468,Q84: 547; COUNTRY: 12,Makonde,Q87: 747; COUNTRY: 31,Wamakonde
+433,Makonde,SM250468,Q84: 747; COUNTRY: 17,Kimakonde,Q87: 547; COUNTRY: 21,Makonde
+434,Makonde,SM250468,Q84: 747; COUNTRY: 17,Kimakonde,Q87: 747; COUNTRY: 31,Wamakonde
+435,Makua,SM250467,Q84: 540; COUNTRY: 12,Makua,Q87: 766; COUNTRY: 31,Wamakuwa
+436,Makua,SM250467,Q84: 540; COUNTRY: 12,Makua,Q87: 540; COUNTRY: 21,Makua
+437,Makua,SM250467,Q84: 2745; COUNTRY: 17,Mmakua,Q87: 766; COUNTRY: 31,Wamakuwa
+438,Makua,SM250467,Q84: 2745; COUNTRY: 17,Mmakua,Q87: 540; COUNTRY: 21,Makua
+439,Malagasy,SM251176,Q84: 9990; COUNTRY: 9,"National identity only, or ""doesn't think of self in those terms""",Q87: 9990; COUNTRY: 16,"National identity only, or 'doesnt think of self in those terms'"
+440,Malawi-DK,SM251177,Q84: 9999; COUNTRY: 10,Don't know,Q87: 9999; COUNTRY: 17,Don't know
+441,Malawi-Missing,SM251324,Q84: -1; COUNTRY: 10,Missing,,
+442,Malawi-Refused to answer,SM251180,,,Q87: 9998; COUNTRY: 17,Refused to answer
+443,Malawian,SM251178,Q84: 9990; COUNTRY: 10,"National identity only, or ""doesn't think of self in those terms""",Q87: 9990; COUNTRY: 17,"National identity only, or 'doesnt think of self in those terms'"
+444,Malawian Abroad,SM497011,Q84: 883; COUNTRY: 20,Malawian,,
+445,Mali-Arab,SM255494,Q84: 4; COUNTRY: 11,Arabe,Q87: 10; COUNTRY: 18,Arabe
+446,Mambwe,SM251040,Q84: 833; COUNTRY: 19,Mambwe,Q87: 833; COUNTRY: 35,Mambwe
+447,Mampruli,SM250471,Q84: 278; COUNTRY: 5,Mamprusi,Q87: 267; COUNTRY: 11,Mamprusi
+448,Mande du Nord,SM251000,Q84: 1262; COUNTRY: 27,Mandé du Nord,Q87: 1262; COUNTRY: 8,Mandé du Nord
+449,Mande du Sud,SM251001,Q84: 1263; COUNTRY: 27,Mandé du Sud,Q87: 1263; COUNTRY: 8,Mandé du Sud
+450,Mandinka/Bambara,SM251144,Q84: 663; COUNTRY: 15,Mandinka/Bambara,Q87: 663; COUNTRY: 26,Mandika/Bambara
+451,Manenkan,SM6023,Q84: 938; COUNTRY: 22,Madingo,Q87: 392; COUNTRY: 15,Mandingo
+452,Manenkan,SM6023,Q84: 938; COUNTRY: 22,Madingo,Q87: 23; COUNTRY: 12,Malinké
+453,Manenkan,SM6023,Q84: 938; COUNTRY: 22,Madingo,Q87: 938; COUNTRY: 27,Madingo
+454,Manenkan,SM6023,Q84: 392; COUNTRY: 8,Mandingo,Q87: 392; COUNTRY: 15,Mandingo
+455,Manenkan,SM6023,Q84: 392; COUNTRY: 8,Mandingo,Q87: 23; COUNTRY: 12,Malinké
+456,Manenkan,SM6023,Q84: 392; COUNTRY: 8,Mandingo,Q87: 938; COUNTRY: 27,Madingo
+457,Manenkan,SM6023,Q84: 20; COUNTRY: 28,Malinké,Q87: 392; COUNTRY: 15,Mandingo
+458,Manenkan,SM6023,Q84: 20; COUNTRY: 28,Malinké,Q87: 23; COUNTRY: 12,Malinké
+459,Manenkan,SM6023,Q84: 20; COUNTRY: 28,Malinké,Q87: 938; COUNTRY: 27,Madingo
+460,Mang'anja,SM251095,Q84: 467; COUNTRY: 10,Mang’anja,Q87: 467; COUNTRY: 17,Mang'anja
+461,Manhawa,SM250912,Q84: 559; COUNTRY: 12,Manhawa,,
+462,Manjaak,SM250913,Q84: 666; COUNTRY: 15,Manjack,Q87: 666; COUNTRY: 26,Manjack
+463,Mankon,SM250914,Q84: 1254; COUNTRY: 26,Mankon,Q87: 1251; COUNTRY: 6,Mankon
+464,Mano,SM250915,Q84: 393; COUNTRY: 8,Mano,Q87: 393; COUNTRY: 15,Mano
+465,Manyema,SM250899,Q84: 756; COUNTRY: 17,Kimanyema,Q87: 756; COUNTRY: 31,Wamanyema
+466,Marati,SM250916,Q84: 904; COUNTRY: 21,Marathi,Q87: 904; COUNTRY: 19,Marathi
+467,Marenje,SM250917,Q84: 552; COUNTRY: 12,Marenge,,
+468,Masaba,SM250485,Q84: 784; COUNTRY: 18,Mugishu,Q87: 784; COUNTRY: 34,Mugishu
+469,Masai-Samburu,SM7429,Q84: 307; COUNTRY: 6,Maasai / Samburu,Q87: 307; COUNTRY: 13,Maasai/Samburu
+470,Masai-Tanzania,SM250486,Q84: 750; COUNTRY: 17,Kimasai,Q87: 750; COUNTRY: 31,Wamasai
+471,Massa,SM250487,Q84: 1255; COUNTRY: 26,Massa,Q87: 1252; COUNTRY: 6,Massa
+472,Matengo,SM250490,,,Q87: 767; COUNTRY: 31,Wamatengo
+473,Maungwe,SM251043,Q84: 873; COUNTRY: 20,Maungwe,Q87: 872; COUNTRY: 36,Maungwe
+474,Mauritian,SM251182,Q84: 9990; COUNTRY: 21,"National identity only, or ""doesn't think of self in those terms""",Q87: 9990; COUNTRY: 19,"National identity only, or 'doesnt think of self in those terms'"
+475,Mauritius-Black Creoles,SM250840,Q84: 900; COUNTRY: 21,Afro-Mauritian (Creole),Q87: 900; COUNTRY: 19,Afro-Mauritian (Creole)
+476,Mauritius-DK,SM251325,Q84: 9999; COUNTRY: 21,Don't know,,
+477,Mauritius-Muslims,SM250949,Q84: 905; COUNTRY: 21,Muslim,Q87: 905; COUNTRY: 19,Muslim
+478,Mauritius-Refused to answer,SM251183,Q84: 9998; COUNTRY: 21,Refused,Q87: 9998; COUNTRY: 19,Refused to answer
+479,Mbam,SM250919,Q84: 1256; COUNTRY: 26,Mbamois,Q87: 1253; COUNTRY: 6,Mbamois
+480,Mbede-Teke,SM7434,,,Q87: 1703; COUNTRY: 10,Mbédè
+481,Mbeere,SM250920,Q84: 318; COUNTRY: 6,Mbeere,,
+482,Mbo (Cameroon),SM250921,Q84: 1257; COUNTRY: 26,Mbo,Q87: 1254; COUNTRY: 6,Mbo
+483,Mboum,SM250504,Q84: 1258; COUNTRY: 26,Mboum,Q87: 1255; COUNTRY: 6,Mboum
+484,Mbukushu,SM250502,Q84: 158; COUNTRY: 2,Mombukushu,Q87: 158; COUNTRY: 3,Mombukushu
+485,Mbunda,SM250506,Q84: 840; COUNTRY: 19,Mbunda,Q87: 840; COUNTRY: 35,Mbunda
+486,Meka,SM250465,Q84: 1252; COUNTRY: 26,Maka,Q87: 1250; COUNTRY: 6,Maka
+487,Mende,SM250511,Q84: 22; COUNTRY: 22,Mende,Q87: 24; COUNTRY: 27,Mende
+488,Mende,SM250511,Q84: 22; COUNTRY: 22,Mende,Q87: 24; COUNTRY: 15,Mende
+489,Mende,SM250511,Q84: 22; COUNTRY: 8,Mende,Q87: 24; COUNTRY: 27,Mende
+490,Mende,SM250511,Q84: 22; COUNTRY: 8,Mende,Q87: 24; COUNTRY: 15,Mende
+491,Merina,SM250512,Q84: 432; COUNTRY: 9,Merina,Q87: 432; COUNTRY: 16,Merina
+492,Meru (Tanzania),SM250900,Q84: 751; COUNTRY: 17,Kimeru,Q87: 751; COUNTRY: 31,Wameru
+493,Meru/Embu,SM258822,Q84: 306; COUNTRY: 6,Meru / Embu,Q87: 306; COUNTRY: 13,Meru/Embu
+494,Mianka,SM250469,Q84: 513; COUNTRY: 11,Mianka,Q87: 513; COUNTRY: 18,Mainka
+495,Migili,SM250924,Q84: 658; COUNTRY: 14,Migili,,
+496,Mijikenda,SM255777,Q84: 308; COUNTRY: 6,Mijikenda,Q87: 308; COUNTRY: 13,Mijikenda
+497,Mina,SM250884,Q84: 1247; COUNTRY: 26,Hina,Q87: 1244; COUNTRY: 6,Hina
+498,Mixed Race-Zimbabwe,SM250926,Q84: 878; COUNTRY: 20,Mixed race,,
+499,Mokubung,SM251052,Q84: 353; COUNTRY: 7,Mokubung,Q87: 353; COUNTRY: 14,Mokubung
+500,Moroccan,SM251185,,,Q87: 9990; COUNTRY: 20,"National identity only, or 'doesnt think of self in those terms'"
+501,Morocco-Arab,SM251084,,,Q87: 9; COUNTRY: 20,Arab
+502,Morocco-DK,SM251184,,,Q87: 9999; COUNTRY: 20,Don't know
+503,Morocco-Other,SM251186,,,Q87: 9995; COUNTRY: 20,Other
+504,Morocco-Refused to answer,SM251187,,,Q87: 9998; COUNTRY: 20,Refused to answer
+505,Mosiea,SM251055,Q84: 344; COUNTRY: 7,Mosiea,Q87: 344; COUNTRY: 14,Mosiea
+506,Mossi,SM251056,Q84: 180; COUNTRY: 3,Mossi,Q87: 180; COUNTRY: 4,Mossi
+507,Mossi,SM251056,Q84: 180; COUNTRY: 3,Mossi,Q87: 266; COUNTRY: 11,Moshie
+508,Mossi,SM251056,Q84: 267; COUNTRY: 5,Mosi,Q87: 180; COUNTRY: 4,Mossi
+509,Mossi,SM251056,Q84: 267; COUNTRY: 5,Mosi,Q87: 266; COUNTRY: 11,Moshie
+510,Motloung,SM251058,Q84: 346; COUNTRY: 7,Motloung,Q87: 346; COUNTRY: 14,Motloung
+511,Motsoeneng,SM251059,Q84: 345; COUNTRY: 7,Motsoeneng,Q87: 345; COUNTRY: 14,Motsoeneng
+512,Moundang,SM255921,Q84: 1259; COUNTRY: 26,Moudang,Q87: 1256; COUNTRY: 6,Moudan
+513,Mousgoum,SM250536,Q84: 2220; COUNTRY: 26,Mousgoum,Q87: 1257; COUNTRY: 6,Mousgoum
+514,Mozambican,SM251189,Q84: 9990; COUNTRY: 12,"National identity only, or ""doesn't think of self in those terms""",Q87: 9990; COUNTRY: 21,"National identity only, or 'doesnt think of self in those terms'"
+515,Mozambique-DK,SM251188,Q84: 9999; COUNTRY: 12,Don't know,Q87: 9999; COUNTRY: 21,Don't know
+516,Mozambique-Missing,SM251326,Q84: -1; COUNTRY: 12,Missing,,
+517,Mozambique-Refused to answer,SM251191,Q84: 9998; COUNTRY: 12,Refused,Q87: 9998; COUNTRY: 21,Refused to answer
+518,Mulamogi,SM251061,Q84: 807; COUNTRY: 18,Mulamogi,,
+519,Mumuye,SM250592,,,Q87: 650; COUNTRY: 24,Mumuye
+520,Mwagavol,SM256028,,,Q87: 651; COUNTRY: 24,Nwangavul
+521,Mwera-Inland,SM250538,Q84: 767; COUNTRY: 17,Mmwera,Q87: 769; COUNTRY: 31,Wamwera
+522,Myene,SM251096,,,Q87: 1705; COUNTRY: 10,Myénè
+523,Mzab (Algeria),SM250776,,,Q87: 1423; COUNTRY: 1,Mouzabit
+524,Nama,SM250543,Q84: 588; COUNTRY: 13,Nama,Q87: 588; COUNTRY: 22,Nama
+525,Nama,SM250543,Q84: 163; COUNTRY: 2,Mokgothu,Q87: 588; COUNTRY: 22,Nama
+526,Nambya,SM250950,Q84: 872; COUNTRY: 20,Nambya,,
+527,Namibia-Colored,SM250864,Q84: 7; COUNTRY: 13,Coloured,Q87: 14; COUNTRY: 22,Coloured
+528,Namibia-English-speaking,SM250872,Q84: 9; COUNTRY: 13,English,Q87: 1; COUNTRY: 22,English
+529,Namibian,SM251192,Q84: 9990; COUNTRY: 13,"National identity only, or ""doesn't think of self in those terms""",Q87: 9990; COUNTRY: 22,"National identity only, or 'doesnt think of self in those terms'"
+530,Namwanga,SM250609,Q84: 2754; COUNTRY: 17,Mnyamwanga,Q87: 829; COUNTRY: 35,Namwanga
+531,Namwanga,SM250609,Q84: 829; COUNTRY: 19,Namwanga,Q87: 829; COUNTRY: 35,Namwanga
+532,Nandom,SM250951,Q84: 276; COUNTRY: 5,Nandom,,
+533,Nateni,SM250952,Q84: 110; COUNTRY: 1,Natimba,,
+534,Nawdm,SM250547,Q84: 1145; COUNTRY: 24,Nawdem (Losso),Q87: 1145; COUNTRY: 32,Nawdem (Losso)
+535,Ndali,SM250930,Q84: 768; COUNTRY: 17,Mndali,Q87: 770; COUNTRY: 31,Wandali
+536,Ndali,SM250930,Q84: 472; COUNTRY: 10,Ndali,Q87: 770; COUNTRY: 31,Wandali
+537,Ndamba,SM250548,,,Q87: 771; COUNTRY: 31,Wandamba
+538,Ndau,SM250549,Q84: 23; COUNTRY: 20,Ndau,Q87: 25; COUNTRY: 21,Ndau
+539,Ndau,SM250549,Q84: 23; COUNTRY: 20,Ndau,Q87: 25; COUNTRY: 36,Ndau
+540,Ndau,SM250549,Q84: 23; COUNTRY: 12,Ndau,Q87: 25; COUNTRY: 21,Ndau
+541,Ndau,SM250549,Q84: 23; COUNTRY: 12,Ndau,Q87: 25; COUNTRY: 36,Ndau
+542,Ndebele North,SM250584,Q84: 24; COUNTRY: 20,Ndebele,Q87: 26; COUNTRY: 36,Ndebele
+543,Ndebele South,SM251093,Q84: 24; COUNTRY: 24,Ndebele,Q87: 26; COUNTRY: 28,Ndebele
+544,Ndebele South,SM251093,Q84: 24; COUNTRY: 24,Ndebele,Q87: 350; COUNTRY: 14,Letebele
+545,Ndebele South,SM251093,Q84: 350; COUNTRY: 7,Letebele,Q87: 26; COUNTRY: 28,Ndebele
+546,Ndebele South,SM251093,Q84: 350; COUNTRY: 7,Letebele,Q87: 350; COUNTRY: 14,Letebele
+547,Ndebele South,SM251093,Q84: 24; COUNTRY: 16,Ndebele,Q87: 26; COUNTRY: 28,Ndebele
+548,Ndebele South,SM251093,Q84: 24; COUNTRY: 16,Ndebele,Q87: 350; COUNTRY: 14,Letebele
+549,Ndendeule,SM250931,Q84: 769; COUNTRY: 17,Mndendeule,Q87: 772; COUNTRY: 31,Wandendeule
+550,Ndengereko,SM250932,Q84: 2750; COUNTRY: 17,Mndengereko,Q87: 773; COUNTRY: 31,Wandengereko
+551,Ngamgam,SM250954,Q84: 1156; COUNTRY: 24,Ngam-Gam,Q87: 1154; COUNTRY: 32,Ngam-gam
+552,Ngindo,SM250560,Q84: 2751; COUNTRY: 17,Mngindo,Q87: 774; COUNTRY: 31,Wangindo
+553,Ngologa,SM251053,Q84: 156; COUNTRY: 2,Mongologa,Q87: 156; COUNTRY: 3,Mongologa
+554,Ngonde,SM256289,Q84: 461; COUNTRY: 10,Nkhonde,Q87: 461; COUNTRY: 17,Ngonde
+555,Ngoni,SM250999,Q84: 465; COUNTRY: 10,Ngoni,Q87: 743; COUNTRY: 31,Wangoni
+556,Ngoni,SM250999,Q84: 465; COUNTRY: 10,Ngoni,Q87: 27; COUNTRY: 17,Ngoni
+557,Ngoni,SM250999,Q84: 465; COUNTRY: 10,Ngoni,Q87: 27; COUNTRY: 35,Ngoni
+558,Ngoni,SM250999,Q84: 25; COUNTRY: 12,Ngoni,Q87: 743; COUNTRY: 31,Wangoni
+559,Ngoni,SM250999,Q84: 25; COUNTRY: 12,Ngoni,Q87: 27; COUNTRY: 17,Ngoni
+560,Ngoni,SM250999,Q84: 25; COUNTRY: 12,Ngoni,Q87: 27; COUNTRY: 35,Ngoni
+561,Ngoni,SM250999,Q84: 743; COUNTRY: 17,Kingoni,Q87: 743; COUNTRY: 31,Wangoni
+562,Ngoni,SM250999,Q84: 743; COUNTRY: 17,Kingoni,Q87: 27; COUNTRY: 17,Ngoni
+563,Ngoni,SM250999,Q84: 743; COUNTRY: 17,Kingoni,Q87: 27; COUNTRY: 35,Ngoni
+564,Ngoni,SM250999,Q84: 25; COUNTRY: 19,Ngoni,Q87: 743; COUNTRY: 31,Wangoni
+565,Ngoni,SM250999,Q84: 25; COUNTRY: 19,Ngoni,Q87: 27; COUNTRY: 17,Ngoni
+566,Ngoni,SM250999,Q84: 25; COUNTRY: 19,Ngoni,Q87: 27; COUNTRY: 35,Ngoni
+567,Ngumbo,SM251066,Q84: 849; COUNTRY: 19,Ngumbo,,
+568,Nguu,SM250568,Q84: 2752; COUNTRY: 17,Mnguu,Q87: 775; COUNTRY: 31,Wanguu
+569,Ngwaketse,SM250569,Q84: 143; COUNTRY: 2,Mongwaketse,Q87: 143; COUNTRY: 3,Mongwaketse
+570,Ngwatu,SM250570,Q84: 142; COUNTRY: 2,Mongwato,Q87: 142; COUNTRY: 3,Mongwato
+571,Ngwo,SM250955,Q84: 2221; COUNTRY: 26,Njikwa,,
+572,Nhungue,SM251067,Q84: 553; COUNTRY: 12,Nhungue,,
+573,Nigeria-DK,SM251195,Q84: 9999; COUNTRY: 14,Don't know,Q87: 9999; COUNTRY: 24,Don't know
+574,Nigerian Fulfulde,SM250879,Q84: 625; COUNTRY: 14,Fulani,Q87: 625; COUNTRY: 24,Fulani
+575,Nkoya,SM250575,Q84: 832; COUNTRY: 19,Nkoya,Q87: 832; COUNTRY: 35,Nkoya
+576,Northern Dagara,SM251026,Q84: 188; COUNTRY: 3,Dagari,Q87: 188; COUNTRY: 4,Dagari
+577,Northwest Gbaya,SM454544,Q84: 1227; COUNTRY: 26,Baya,Q87: 1227; COUNTRY: 6,Gbaya
+578,Nsenga,SM250589,Q84: 825; COUNTRY: 19,Nsenga,Q87: 825; COUNTRY: 35,Nsenga
+579,Nso,SM250414,Q84: 1224; COUNTRY: 26,Nso,Q87: 1224; COUNTRY: 6,Nso
+580,Ntcham,SM250591,Q84: 1149; COUNTRY: 24,N’Tcha (Bassar),Q87: 1149; COUNTRY: 32,N'Tcha (Bassar)
+581,Ntcham,SM250591,Q84: 1149; COUNTRY: 24,N’Tcha (Bassar),Q87: 278; COUNTRY: 11,Basari
+582,Nupe,SM251068,Q84: 630; COUNTRY: 14,Nupe,Q87: 630; COUNTRY: 24,Nupe
+583,Nupe,SM251068,Q84: 639; COUNTRY: 14,Tapa,Q87: 630; COUNTRY: 24,Nupe
+584,Nyakyusa,SM8843,Q84: 740; COUNTRY: 17,Kinyakyusa,Q87: 740; COUNTRY: 31,Wanyakyusa
+585,Nyambo,SM250933,Q84: 770; COUNTRY: 17,Mnyambo,Q87: 776; COUNTRY: 31,Wanyambo
+586,Nyamwezi,SM250610,Q84: 748; COUNTRY: 17,Kinyamwezi,Q87: 748; COUNTRY: 31,Wanyamwezi
+587,Nyanja,SM250595,Q84: 26; COUNTRY: 12,Nyanja,Q87: 28; COUNTRY: 21,Nyanja
+588,Nyanja,SM250595,Q84: 26; COUNTRY: 12,Nyanja,Q87: 28; COUNTRY: 35,Nyanja
+589,Nyanja,SM250595,Q84: 26; COUNTRY: 20,Nyanja,Q87: 28; COUNTRY: 21,Nyanja
+590,Nyanja,SM250595,Q84: 26; COUNTRY: 20,Nyanja,Q87: 28; COUNTRY: 35,Nyanja
+591,Nyanja,SM250595,Q84: 26; COUNTRY: 19,Nyanja,Q87: 28; COUNTRY: 21,Nyanja
+592,Nyanja,SM250595,Q84: 26; COUNTRY: 19,Nyanja,Q87: 28; COUNTRY: 35,Nyanja
+593,Nyasa,SM250537,Q84: 2759; COUNTRY: 17,Mnyasa,,
+594,Nyaturu,SM250614,Q84: 758; COUNTRY: 17,Kinyaturu,Q87: 758; COUNTRY: 31,Wanyaturu
+595,Nyiha,SM250934,Q84: 2753; COUNTRY: 17,Mnyiha,Q87: 777; COUNTRY: 31,Wanyiha
+596,Nyika Malawi & Zambia,SM251099,,,Q87: 845; COUNTRY: 35,Nyika
+597,Nyole,SM250947,Q84: 786; COUNTRY: 18,Munyole,Q87: 786; COUNTRY: 34,Munyole
+598,Nzabi-Duma,SM250213,,,Q87: 1704; COUNTRY: 10,Nzébi/Métié
+599,Ogoni,SM250957,Q84: 645; COUNTRY: 14,Ogoni,,
+600,Okirika,SM250959,Q84: 653; COUNTRY: 14,Okrika,,
+601,Okpela,SM250958,Q84: 648; COUNTRY: 14,Okpella,,
+602,Oku,SM256448,Q84: 2222; COUNTRY: 26,Oku,Q87: 1259; COUNTRY: 6,Oku
+603,Orma,SM250960,Q84: 322; COUNTRY: 6,Oroma,,
+604,Oshivambo,SM250552,Q84: 580; COUNTRY: 13,Wambo,Q87: 580; COUNTRY: 22,Wambo
+605,Other BF,SM251152,Q84: 9995; COUNTRY: 3,Others,Q87: 9995; COUNTRY: 4,Other
+606,Other Benin,SM251148,Q84: 9995; COUNTRY: 1,Others,Q87: 9995; COUNTRY: 2,Other
+607,Other Botswana,SM251151,Q84: 9995; COUNTRY: 2,Others,Q87: 9995; COUNTRY: 3,Other
+608,Other CM,SM251155,Q84: 9995; COUNTRY: 26,Others,Q87: 9995; COUNTRY: 6,Other
+609,Other Gabon,SM251163,,,Q87: 9995; COUNTRY: 10,Other
+610,Other Guinea,SM251166,Q84: 9995; COUNTRY: 28,Others,Q87: 9995; COUNTRY: 12,Other
+611,Other Kenya,SM251169,Q84: 9995; COUNTRY: 6,Others,Q87: 9995; COUNTRY: 13,Other
+612,Other Liberia,SM251320,Q84: 9995; COUNTRY: 8,Others,,
+613,Other Malawi,SM251179,Q84: 9995; COUNTRY: 10,Others,Q87: 9995; COUNTRY: 17,Other
+614,Other Mali,SM251181,Q84: 9995; COUNTRY: 11,Others,Q87: 9995; COUNTRY: 18,Other
+615,Other Mozambique,SM251190,Q84: 9995; COUNTRY: 12,Others,Q87: 9995; COUNTRY: 21,Other
+616,Other Namibia,SM251193,Q84: 9995; COUNTRY: 13,Others,Q87: 9995; COUNTRY: 22,Other
+617,Other Niger,SM251194,Q84: 9995; COUNTRY: 23,Others,Q87: 9995; COUNTRY: 23,Other
+618,Other Nigeria,SM251196,Q84: 9995; COUNTRY: 14,Others,Q87: 9995; COUNTRY: 24,Other
+619,Other Senegal,SM251204,Q84: 9995; COUNTRY: 15,Others,Q87: 9995; COUNTRY: 26,Other
+620,Other Togo,SM251214,Q84: 9995; COUNTRY: 24,Others,Q87: 9995; COUNTRY: 32,Other
+621,Other Uganda,SM251216,Q84: 9995; COUNTRY: 18,Others,Q87: 9995; COUNTRY: 34,Other
+622,Other Zambia,SM251219,Q84: 9995; COUNTRY: 19,Others,Q87: 9995; COUNTRY: 35,Other
+623,Other Zimbabwe,SM251223,Q84: 9995; COUNTRY: 20,Others,Q87: 9995; COUNTRY: 36,Other
+624,Other tribes-TZ,SM251212,Q84: 9995; COUNTRY: 17,Others,Q87: 9995; COUNTRY: 31,Other
+625,Pangwa,SM250939,Q84: 2749; COUNTRY: 17,Mpangwa,,
+626,Pare,SM250043,Q84: 745; COUNTRY: 17,Kipare,Q87: 745; COUNTRY: 31,Wapare
+627,Pedi,SM250630,Q84: 704; COUNTRY: 16,Pedi/Spedi/North Sotho,Q87: 704; COUNTRY: 28,Pedi/North Sotho
+628,Pedi,SM250630,Q84: 165; COUNTRY: 2,Mopedi,Q87: 704; COUNTRY: 28,Pedi/North Sotho
+629,Phuthi,SM251054,Q84: 348; COUNTRY: 7,Mophuthi,Q87: 348; COUNTRY: 14,Mophuthi
+630,Phuthing,SM251038,Q84: 347; COUNTRY: 7,Lephuthing,Q87: 347; COUNTRY: 14,Lephuthing
+631,Pogoro,SM250634,Q84: 771; COUNTRY: 17,Mpogoro,Q87: 778; COUNTRY: 31,Wapogoro
+632,Pokomo,SM250637,Q84: 317; COUNTRY: 6,Pokomo,,
+633,Pokot,SM250638,Q84: 311; COUNTRY: 6,Pokot,Q87: 311; COUNTRY: 13,Pokot
+634,Portuguese Angola,SM250963,Q84: 587; COUNTRY: 13,Portuguese,Q87: 587; COUNTRY: 22,Portuguese
+635,"Pulaar (Senegambia, Mauritania) (incl. Toucouleur)",SM251005,Q84: 661; COUNTRY: 15,Pulaar/Toucouleur,Q87: 661; COUNTRY: 26,Pulaar/Toucouleur
+636,"Pular (Guinea, Sierra Leone, Guinea-Bissau)",SM250640,Q84: 931; COUNTRY: 22,Fulla,Q87: 931; COUNTRY: 27,Fulla
+637,"Pular (Guinea, Sierra Leone, Guinea-Bissau)",SM250640,Q84: 931; COUNTRY: 22,Fulla,Q87: 29; COUNTRY: 12,Peulh
+638,"Pular (Guinea, Sierra Leone, Guinea-Bissau)",SM250640,Q84: 27; COUNTRY: 28,Peulh,Q87: 931; COUNTRY: 27,Fulla
+639,"Pular (Guinea, Sierra Leone, Guinea-Bissau)",SM250640,Q84: 27; COUNTRY: 28,Peulh,Q87: 29; COUNTRY: 12,Peulh
+640,Rangi,SM250416,Q84: 2748; COUNTRY: 17,Mrangi,Q87: 779; COUNTRY: 31,Wanrangi
+641,Rendille,SM250644,Q84: 316; COUNTRY: 6,Rendile,,
+642,Riffian,SM250646,,,Q87: 1501; COUNTRY: 20,Rifi
+643,Rolong,SM250647,Q84: 146; COUNTRY: 2,Morolong,Q87: 146; COUNTRY: 3,Morolong
+644,Ronga,SM250648,Q84: 560; COUNTRY: 12,Ronga,,
+645,Ruanda,SM250369,Q84: 802; COUNTRY: 18,Munyarwanda,,
+646,SA-White,SM250986,Q84: 711; COUNTRY: 16,White/European,Q87: 711; COUNTRY: 28,White/European
+647,Sabaot,SM250652,Q84: 315; COUNTRY: 6,Sabaot,Q87: 314; COUNTRY: 13,Sabaot
+648,Safwa,SM250653,Q84: 2747; COUNTRY: 17,Msafwa,Q87: 2740; COUNTRY: 31,Wasafwa
+649,Sahafatra,SM250965,Q84: 439; COUNTRY: 9,Sahafatra,,
+650,Sahraoui,SM251100,,,Q87: 1504; COUNTRY: 20,Sahraoui
+651,Sakalava,SM250659,Q84: 433; COUNTRY: 9,Sakalava,Q87: 433; COUNTRY: 16,Sakalava
+652,Samba Leko,SM257303,Q84: 1233; COUNTRY: 26,Bali Gashu,,
+653,Sambaa,SM250675,Q84: 772; COUNTRY: 17,Msambaa,Q87: 2741; COUNTRY: 31,Wasambaa
+654,Samia,SM250948,Q84: 793; COUNTRY: 18,Musamia,Q87: 793; COUNTRY: 34,Musamia
+655,Samo,SM250475,Q84: 190; COUNTRY: 3,Samo,Q87: 190; COUNTRY: 4,Samo
+656,Samogo,SM250966,Q84: 515; COUNTRY: 11,Samogo,Q87: 515; COUNTRY: 18,Samogo
+657,San,SM257321,,,Q87: 595; COUNTRY: 22,San
+658,Sangu,SM250667,Q84: 2744; COUNTRY: 17,Msangu,,
+659,Sao Tome and Principe,SM257361,,,Q87: 9990; COUNTRY: 25,"National identity only, or 'doesnt think of self in those terms'"
+660,Sarakol,SM250700,Q84: 664; COUNTRY: 15,Soninke,Q87: 517; COUNTRY: 18,Soninké/Sarakolé
+661,Sarakol,SM250700,Q84: 664; COUNTRY: 15,Soninke,Q87: 664; COUNTRY: 26,Soninke
+662,Sarakol,SM250700,Q84: 517; COUNTRY: 11,Soninké / Sarakollé,Q87: 517; COUNTRY: 18,Soninké/Sarakolé
+663,Sarakol,SM250700,Q84: 517; COUNTRY: 11,Soninké / Sarakollé,Q87: 664; COUNTRY: 26,Soninke
+664,Sawa (Coastal bantu),SM250967,Q84: 1222; COUNTRY: 26,Sawa,Q87: 1222; COUNTRY: 6,Sawa
+665,Sebirwa,SM250929,Q84: 155; COUNTRY: 2,Mmirwa,Q87: 155; COUNTRY: 3,Mmirwa
+666,Sena Malawi,SM251110,Q84: 28; COUNTRY: 10,Sena,Q87: 37; COUNTRY: 17,Sena
+667,Sena Mozambiquean,SM251070,Q84: 28; COUNTRY: 12,Sena,Q87: 37; COUNTRY: 21,Sena
+668,Senegalese,SM251203,Q84: 9990; COUNTRY: 15,"National identity only, or ""doesn't think of self in those terms""",Q87: 9990; COUNTRY: 26,"National identity only, or 'doesnt think of self in those terms'"
+669,Senga,SM250673,Q84: 29; COUNTRY: 19,Senga,Q87: 38; COUNTRY: 17,Senga
+670,Senga,SM250673,Q84: 29; COUNTRY: 19,Senga,Q87: 38; COUNTRY: 35,Senga
+671,Senga,SM250673,Q84: 29; COUNTRY: 10,Senga,Q87: 38; COUNTRY: 17,Senga
+672,Senga,SM250673,Q84: 29; COUNTRY: 10,Senga,Q87: 38; COUNTRY: 35,Senga
+673,Senufo-Generic,SM2273,Q84: 191; COUNTRY: 3,Sénoufo,Q87: 516; COUNTRY: 18,Senufo
+674,Senufo-Generic,SM2273,Q84: 191; COUNTRY: 3,Sénoufo,Q87: 191; COUNTRY: 4,Senoufo
+675,Senufo-Generic,SM2273,Q84: 516; COUNTRY: 11,Senufo,Q87: 516; COUNTRY: 18,Senufo
+676,Senufo-Generic,SM2273,Q84: 516; COUNTRY: 11,Senufo,Q87: 191; COUNTRY: 4,Senoufo
+677,Serer,SM250674,Q84: 662; COUNTRY: 15,Serer,Q87: 662; COUNTRY: 26,Serer
+678,Setswapong,SM250938,Q84: 160; COUNTRY: 2,Motswapong,Q87: 160; COUNTRY: 3,Motswapong
+679,Shangaan,SM257498,Q84: 871; COUNTRY: 20,Shangani,Q87: 543; COUNTRY: 21,Changana
+680,Shangaan,SM257498,Q84: 871; COUNTRY: 20,Shangani,Q87: 873; COUNTRY: 36,Shangani
+681,Shangaan,SM257498,Q84: 871; COUNTRY: 20,Shangani,Q87: 39; COUNTRY: 30,Shangaan
+682,Shangaan,SM257498,Q84: 871; COUNTRY: 20,Shangani,Q87: 39; COUNTRY: 28,Shangaan
+683,Shangaan,SM257498,Q84: 544; COUNTRY: 12,Changana,Q87: 543; COUNTRY: 21,Changana
+684,Shangaan,SM257498,Q84: 544; COUNTRY: 12,Changana,Q87: 873; COUNTRY: 36,Shangani
+685,Shangaan,SM257498,Q84: 544; COUNTRY: 12,Changana,Q87: 39; COUNTRY: 30,Shangaan
+686,Shangaan,SM257498,Q84: 544; COUNTRY: 12,Changana,Q87: 39; COUNTRY: 28,Shangaan
+687,Shangaan,SM257498,Q84: 707; COUNTRY: 16,Shangaan,Q87: 543; COUNTRY: 21,Changana
+688,Shangaan,SM257498,Q84: 707; COUNTRY: 16,Shangaan,Q87: 873; COUNTRY: 36,Shangani
+689,Shangaan,SM257498,Q84: 707; COUNTRY: 16,Shangaan,Q87: 39; COUNTRY: 30,Shangaan
+690,Shangaan,SM257498,Q84: 707; COUNTRY: 16,Shangaan,Q87: 39; COUNTRY: 28,Shangaan
+691,Shangwe,SM251074,Q84: 882; COUNTRY: 20,Shangwe,,
+692,Shekgalagari,SM251047,Q84: 151; COUNTRY: 2,Mokgalagadi,Q87: 151; COUNTRY: 3,Mokgalagadi
+693,Sherbro,SM250676,Q84: 940; COUNTRY: 22,Sherbro,Q87: 940; COUNTRY: 27,Sherbro
+694,Shieyeyi,SM250825,Q84: 152; COUNTRY: 2,Moyeyi/Moyei,Q87: 152; COUNTRY: 3,Moyei
+695,Shilha,SM250728,,,Q87: 1503; COUNTRY: 20,Chalh
+696,Shirazi-Swahili,SM250940,Q84: 2757; COUNTRY: 17,Mshirazi,Q87: 2742; COUNTRY: 31,Washirazi
+697,Shona,SM487670,Q84: 861; COUNTRY: 20,Shona,Q87: 861; COUNTRY: 36,Shona
+698,Shubi,SM250680,Q84: 2740; COUNTRY: 17,Misubi,Q87: 2743; COUNTRY: 31,Wasubi
+699,Shubi,SM250680,Q84: 776; COUNTRY: 17,Mzinza,Q87: 2743; COUNTRY: 31,Wasubi
+700,Sierra Leone -DK,SM251205,,,Q87: 9999; COUNTRY: 27,Don't know
+701,Sihanaka,SM250682,Q84: 434; COUNTRY: 9,Sihanaka,Q87: 434; COUNTRY: 16,Sihanaka
+702,Simbiti,SM250925,Q84: 2741; COUNTRY: 17,Misimbiti,,
+703,Sisaala,SM250969,Q84: 268; COUNTRY: 5,Sissala,,
+704,Soli,SM250970,Q84: 836; COUNTRY: 19,Soli,Q87: 836; COUNTRY: 35,Soli
+705,Somalie,SM251007,Q84: 310; COUNTRY: 6,Somali,Q87: 310; COUNTRY: 13,Somali
+706,Songhai-generic,SM6647,Q84: 1101; COUNTRY: 23,Zarrma/Songhaï,Q87: 1101; COUNTRY: 23,Zarma/Songhai
+707,Sonra,SM250387,Q84: 518; COUNTRY: 11,Sonrhaï,Q87: 518; COUNTRY: 18,Sonrhai
+708,Sotho,SM250703,Q84: 876; COUNTRY: 20,Sotho,Q87: 705; COUNTRY: 28,Sotho/South Sotho
+709,Sotho,SM250703,Q84: 876; COUNTRY: 20,Sotho,Q87: 874; COUNTRY: 36,Suthu
+710,Sotho,SM250703,Q84: 705; COUNTRY: 16,Sesotho/Sotho/South Sotho,Q87: 705; COUNTRY: 28,Sotho/South Sotho
+711,Sotho,SM250703,Q84: 705; COUNTRY: 16,Sesotho/Sotho/South Sotho,Q87: 874; COUNTRY: 36,Suthu
+712,Sousou,SM250722,Q84: 1300; COUNTRY: 28,Soussou,Q87: 1300; COUNTRY: 12,Soussou
+713,Sousou,SM250722,Q84: 1300; COUNTRY: 28,Soussou,Q87: 941; COUNTRY: 27,Susu
+714,Sousou,SM250722,Q84: 941; COUNTRY: 22,Susu,Q87: 1300; COUNTRY: 12,Soussou
+715,Sousou,SM250722,Q84: 941; COUNTRY: 22,Susu,Q87: 941; COUNTRY: 27,Susu
+716,Soussi,SM251101,,,Q87: 1502; COUNTRY: 20,Soussi
+717,South Africa-DK,SM251206,Q84: 9999; COUNTRY: 16,Don't know,Q87: 9999; COUNTRY: 28,Don't know
+718,South Africa-Other,SM251208,Q84: 9995; COUNTRY: 16,Others,Q87: 9995; COUNTRY: 28,Other
+719,South Africa-Refused,SM251327,Q84: 9998; COUNTRY: 16,Refused,,
+720,South African,SM251207,Q84: 9990; COUNTRY: 16,"National identity only, or ""doesn't think of self in those terms""",Q87: 9990; COUNTRY: 28,"National identity only, or 'doesnt think of self in those terms'"
+721,Southern Dagara,SM251027,Q84: 265; COUNTRY: 5,Dagarti,Q87: 273; COUNTRY: 11,Dagaaba
+722,Subiya,SM250706,Q84: 591; COUNTRY: 13,Subia,Q87: 149; COUNTRY: 3,Mosubia
+723,Subiya,SM250706,Q84: 591; COUNTRY: 13,Subia,Q87: 591; COUNTRY: 22,Subia
+724,Subiya,SM250706,Q84: 149; COUNTRY: 2,Mosubeya,Q87: 149; COUNTRY: 3,Mosubia
+725,Subiya,SM250706,Q84: 149; COUNTRY: 2,Mosubeya,Q87: 591; COUNTRY: 22,Subia
+726,Sukuma,SM250719,Q84: 749; COUNTRY: 17,Kisukuma,Q87: 749; COUNTRY: 31,Wasukuma
+727,Sukwa,SM250971,Q84: 469; COUNTRY: 10,Sukwa,Q87: 469; COUNTRY: 17,Sukwa
+728,Sumbwa,SM250720,Q84: 779; COUNTRY: 17,Msumbwa,Q87: 2744; COUNTRY: 31,Wasumbwa
+729,Swahili-East Africa,SM250941,Q84: 2756; COUNTRY: 17,Mswahili,Q87: 4; COUNTRY: 13,Swahili
+730,Swahili-East Africa,SM250941,Q84: 2756; COUNTRY: 17,Mswahili,Q87: 2745; COUNTRY: 31,Waswahili
+731,Swati,SM250725,Q84: 708; COUNTRY: 16,Swazi,Q87: 708; COUNTRY: 28,Swazi
+732,Swati,SM250725,Q84: 708; COUNTRY: 16,Swazi,Q87: 9990; COUNTRY: 30,"National identity only, or 'doesnt think of self in those terms'"
+733,Swaziland-Other,SM251210,,,Q87: 9995; COUNTRY: 30,Other
+734,São Tomé and Príncipe-African,SM251197,,,Q87: 6; COUNTRY: 25,African
+735,São Tomé and Príncipe-DK,SM251198,,,Q87: 9999; COUNTRY: 25,Don't know
+736,São Tomé and Príncipe-Missing,SM251199,,,Q87: -1; COUNTRY: 25,Missing
+737,São Tomé and Príncipe-Other,SM251201,,,Q87: 9995; COUNTRY: 25,Other
+738,São Tomé and Príncipe-Refused to answer,SM251202,,,Q87: 9998; COUNTRY: 25,Refused to answer
+739,Tabwa,SM250726,Q84: 851; COUNTRY: 19,Tabwa,Q87: 851; COUNTRY: 35,Tabwa
+740,Taimoro,SM250846,Q84: 425; COUNTRY: 9,Antemoro,Q87: 425; COUNTRY: 16,Antemoro
+741,Taisaka,SM250750,Q84: 426; COUNTRY: 9,Antesaka,Q87: 426; COUNTRY: 16,Antasaka
+742,Taita,SM250732,Q84: 309; COUNTRY: 6,Taita,Q87: 309; COUNTRY: 13,Taita
+743,Takwane,SM250972,Q84: 561; COUNTRY: 12,Tacuane,,
+744,Talaote,SM250937,Q84: 164; COUNTRY: 2,Motalaote,,
+745,Tallensi,SM250973,Q84: 270; COUNTRY: 5,Talensi,,
+746,Tamasheq,SM251008,Q84: 519; COUNTRY: 11,Tamasheq,Q87: 40; COUNTRY: 18,Tamasheq
+747,Tamasheq,SM251008,Q84: 519; COUNTRY: 11,Tamasheq,Q87: 40; COUNTRY: 23,Tamasheq
+748,Tambahoaka,SM250844,Q84: 421; COUNTRY: 9,Antambahoaka,,
+749,Tamil Abroad,SM496961,Q84: 906; COUNTRY: 21,Tamil,Q87: 906; COUNTRY: 19,Tamil
+750,Tanala,SM250737,Q84: 435; COUNTRY: 9,Tanala,Q87: 435; COUNTRY: 16,Tanala
+751,Tangale,SM250601,,,Q87: 652; COUNTRY: 24,Tangale
+752,Tanzania,SM257920,Q84: 9990; COUNTRY: 17,"National identity only, or ""doesn't think of self in those terms""",Q87: 9990; COUNTRY: 31,"National identity only, or 'doesnt think of self in those terms'"
+753,Tanzania-DK,SM251329,Q84: 9999; COUNTRY: 17,Don't know,,
+754,Tanzania-Refused,SM251328,Q84: 9998; COUNTRY: 17,Refused,,
+755,Tarok,SM250740,Q84: 649; COUNTRY: 14,Tarok,Q87: 653; COUNTRY: 24,Tarok
+756,Tawana,SM250741,Q84: 150; COUNTRY: 2,Motawana,Q87: 150; COUNTRY: 3,Motawana
+757,Tawara,SM250742,Q84: 556; COUNTRY: 12,Tawala,,
+758,Tchamba,SM250975,Q84: 1157; COUNTRY: 24,Tchamba,Q87: 1155; COUNTRY: 32,Tchamba
+759,Tealaotra,SM250976,Q84: 440; COUNTRY: 9,Tealaotra,,
+760,Telugu Abroad,SM497060,Q84: 907; COUNTRY: 21,Telegu,Q87: 907; COUNTRY: 19,Telegu
+761,Tem,SM250748,Q84: 269; COUNTRY: 5,Kontonkoli,Q87: 1143; COUNTRY: 32,Tem (Kotokoli)
+762,Tem,SM250748,Q84: 269; COUNTRY: 5,Kontonkoli,Q87: 275; COUNTRY: 11,Kotokoli
+763,Tem,SM250748,Q84: 1143; COUNTRY: 24,Tem (Kotokoli),Q87: 1143; COUNTRY: 32,Tem (Kotokoli)
+764,Tem,SM250748,Q84: 1143; COUNTRY: 24,Tem (Kotokoli),Q87: 275; COUNTRY: 11,Kotokoli
+765,Temne,SM250759,Q84: 942; COUNTRY: 22,Temne,Q87: 942; COUNTRY: 27,Temne
+766,Teve,SM250978,Q84: 554; COUNTRY: 12,Tewe,,
+767,Tharaka,SM250979,Q84: 313; COUNTRY: 6,Tharaka,,
+768,Thembu,SM250753,Q84: 354; COUNTRY: 7,Mothepu,Q87: 354; COUNTRY: 14,Mothepu
+769,Tikar,SM250757,Q84: 2224; COUNTRY: 26,Tikari,Q87: 2221; COUNTRY: 6,Tikari
+770,Tiv,SM250760,Q84: 629; COUNTRY: 14,Tiv,Q87: 629; COUNTRY: 24,Tiv
+771,Tlhaping,SM250761,Q84: 162; COUNTRY: 2,Motlhaping,,
+772,Tlharo,SM250762,Q84: 161; COUNTRY: 2,Motlharo,Q87: 161; COUNTRY: 3,Motlharo
+773,Tlokwa,SM250362,Q84: 144; COUNTRY: 2,Motlokwa,Q87: 144; COUNTRY: 3,Motlokwa
+774,Tlokwa,SM250362,Q84: 144; COUNTRY: 2,Motlokwa,Q87: 349; COUNTRY: 14,Motlokoa
+775,Tlokwa,SM250362,Q84: 349; COUNTRY: 7,Motlokoa,Q87: 144; COUNTRY: 3,Motlokwa
+776,Tlokwa,SM250362,Q84: 349; COUNTRY: 7,Motlokoa,Q87: 349; COUNTRY: 14,Motlokoa
+777,Togo-DK,SM251213,,,Q87: 9999; COUNTRY: 32,Don't know
+778,Togo-Refused to answer,SM251215,,,Q87: 9998; COUNTRY: 32,Refused to answer
+779,Togolese,SM251330,Q84: 9990; COUNTRY: 24,"National identity only, or ""doesn't think of self in those terms""",,
+780,Toka-Leya,SM250980,Q84: 847; COUNTRY: 19,Tokaleya,Q87: 847; COUNTRY: 35,Tokaleya
+781,Toma,SM250439,Q84: 1305; COUNTRY: 28,Toma,Q87: 1305; COUNTRY: 12,Toma
+782,Tonga (Nyasa),SM250981,Q84: 30; COUNTRY: 10,Tonga,Q87: 41; COUNTRY: 17,Tonga
+783,Tonga (Zambia),SM258139,Q84: 30; COUNTRY: 19,Tonga,Q87: 41; COUNTRY: 36,Tonga
+784,Tonga (Zambia),SM258139,Q84: 30; COUNTRY: 19,Tonga,Q87: 41; COUNTRY: 35,Tonga
+785,Tonga (Zambia),SM258139,Q84: 30; COUNTRY: 20,Tonga,Q87: 41; COUNTRY: 36,Tonga
+786,Tonga (Zambia),SM258139,Q84: 30; COUNTRY: 20,Tonga,Q87: 41; COUNTRY: 35,Tonga
+787,Tongwe,SM250942,Q84: 766; COUNTRY: 17,Mtongwe,,
+788,Touareg,SM251009,Q84: 1103; COUNTRY: 23,Touareg,Q87: 1424; COUNTRY: 1,Tergui
+789,Toubou,SM251010,Q84: 1107; COUNTRY: 23,Toubou,,
+790,Toupouri,SM258156,Q84: 2225; COUNTRY: 26,Toupouri,Q87: 2222; COUNTRY: 6,Toupouri
+791,Toussian,SM250783,Q84: 198; COUNTRY: 3,Toussian,Q87: 197; COUNTRY: 4,Toussian
+792,Tsimihety,SM250768,Q84: 436; COUNTRY: 9,Tsimihety,Q87: 436; COUNTRY: 16,Tsimihety
+793,Tsoa,SM250769,Q84: 147; COUNTRY: 2,Mosarwa,Q87: 147; COUNTRY: 3,Mosarwa
+794,Tsogho,SM250770,,,Q87: 1706; COUNTRY: 10,Tsogho
+795,Tswana,SM251105,Q84: 593; COUNTRY: 13,Tswana,Q87: 42; COUNTRY: 28,Tswana
+796,Tswana,SM251105,Q84: 593; COUNTRY: 13,Tswana,Q87: 42; COUNTRY: 22,Tswana
+797,Tswana,SM251105,Q84: 706; COUNTRY: 16,Setswana/Tswana,Q87: 42; COUNTRY: 28,Tswana
+798,Tswana,SM251105,Q84: 706; COUNTRY: 16,Setswana/Tswana,Q87: 42; COUNTRY: 22,Tswana
+799,Tumbatu,SM250943,Q84: 2755; COUNTRY: 17,Mtumbatu,Q87: 2746; COUNTRY: 31,Watumbatu
+800,Tumbuka,SM250774,Q84: 31; COUNTRY: 10,Tumbuka,Q87: 43; COUNTRY: 17,Tumbuka
+801,Tumbuka,SM250774,Q84: 31; COUNTRY: 10,Tumbuka,Q87: 43; COUNTRY: 35,Tumbuka
+802,Tumbuka,SM250774,Q84: 31; COUNTRY: 19,Tumbuka,Q87: 43; COUNTRY: 17,Tumbuka
+803,Tumbuka,SM250774,Q84: 31; COUNTRY: 19,Tumbuka,Q87: 43; COUNTRY: 35,Tumbuka
+804,Turkana,SM250782,Q84: 312; COUNTRY: 6,Turkana,Q87: 312; COUNTRY: 13,Turkana
+805,Tutsi,SM251076,Q84: 1181; COUNTRY: 25,Tutsi,,
+806,Ugandan,SM251331,Q84: 9990; COUNTRY: 18,"National identity only, or ""doesn't think of self in those terms""",,
+807,Urhobo,SM250982,Q84: 634; COUNTRY: 14,Urhobo,Q87: 634; COUNTRY: 24,Urhobo
+808,Ushi,SM250045,Q84: 838; COUNTRY: 19,Ushi,Q87: 838; COUNTRY: 35,Ushi
+809,Vai,SM250794,Q84: 32; COUNTRY: 22,Vai,Q87: 943; COUNTRY: 27,Vai
+810,Vai,SM250794,Q84: 32; COUNTRY: 22,Vai,Q87: 395; COUNTRY: 15,Vai
+811,Vai,SM250794,Q84: 32; COUNTRY: 8,Vai,Q87: 943; COUNTRY: 27,Vai
+812,Vai,SM250794,Q84: 32; COUNTRY: 8,Vai,Q87: 395; COUNTRY: 15,Vai
+813,Venda,SM250795,Q84: 33; COUNTRY: 20,Venda,Q87: 44; COUNTRY: 36,Venda
+814,Venda,SM250795,Q84: 33; COUNTRY: 20,Venda,Q87: 44; COUNTRY: 28,Venda
+815,Venda,SM250795,Q84: 33; COUNTRY: 16,Venda,Q87: 44; COUNTRY: 36,Venda
+816,Venda,SM250795,Q84: 33; COUNTRY: 16,Venda,Q87: 44; COUNTRY: 28,Venda
+817,Vezo,SM250983,Q84: 437; COUNTRY: 9,Vezo,Q87: 437; COUNTRY: 16,Vezo
+818,Vhitori,SM250984,Q84: 870; COUNTRY: 20,Vhitori,,
+819,Waci,SM250961,Q84: 1152; COUNTRY: 24,Ouatchi,Q87: 1157; COUNTRY: 32,Ouatchi
+820,Waja,SM258501,,,Q87: 654; COUNTRY: 24,Waja
+821,Wali,SM250800,Q84: 266; COUNTRY: 5,Waale,Q87: 265; COUNTRY: 11,Waali
+822,Wandala,SM258519,Q84: 1253; COUNTRY: 26,Mandara,Q87: 1246; COUNTRY: 6,Mandara
+823,Wapemba (Zanzibar),SM250631,Q84: 2758; COUNTRY: 17,Mpemba,,
+824,White Moors (Beydan),SM250918,Q84: 21; COUNTRY: 11,Maure,Q87: 668; COUNTRY: 26,Maures
+825,White Moors (Beydan),SM250918,Q84: 21; COUNTRY: 11,Maure,Q87: 512; COUNTRY: 18,Maure
+826,White Moors (Beydan),SM250918,Q84: 21; COUNTRY: 15,Maure,Q87: 668; COUNTRY: 26,Maures
+827,White Moors (Beydan),SM250918,Q84: 21; COUNTRY: 15,Maure,Q87: 512; COUNTRY: 18,Maure
+828,Widikum,SM252127,Q84: 1238; COUNTRY: 26,Batibo,Q87: 1238; COUNTRY: 6,Batibo
+829,Wolof,SM250812,Q84: 660; COUNTRY: 15,Wolof,Q87: 660; COUNTRY: 26,Wolof
+830,Xhosa-speaking people,SM250815,Q84: 703; COUNTRY: 16,Xhosa,Q87: 703; COUNTRY: 28,Xhosa
+831,Yakurr,SM250437,Q84: 647; COUNTRY: 14,Yakhor,,
+832,Yalunka,SM250817,Q84: 1306; COUNTRY: 28,Djalounké,Q87: 944; COUNTRY: 27,Yalumka
+833,Yalunka,SM250817,Q84: 944; COUNTRY: 22,Yalunka,Q87: 944; COUNTRY: 27,Yalumka
+834,Yamba,SM250987,Q84: 2227; COUNTRY: 26,Yamba,Q87: 2224; COUNTRY: 6,Yamba
+835,Yana,SM251078,Q84: 194; COUNTRY: 3,Yanan,,
+836,Yao,SM250820,Q84: 773; COUNTRY: 17,Myao,Q87: 464; COUNTRY: 17,Yao
+837,Yao,SM250820,Q84: 773; COUNTRY: 17,Myao,Q87: 2747; COUNTRY: 31,Wayao
+838,Yao,SM250820,Q84: 773; COUNTRY: 17,Myao,Q87: 549; COUNTRY: 21,Ajaua
+839,Yao,SM250820,Q84: 549; COUNTRY: 12,Ajaua,Q87: 464; COUNTRY: 17,Yao
+840,Yao,SM250820,Q84: 549; COUNTRY: 12,Ajaua,Q87: 2747; COUNTRY: 31,Wayao
+841,Yao,SM250820,Q84: 549; COUNTRY: 12,Ajaua,Q87: 549; COUNTRY: 21,Ajaua
+842,Yao,SM250820,Q84: 464; COUNTRY: 10,Yao,Q87: 464; COUNTRY: 17,Yao
+843,Yao,SM250820,Q84: 464; COUNTRY: 10,Yao,Q87: 2747; COUNTRY: 31,Wayao
+844,Yao,SM250820,Q84: 464; COUNTRY: 10,Yao,Q87: 549; COUNTRY: 21,Ajaua
+845,Yoa-Lokpa,SM251081,Q84: 107; COUNTRY: 1,Yoa,Q87: 107; COUNTRY: 2,Yoa
+846,Yoruba,SM250827,Q84: 34; COUNTRY: 24,Yoruba,Q87: 45; COUNTRY: 24,Yoruba
+847,Yoruba,SM250827,Q84: 34; COUNTRY: 24,Yoruba,Q87: 45; COUNTRY: 2,Yoruba
+848,Yoruba,SM250827,Q84: 34; COUNTRY: 1,Yoruba,Q87: 45; COUNTRY: 24,Yoruba
+849,Yoruba,SM250827,Q84: 34; COUNTRY: 1,Yoruba,Q87: 45; COUNTRY: 2,Yoruba
+850,Yoruba,SM250827,Q84: 34; COUNTRY: 14,Yoruba,Q87: 45; COUNTRY: 24,Yoruba
+851,Yoruba,SM250827,Q84: 34; COUNTRY: 14,Yoruba,Q87: 45; COUNTRY: 2,Yoruba
+852,Zafisoro,SM258780,Q84: 441; COUNTRY: 9,Zafisoro,,
+853,Zambia-DK,SM251332,Q84: 9999; COUNTRY: 19,Don't know,,
+854,Zambia-Missing,SM251217,,,Q87: -1; COUNTRY: 35,Missing
+855,Zambia-Refused to answer,SM251220,Q84: 9998; COUNTRY: 19,Refused,Q87: 9998; COUNTRY: 35,Refused to answer
+856,Zambian,SM251218,,,Q87: 9990; COUNTRY: 35,"National identity only, or 'doesnt think of self in those terms'"
+857,Zaramo,SM250830,Q84: 774; COUNTRY: 17,Mzaramo,Q87: 2749; COUNTRY: 31,Wazaramo
+858,Zezeru,SM250834,Q84: 862; COUNTRY: 20,Zezuru,Q87: 862; COUNTRY: 36,Zezuru
+859,Zigua,SM250835,Q84: 775; COUNTRY: 17,Mzigua,Q87: 2750; COUNTRY: 31,Wazigua
+860,Zimbabwe-DK,SM251221,Q84: 9999; COUNTRY: 20,Don't know,Q87: 9999; COUNTRY: 36,Don't know
+861,Zimbabwe-Missing,SM251333,Q84: -1; COUNTRY: 20,Missing,,
+862,Zimbabwe-Refused to answer,SM251224,,,Q87: 9998; COUNTRY: 36,Refused to answer
+863,Zimbabwean,SM251222,Q84: 9990; COUNTRY: 20,"National identity only, or ""doesn't think of self in those terms""",Q87: 9990; COUNTRY: 36,"National identity only, or 'doesnt think of self in those terms'"
+864,Zulu,SM250837,Q84: 710; COUNTRY: 16,Zulu,Q87: 46; COUNTRY: 28,Zulu
+865,Zulu,SM250837,Q84: 710; COUNTRY: 16,Zulu,Q87: 46; COUNTRY: 30,Zulu
+866,taung,SM251057,Q84: 341; COUNTRY: 7,Motaung,Q87: 341; COUNTRY: 14,Motaung
+867,waama,SM250985,Q84: 109; COUNTRY: 1,Waama,,
