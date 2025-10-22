@@ -207,9 +207,10 @@ def joinDatasets(database, joinLeft, joinRight):
             return {"Error": "Unable to process error"}, 500
 
 
-def proposeMerge(dataset_choices, category_label, criteria, database, intersection, ncontains=2):
+def proposeMerge(dataset_choices, category_label, criteria, database, intersection, ncontains=2, resultFormat = "key-to-key"):
 
     try:
+        return resultFormat
         driver = getDriver(database)
 
         if len(dataset_choices) < 1:
@@ -228,36 +229,52 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
             merged = getQuery(query, driver=driver, params={
                               'datasets': dataset_choices}, type = "df")
 
-            if not merged.empty:
-                dataset_list = []
-                for dataset in dataset_choices:
-                    tmp = merged[merged['datasetID'] == dataset].copy()
-                    dataset_list.append(tmp)
-                merged_df = dataset_list[0]
-                merged_df.rename(columns={"Key": f"Key_{merged_df['datasetID'].iloc[0]}", "Name": f"Name_{merged_df['datasetID'].iloc[0]}"}, inplace=True)
-                merged_df.drop(columns=["datasetID"], inplace=True)
-
-                for dataset in dataset_list[1:]:
-                    dataset.rename(columns={"Key": f"Key_{dataset['datasetID'].iloc[0]}", "Name": f"Name_{dataset['datasetID'].iloc[0]}"}, inplace=True)
-                    dataset.drop(columns=["datasetID"], inplace=True)
-                    merged_df = pd.merge(merged_df, dataset, on=["CMName", "CMID"], how="outer")
-                    
-                # reorder columns
-                cols = merged_df.columns.tolist()
-                cols = ["CMName", "CMID"] + [col for col in cols if col not in ["CMName", "CMID"]]
-                merged_df = merged_df[cols]
-
-                # filter keys if intersection is off
-                if intersection:
-                    for col in merged_df.columns:
-                        if 'Key_' in col:
-                            merged_df = merged_df[merged_df[col].notna()]
-
-                merged = merged_df.fillna("")
-                merged = merged.to_dict(orient='records')
-                return merged
-            else:
+            if merged.empty:
                 return jsonify({"message": "No data found"}), 404
+            
+            if resultFormat == "key-to-category":
+                cols = ['datasetID', 'CMName', 'CMID', 'Key', 'Name']
+                result = merged[cols].copy()
+                result = result.fillna("")
+                return result.to_dict(orient='records')
+                
+            # filter to have one row per category
+            if resultFormat =="category-to-category":
+                merged = merged.groupby(['datasetID', 'CMName', 'CMID']).agg({
+                    'Key': lambda x: list(x),
+                    'Name': lambda x: list(x)
+                }).reset_index()
+                for col in merged.columns:
+                    if merged[col].apply(lambda x: isinstance(x, list)).any():
+                        merged[col] = merged[col].apply(lambda x: ' || '.join(map(str, x)) if isinstance(x, list) else x)
+                        
+            dataset_list = []
+            for dataset in dataset_choices:
+                tmp = merged[merged['datasetID'] == dataset].copy()
+                dataset_list.append(tmp)
+            merged_df = dataset_list[0]
+            merged_df.rename(columns={"Key": f"Key_{merged_df['datasetID'].iloc[0]}", "Name": f"Name_{merged_df['datasetID'].iloc[0]}"}, inplace=True)
+            merged_df.drop(columns=["datasetID"], inplace=True)
+
+            for dataset in dataset_list[1:]:
+                dataset.rename(columns={"Key": f"Key_{dataset['datasetID'].iloc[0]}", "Name": f"Name_{dataset['datasetID'].iloc[0]}"}, inplace=True)
+                dataset.drop(columns=["datasetID"], inplace=True)
+                merged_df = pd.merge(merged_df, dataset, on=["CMName", "CMID"], how="outer")
+                
+            # reorder columns
+            cols = merged_df.columns.tolist()
+            cols = ["CMName", "CMID"] + [col for col in cols if col not in ["CMName", "CMID"]]
+            merged_df = merged_df[cols]
+
+            # filter keys if intersection is off
+            if intersection:
+                for col in merged_df.columns:
+                    if 'Key_' in col:
+                        merged_df = merged_df[merged_df[col].notna()]
+
+            merged = merged_df.fillna("")
+            merged = merged.to_dict(orient='records')
+            return merged
 
         elif criteria == "extended":
             if len(dataset_choices) > 2:
@@ -265,12 +282,25 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
 
             query = generate_cypher_query(unlist(category_label), ncontains)
 
-            matches = getQuery(query, driver, {"datasets": dataset_choices})
-
-            matches = pd.DataFrame(matches)
+            matches = getQuery(query, driver, {"datasets": dataset_choices}, type="df")
 
             if matches.empty:
                 return jsonify({"message": "No data found"}), 404
+            
+            if resultFormat == "key-to-category":
+                cols = ['datasetID', 'LCA_CMName', 'LCA_CMID', 'tie','Key', 'Name']
+                result = matches[cols].copy()
+                result = result.fillna("")
+                return result.to_dict(orient='records')
+            
+            if resultFormat == "category-to-category":
+                matches = matches.groupby(['datasetID', 'LCA_CMName', 'LCA_CMID']).agg({
+                    'Key': lambda x: list(x),
+                    'Name': lambda x: list(x)
+                }).reset_index()
+                for col in matches.columns:
+                    if matches[col].apply(lambda x: isinstance(x, list)).any():
+                        matches[col] = matches[col].apply(lambda x: ' || '.join(map(str, x)) if isinstance(x, list) else x)
 
             # Split into groups by 'datasetID'
             matches_grp = [group for _, group in matches.groupby("datasetID")]
@@ -307,7 +337,7 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
 
            # Reorder columns
             cols = ["LCA_CMID", "LCA_CMName", "nTie"] + \
-                [col for col in result.columns if col not in [
+                [col for col in df_filtered.columns if col not in [
                     "LCA_CMID", "LCA_CMName", "nTie"]]
             result = df_filtered[cols]
             result = result.fillna("")
