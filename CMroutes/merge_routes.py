@@ -45,13 +45,14 @@ def submit_merge():
     intersection = unlist(data.get("intersection", False))
     database = unlist(data.get('database'))
     criteria = str.lower(unlist(data.get('equivalence')))
+    resultFormat = unlist(data.get('resultFormat', 'key-to-key'))
     if category_label == "ANY DOMAIN":
         category_label = "CATEGORY"
     elif category_label == "AREA":
         category_label = "DISTRICT"
 
     result = proposeMerge(dataset_choices=dataset_choices, category_label=category_label,
-                          criteria=criteria, database=database, intersection=intersection, ncontains=ncontains)
+                          criteria=criteria, database=database, intersection=intersection, ncontains=ncontains,resultFormat = resultFormat)
 
     return result
 
