@@ -17,7 +17,7 @@ from .USES import processUSES
 from .USES import addCMNameRel,processDATASETs,waitingUSES
 from .upload import updateProperty,createUSES
 from flask import jsonify
-
+from itertools import groupby
 
 # This is a module for admin functions in CatMapper
 
@@ -633,11 +633,6 @@ def moveUSESties(database,user,input,dataset,tabledata):
     rel_id = USES_property[1]["id"]
     # only need to revise operation if user wants to keep some parent-child ties with the FROM node.
     USES_to_change = [row for row in tabledata if row['optionA'] != 'From']
-
-    print(CMID_from)
-    print(CMID_to)
-
-    return
     
     try:
         if len(USES_to_change) > 0:
@@ -902,19 +897,18 @@ def deleteNode(database,user,input):
                     createLog(id=[row['ids'] for row in ids], type="node",
                           log=f"removed reference to deleted node {input.get('s1_2')} from {prop}",
                           user=user, driver=driver)
-                    
+                                
             # getting all the affected relationships and extracting the safe data and setting it back
             if len(rels) > 0:
-                from itertools import groupby
-                import re
 
                 sepRels = []
                 for row in rels:
                     for val in re.split(r' \|\|', row['val']):
+                    #for val in row['val']:
                         val = val.strip()
-                        if {input.get('s1_2')} not in val:
+                        if input.get('s1_2') not in val:
                             sepRels.append({"id": row["id"], "key": row["key"], "val": val})
-
+                
                 # if there's saved data, it is set back before removing the purely unsaved data
                 if len(sepRels) > 0:
                     grouped = {}
@@ -945,7 +939,7 @@ def deleteNode(database,user,input):
                 createLog(id=[row["id"] for row in rels], type="relation",
                       log=f"removed reference to deleted node {input.get('s1_2')}",
                       user=user, driver=driver)
-
+        
         nodeID = getID(input.get('s1_2'), "CMID", driver)
         create_deleted_query = f"""
             MATCH (n) WHERE elementId(n) = '{nodeID}'
@@ -954,6 +948,7 @@ def deleteNode(database,user,input):
             RETURN elementId(n2) AS nodeID
         """
         deletedID = getQuery(create_deleted_query,driver=driver)
+        print("Stgae 3")
         createLog(id=[deletedID[0]['nodeID']], type="node",
               log=[f"deleted node {input.get('s1_2')}"],
               user=user, driver=driver)
