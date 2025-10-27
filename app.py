@@ -15,6 +15,10 @@ from CMroutes import *
 app = create_app()
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB
 
+# routes
+app.register_blueprint(root_bp)
+app.register_blueprint(merge_bp)  
+
 @app.route("/")
 def root():
     headers = {'Content-Type': 'text/html'}
@@ -876,83 +880,6 @@ return a, collect(distinct r) as r, collect(distinct e) as e
     except Exception as e:
         return str(e), 500
 
-
-# what about calling this createLinkfile internally? # do we want to?
-@app.route('/proposeMergeSubmit', methods=['POST'])
-def submit_merge():
-    data = request.get_data()
-    data = json.loads(data)
-    dataset_choices = data.get("datasetChoices")
-    dataset_choices = [choice.strip() for choice in dataset_choices.split(",")]
-    ncontains = data.get("mergelevel")
-    category_label = unlist(data.get("categoryLabel", ""))
-    intersection = unlist(data.get("intersection", False))
-    database = unlist(data.get('database'))
-    criteria = str.lower(unlist(data.get('equivalence')))
-    if category_label == "ANY DOMAIN":
-        category_label = "CATEGORY"
-    elif category_label == "AREA":
-        category_label = "DISTRICT"
-
-    result = proposeMerge(dataset_choices=dataset_choices, category_label=category_label,
-                          criteria=criteria, database=database, intersection=intersection, ncontains=ncontains)
-
-    return result
-
-
-@app.route('/downloadMergeCode', methods=['POST'])
-def get_merge_code():
-    data = request.get_data()
-    data = json.loads(data)
-
-
-@app.route('/joinDatasets', methods=['POST'])
-def submitjoinDatasets():
-    data = request.get_data()
-    data = json.loads(data)
-    # print(data)
-    database = unlist(data.get("database", ""))
-    joinLeft = data.get("joinLeft")
-    joinRight = data.get("joinRight")
-
-    result = joinDatasets(database, joinLeft, joinRight)
-
-    return jsonify(result)
-
-
-@app.route('/validateDatasets', methods=['POST'])
-def submitvalidateDatasets():
-    data = request.get_data()
-    data = json.loads(data)
-    database = unlist(data.get("database", ""))
-    names = data.get("names").split(",")
-
-    driver = getDriver(database)
-
-    with driver.session() as session:
-        for i in names:
-            q = """
-            MATCH (n:DATASET)
-            WHERE n.CMID = $prop
-            RETURN COUNT(n) > 0 AS nodeExists
-            """
-            result = session.run(q, prop=i.strip())
-            node_exists = result.single()["nodeExists"]
-            if not node_exists:
-                return jsonify({"success": False, "message": "Check your Dataset IDs."})
-    driver.close()
-    return jsonify({"success": True, "message": "All IDs exist."})
-
-
-# Download template
-app.add_url_rule('/merge/template/<database>/<datasetID>', 'get_merge_template',
-                 get_merge_template, methods=['GET'])
-
-# Merging syntax -- only accepts R syntax for now
-app.add_url_rule('/merge/syntax/<database>', 'get_merge_syntax_route',
-                 get_merge_syntax_route, methods=['POST'])
-
-
 @app.route('/networksjs', methods=['GET'])
 def getNetworkjs():
     try:
@@ -1522,7 +1449,7 @@ def getAdminEdit():
             if apikey == apikeyEnv:
                 validated = True
             if not validated:
-                credentials = login(database, user, pwd)
+                credentials = login(user, pwd)
                 if isinstance(credentials, dict) and credentials.get('role') == "admin":
                     validated = True
                     user = credentials.get('userid')
@@ -2330,4 +2257,4 @@ app.add_url_rule('/admin/view_graph', 'display_graph',
                  display_graph, methods=['GET'])
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5001)
+    app.run(debug=True, port=5010)
