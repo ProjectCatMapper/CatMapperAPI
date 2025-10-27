@@ -1449,7 +1449,7 @@ def getAdminEdit():
             if apikey == apikeyEnv:
                 validated = True
             if not validated:
-                credentials = login(database, user, pwd)
+                credentials = login(user, pwd)
                 if isinstance(credentials, dict) and credentials.get('role') == "admin":
                     validated = True
                     user = credentials.get('userid')
