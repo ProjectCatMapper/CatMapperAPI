@@ -210,6 +210,7 @@ def joinDatasets(database, joinLeft, joinRight):
 def proposeMerge(dataset_choices, category_label, criteria, database, intersection, ncontains=2, resultFormat = "key-to-key"):
 
     try:
+        return resultFormat
         driver = getDriver(database)
 
         if len(dataset_choices) < 1:
