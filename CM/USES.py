@@ -357,6 +357,8 @@ def processUSES(database, CMID=None, user="0", detailed = True):
         if CMID is not None:
             print("running merge duplicate relations")
             mergeDupRelationsResults = mergeDupRelations(CMID=CMID, database = database)
+        else:
+            mergeDupRelationsResults = "Not ran"
 
         # Update structural properties and referenceKeys
         properties = getPropertiesMetadata(driver=driver)
