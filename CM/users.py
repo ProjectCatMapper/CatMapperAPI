@@ -1,5 +1,6 @@
 ''' users.py '''
 
+from unittest import result
 import pysodium
 from .utils import *
 
@@ -115,3 +116,24 @@ return u.userid as userid, u.first as first, u.last as last, u.email as email, u
         result = getQuery(query, driver)
 
     return result
+
+def changePassword(credentials, newPassword):
+
+    try:
+        driver = getDriver('userdb')
+
+        userid = credentials.get("userid")
+    
+        hashedPassword = password_hash(newPassword)
+
+        query = """
+        MATCH (u:USER {userid: toString($userid)})
+        SET u.password = $hashedPassword
+        RETURN u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
+        """
+        
+        result = getQuery(query, driver, params={'userid': userid, 'hashedPassword': hashedPassword})
+        
+        return result
+    except Exception as e:
+        return f"Error changing password: {e}", 500
