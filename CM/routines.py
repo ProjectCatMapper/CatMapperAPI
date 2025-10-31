@@ -1360,6 +1360,65 @@ def reportChanges(database, dateStart=None, dateEnd=None, action="default", user
     except Exception as e:
         return "Error in reportChanges: " + str(e)
     
+def missingCMName(database, mail=None, return_type="data"):
+    """
+    Identify categories in a Neo4j database that are missing 
+    a `CMName` property, and optionally export results to Excel 
+    or send via email.
+
+    This function searches for `CATEGORY`, `DATASET`, and `METADATA` nodes that lack a defined `CMName`. 
+
+    Parameters
+    ----------
+    database : str
+        The database name used to obtain a Neo4j driver instance.
+    mail : Mail, optional
+        A Mail object for sending notifications (default: None).
+        If provided and results exist, the Excel file is attached 
+        and sent via email.
+    return_type : {"data", "info"}, default="data"
+        Determines the format of the return value:
+        - "data" : return detailed results as a dictionary.
+        - "info" : return a dictionary with summary information 
+          and the file path.
+    Returns
+    -------
+    dict or tuple
+        If return_type == "data":
+            {"Total": number of nodes missing CMName,
+             "Missing CMName": list of dicts with CMID and labels}
+        If return_type == "info":
+            {"info": number of nodes missing CMName,
+             "filepath": path to the Excel file or None}
+        If an error occurs:
+            A tuple of (error_message, 500).
+    """
+    
+    try:
+        driver = getDriver(database)
+        query = """
+        MATCH (n)
+        WHERE (n:CATEGORY OR n:DATASET OR n:METADATA) AND (n.CMName IS NULL OR n.CMName = '')
+        RETURN n.CMID as CMID, labels(n) as labels
+        """
+        results = getQuery(query, driver, type="df")
+
+        fp1 = None
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"missing_cmname_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp1 = tmpfile.name
+                results.to_excel(fp1, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Missing CMName for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+        if return_type == "data":
+            return {"Total": len(results), "Missing CMName": results.to_dict(orient="records")}
+        elif return_type == "info":
+            return {"info": str(len(results)), "filepath": fp1}
+    except Exception as e:
+        result = str(e)
+        return result, 500
+    
 def runRoutinesStream(databases="all", mail=None):
     """
     Run a sequence of validation and processing routines for one or more 
@@ -1436,6 +1495,7 @@ def runRoutinesStream(databases="all", mail=None):
             ("Bad JSON", lambda db: getBadJSON(db, mail=None, return_type="info")),
             ("Bad Relations", lambda db: getBadRelations(db, mail=None, return_type="info")),
             ("CMName Not In Name", lambda db: CMNameNotInName(db, mail=None, return_type="info")),
+            ("Missing CMName", lambda db: missingCMName(db, mail=None, return_type="info")),
             ("No USES", lambda db: noUSES(db, save=True, mail=None, return_type="info")),
             ("Check USES", lambda db: checkUSES(db, save=True, mail=None, return_type="info")),
             ("Process USES", lambda db: processUSES(db, detailed=False)),
@@ -1500,6 +1560,7 @@ def runRoutinesStream(databases="all", mail=None):
           <tr><td>Bad JSON</td><td>getBadJSON</td><td>Validates JSON properties (geoCoords, parentContext) and reports invalid entries.</td></tr>
           <tr><td>Bad Relations</td><td>getBadRelations</td><td>Checks for invalid or inconsistent parent–child category relationships and mis-specified CONTAINS links.</td></tr>
           <tr><td>CMName Not In Name</td><td>CMNameNotInName</td><td>Finds categories where the primary CMName is missing from the alternate names list and updates them.</td></tr>
+          <tr><td>Missing CMName</td><td>missingCMName</td><td>Identifies CATEGORY, DATASET, and METADATA nodes that lack a defined CMName property.</td></tr>
           <tr><td>No USES</td><td>noUSES</td><td>Lists categories that are not connected to any datasets through USES relationships.</td></tr>
           <tr><td>Check USES</td><td>checkUSES</td><td>Validates USES relationships, checking for missing or malformed label, Key, or Name fields.</td></tr>
           <tr><td>Process USES</td><td>processUSES</td><td>Processes and reconciles USES relationships for consistency and downstream use.</td></tr>
