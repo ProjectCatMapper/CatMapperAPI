@@ -1278,6 +1278,7 @@ return true as exists
 def admin_nodeproperties():
     CMID = request.args.get('CMID')
     database = request.args.get('database')
+    option = request.args.get('option')
 
     driver = getDriver(database)
 
@@ -1299,7 +1300,6 @@ def admin_nodeproperties():
 
         if r == []:
             return jsonify({"error": "Invalid CMID"})
-
         props = [k for k in r[0]['props'].keys()] if r else []
 
         # Run q1 to get allowed properties
@@ -1308,7 +1308,7 @@ def admin_nodeproperties():
 
         r = {k: v for k, v in r[0]['props'].items() if k in allowed_props}
 
-        if r == {}:
+        if option != "add" and r == {}:
             return jsonify({"error": "No editable features on this node."})
 
         # Filter props to only include allowed keys
