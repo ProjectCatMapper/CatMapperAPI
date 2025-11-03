@@ -380,22 +380,23 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
         # End of error checking
         
         #get elementID of USES tie uniquely identified by CMID,Key and datasetID
-        id_query = """UNWIND $rows AS row
-            MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
-            RETURN elementId(r) AS relID, row.CMID AS CMID, row.Key AS Key, row.datasetID AS datasetID
-            """
-        
-        id_values = getQuery(
-            query=id_query,
-            driver=driver,
-            params={"rows": df.to_dict(orient="records")}, type="df"
-        )
-
-        df = df.merge(
-                id_values,
-                on=["CMID", "Key", "datasetID"],
-                how="left"
+        if propertyType == "USES":
+            id_query = """UNWIND $rows AS row
+                MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
+                RETURN elementId(r) AS relID, row.CMID AS CMID, row.Key AS Key, row.datasetID AS datasetID
+                """
+            
+            id_values = getQuery(
+                query=id_query,
+                driver=driver,
+                params={"rows": df.to_dict(orient="records")}, type="df"
             )
+
+            df = df.merge(
+                    id_values,
+                    on=["CMID", "Key", "datasetID"],
+                    how="left"
+                )
                         
         if "NewKey" in df.columns:
             df = df.rename(columns={
@@ -989,10 +990,10 @@ def input_Nodes_Uses(
             
     # When uploading keys or new keys, need to make sure they follow the standard convention
         
-    pattern = re.compile(r"^[^:]+:[^:]+$")
+    pattern = re.compile(r"^\s*[^:;]+?\s*:\s*[^:;]+?(?:\s*;\s*[^:;]+?\s*:\s*[^:;]+?)*\s*$")
 
     if (uploadOption == "add_node" and not isDataset) or uploadOption == "add_uses":
-        invalid_rows = dataset.index[~dataset["Key"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].tolist()
+        invalid_rows = dataset.index[~dataset["Key"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].map(lambda x:x+1).tolist()
 
         if invalid_rows:
             raise ValueError(f"Invalid 'Key' format in rows:\n{invalid_rows}. Must be of form VARIABLE : VALUE")
