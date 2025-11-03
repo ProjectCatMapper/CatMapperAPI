@@ -555,7 +555,7 @@ def USESLogText(relid, driver):
 #this creates ambiguity in whether C should be a child of A or B.
 #This function detects that issue and leads to the user being prompted to make decisions about this ambiguity.
 def check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id):
-
+    
     try:
         #checks to see if CMID is valid
         validCMID_to = isValidCMID(CMID_to, driver)
