@@ -1441,9 +1441,7 @@ def input_Nodes_Uses(
                     child_labels.append(b)              
                                                                     
                 validate_labels(uploadOption,driver,parent_labels, child_labels)
-    
-    return
-    
+        
     # checks if the eventType value is valid
 
     if "eventType" in dataset.columns:
