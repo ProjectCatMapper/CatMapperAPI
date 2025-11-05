@@ -811,15 +811,15 @@ def validate_labels(uploadOption,driver,parent_labels, child_labels):
 
     all_group_labels = {item['groupLabel'] for item in all_group_labels if item['groupLabel'] != "CATEGORY"}
 
-    if uploadOption == "add_node":
-        query = """MATCH (n:LABEL)
-                    RETURN n.CMName AS key, n.groupLabel AS value
-                    """
+    # if uploadOption == "add_node":
+    #     query = """MATCH (n:LABEL)
+    #                 RETURN n.CMName AS key, n.groupLabel AS value
+    #                 """
         
-        result = getQuery(query=query,driver=driver)
-        label_dict = {row["key"]: row["value"] for row in result}
+    #     result = getQuery(query=query,driver=driver)
+    #     label_dict = {row["key"]: row["value"] for row in result}
 
-        child_labels = [[label_dict.get(i[0])] for i in child_labels]
+    #     child_labels = [[label_dict.get(i[0])] for i in child_labels]
             
     for idx, (i, j) in enumerate(zip(parent_labels, child_labels)):
         if  len(i) == 0:
@@ -1181,9 +1181,9 @@ def input_Nodes_Uses(
 
         for i in cmids:
             if not bool(re.match(pattern, i)):
-                raise ValueError("There is a malformed CMID in the CMID column.")
+                raise ValueError(f"There is a malformed CMID in the CMID column. {i}")
 
-        if (
+        if ( 
             not cmids.str.startswith(("SD", "AD")).all()
             and not cmids.str.startswith(("SM", "AM")).all()
         ):
@@ -1220,8 +1220,6 @@ def input_Nodes_Uses(
             if i == "datasetID":
                 search_label = "DATASET"
             
-            print(search_label)
-
             query = f"""
             UNWIND $rows AS row
             OPTIONAL MATCH (n:{search_label} {{CMID: row.value}})
@@ -1246,14 +1244,10 @@ def input_Nodes_Uses(
             if not rows_to_check:
                 continue
 
-            print(rows_to_check)
-
             with driver.session() as session:
                 results = session.run(query, rows=rows_to_check)
                 missing_values = [r["value"] for r in results.data() if r["count"] == 0]
             
-            print(missing_values)
-
             if missing_values:
                 if i == "datasetID":
                     raise ValueError(
@@ -1370,61 +1364,85 @@ def input_Nodes_Uses(
                     raise ValueError(
                         f"Error: Wrong labels in database for column '{i}': {wrong_labels}"
                     )
-            elif i == "parent":
-                if uploadOption == "add_node":
-                    child_column = "label"
-                else:
-                    child_column = "CMID"
 
-                combined = []
-                
-                for _, row in dataset.iterrows():
-                    child_value = row[child_column]
-                    parent_values = str(row['parent']).split(';')
-                    
-                    for i in parent_values:
-                        i = i.strip()
-                        # if i:  # skip empty strings
-                        #     combined.append((child_value, i))
-                        combined.append((child_value, i))
-                
-                dict_with_index = {i: {child_column: a, 'parent': b} for i, (a, b) in enumerate(combined)}
+            elif i == "parent":
+                # if uploadOption == "add_node":
+                #     child_column = "label"
+                # else:
+                #     child_column = "CMID"
 
                 query = """
-                        MATCH (n)
-                        WHERE n.CMID IN $rows
-                        RETURN n.CMID as CMID, labels(n) AS labels
+                        MATCH (n:CATEGORY {CMID: $cmid})
+                        WITH head([lbl IN labels(n) WHERE lbl <> 'CATEGORY']) AS otherLabel
+                        MATCH (m:LABEL {CMName: otherLabel})
+                        RETURN m.groupLabel AS groupLabel
                         """
 
-                parent_values = list({row['parent'] for row in dict_with_index.values()})
-                child_values = list({row[child_column] for row in dict_with_index.values()})
+                # combined is a list of tuples
+                combined = []
 
-                with driver.session() as session:
-                    result = session.run(query, rows=parent_values)
-                    parent_dict = {record["CMID"]: record["labels"] for record in result}
-
-                    if uploadOption != "add_node":
-                        result= session.run(query,rows=child_values)
-                        child_dict = {record["CMID"]: record["labels"] for record in result}
-
-                for idx, row in dict_with_index.items():
-                        row['parent_label'] = parent_dict.get(row['parent'], [])
-
-                if uploadOption == "add_node":
-                    for idx, row in dict_with_index.items():
-                        row['child_label'] = [row['label']]
-                else:
-                    for idx, row in dict_with_index.items():
-                        row['child_label'] = child_dict.get(row['CMID'], [])
+                # Builds dictionary of labels for parents and children
+                # dictionary can have more elements than the original number of rows if there are multiple parents in a row
+                for i, row in dataset.iterrows():
+                    if "CMID" in dataset.columns and row["CMID"]:
+                        child_value = getQuery(query,driver,params={"cmid":row["CMID"]},type="list")
+                    elif "groupLabel" in dataset.columns and row["groupLabel"]:
+                        child_value = row['groupLabel']
+                    else:
+                        raise ValueError(
+                            f"Both CMID and labels are missing for row {i} "
+                        )
                     
+                    parent_values = str(row['parent']).split(';')
+                    
+                    for j in parent_values:
+                        j = j.strip()
+                        j = getQuery(query,driver,params={"cmid":j},type="list")
+                        if isinstance(child_value,list):
+                            combined.append((child_value, j))
+                        else:
+                            combined.append(([child_value],j))
+                
+
+                # dict_with_index = {i: {child_column: a, 'parent': b} for i, (a, b) in enumerate(combined)}
+
+                # query = """
+                #         MATCH (n)
+                #         WHERE n.CMID IN $rows
+                #         RETURN n.CMID as CMID, labels(n) AS labels
+                #         """
+
+                # parent_values = list({row['parent'] for row in dict_with_index.values()})
+                # child_values = list({row[child_column] for row in dict_with_index.values()})
+
+                # with driver.session() as session:
+                #     result = session.run(query, rows=parent_values)
+                #     parent_dict = {record["CMID"]: record["labels"] for record in result}
+
+                #     if uploadOption != "add_node":
+                #         result= session.run(query,rows=child_values)
+                #         child_dict = {record["CMID"]: record["labels"] for record in result}
+
+                # for idx, row in dict_with_index.items():
+                #         row['parent_label'] = parent_dict.get(row['parent'], [])
+
+                # if uploadOption == "add_node":
+                #     for idx, row in dict_with_index.items():
+                #         row['child_label'] = [row['label']]
+                # else:
+                #     for idx, row in dict_with_index.items():
+                #         row['child_label'] = child_dict.get(row['CMID'], [])
+
                 parent_labels = []
                 child_labels = []
                 
-                for row in dict_with_index.values():
-                    parent_labels.append(row["parent_label"])
-                    child_labels.append(row['child_label'])
-                                       
+                for a, b in combined:
+                    parent_labels.append(a)
+                    child_labels.append(b)              
+                                                                    
                 validate_labels(uploadOption,driver,parent_labels, child_labels)
+    
+    return
     
     # checks if the eventType value is valid
 
