@@ -563,11 +563,27 @@ def check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id):
         if len(validCMID_to) == 0:
             raise Exception(f"{CMID_to} is invalid")
         
-        #checks to see if labels are consistent
-        to_label = getGroupLabels(CMID_from,driver)
-        from_label = getGroupLabels(CMID_to,driver)
+        # gets labels of uses tie using relID, then gets groupLabel of the label and returns it.
+        query = """
+                MATCH ()-[r:USES]->()
+                WHERE elementId(r) = $relID
+                WITH r.label AS label
+                MATCH (m:LABEL {CMName: label})
+                RETURN m.groupLabel as groupLabel
+                """
 
-        if to_label != from_label:
+        uses_label = getQuery(query_dataset,driver,params = {'relID': rel_id})
+
+        if uses_label:
+            uses_label = uses_label[0]['label']
+        else:
+            return "No label found for this USES tie."
+        
+        #checks to see if uses tie labels is consistent with label of destination node
+        to_label = getGroupLabels(CMID_to,driver)
+        #from_label = getGroupLabels(uses_label,driver)
+
+        if to_label != uses_label:
             raise Exception(f"The CMIDs are not of the same group label.")
         
         # 1. Get dataset CMID linked to the relID
