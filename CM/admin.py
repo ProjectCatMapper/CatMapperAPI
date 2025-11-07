@@ -572,7 +572,7 @@ def check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id):
                 RETURN m.groupLabel as groupLabel
                 """
 
-        uses_label = getQuery(dataset,driver,params = {'relID': rel_id})
+        uses_label = getQuery(query,driver,params = {'relID': rel_id})
 
         if uses_label:
             uses_label = uses_label[0]['label']
