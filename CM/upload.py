@@ -1136,12 +1136,12 @@ def input_Nodes_Uses(
         raise ValueError(error_msg)
     
     # checks for year validities
-    if "recordEnd" in dataset.columns:
+    if "recordEnd" in dataset.columns and "recordStart" in dataset.columns:
         invalid_rows = get_invalid_ranges(dataset, "recordStart", "recordEnd")
         if not invalid_rows.empty:
             raise ValueError(f"Found {len(invalid_rows)} invalid rows where 'recordEnd' < 'recordStart'")
     
-    if "yearEnd" in dataset.columns:
+    if "yearEnd" in dataset.columns and "yearStart" in dataset.columns:
         invalid_rows = get_invalid_ranges(dataset, "yearStart", "yearEnd")
         if not invalid_rows.empty:
             raise ValueError(f"Found {len(invalid_rows)} invalid rows where 'yearEnd' < 'yearStart'")
@@ -1606,7 +1606,7 @@ def input_Nodes_Uses(
             if i in optionalProperties:
                 query = """UNWIND $rows AS row
                     OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
-                    RETURN r.[$column] AS existing_value, row"""
+                    RETURN r[$column] AS existing_value, row"""
 
                 result = getQuery(
                     query,
