@@ -977,7 +977,7 @@ def input_Nodes_Uses(
     if uploadOption == "node_add" or uploadOption == "node_replace":
         duplicate_CMIDs = dataset[dataset['CMID'].duplicated(keep=False)]
         duplicate_CMIDs = duplicate_CMIDs['CMID'].tolist()
-        if not duplicate_CMIDs.empty:
+        if duplicate_CMIDs:
             raise ValueError(f"Duplicate CMIDs found in CMID column: \n{duplicate_CMIDs}")
     
     # When uploading category nodes, need to make sure that CMName is added to names in case, it is not included in Name column.
@@ -1372,7 +1372,7 @@ def input_Nodes_Uses(
                 #     child_column = "CMID"
 
                 query = """
-                        MATCH (n:CATEGORY {CMID: $cmid})
+                        MATCH (n {CMID: $cmid})
                         WITH head([lbl IN labels(n) WHERE lbl <> 'CATEGORY']) AS otherLabel
                         MATCH (m:LABEL {CMName: otherLabel})
                         RETURN m.groupLabel AS groupLabel
@@ -1390,20 +1390,21 @@ def input_Nodes_Uses(
                         child_value = row['groupLabel']
                     else:
                         raise ValueError(
+                           
                             f"Both CMID and labels are missing for row {i} "
                         )
-                    
+                                        
                     parent_values = str(row['parent']).split(';')
                     
                     for j in parent_values:
                         j = j.strip()
                         j = getQuery(query,driver,params={"cmid":j},type="list")
+                        print(j)
                         if isinstance(child_value,list):
                             combined.append((child_value, j))
                         else:
                             combined.append(([child_value],j))
                 
-
                 # dict_with_index = {i: {child_column: a, 'parent': b} for i, (a, b) in enumerate(combined)}
 
                 # query = """
@@ -1438,7 +1439,9 @@ def input_Nodes_Uses(
                 
                 for a, b in combined:
                     parent_labels.append(a)
-                    child_labels.append(b)              
+                    child_labels.append(b)
+
+
                                                                     
                 validate_labels(uploadOption,driver,parent_labels, child_labels)
         
