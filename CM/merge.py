@@ -20,6 +20,20 @@ def generate_unique_hash():
         hashlib.sha256(now.encode()).digest()
     ).decode()[:16]
 
+def split_vars_values(s):
+    if pd.isna(s):
+        return pd.Series([None, None])
+    # Split by semicolon first
+    pairs = [p.strip() for p in s.split(";")]
+    variables = []
+    values = []
+    for pair in pairs:
+        if ": " in pair:
+            var, val = pair.split(": ", 1)
+            variables.append(var.strip())
+            values.append(val.strip())
+    return pd.Series(["; ".join(variables), "; ".join(values)])
+
 
 def joinDatasets(database, joinLeft, joinRight):
     try:
@@ -210,7 +224,7 @@ def joinDatasets(database, joinLeft, joinRight):
 def proposeMerge(dataset_choices, category_label, criteria, database, intersection, ncontains=2, resultFormat = "key-to-key"):
 
     try:
-        return resultFormat
+        #return resultFormat
         driver = getDriver(database)
 
         if len(dataset_choices) < 1:
@@ -317,23 +331,48 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
 
             if result.empty:
                 return jsonify({"message": "No common ancestors found"}), 404
+            
+            # Select all columns with "tie" in the name, sum across the columns (there should be one tie column per dataset)
+            # if any row value is NaN, then penalize by adding infinity
+            infinity = 1000
+            tie_cols = result.filter(like="tie").columns
+            nTie = result[tie_cols].sum(axis=1, skipna=True)
+            nTie += result[tie_cols].isna().any(axis=1) * infinity
+            result["nTie"] = nTie
 
-            result["nTie"] = result.filter(like="tie").sum(axis=1, skipna=True)
+            # only consider rows within search radius and non-matches rows
+            result = result[(result["nTie"] <= ncontains) | (result["nTie"] >= infinity)]
 
-            key1 = f"Key_{dataset_choices[0]}"
-            key2 = f"Key_{dataset_choices[1]}"
+            # for each key in each dataset, keeps the rows with the best match
+            # best match is defined as lowest nTie
+            # if there are multiple non-matches for a key, it keeps the tie row with 0
+            rows_to_keep = np.zeros(len(result), dtype=int)
 
-            min_nTie_1 = result.groupby(key1)["nTie"].transform("min")
-            min_nTie_2 = result.groupby(key2)["nTie"].transform("min")
+            for i in range(0,len(dataset_choices)):
+                key = f"Key_{dataset_choices[i]}"
+                minTie = result.groupby(key)["nTie"].transform("min")
+                minTie = minTie.fillna(infinity)
+                rows_to_keep[(result["nTie"] == minTie) & (result[key].notna())] = 1
+            
+            df_filtered = result[rows_to_keep == 1]
 
-            df_filtered = result[(result["nTie"] == min_nTie_1) | (
-                result["nTie"] == min_nTie_2)]
+            # result["nTie"] = result.filter(like="tie").sum(axis=1, skipna=True)
 
-            df_filtered = df_filtered.drop_duplicates(
-                subset=[key1, key2], keep="first")
+            # key1 = f"Key_{dataset_choices[0]}"
+            # key2 = f"Key_{dataset_choices[1]}"
 
-            # filter df nTie to exclude values greater than ncontains
-            df_filtered = df_filtered[df_filtered["nTie"] <= ncontains]
+            # min_nTie_1 = result.groupby(key1)["nTie"].transform("min")
+            # min_nTie_2 = result.groupby(key2)["nTie"].transform("min")
+           
+            # for every key from every dataset, choose the best match that exists
+            # df_filtered = result[(result["nTie"] == min_nTie_1) | (
+            #     result["nTie"] == min_nTie_2)]
+            
+            # df_filtered = df_filtered.drop_duplicates(
+            #     subset=[key1, key2], keep="first")
+
+            # # filter df nTie to exclude values greater than ncontains
+            # df_filtered = df_filtered[df_filtered["nTie"] <= ncontains]
 
            # Reorder columns
             cols = ["LCA_CMID", "LCA_CMName", "nTie"] + \
@@ -341,6 +380,9 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
                     "LCA_CMID", "LCA_CMName", "nTie"]]
             result = df_filtered[cols]
             result = result.fillna("")
+
+            for col in result.filter(like="Key_").columns:
+                result[[f"variable_{col}", f"value_{col}"]] = result[col].apply(split_vars_values)
 
             return result.to_dict(orient='records')
 
