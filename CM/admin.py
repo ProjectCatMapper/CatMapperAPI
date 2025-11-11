@@ -197,10 +197,16 @@ def add_edit_delete_USES(database,user,input):
         processUSES(CMID=CMID,database=database,user=user)
     elif addOrEditNode == "delete":
         q = f"""
-                MATCH (a:CATEGORY {{CMID: '{CMID}'}})<-[r:USES {{Key: '{key}'}}]-(d:DATASET {{CMID: '{datasetID}'}})
-                REMOVE r.{USES_property} RETURN elementId(r) as relID
+                MATCH (a:CATEGORY {{CMID: $CMID}})<-[r:USES {{Key: $key}}]-(d:DATASET {{CMID: $datasetID}})
+                REMOVE r[$USES_property] RETURN elementId(r) as relID
             """
-        result = getQuery(q,driver=driver)
+        params = {
+            "CMID": CMID,
+            "key": key,
+            "datasetID": datasetID,
+            "USES_property": USES_property
+        }
+        result = getQuery(q,driver=driver,params = params)
         processUSES(CMID=CMID,database=database,user=user)
 
         createLog(id=[row["relID"] for row in result], type="relation",
