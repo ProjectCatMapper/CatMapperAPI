@@ -1395,15 +1395,22 @@ def input_Nodes_Uses(
                         )
                                         
                     parent_values = str(row['parent']).split(';')
-                    
-                    for j in parent_values:
-                        j = j.strip()
-                        j = getQuery(query,driver,params={"cmid":j},type="list")
-                        print(j)
+
+                    if parent_values:                   
+                        for j in parent_values:
+                            j = j.strip()
+                            j = getQuery(query,driver,params={"cmid":j},type="list")
+                            print(j)
+                            if isinstance(child_value,list):
+                                combined.append((child_value, j))
+                            else:
+                                combined.append(([child_value],j))
+                    else:
                         if isinstance(child_value,list):
-                            combined.append((child_value, j))
+                                combined.append((child_value, child_value))
                         else:
-                            combined.append(([child_value],j))
+                            combined.append(([child_value],[child_value]))
+                    
                 
                 # dict_with_index = {i: {child_column: a, 'parent': b} for i, (a, b) in enumerate(combined)}
 
