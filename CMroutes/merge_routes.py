@@ -46,13 +46,15 @@ def submit_merge():
     database = unlist(data.get('database'))
     criteria = str.lower(unlist(data.get('equivalence')))
     resultFormat = unlist(data.get('resultFormat', 'key-to-key'))
+    selectedKeyvariables = data.get('selectedKeyvariable')
+    print(selectedKeyvariables)
     if category_label == "ANY DOMAIN":
         category_label = "CATEGORY"
     elif category_label == "AREA":
         category_label = "DISTRICT"
 
     result = proposeMerge(dataset_choices=dataset_choices, category_label=category_label,
-                          criteria=criteria, database=database, intersection=intersection, ncontains=ncontains,resultFormat = resultFormat)
+                          criteria=criteria, database=database, intersection=intersection, selectedKeyvariables=selectedKeyvariables, ncontains=ncontains,resultFormat = resultFormat)
 
     return result
 
@@ -98,7 +100,49 @@ def submitvalidateDatasets():
             if not node_exists:
                 return jsonify({"success": False, "message": "Check your Dataset IDs."})
     driver.close()
-    return jsonify({"success": True, "message": "All IDs exist."})    
+    return jsonify({"success": True, "message": "All IDs exist."})
+
+@merge_bp.route('/getKeys', methods=['POST'])
+def getvalidKeysForDataset():
+    data = request.get_data()
+    data = json.loads(data)
+    database = unlist(data.get("database", ""))
+    subdomain = unlist(data.get("subdomain", ""))
+    names = data.get("names").split(",")
+
+    driver = getDriver(database)
+    
+    result_map={}
+
+    for i in names:
+        q = f"""
+        MATCH (c:{subdomain})<-[r:USES]-(d:DATASET {{CMID: $datasetID}})
+        RETURN r.Key as Key
+        """
+        result = getQuery(q,driver,params={
+                              'datasetID': i.strip()})
+                
+        if not result:
+            return jsonify({"success": False, "message": f"{i} does not have ties to nodes with the selected subdomain"})
+        
+        keys = [row["Key"] for row in result]
+
+        first_parts = []
+
+        for key in keys:
+            # Split by ';' in case there are multiple pairs
+            pairs = key.split(";")
+            for pair in pairs:
+                # Split by ':' and take the first part, stripping whitespace
+                first_part = pair.split(":")[0].strip()
+                first_parts.append(first_part)
+
+        # Remove duplicates if needed
+        key_variables = list(set(first_parts))
+
+        result_map[i] = key_variables
+            
+    return jsonify({"success": True, "message": "All Keys exist.","keysByDataset": result_map})        
 
 @merge_bp.route('/linkfile', methods=['GET'])
 def getLinkFile():
