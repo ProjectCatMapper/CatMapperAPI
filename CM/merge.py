@@ -296,8 +296,6 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
 
             query = generate_cypher_query(unlist(category_label), ncontains)
 
-            print(query)
-
             matches = getQuery(query, driver, {"datasets": dataset_choices}, type="df")
 
             if matches.empty:
@@ -333,7 +331,13 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
 
             if result.empty:
                 return jsonify({"message": "No common ancestors found"}), 404
-            
+
+            selectedKeyvariables = {f"Key_{k.strip()}": v for k, v in selectedKeyvariables.items()}
+
+            for col, prefix in selectedKeyvariables.items():
+                if col in result.columns:
+                    result = result[result[col].str.startswith(prefix,na=False)]
+                   
             # Select all columns with "tie" in the name, sum across the columns (there should be one tie column per dataset)
             # if any row value is NaN, then penalize by adding infinity
             infinity = 1000
