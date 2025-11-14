@@ -911,7 +911,17 @@ def CMNameNotInName(database, mail=None, return_type="data"):
         RETURN n.CMID as CMID
         """
 
+        dataset_query = """MATCH (n:DATASET)
+                        WHERE any(v IN [n.datasetCitation, n.shortName, n.CMName] 
+                                WHERE v IS NOT NULL AND (n.names IS NULL OR NOT v IN n.names))
+                        SET n.names = coalesce(n.names, []) +
+                                    [v IN [n.datasetCitation, n.shortName, n.CMName]
+                                    WHERE v IS NOT NULL AND NOT v IN coalesce(n.names, [])]
+                        RETURN n.CMID as CMID
+                        """
         cmids = getQuery(query, driver, type="list")
+
+        dataset_cmids = getQuery(dataset_query,driver, type="list")
 
         fp1 = None
         if len(cmids) > 0:
@@ -1167,6 +1177,24 @@ def checkUSES(database, save=True, mail=None, return_type="data"):
         
         # Check for missing label, Key, and Name in USES relationships
         
+        # query = """
+        # MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+        # where r.label is null or r.label = ''
+        # RETURN "No label" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
+        # UNION ALL
+        # MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+        # where r.Key is null or r.Key = ''
+        # RETURN "No Key" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
+        # UNION ALL
+        # MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+        # where not r.Key contains ": "
+        # RETURN "Malformed Key" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
+        # UNION ALL
+        # MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+        # where r.Name is null or r.Name = ''
+        # RETURN "No Name" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
+        # """
+
         query = """
         MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
         where r.label is null or r.label = ''
@@ -1177,13 +1205,15 @@ def checkUSES(database, save=True, mail=None, return_type="data"):
         RETURN "No Key" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
         UNION ALL
         MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
-        where not r.Key contains ": "
+        WITH c, d, r, [segment IN split(r.Key, ";") | trim(segment)] AS segments
+        WHERE any(seg IN segments WHERE NOT seg CONTAINS ": ")
         RETURN "Malformed Key" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
         UNION ALL
         MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
         where r.Name is null or r.Name = ''
         RETURN "No Name" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
         """
+
         result = getQuery(query, driver, type="df")
         fp1 = None
         if isinstance(result, pd.DataFrame) and not result.empty:
