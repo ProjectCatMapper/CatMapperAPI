@@ -1393,14 +1393,15 @@ def input_Nodes_Uses(
                            
                             f"Both CMID and labels are missing for row {i} "
                         )
+                    
+                    if row['parent'] != "":
                                         
-                    parent_values = str(row['parent']).split(';')
+                        parent_values = str(row['parent']).split(';')
 
-                    if parent_values:                   
+                        # iterating through parents in a single row
                         for j in parent_values:
                             j = j.strip()
                             j = getQuery(query,driver,params={"cmid":j},type="list")
-                            print(j)
                             if isinstance(child_value,list):
                                 combined.append((child_value, j))
                             else:
@@ -1410,8 +1411,7 @@ def input_Nodes_Uses(
                                 combined.append((child_value, child_value))
                         else:
                             combined.append(([child_value],[child_value]))
-                    
-                
+                                       
                 # dict_with_index = {i: {child_column: a, 'parent': b} for i, (a, b) in enumerate(combined)}
 
                 # query = """
@@ -1447,11 +1447,9 @@ def input_Nodes_Uses(
                 for a, b in combined:
                     parent_labels.append(a)
                     child_labels.append(b)
-
-
-                                                                    
+                                               
                 validate_labels(uploadOption,driver,parent_labels, child_labels)
-        
+            
     # checks if the eventType value is valid
 
     if "eventType" in dataset.columns:
