@@ -221,7 +221,7 @@ def joinDatasets(database, joinLeft, joinRight):
             return {"Error": "Unable to process error"}, 500
 
 
-def proposeMerge(dataset_choices, category_label, criteria, database, intersection, ncontains=2, resultFormat = "key-to-key"):
+def proposeMerge(dataset_choices, category_label, criteria, database, intersection, selectedKeyvariables, ncontains=2, resultFormat = "key-to-key"):
 
     try:
         #return resultFormat
@@ -295,6 +295,8 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
                 return jsonify({"message": "Please select only two datasets"}), 400
 
             query = generate_cypher_query(unlist(category_label), ncontains)
+
+            print(query)
 
             matches = getQuery(query, driver, {"datasets": dataset_choices}, type="df")
 
