@@ -1646,30 +1646,31 @@ def input_Nodes_Uses(
             type="list",
         )
     
+    if "CMID" in node_string_cols:
+        node_string_cols.remove("CMID")
+    
     # For function 5, if a non-null value in a string-value column already exists in the database for a given CMID,
     # throws an error
     if uploadOption == "node_add":
     
-        if node_string_cols:
-            for i in node_string_cols:
-                if i in dataset.columns:
-                    query = """UNWIND $rows AS row
-                        OPTIONAL MATCH (a {CMID: row.CMID})
-                        RETURN a[$column] AS existing_value, row"""
-                    
-                    result = getQuery(
-                                query,
-                                driver,
-                                params={"rows": dataset[["CMID",i]].to_dict(orient="records"),"column":i},
-                                type="list",
-                            )
-                    
-
-                    for j in result:
-                        if j["existing_value"] is not None:
-                            raise ValueError(
-                        f"Property '{i}' already exists for CMID {result['row']['CMID']} "
-                    )
+        for i in node_string_cols:
+            if i in dataset.columns:
+                query = """UNWIND $rows AS row
+                    OPTIONAL MATCH (a {CMID: row.CMID})
+                    RETURN a[$column] AS existing_value, row"""
+                
+                result = getQuery(
+                            query,
+                            driver,
+                            params={"rows": dataset[["CMID",i]].to_dict(orient="records"),"column":i},
+                            type="list",
+                        )
+                
+                for j in result:
+                    if j["existing_value"] is not None:
+                        raise ValueError(
+                    f"Property '{i}' already exists for CMID {result['row']['CMID']} "
+                )
           
     '''Error checking ends here'''
 
