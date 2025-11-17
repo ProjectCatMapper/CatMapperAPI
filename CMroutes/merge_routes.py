@@ -113,7 +113,10 @@ def getvalidKeysForDataset():
     driver = getDriver(database)
     
     result_map={}
-
+    
+    if subdomain == "ANY DOMAIN":
+        subdomain = "CATEGORY"
+        
     for i in names:
         q = f"""
         MATCH (c:{subdomain})<-[r:USES]-(d:DATASET {{CMID: $datasetID}})
@@ -123,7 +126,9 @@ def getvalidKeysForDataset():
                               'datasetID': i.strip()})
                 
         if not result:
-            return jsonify({"success": False, "message": f"{i} does not have ties to nodes with the selected subdomain"})
+            result_map[i] = []
+            continue
+            #return jsonify({"success": False, "message": f"{i} does not have ties to nodes with the selected subdomain","keysByDataset": result_map})
         
         keys = [row["Key"] for row in result]
 
