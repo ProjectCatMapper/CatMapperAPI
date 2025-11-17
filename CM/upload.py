@@ -1633,6 +1633,8 @@ def input_Nodes_Uses(
                             f"DATASET {j['row']['datasetID']} and CATEGORY {j['row']['CMID']} with Key {j['row']['Key']}"
                         )
 
+    # For function 5, if a non-null value in a string-value column already exists in the database for a given CMID,
+    # throws an error
     updateLog(
         f"log/{user}uploadProgress.txt",
         "obtaining string-type node properties",
@@ -1646,11 +1648,8 @@ def input_Nodes_Uses(
             type="list",
         )
     
-    if "CMID" in node_string_cols:
-        node_string_cols.remove("CMID")
+    node_string_cols = [col for col in node_string_cols if col not in ["CMID","label"]]
     
-    # For function 5, if a non-null value in a string-value column already exists in the database for a given CMID,
-    # throws an error
     if uploadOption == "node_add":
     
         for i in node_string_cols:
