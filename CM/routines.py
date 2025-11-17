@@ -1448,6 +1448,33 @@ def missingCMName(database, mail=None, return_type="data"):
     except Exception as e:
         result = str(e)
         return result, 500
+
+def getBadContextual(database, mail=None, return_type="data"):
+    try:
+        driver = getDriver(database)
+        query = """
+        MATCH (n)
+        WHERE (n:CATEGORY OR n:DATASET OR n:METADATA) AND (n.CMName IS NULL OR n.CMName = '')
+        RETURN n.CMID as CMID, labels(n) as labels
+        """
+        results = getQuery(query, driver, type="df")
+
+        fp1 = None
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"missing_cmname_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp1 = tmpfile.name
+                results.to_excel(fp1, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Missing CMName for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+        if return_type == "data":
+            return {"Total": len(results), "Missing CMName": results.to_dict(orient="records")}
+        elif return_type == "info":
+            return {"info": str(len(results)), "filepath": fp1}
+    except Exception as e:
+        result = str(e)
+        return result, 500
+
     
 def runRoutinesStream(databases="all", mail=None):
     """

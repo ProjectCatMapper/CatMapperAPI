@@ -872,6 +872,12 @@ def input_Nodes_Uses(
     
     dataset = pd.DataFrame(dataset)
 
+    # Since APIs remove empty columns, and a user can submit a fully empty column of CMIDS for function 2,
+    # we need to re-add CMID column if it doesn't exist in this case
+    if uploadOption == "add_uses":
+        if "CMID" not in dataset.columns:
+            dataset["CMID"] = ""
+
     #database must be either SocioMap or ArchaMap
     if database.lower() == "sociomap":
         database = "SocioMap"
@@ -1013,7 +1019,7 @@ def input_Nodes_Uses(
                 dataset['CMName'] = dataset['Name']
             else:
                 dataset['CMName'] = dataset['CMName'].fillna(dataset['Name'])
-    
+
     # When adding a new node, CMName is required    
     if uploadOption == "add_node" or uploadOption == "add_uses":
         mask = pd.Series(False, index=dataset.index)
@@ -1644,24 +1650,26 @@ def input_Nodes_Uses(
     # throws an error
     if uploadOption == "node_add":
     
-        for i in node_string_cols:
-            if i in dataset.columns:
-                query = """UNWIND $rows AS row
-                    OPTIONAL MATCH (a {CMID: row.CMID})
-                    RETURN a[$column] AS existing_value, row"""
-                
-                result = getQuery(
-                            query,
-                            driver,
-                            params={"rows": dataset[["CMID",i]].to_dict(orient="records"),"column":i},
-                            type="list",
-                        )
-                
-                for j in result:
-                    if j["existing_value"] is not None:
-                        raise ValueError(
-                    f"Property '{i}' already exists for CMID {result['row']['CMID']} "
-                )
+        if node_string_cols:
+            for i in node_string_cols:
+                if i in dataset.columns:
+                    query = """UNWIND $rows AS row
+                        OPTIONAL MATCH (a {CMID: row.CMID})
+                        RETURN a[$column] AS existing_value, row"""
+                    
+                    result = getQuery(
+                                query,
+                                driver,
+                                params={"rows": dataset[["CMID",i]].to_dict(orient="records"),"column":i},
+                                type="list",
+                            )
+                    
+
+                    for j in result:
+                        if j["existing_value"] is not None:
+                            raise ValueError(
+                        f"Property '{i}' already exists for CMID {result['row']['CMID']} "
+                    )
           
     '''Error checking ends here'''
 
