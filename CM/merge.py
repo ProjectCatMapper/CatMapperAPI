@@ -34,7 +34,9 @@ def split_vars_values(s):
             values.append(val.strip())
     return pd.Series(["; ".join(variables), "; ".join(values)])
 
-
+# joins two datasets that have previously been translated into CatMapper’s database.Each dataset must include two columns: datasetiD and the Key pointing to a category.
+# It returns a single spreadsheet with: 1) datasetIDs, 2) data columns from the original dataset (renamed with _left and _right suffixes if overlapping.  Rows with keys pointing to the same category are aligned in the output spreadsheet.
+# When keys point to a CatMapper category, standardized identifiers are also returned (CMID, CMName).
 def joinDatasets(database, joinLeft, joinRight):
     try:
 
@@ -160,7 +162,7 @@ def joinDatasets(database, joinLeft, joinRight):
         link_file = merge_left.merge(
             merge_right,
             on=['CMID', 'CMName'],
-            suffixes=('_left', '_right')
+            suffixes=('_'+datasetID_left, '_'+datasetID_right)
         )
 
         # Step 3: Update found_left_keys and found_right_keys to include suffixes for the identified overlapping columns
@@ -187,7 +189,7 @@ def joinDatasets(database, joinLeft, joinRight):
             right_on=['datasetID_left'] + found_left_keys_with_suffix,
             how='left',
             # Prevents adding additional _x suffixes
-            suffixes=('_left', '_right')
+            suffixes=('_'+datasetID_left, '_'+datasetID_right)
         )
 
         # Step 6: Merge link_file with joinRight without adding further suffixes for overlapping columns
@@ -196,7 +198,7 @@ def joinDatasets(database, joinLeft, joinRight):
             left_on=['datasetID_right'] + found_right_keys_with_suffix,
             right_on=['datasetID_right'] + found_right_keys_with_suffix,
             how='left',
-            suffixes=('_left', '_right')
+            suffixes=('_'+datasetID_left, '_'+datasetID_right)
         )
 
         # Step 7: Final clean-up to drop duplicates and sort by specified columns
