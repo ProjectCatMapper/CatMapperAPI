@@ -43,7 +43,7 @@ def unlist(l):
 # it returns true if CMID exists else returns empty list
 def isValidCMID(cmid, driver):
 
-    query = "unwind $cmid as cmid match (c:CATEGORY:DATASET) where c.CMID = cmid return c.CMID as cmid, true as exists"
+    query = "unwind $cmid as cmid match (c) where c.CMID = cmid AND (c:CATEGORY OR c:DATASET) return c.CMID as cmid, true as exists"
 
     with driver.session() as session:
         result = session.run(query, cmid=cmid)
