@@ -1407,7 +1407,9 @@ def input_Nodes_Uses(
                         # iterating through parents in a single row
                         for j in parent_values:
                             j = j.strip()
+                            print(j)
                             j = getQuery(query,driver,params={"cmid":j},type="list")
+                            print(j)
                             if isinstance(child_value,list):
                                 combined.append((child_value, j))
                             else:
@@ -1451,8 +1453,8 @@ def input_Nodes_Uses(
                 child_labels = []
                 
                 for a, b in combined:
-                    parent_labels.append(a)
-                    child_labels.append(b)
+                    parent_labels.append(b)
+                    child_labels.append(a)
                                                
                 validate_labels(uploadOption,driver,parent_labels, child_labels)
             
