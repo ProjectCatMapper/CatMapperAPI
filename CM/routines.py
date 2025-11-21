@@ -1713,19 +1713,16 @@ def get_duplicate_triplets(database, mail=None, return_type="data"):
     try:
         driver = getDriver(database)
         query = """
-        MATCH (n)
-        WITH n, keys(n) AS props
-        UNWIND props AS prop
-        WITH n, prop, n[prop] AS value
-        WHERE value IS NULL
-        OR (apoc.meta.cypher.type(value) = 'STRING' AND trim(value) = '')
-        OR (apoc.meta.cypher.type(value) STARTS WITH 'LIST' AND size(value) = 0)
-        RETURN labels(n) AS labels,
-            n.CMID AS CMID,
-            prop AS emptyProperty,
-            value AS propertyValue
-        ORDER BY labels, CMID, emptyProperty;
-        """
+        MATCH (a:DATASET)-[r:USES]->(b:CATEGORY)
+        WITH a, b, r.Key AS Key, COUNT(r) AS rel_count
+        WHERE rel_count > 1
+        RETURN 
+            a.CMID AS datasetID,
+            b.CMID AS CMID,
+            Key,
+            rel_count
+        ORDER BY datasetID, CMID, Key;
+                """
         results = getQuery(query, driver, type="df")
 
         fp1 = None
@@ -1824,13 +1821,13 @@ def runRoutinesStream(databases="all", mail=None):
             ("Bad Relations", lambda db: getBadRelations(db, mail=None, return_type="info")),
             ("CMName Not In Name", lambda db: CMNameNotInName(db, mail=None, return_type="info")),
             ("Missing CMName", lambda db: missingCMName(db, mail=None, return_type="info")),
-            ("Invalid shortname", lambda db: getBadContextual(db, mail=None, return_type="data")),
+            ("Invalid shortname", lambda db: getBadContextual(db, mail=None, return_type="info")),
             ("No USES", lambda db: noUSES(db, save=True, mail=None, return_type="info")),
             ("Check USES", lambda db: checkUSES(db, save=True, mail=None, return_type="info")),
-            ("Check USES for empty and duplicates", lambda db: get_duplicate_empty_USES(db, mail=None, return_type="data")),
-            ("Check USES for duplicate triplets", lambda db: get_duplicate_triplets(db, mail=None, return_type="data")),
+            ("Check USES for empty and duplicates", lambda db: get_duplicate_empty_USES(db, mail=None, return_type="info")),
+            ("Check USES for duplicate triplets", lambda db: get_duplicate_triplets(db, mail=None, return_type="info")),
             ("Process USES", lambda db: processUSES(db, detailed=False)),
-            ("Empty Node properties", lambda db: get_empty_nodeprops(db, mail=None, return_type="data")),
+            ("Empty Node properties", lambda db: get_empty_nodeprops(db, mail=None, return_type="info")),
             ("Process DATASETs", lambda db: processDATASETs(db)),
             ("Fix MetaTypes", lambda db: fixMetaTypes(db, return_type="info")),
         ]
