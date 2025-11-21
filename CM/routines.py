@@ -1453,24 +1453,75 @@ def getBadContextual(database, mail=None, return_type="data"):
     try:
         driver = getDriver(database)
         query = """
-        MATCH (n)
-        WHERE (n:CATEGORY OR n:DATASET OR n:METADATA) AND (n.CMName IS NULL OR n.CMName = '')
-        RETURN n.CMID as CMID, labels(n) as labels
+        match (d:DATASET) with collect(d.shortName) as sn
+        match (c:CATEGORY)<-[r:CONTAINS]-(p:CATEGORY) where not r.referenceKey is null 
+        with sn, r  unwind r.referenceKey as rf with r, sn, split(rf," Key: ")[0] as rf 
+        where not rf in sn return distinct rf
         """
         results = getQuery(query, driver, type="df")
 
         fp1 = None
         if isinstance(results, pd.DataFrame) and not results.empty:
-            with tempfile.NamedTemporaryFile(delete=False, prefix=f"missing_cmname_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"invalidShortName_refKeys_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
                 fp1 = tmpfile.name
                 results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Missing CMName for {database}", recipients=[
+                sendEmail(mail, subject=f"Invalid short names for {database}", recipients=[
                           "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+        query = """
+        MATCH (n)-[r]->(m)
+        WHERE type(r) IN ["CONTAINS", "LANGUOID_OF", "RELIGION_OF", "DISTRICT_OF"]
+        WITH n, m, type(r) AS relType, COUNT(r) AS relCount
+        WHERE relCount > 1
+        RETURN n.CMID AS CMID,
+            m.CMID AS targetCMID,
+            relType,
+            relCount
+        """
+        results2 = getQuery(query, driver, type="df")
+
+        fp2 = None
+        if isinstance(results2, pd.DataFrame) and not results2.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"duplicate_contextual_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp2 = tmpfile.name
+                results2.to_excel(fp2, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Duplicate contextual ties for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
+        
+        query = """
+                MATCH (n)-[r:CONTAINS]->(n)
+                RETURN n.CMID AS startCMID, [n.CMID] AS relatedNodes, 'Self-loop' AS issueType, type(r) AS relType
+
+                UNION ALL
+
+                MATCH (a)-[r1:CONTAINS]->(b)
+                WHERE (b)-[:CONTAINS]->(a) AND id(a) < id(b)  // avoids double reporting
+                RETURN a.CMID AS startCMID, [b.CMID] AS relatedNodes, 'Reciprocal' AS issueType, type(r1) AS relType
+
+                UNION ALL
+
+                MATCH p = (n)-[:CONTAINS*3..]->(n)
+                RETURN n.CMID AS startCMID,
+                    [x IN nodes(p) | x.CMID] AS relatedNodes,
+                    'Cycle' AS issueType,
+                    'CONTAINS' AS relType
+                """
+        results3 = getQuery(query, driver, type="df")
+
+        fp3 = None
+        if isinstance(results3, pd.DataFrame) and not results3.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"cyclic_contextual_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp3 = tmpfile.name
+                results3.to_excel(fp3, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Cyclic contextual ties for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp3])
+
         if return_type == "data":
-            return {"Total": len(results), "Missing CMName": results.to_dict(orient="records")}
+            return {"Invalid short names": len(results), "Invalid short names": results.to_dict(orient="records"),"Duplicate contextual ties": len(results2), "Duplicate contextual ties": results2.to_dict(orient="records"),"Cyclical contextual ties": len(results3), "Cyclical contextual ties": results3.to_dict(orient="records")}
         elif return_type == "info":
-            return {"info": str(len(results)), "filepath": fp1}
+            return {"Invalid short names": str(len(results)), "Invalid short names filepath": fp1,"Duplicate contextual ties": str(len(results2)), "Duplicate contextual ties filepath": fp2,"Cyclical contextual ties": str(len(results3)), "Cyclical contextual ties filepath": fp3}
     except Exception as e:
         result = str(e)
         return result, 500
@@ -1543,6 +1594,8 @@ def runRoutinesStream(databases="all", mail=None):
         else:
             dbs = databases
 
+        print("in")
+
         routines = [
             ("Modifications", lambda db: reportChanges(db, return_type="info")),
             ("Check Domains", lambda db: checkDomains(db, mail=None, return_type="info")),
@@ -1553,6 +1606,7 @@ def runRoutinesStream(databases="all", mail=None):
             ("Bad Relations", lambda db: getBadRelations(db, mail=None, return_type="info")),
             ("CMName Not In Name", lambda db: CMNameNotInName(db, mail=None, return_type="info")),
             ("Missing CMName", lambda db: missingCMName(db, mail=None, return_type="info")),
+            ("Invalid shortname", lambda db: getBadContextual(db, mail=None, return_type="info")),
             ("No USES", lambda db: noUSES(db, save=True, mail=None, return_type="info")),
             ("Check USES", lambda db: checkUSES(db, save=True, mail=None, return_type="info")),
             ("Process USES", lambda db: processUSES(db, detailed=False)),
@@ -1618,6 +1672,7 @@ def runRoutinesStream(databases="all", mail=None):
           <tr><td>Bad Relations</td><td>getBadRelations</td><td>Checks for invalid or inconsistent parent–child category relationships and mis-specified CONTAINS links.</td></tr>
           <tr><td>CMName Not In Name</td><td>CMNameNotInName</td><td>Finds categories where the primary CMName is missing from the alternate names list and updates them.</td></tr>
           <tr><td>Missing CMName</td><td>missingCMName</td><td>Identifies CATEGORY, DATASET, and METADATA nodes that lack a defined CMName property.</td></tr>
+          <tr><td>Invalid shortName and bad contextual ties</td><td>getbadContextual</td><td>Identifies bad shortnames and also duplicate and cylical contextual ties.</td></tr>
           <tr><td>No USES</td><td>noUSES</td><td>Lists categories that are not connected to any datasets through USES relationships.</td></tr>
           <tr><td>Check USES</td><td>checkUSES</td><td>Validates USES relationships, checking for missing or malformed label, Key, or Name fields.</td></tr>
           <tr><td>Process USES</td><td>processUSES</td><td>Processes and reconciles USES relationships for consistency and downstream use.</td></tr>
