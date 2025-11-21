@@ -1566,7 +1566,7 @@ def getBadContextual(database, mail=None, return_type="data"):
         return result, 500
 
 def get_duplicate_empty_USES(database, mail=None, return_type="data"):    
-      try:
+    try:
         driver = getDriver(database)
         query = """
         MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
@@ -1675,7 +1675,7 @@ def get_duplicate_empty_USES(database, mail=None, return_type="data"):
         return result, 500
 
 def get_empty_nodeprops(database, mail=None, return_type="data"):
-        try:
+    try:
         driver = getDriver(database)
         query = """
         MATCH (n)
@@ -1710,7 +1710,7 @@ def get_empty_nodeprops(database, mail=None, return_type="data"):
         return result, 500
 
 def get_duplicate_triplets(database, mail=None, return_type="data"):
-        try:
+    try:
         driver = getDriver(database)
         query = """
         MATCH (n)
