@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, render_template, make_response
-from CM import getDriver, verifyUser, login, mergeNodes, processUSES, replaceProperty, add_edit_delete_Node, add_edit_delete_USES, createLabel, deleteNode, deleteUSES, moveUSESties, check_ambiguous_ties_moveUSESties, cleanCMID, unlist, createNodes, waitingUSES
+from CM import getDriver, verifyUser, login, mergeNodes, processUSES, replaceProperty, add_edit_delete_Node, add_edit_delete_USES, createLabel, deleteNode, deleteUSES, moveUSESties, check_ambiguous_ties_moveUSESties, cleanCMID, unlist, createNodes, waitingUSES, mergeUSESties
 import json
 
 admin_bp = Blueprint('admin', __name__)
@@ -252,4 +252,22 @@ def getUpdateWaitingUSES():
     data = json.loads(data)
     database = data.get("database")
     result = waitingUSES(database)
+    return result
+
+@admin_bp.route('/mergeUSESties', methods=['GET','POST'])
+def getMergeUSESties():
+    if request.method == 'GET':
+        database = request.args.get('database')
+        CMID = request.args.get('CMID')
+        Key = request.args.get('Key')
+        datasetID = request.args.get('datasetID')
+    else:
+        data = request.get_data()
+        data = json.loads(data)
+        database = data.get("database")
+        CMID = data.get("CMID")
+        Key = data.get("Key")
+        datasetID = data.get("datasetID")
+    
+    result = mergeUSESties(database, CMID, Key, datasetID)
     return result
