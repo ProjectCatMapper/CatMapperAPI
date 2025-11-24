@@ -1040,5 +1040,58 @@ def createLabel(database,user,input):
 
     return "done"
 
+
+def mergeUSESties(database, CMID, Key, datasetID):
+    driver = getDriver(database)
+    
+    # identify properties that cannot be combined.
+    props_query = """
+    MATCH (p:PROPERTY)
+    WHERE p.type = "relationship" AND p.metaType = "string"
+    RETURN p.CMName AS property
+    """
+    non_combinable_props = getQuery(props_query, driver=driver)
+    existing_query = """
+    MATCH (:CATEGORY {CMID: $cmid})<-[r:USES {Key: $key}]-(:DATASET {CMID: $datasetID})
+    UNWIND keys(r) AS prop
+    WITH prop, r
+    WHERE prop IN $props AND r[prop] IS NOT NULL
+    RETURN DISTINCT prop as property, r[prop] AS value
+    """
+    existing_props = getQuery(existing_query, driver=driver, params={
+        "cmid": CMID,
+        "key": Key,
+        "datasetID": datasetID,
+        "props": [row['property'] for row in non_combinable_props]
+    })
+    # determine if any non-combinable properties have multiple distinct values
+    for row in existing_props:
+        if isinstance(row['value'], list) and len(set(row['value'])) > 1:
+            raise Exception(f"Cannot merge USES ties for CMID {CMID} with Key {Key} in Dataset {datasetID} due to multiple distinct values for property {row['property']}")
+    # build properties map for merging
+    properties_map = {}
+    for row in non_combinable_props:
+        properties_map[row['property']] = 'discard'
+    properties_map[".*"] = 'combine'
+
+    merge_query = """
+    MATCH (:CATEGORY {CMID: $cmid})<-[r:USES {Key: $key}]-(:DATASET {CMID: $datasetID})
+    WITH collect(r) AS rels
+    CALL apoc.refactor.mergeRelationships(rels, {properties: $propsMap}) YIELD rel
+    RETURN count(rel) AS mergedCount
+    """
+    result = getQuery(merge_query, driver=driver, params={
+        "cmid": CMID,
+        "key": Key,
+        "datasetID": datasetID,
+        "propsMap": properties_map
+    })
+    
+    if result[0]['mergedCount'] == 0:
+        raise Exception(f"No USES ties found to merge for CMID {CMID} with Key {Key} in Dataset {datasetID}")
+    return f"Merged USES ties successfully for CMID {CMID} with Key {Key} in Dataset {datasetID}"
+
+
+
 ############################
 #section for potentially deprecating functions
