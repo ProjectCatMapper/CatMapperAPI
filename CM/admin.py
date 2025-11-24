@@ -1042,54 +1042,107 @@ def createLabel(database,user,input):
 
 
 def mergeUSESties(database, CMID, Key, datasetID):
+    """
+    Merge all `USES` relationships between a CATEGORY node and a DATASET node 
+    in a Neo4j database while respecting constraints on which properties can 
+    or cannot be combined.
+
+    Parameters
+    ----------
+    database : str
+        Name of the Neo4j database to connect to.
+    CMID : str
+        The unique identifier of the CATEGORY node.
+    Key : str
+        The key value identifying the specific USES relationships to merge.
+    datasetID : str
+        The unique identifier of the DATASET node.
+
+    Returns
+    -------
+    str
+        Success message confirming that the USES relationships were merged.
+
+    Raises
+    ------
+    Exception
+        If multiple distinct values are found for a non-combinable property, 
+        or if no relationships are found to merge.
+    """
+
+    # Obtain a Neo4j driver connection for the specified database.
     driver = getDriver(database)
-    
-    # identify properties that cannot be combined.
+
+    # Query for properties that cannot be combined when merging relationships.
     props_query = """
     MATCH (p:PROPERTY)
     WHERE p.type = "relationship" AND p.metaType = "string"
     RETURN p.CMName AS property
     """
     non_combinable_props = getQuery(props_query, driver=driver)
+
+    # Query for all existing USES relationships matching the given identifiers,
+    # and extract property-value pairs for the non-combinable properties.
     existing_query = """
     MATCH (:CATEGORY {CMID: $cmid})<-[r:USES {Key: $key}]-(:DATASET {CMID: $datasetID})
     UNWIND keys(r) AS prop
     WITH prop, r
     WHERE prop IN $props AND r[prop] IS NOT NULL
-    RETURN DISTINCT prop as property, r[prop] AS value
+    RETURN DISTINCT prop AS property, r[prop] AS value
     """
-    existing_props = getQuery(existing_query, driver=driver, params={
-        "cmid": CMID,
-        "key": Key,
-        "datasetID": datasetID,
-        "props": [row['property'] for row in non_combinable_props]
-    })
-    # determine if any non-combinable properties have multiple distinct values
+    existing_props = getQuery(
+        existing_query,
+        driver=driver,
+        params={
+            "cmid": CMID,
+            "key": Key,
+            "datasetID": datasetID,
+            "props": [row['property'] for row in non_combinable_props]
+        }
+    )
+
+    # Check for any non-combinable properties that have conflicting values.
+    # If found, merging is aborted to prevent data loss or inconsistency.
     for row in existing_props:
         if isinstance(row['value'], list) and len(set(row['value'])) > 1:
-            raise Exception(f"Cannot merge USES ties for CMID {CMID} with Key {Key} in Dataset {datasetID} due to multiple distinct values for property {row['property']}")
-    # build properties map for merging
-    properties_map = {}
-    for row in non_combinable_props:
-        properties_map[row['property']] = 'discard'
-    properties_map[".*"] = 'combine'
+            raise Exception(
+                f"Cannot merge USES ties for CMID {CMID} with Key {Key} in Dataset {datasetID} "
+                f"due to multiple distinct values for property {row['property']}"
+            )
 
+    # Construct a property merge map defining which properties to combine or discard.
+    # Non-combinable properties are discarded; all others are combined.
+    properties_map = {row['property']: 'discard' for row in non_combinable_props}
+    properties_map[".*"] = 'combine'  # Default: combine all unspecified properties.
+
+    # Execute the merge operation using APOC's refactor.mergeRelationships procedure.
     merge_query = """
     MATCH (:CATEGORY {CMID: $cmid})<-[r:USES {Key: $key}]-(:DATASET {CMID: $datasetID})
     WITH collect(r) AS rels
     CALL apoc.refactor.mergeRelationships(rels, {properties: $propsMap}) YIELD rel
     RETURN count(rel) AS mergedCount
     """
-    result = getQuery(merge_query, driver=driver, params={
-        "cmid": CMID,
-        "key": Key,
-        "datasetID": datasetID,
-        "propsMap": properties_map
-    })
-    
+    result = getQuery(
+        merge_query,
+        driver=driver,
+        params={
+            "cmid": CMID,
+            "key": Key,
+            "datasetID": datasetID,
+            "propsMap": properties_map
+        }
+    )
+
+    # Raise an error if no relationships were merged (indicating a mismatch or missing ties).
     if result[0]['mergedCount'] == 0:
-        raise Exception(f"No USES ties found to merge for CMID {CMID} with Key {Key} in Dataset {datasetID}")
+        raise Exception(
+            f"No USES ties found to merge for CMID {CMID} with Key {Key} in Dataset {datasetID}"
+        )
+
+    # Return success confirmation.
     return f"Merged USES ties successfully for CMID {CMID} with Key {Key} in Dataset {datasetID}"
+
+
 
 
 

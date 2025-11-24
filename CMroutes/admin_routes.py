@@ -233,7 +233,7 @@ def getAdminEdit():
 @admin_bp.route('/createNodes', methods=['POST'])
 def createNodesapi():
     try:
-
+        import pandas as pd
         data = request.get_data()
         data = json.loads(data)
         df = data.get('df')

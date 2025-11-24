@@ -836,6 +836,214 @@ def validate_labels(uploadOption,driver,parent_labels, child_labels):
                     f"Child Labels: {j}"
                 )
 
+def create_mties_stacks(database, user, dataset):
+    # check if dataset has necessary columns
+    driver = getDriver(database)
+    mergingID = dataset["mergingID"].unique().tolist()
+    required_cols = ["mergingID","datasetID"]
+    for col in required_cols:
+        if col not in dataset.columns:
+            raise ValueError(f"Missing required column: {col}")
+    if not "stackID" in dataset.columns:
+        updateLog(f"log/{user}uploadProgress.txt", "Creating missing stackID", write="a")
+        merging = getQuery(f"Match (m:MERGING) WHERE m.CMID in $mergingID unwind keys(m) as key WITH m, key where not key = 'names' return distinct m.CMID as mergingID, key, m[key] as value order by value desc", driver, mergingID = mergingID, type = "df")
+        if not merging:
+            raise ValueError("No merging nodes found for the provided mergingIDs")
+        # modify CMName and shortName to include datasetID
+        stack = merging.pivot(index="mergingID", columns="key", values="value")
+        stack = stack.merge(dataset[["mergingID","datasetID"]], on="mergingID", how="left")
+        stack['CMName'] = stack.apply(lambda row: f"{row['CMName']}_{row['datasetID']}", axis=1)
+        stack['shortName'] = stack.apply(lambda row: f"{row['shortName']}_{row['datasetID']}", axis=1)
+        stack.rename(columns={"mergingID":"parent"}, inplace=True)
+        stack.drop(columns=["CMID"], inplace=True)
+        
+        nodes = stack[['parent','CMName','shortName','DatasetCitation']].drop_duplicates().copy()
+        CMIDs = getAvailableID(
+            new_id="CMID", label="DATASET", n=len(nodes), database=database
+        )       
+        stack['CMID'] = CMIDs
+        new_stacks_query = """
+        unwind $rows as row
+        MERGE (a:DATASET {CMID: row.CMID})
+        ON CREATE SET
+        a.CMName = row.CMName,
+        a.shortName = row.shortName,
+        a:STACK
+        return elementId(a) as id, a.CMID as CMID, labels(a) as labels
+        """
+        rows = stack.to_dict(orient="records")
+        updateLog(f"log/{user}uploadProgress.txt", "Creating missing stackID nodes", write="a")
+        results = getQuery(query=new_stacks_query, driver=driver, params={"rows": rows})
+        for res in results:
+            if "STACK" not in res['labels']:
+                raise ValueError(f"Node with CMID {res['CMID']} was not created as a STACK node")
+            createLog(
+                id=[res["id"]],
+                type="node",
+                log=[f"created STACK node with CMID: {res['CMID']}"],
+                user=user,
+                driver=driver,
+            )
+        dataset = dataset.merge(stack[['CMID','parent','datasetID']], left_on=["mergingID",'datasetID'], right_on=["parent",'datasetID'], how="left")
+        dataset.rename(columns={"CMID":"stackID"}, inplace=True)
+        dataset.drop(columns=["parent"], inplace=True)
+        
+    merging_ties_query = """
+    unwind $rows as row
+    MATCH (a:DATASET {CMID: row.mergingID})
+    MATCH (b:DATASET {CMID: row.stackID})
+    MERGE (a)-[r:MERGING]->(b)
+    RETURN count(*) as count
+    """
+    rows = dataset[["mergingID", "stackID"]].drop_duplicates().to_dict(orient="records")
+    updateLog(f"log/{user}uploadProgress.txt", "Creating MERGING ties between merging and stack", write="a")
+    results = getQuery(query=merging_ties_query, driver=driver, params={"rows": rows})
+    if results[0]['count'] == len(rows):
+        updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results[0]['count']} MERGING ties", write="a")
+    else:
+        raise ValueError(f"Expected to create {len(rows)} MERGING ties, but created {results[0]['count']}")
+    merging_ties_query2 = """
+    unwind $rows as row
+    MATCH (a:DATASET {CMID: row.stackID})
+    MATCH (b:DATASET {CMID: row.datasetID})
+    MERGE (a)-[r:MERGING]->(b)
+    RETURN count(*) as count
+    """
+    rows = dataset[["stackID", "datasetID"]].drop_duplicates().to_dict(orient="records")
+    updateLog(f"log/{user}uploadProgress.txt", "Creating MERGING ties between stack and dataset", write="a")
+    results = getQuery(query=merging_ties_query2, driver=driver, params={"rows": rows})
+    if results[0]['count'] == len(rows):
+        updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results[0]['count']} MERGING ties", write="a")
+    else:
+        raise ValueError(f"Expected to create {len(rows)} MERGING ties, but created {results[0]['count']}")
+        
+        
+    return f"Merging ties created successfully for mergingID(s): {', '.join(mergingID)}"
+
+def create_mties_variables(database, user, dataset):
+    driver = getDriver(database)
+    mergingID = dataset["mergingID"].unique().tolist()
+    required_cols = ["mergingID","variableID","varName","Key","datasetID"]
+    for col in required_cols:
+        if col not in dataset.columns:
+            raise ValueError(f"Missing required column: {col}")
+    if not "stackID" in dataset.columns:
+        updateLog(f"log/{user}uploadProgress.txt", "Finding missing stackIDs", write="a")
+        stacks = getQuery("unwind $rows as row Match (m:MERGING {CMID: row.mergingID})-[:MERGING]->(s:STACK)-[:MERGING]->(d:DATASET {CMID: row.datasetID}) return distinct m.CMID as mergingID, s.CMID as stackID, d.CMID as datasetID", driver, rows = dataset[["mergingID", "datasetID"]].drop_duplicates().to_dict(orient="records"), type = "df")
+        if stacks.empty:
+            raise ValueError("No stacks found for the provided mergingIDs and datasetIDs")
+        dataset = dataset.merge(stacks[["mergingID","stackID","datasetID"]], on=["mergingID","datasetID"], how="left")
+    # create merging ties between stacks and variables
+    
+    # create dict with ids and properties
+    top_level = ["stackID", "variableID"]
+
+    # Define the property columns dynamically (the rest)
+    property_columns = ["varName","stackTransform","summaryStatistic"]
+    property_columns = [col for col in property_columns if col in dataset.columns.tolist()]
+    
+    nested = []
+    for _, row in dataset.iterrows():
+        props = {k: row[k] for k in property_columns}
+        entry = {k: row[k] for k in top_level}
+        entry["properties"] = props
+        nested.append(entry)
+
+    merging_vars_query = """
+    unwind $rows as row
+    MATCH (m:STACK {CMID: row.stackID})
+    MATCH (v:VARIABLE {CMID: row.variableID})
+    MERGE (m)-[r:MERGING]->(v)
+    SET r += row.properties
+    RETURN count(*) AS count
+    """
+    results = getQuery(query=merging_vars_query, driver=driver, params={"rows": nested})
+    
+    if results[0]['count'] == len(nested):
+        updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results[0]['count']} MERGING ties between stacks and variables", write="a")
+    else:
+        raise ValueError(f"Expected to create {len(nested)} MERGING ties, but created {results[0]['count']}")
+    
+    # create merging ties between variables and datasets
+    top_level = ["datasetID", "variableID"]
+    rows = dataset.copy()
+    rows.rename(columns={"stackID":"stack"}, inplace=True)
+    property_columns = ["stack","datasetTransform"]
+    property_columns = [col for col in property_columns if col in rows.columns.tolist()]
+    
+    nested = []
+    for _, row in rows.iterrows():
+        props = {k: row[k] for k in property_columns}
+        entry = {k: row[k] for k in top_level}
+        entry["properties"] = props
+        nested.append(entry)
+    merging_vars_query2 = """
+    unwind $rows as row
+    MATCH (d:DATASET {CMID: row.datasetID})
+    MATCH (v:VARIABLE {CMID: row.variableID})
+    MERGE (d)-[r:MERGING]->(v)
+    SET r += row.properties
+    RETURN count(*) AS count
+    """
+    results = getQuery(query=merging_vars_query2, driver=driver, params={"rows": nested})
+    
+    if results[0]['count'] == len(nested):
+        updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results[0]['count']} MERGING ties between datasets and variables", write="a")
+    else:
+        raise ValueError(f"Expected to create {len(nested)} MERGING ties, but created {results[0]['count']}")
+    
+    return f"Merging variable ties created successfully for mergingID(s): {', '.join(mergingID)}"
+
+database = "ArchaMap"
+user = "1"
+# dataset = pd.read_excel("tmp/BecomingHopiMergingTemplate.xlsx")
+# dataset = pd.read_excel("tmp/BecomingHopiMergingVariables.xlsx")
+dataset = pd.read_excel("tmp/BecomingHopiEquivalenceTies.xlsx")
+
+def create_equivalence_ties(database, user, dataset):
+    driver = getDriver(database)
+    required_cols = ["mergingID","categoryID","Key","datasetID"]
+    for col in required_cols:
+        if col not in dataset.columns:
+            raise ValueError(f"Missing required column: {col}")
+    
+    # add stack ids if missing
+    if not "stackID" in dataset.columns:
+        updateLog(f"log/{user}uploadProgress.txt", "Finding missing stackIDs", write="a")
+        stacks = getQuery("unwind $rows as row Match (m:MERGING {CMID: row.mergingID})-[:MERGING]->(s:STACK)-[:MERGING]->(d:DATASET {CMID: row.datasetID}) return distinct m.CMID as mergingID, s.CMID as stackID, d.CMID as datasetID", driver, rows = dataset[["mergingID", "datasetID"]].drop_duplicates().to_dict(orient="records"), type = "df")
+        if stacks.empty:
+            raise ValueError("No stacks found for the provided mergingIDs and datasetIDs")
+        dataset = dataset.merge(stacks[["mergingID","stackID","datasetID"]], on=["mergingID","datasetID"], how="left")
+    
+    # return original CMIDs for dataset and Key
+    original_cmids_query = """
+    unwind $rows as row
+    MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+    WHERE d.CMID = row.datasetID AND r.Key = row.Key
+    RETURN row.mergingID AS mergingID, d.CMID AS datasetID, c.CMID AS originalID, r.Key as Key
+    """
+    original_cmids = getQuery(query=original_cmids_query, driver=driver, params={"rows": dataset[["mergingID","datasetID","Key"]].to_dict(orient="records")}, type="df")
+    if original_cmids.empty:
+        raise ValueError("No USES ties found for the provided datasetIDs and Keys")
+    dataset = dataset.merge(original_cmids, on=["mergingID","datasetID","Key"], how="left")
+        
+    equivalence_ties_query = """
+    unwind $rows as row
+    MATCH (c1:CATEGORY {CMID: row.originalID})
+    MATCH (c2:CATEGORY {CMID: row.categoryID})
+    MERGE (c1)-[r:EQUIVALENT]->(c2)
+    set r += {stack: row.stackID, dataset: row.datasetID, Key: row.Key}
+    RETURN count(*) as count
+    """
+    
+    results = getQuery(query=equivalence_ties_query, driver=driver, params={"rows": dataset[["originalID","categoryID","stackID","datasetID","Key"]].to_dict(orient="records")}, type = "df")
+    if results[0]['count'] == len(dataset)::
+        updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results[0]['count']} EQUIVALENT ties", write="a")
+    else:
+        raise ValueError(f"Expected to create {len(dataset)} EQUIVALENT ties, but created {results[0]['count']}")
+    
+    return f"EQUIVALENT ties created successfully for mergingID(s): {', '.join(dataset['mergingID'].unique().tolist())}"
+
 def input_Nodes_Uses(
     dataset,
     database,
