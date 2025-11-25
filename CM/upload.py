@@ -1243,6 +1243,7 @@ def input_Nodes_Uses(
         if mask.any():
             invalid_rows = dataset[mask]
             raise ValueError(f"When adding new nodes, new node must have non-empty Name or CMName. Check : {invalid_rows}")
+    
 
     """checks if all required columns are present"""
 
@@ -1796,6 +1797,9 @@ def input_Nodes_Uses(
                     f"Error:CMID, Key and datasetID triplet already exists for {keyExists}"
                 )
     
+        
+    # For function 2, if two rows have the same uses tie(CMID,Key,datasetID) triplet and they both contain different values for
+    # string type variable, throw an error
 
     query = """MATCH (n:PROPERTY) WHERE n.type="relationship" and n.metaType="string" RETURN n.CMName as n"""
 
@@ -1804,9 +1808,7 @@ def input_Nodes_Uses(
             driver,
             type="list",
         )
-        
-    # For function 2, if two rows have the same uses tie(CMID,Key,datasetID) triplet and they both contain different values for
-    # string type variable, throw an error
+
     if uploadOption == "add_uses":
 
         group_cols = ["CMID", "Key", "datasetID"]
