@@ -431,27 +431,6 @@ def generate_cypher_query(domain, nContains):
     full_query = base_query + "\n".join(union_queries)
     return full_query
 
-
-def transform_variables_r(variables):
-    variables["transform"] = variables["transform"].str.replace(
-        "~", "!", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "=", "==", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "!==", "!=", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "concat", "paste0", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        r',0\)', ',na.rm = True', regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "in", "%in%", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "na.rm == T", "na.rm = True", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "== as.numeric", "= as.numeric", regex=True)
-    return variables
-
-
 def load_r_syntax_template(filename, replacements):
     """ Reads R syntax template and replaces placeholders """
     try:
@@ -516,10 +495,16 @@ def getMergingTemplate(datasetID, database):
         except:
             return {"Error": "Unable to process error"}, 500
 
-
-def createSyntax(template, database="SocioMap", domain="ETHNICITY",
+# template = pd.read_excel("tmp/BecomingHopiMergingTemplate.xlsx")
+# database = "ArchaMap"
+# syntax = "R"
+# dirpath = None
+# download=True
+def createSyntax(template, database="SocioMap",
                  syntax="R", dirpath=None, download=True):
     try:
+        
+        driver = getDriver(database)
 
         try:
             template = pd.DataFrame(template)
@@ -529,26 +514,32 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
         if template.empty:
             raise ValueError("Template DataFrame is empty.")
 
-        if "datasetID" not in template.columns:
-            raise ValueError(
-                "Template DataFrame must contain 'datasetID' column.")
-
-        if "mergingID" not in template.columns:
-            raise ValueError(
-                "Template DataFrame must contain 'mergingID' column.")
+        required_cols = ["mergingID", "datasetID", "filePath"]
+        for col in required_cols:
+            if col not in template.columns:
+                raise ValueError(
+                    f"Required column '{col}' is missing from the template.")
 
         if "stackID" not in template.columns:
-            raise ValueError(
-                "Template DataFrame must contain 'stackID' column.")
+            # obtain stackID from database
+            query = """
+            UNWIND $rows as row
+            MATCH (m:DATASET {CMID: row.mergingID})-[rs:MERGING]->(s:DATASET)-[rm:MERGING]->(d:DATASET {CMID: row.datasetID})
+            RETURN
+            m.CMID as mergingID, s.CMID as stackID, d.CMID as datasetID
+            """
+            stacks = getQuery(query, driver=driver, params={
+                              "rows": template.to_dict(orient='records')}, type="df")
+            if stacks.empty:
+                raise ValueError(
+                    "Could not retrieve stackIDs from the database. Please ensure mergingID and datasetID are correct.")
+            template = pd.merge(template, stacks, on=[
+                                "mergingID", "datasetID"], how="left")
+        template = template[["mergingID", "stackID",
+                                 "datasetID", "filePath"]]
 
         if dirpath is None:
             dirpath = "./tmp"
-
-        driver = getDriver(database)
-
-        if "filePath" not in template.columns:
-            raise ValueError(
-                "Must upload a list of datasets with the filePath column before generating syntax.")
 
         wd = template.iloc[0]["filePath"]
 
@@ -565,7 +556,6 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
 
         # verify CMIDs
         cols = ["mergingID", "stackID", "datasetID"]
-        cols = [col for col in cols if col in template.columns]
         CMIDs = list(set(template[cols].values.flatten().tolist()))
 
         check = getQuery(
@@ -577,7 +567,7 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
             params={"CMIDs": CMIDs},
             type="df"
         )
-
+        
         missing = set(CMIDs) - set(check["CMID"].tolist())
         missing = [str(m) + "\n" for m in missing]
 
@@ -586,32 +576,22 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
                 "Error: One or more CMIDs not found in the database\nMissing CMIDs: ", missing)
         else:
             print("All CMIDs found in the database.")
-        # need to adjust query to account for no stack datasets and for potentially different keys to variables using equivalence ties
-        db_query = """
+            
+        # get merging variables
+        variable_query = """
             unwind $rows as row
-            match (m:DATASET {CMID: row.mergingID})-[rs:MERGING]->(s:DATASET {CMID: row.stackID})-[rm:MERGING]->(v:VARIABLE)<-[ru:USES]-(d:DATASET {CMID: row.datasetID})
-            return
-            m.CMID as mergingID, m.CMName as mergingName, s.CMID as stackID, s.CMName as stackName, d.CMID as datasetID, d.CMName as datasetName, rs.aggBy as aggBy, v.CMID as variableCMID, head(apoc.coll.flatten(collect(rm.varName),true)) as varName, rm.transform as transform, rm.Rtransform as Rtransform, rm.Rfunction as Rfunction, rm.summaryStatistic as summaryStatistic, ru.Key as Key
+            match (m:DATASET {CMID: row.mergingID})-[:MERGING]->(s:DATASET {CMID: row.stackID})-[rsv:MERGING]->(v:VARIABLE)<-[rdv:MERGING]-(d:DATASET {CMID: row.datasetID}) where rdv.stack = s.CMID
+            optional match (v)<-[ru:USES]-(d) 
+            RETURN DISTINCT
+            m.CMID as mergingID, m.CMName as mergingName, s.CMID as stackID, s.CMName as stackName, d.CMID as datasetID, d.CMName as datasetName, rsv.varName as varName, v.CMID as variableID, rsv.stackTransform as stackTransform, rsv.summaryStatistic as summaryStatistic, rdv.datasetTransform as datasetTransform, ru.Key as variableKey
             """
-        data = getQuery(db_query, driver=driver, params={
+        variables = getQuery(variable_query, driver=driver, params={
                         "rows": template.to_dict(orient='records')}, type="df")
 
-        # pd.set_option('display.max_rows', None)
 
-        # print(data.head(10))
-
-        if "transform" in data.columns:
-            print("transforming variables")
-
-            if "Rtransform" in data.columns:
-                data['transform'] = data['Rtransform'].combine_first(
-                    data['transform'])
-                data = transform_variables_r(data)
-        data = data.reset_index()
-
-        variables = data[["datasetID", "Key"]].copy()
+        template_names = variables[['mergingID', 'mergingName','stackID','stackName']].drop_duplicates()
+        variables = data[["datasetID", "variableKey"]].copy()
         variables = variables.drop_duplicates()
-        # variables = extract_key(variables, col="Key")
         variables[['variable', 'value']] = variables['Key'].str.split(
             ': ', n=1, expand=True)
 
