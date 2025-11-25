@@ -24,7 +24,7 @@ def createKey(nodes, cols):
 
     # Create the 'Key' column by concatenating "{ColumnName}: {Value}" for each specified column
     nodes['Key'] = nodes[cols].astype(str).apply(
-        lambda row: '; '.join([f"{col}: {row[col]}" for col in cols]),
+        lambda row: ' && '.join([f"{col} == {row[col]}" for col in cols]),
         axis=1
     )
 
@@ -53,10 +53,10 @@ def extract_key(nodes, col="Key", sep=None):
     nodes = nodes.reset_index()
 
     tmp = nodes[["index", col]].dropna(subset=[col]).copy()
-    tmp[col] = tmp[col].str.split(";")
+    tmp[col] = tmp[col].str.split(" && ")
     tmp = tmp.explode(col)
     tmp[col] = tmp[col].str.strip()
-    tmp[['KeyName', 'KeyVal']] = tmp[col].str.split(': ', n=1, expand=True)
+    tmp[['KeyName', 'KeyVal']] = tmp[col].str.split(' == ', n=1, expand=True)
     tmp['KeyName'] = tmp['KeyName'].str.strip()
     tmp['KeyVal'] = tmp['KeyVal'].str.strip()
     tmp.drop(columns=[col], inplace=True)

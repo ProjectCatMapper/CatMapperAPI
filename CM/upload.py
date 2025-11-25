@@ -380,22 +380,23 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
         # End of error checking
         
         #get elementID of USES tie uniquely identified by CMID,Key and datasetID
-        id_query = """UNWIND $rows AS row
-            MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
-            RETURN elementId(r) AS relID, row.CMID AS CMID, row.Key AS Key, row.datasetID AS datasetID
-            """
-        
-        id_values = getQuery(
-            query=id_query,
-            driver=driver,
-            params={"rows": df.to_dict(orient="records")}, type="df"
-        )
-
-        df = df.merge(
-                id_values,
-                on=["CMID", "Key", "datasetID"],
-                how="left"
+        if propertyType == "USES":
+            id_query = """UNWIND $rows AS row
+                MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
+                RETURN elementId(r) AS relID, row.CMID AS CMID, row.Key AS Key, row.datasetID AS datasetID
+                """
+            
+            id_values = getQuery(
+                query=id_query,
+                driver=driver,
+                params={"rows": df.to_dict(orient="records")}, type="df"
             )
+
+            df = df.merge(
+                    id_values,
+                    on=["CMID", "Key", "datasetID"],
+                    how="left"
+                )
                         
         if "NewKey" in df.columns:
             df = df.rename(columns={
@@ -810,15 +811,15 @@ def validate_labels(uploadOption,driver,parent_labels, child_labels):
 
     all_group_labels = {item['groupLabel'] for item in all_group_labels if item['groupLabel'] != "CATEGORY"}
 
-    if uploadOption == "add_node":
-        query = """MATCH (n:LABEL)
-                    RETURN n.CMName AS key, n.groupLabel AS value
-                    """
+    # if uploadOption == "add_node":
+    #     query = """MATCH (n:LABEL)
+    #                 RETURN n.CMName AS key, n.groupLabel AS value
+    #                 """
         
-        result = getQuery(query=query,driver=driver)
-        label_dict = {row["key"]: row["value"] for row in result}
+    #     result = getQuery(query=query,driver=driver)
+    #     label_dict = {row["key"]: row["value"] for row in result}
 
-        child_labels = [[label_dict.get(i[0])] for i in child_labels]
+    #     child_labels = [[label_dict.get(i[0])] for i in child_labels]
             
     for idx, (i, j) in enumerate(zip(parent_labels, child_labels)):
         if  len(i) == 0:
@@ -834,6 +835,214 @@ def validate_labels(uploadOption,driver,parent_labels, child_labels):
                     f"Parent Labels: {i}\n"
                     f"Child Labels: {j}"
                 )
+
+def create_mties_stacks(database, user, dataset):
+    # check if dataset has necessary columns
+    driver = getDriver(database)
+    mergingID = dataset["mergingID"].unique().tolist()
+    required_cols = ["mergingID","datasetID"]
+    for col in required_cols:
+        if col not in dataset.columns:
+            raise ValueError(f"Missing required column: {col}")
+    if not "stackID" in dataset.columns:
+        updateLog(f"log/{user}uploadProgress.txt", "Creating missing stackID", write="a")
+        merging = getQuery(f"Match (m:MERGING) WHERE m.CMID in $mergingID unwind keys(m) as key WITH m, key where not key = 'names' return distinct m.CMID as mergingID, key, m[key] as value order by value desc", driver, mergingID = mergingID, type = "df")
+        if not merging:
+            raise ValueError("No merging nodes found for the provided mergingIDs")
+        # modify CMName and shortName to include datasetID
+        stack = merging.pivot(index="mergingID", columns="key", values="value")
+        stack = stack.merge(dataset[["mergingID","datasetID"]], on="mergingID", how="left")
+        stack['CMName'] = stack.apply(lambda row: f"{row['CMName']}_{row['datasetID']}", axis=1)
+        stack['shortName'] = stack.apply(lambda row: f"{row['shortName']}_{row['datasetID']}", axis=1)
+        stack.rename(columns={"mergingID":"parent"}, inplace=True)
+        stack.drop(columns=["CMID"], inplace=True)
+        
+        nodes = stack[['parent','CMName','shortName','DatasetCitation']].drop_duplicates().copy()
+        CMIDs = getAvailableID(
+            new_id="CMID", label="DATASET", n=len(nodes), database=database
+        )       
+        stack['CMID'] = CMIDs
+        new_stacks_query = """
+        unwind $rows as row
+        MERGE (a:DATASET {CMID: row.CMID})
+        ON CREATE SET
+        a.CMName = row.CMName,
+        a.shortName = row.shortName,
+        a:STACK
+        return elementId(a) as id, a.CMID as CMID, labels(a) as labels
+        """
+        rows = stack.to_dict(orient="records")
+        updateLog(f"log/{user}uploadProgress.txt", "Creating missing stackID nodes", write="a")
+        results = getQuery(query=new_stacks_query, driver=driver, params={"rows": rows})
+        for res in results:
+            if "STACK" not in res['labels']:
+                raise ValueError(f"Node with CMID {res['CMID']} was not created as a STACK node")
+            createLog(
+                id=[res["id"]],
+                type="node",
+                log=[f"created STACK node with CMID: {res['CMID']}"],
+                user=user,
+                driver=driver,
+            )
+        dataset = dataset.merge(stack[['CMID','parent','datasetID']], left_on=["mergingID",'datasetID'], right_on=["parent",'datasetID'], how="left")
+        dataset.rename(columns={"CMID":"stackID"}, inplace=True)
+        dataset.drop(columns=["parent"], inplace=True)
+        
+    merging_ties_query = """
+    unwind $rows as row
+    MATCH (a:DATASET {CMID: row.mergingID})
+    MATCH (b:DATASET {CMID: row.stackID})
+    MERGE (a)-[r:MERGING]->(b)
+    RETURN count(*) as count
+    """
+    rows = dataset[["mergingID", "stackID"]].drop_duplicates().to_dict(orient="records")
+    updateLog(f"log/{user}uploadProgress.txt", "Creating MERGING ties between merging and stack", write="a")
+    results = getQuery(query=merging_ties_query, driver=driver, params={"rows": rows})
+    if results[0]['count'] == len(rows):
+        updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results[0]['count']} MERGING ties", write="a")
+    else:
+        raise ValueError(f"Expected to create {len(rows)} MERGING ties, but created {results[0]['count']}")
+    merging_ties_query2 = """
+    unwind $rows as row
+    MATCH (a:DATASET {CMID: row.stackID})
+    MATCH (b:DATASET {CMID: row.datasetID})
+    MERGE (a)-[r:MERGING]->(b)
+    RETURN count(*) as count
+    """
+    rows = dataset[["stackID", "datasetID"]].drop_duplicates().to_dict(orient="records")
+    updateLog(f"log/{user}uploadProgress.txt", "Creating MERGING ties between stack and dataset", write="a")
+    results = getQuery(query=merging_ties_query2, driver=driver, params={"rows": rows})
+    if results[0]['count'] == len(rows):
+        updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results[0]['count']} MERGING ties", write="a")
+    else:
+        raise ValueError(f"Expected to create {len(rows)} MERGING ties, but created {results[0]['count']}")
+        
+        
+    return f"Merging ties created successfully for mergingID(s): {', '.join(mergingID)}"
+
+def create_mties_variables(database, user, dataset):
+    driver = getDriver(database)
+    mergingID = dataset["mergingID"].unique().tolist()
+    required_cols = ["mergingID","variableID","varName","Key","datasetID"]
+    for col in required_cols:
+        if col not in dataset.columns:
+            raise ValueError(f"Missing required column: {col}")
+    if not "stackID" in dataset.columns:
+        updateLog(f"log/{user}uploadProgress.txt", "Finding missing stackIDs", write="a")
+        stacks = getQuery("unwind $rows as row Match (m:MERGING {CMID: row.mergingID})-[:MERGING]->(s:STACK)-[:MERGING]->(d:DATASET {CMID: row.datasetID}) return distinct m.CMID as mergingID, s.CMID as stackID, d.CMID as datasetID", driver, rows = dataset[["mergingID", "datasetID"]].drop_duplicates().to_dict(orient="records"), type = "df")
+        if stacks.empty:
+            raise ValueError("No stacks found for the provided mergingIDs and datasetIDs")
+        dataset = dataset.merge(stacks[["mergingID","stackID","datasetID"]], on=["mergingID","datasetID"], how="left")
+    # create merging ties between stacks and variables
+    
+    # create dict with ids and properties
+    top_level = ["stackID", "variableID"]
+
+    # Define the property columns dynamically (the rest)
+    property_columns = ["varName","stackTransform","summaryStatistic"]
+    property_columns = [col for col in property_columns if col in dataset.columns.tolist()]
+    
+    nested = []
+    for _, row in dataset.iterrows():
+        props = {k: row[k] for k in property_columns}
+        entry = {k: row[k] for k in top_level}
+        entry["properties"] = props
+        nested.append(entry)
+
+    merging_vars_query = """
+    unwind $rows as row
+    MATCH (m:STACK {CMID: row.stackID})
+    MATCH (v:VARIABLE {CMID: row.variableID})
+    MERGE (m)-[r:MERGING]->(v)
+    SET r += row.properties
+    RETURN count(*) AS count
+    """
+    results = getQuery(query=merging_vars_query, driver=driver, params={"rows": nested})
+    
+    if results[0]['count'] == len(nested):
+        updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results[0]['count']} MERGING ties between stacks and variables", write="a")
+    else:
+        raise ValueError(f"Expected to create {len(nested)} MERGING ties, but created {results[0]['count']}")
+    
+    # create merging ties between variables and datasets
+    top_level = ["datasetID", "variableID"]
+    rows = dataset.copy()
+    rows.rename(columns={"stackID":"stack"}, inplace=True)
+    property_columns = ["stack","datasetTransform"]
+    property_columns = [col for col in property_columns if col in rows.columns.tolist()]
+    
+    nested = []
+    for _, row in rows.iterrows():
+        props = {k: row[k] for k in property_columns}
+        entry = {k: row[k] for k in top_level}
+        entry["properties"] = props
+        nested.append(entry)
+    merging_vars_query2 = """
+    unwind $rows as row
+    MATCH (d:DATASET {CMID: row.datasetID})
+    MATCH (v:VARIABLE {CMID: row.variableID})
+    MERGE (d)-[r:MERGING]->(v)
+    SET r += row.properties
+    RETURN count(*) AS count
+    """
+    results = getQuery(query=merging_vars_query2, driver=driver, params={"rows": nested})
+    
+    if results[0]['count'] == len(nested):
+        updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results[0]['count']} MERGING ties between datasets and variables", write="a")
+    else:
+        raise ValueError(f"Expected to create {len(nested)} MERGING ties, but created {results[0]['count']}")
+    
+    return f"Merging variable ties created successfully for mergingID(s): {', '.join(mergingID)}"
+
+# database = "ArchaMap"
+# user = "1"
+# dataset = pd.read_excel("tmp/BecomingHopiMergingTemplate.xlsx")
+# dataset = pd.read_excel("tmp/BecomingHopiMergingVariables.xlsx")
+# dataset = pd.read_excel("tmp/BecomingHopiEquivalenceTies.xlsx")
+
+def create_equivalence_ties(database, user, dataset):
+    driver = getDriver(database)
+    required_cols = ["mergingID","categoryID","Key","datasetID"]
+    for col in required_cols:
+        if col not in dataset.columns:
+            raise ValueError(f"Missing required column: {col}")
+    
+    # add stack ids if missing
+    if not "stackID" in dataset.columns:
+        updateLog(f"log/{user}uploadProgress.txt", "Finding missing stackIDs", write="a")
+        stacks = getQuery("unwind $rows as row Match (m:MERGING {CMID: row.mergingID})-[:MERGING]->(s:STACK)-[:MERGING]->(d:DATASET {CMID: row.datasetID}) return distinct m.CMID as mergingID, s.CMID as stackID, d.CMID as datasetID", driver, rows = dataset[["mergingID", "datasetID"]].drop_duplicates().to_dict(orient="records"), type = "df")
+        if stacks.empty:
+            raise ValueError("No stacks found for the provided mergingIDs and datasetIDs")
+        dataset = dataset.merge(stacks[["mergingID","stackID","datasetID"]], on=["mergingID","datasetID"], how="left")
+    
+    # return original CMIDs for dataset and Key
+    original_cmids_query = """
+    unwind $rows as row
+    MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+    WHERE d.CMID = row.datasetID AND r.Key = row.Key
+    RETURN row.mergingID AS mergingID, d.CMID AS datasetID, c.CMID AS originalID, r.Key as Key
+    """
+    original_cmids = getQuery(query=original_cmids_query, driver=driver, params={"rows": dataset[["mergingID","datasetID","Key"]].to_dict(orient="records")}, type="df")
+    if original_cmids.empty:
+        raise ValueError("No USES ties found for the provided datasetIDs and Keys")
+    dataset = dataset.merge(original_cmids, on=["mergingID","datasetID","Key"], how="left")
+        
+    equivalence_ties_query = """
+    unwind $rows as row
+    MATCH (c1:CATEGORY {CMID: row.originalID})
+    MATCH (c2:CATEGORY {CMID: row.categoryID})
+    MERGE (c1)-[r:EQUIVALENT]->(c2)
+    set r += {stack: row.stackID, dataset: row.datasetID, Key: row.Key}
+    RETURN count(*) as count
+    """
+    
+    results = getQuery(query=equivalence_ties_query, driver=driver, params={"rows": dataset[["originalID","categoryID","stackID","datasetID","Key"]].to_dict(orient="records")}, type = "df")
+    if results[0]['count'] == len(dataset):
+        updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results[0]['count']} EQUIVALENT ties", write="a")
+    else:
+        raise ValueError(f"Expected to create {len(dataset)} EQUIVALENT ties, but created {results[0]['count']}")
+    
+    return f"EQUIVALENT ties created successfully for mergingID(s): {', '.join(dataset['mergingID'].unique().tolist())}"
 
 def input_Nodes_Uses(
     dataset,
@@ -871,6 +1080,12 @@ def input_Nodes_Uses(
     
     dataset = pd.DataFrame(dataset)
 
+    # Since APIs remove empty columns, and a user can submit a fully empty column of CMIDS for function 2,
+    # we need to re-add CMID column if it doesn't exist in this case
+    if uploadOption == "add_uses":
+        if "CMID" not in dataset.columns:
+            dataset["CMID"] = ""
+
     #database must be either SocioMap or ArchaMap
     if database.lower() == "sociomap":
         database = "SocioMap"
@@ -906,8 +1121,9 @@ def input_Nodes_Uses(
     # Input is dataset if: 1) label is DATASET (function 1), or 
     # 2) all CMIDs have dataset format (functions 5,6)
     isDataset = False
+    # remove hardcoding
     if "label" in dataset.columns:
-        if dataset["label"].iloc[0] == "DATASET":
+        if dataset["label"].iloc[0] == "DATASET" or dataset["label"].iloc[0] == "STACK" or dataset["label"].iloc[0] == "MERGING":
             isDataset = True
     elif "CMID" in dataset.columns:
         if dataset["CMID"].astype(str).str.startswith(("SD", "AD")).all():
@@ -976,7 +1192,7 @@ def input_Nodes_Uses(
     if uploadOption == "node_add" or uploadOption == "node_replace":
         duplicate_CMIDs = dataset[dataset['CMID'].duplicated(keep=False)]
         duplicate_CMIDs = duplicate_CMIDs['CMID'].tolist()
-        if not duplicate_CMIDs.empty:
+        if duplicate_CMIDs:
             raise ValueError(f"Duplicate CMIDs found in CMID column: \n{duplicate_CMIDs}")
     
     # When uploading category nodes, need to make sure that CMName is added to names in case, it is not included in Name column.
@@ -986,16 +1202,19 @@ def input_Nodes_Uses(
                         else f"{row['Name']},{row['CMName']}",
                         axis=1
                     )
-            
-    # When uploading keys or new keys, need to make sure they follow the standard convention
+       
+    # Disabled for now as it is too restrictive -- RJB        
+    # # When uploading keys or new keys, need to make sure they follow the standard convention
         
-    pattern = re.compile(r"^[^:]+:[^:]+$")
+    #pattern = re.compile(r"^\s*[^:;]+?\s*:\s*[^:;]+?(?:\s*;\s*[^:;]+?\s*:\s*[^:;]+?)*\s*$")
+    pattern = re.compile(r"^\s*[^=&&]+?\s*==\s*[^=&&]+?(?:\s*&&\s*[^=&&]+?\s*==\s*[^=&&]+?)*\s*$")
 
-    if (uploadOption == "add_node" and not isDataset) or uploadOption == "add_uses":
-        invalid_rows = dataset.index[~dataset["Key"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].tolist()
 
-        if invalid_rows:
-            raise ValueError(f"Invalid 'Key' format in rows:\n{invalid_rows}. Must be of form VARIABLE : VALUE")
+    # if (uploadOption == "add_node" and not isDataset) or uploadOption == "add_uses":
+    #     invalid_rows = dataset.index[~dataset["Key"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].map(lambda x:x+1).tolist()
+
+    #     if invalid_rows:
+    #         raise ValueError(f"Invalid 'Key' format in rows:\n{invalid_rows}. Must be of form VARIABLE : VALUE")
         
     
     if uploadOption == "update_replace":
@@ -1012,7 +1231,7 @@ def input_Nodes_Uses(
                 dataset['CMName'] = dataset['Name']
             else:
                 dataset['CMName'] = dataset['CMName'].fillna(dataset['Name'])
-    
+
     # When adding a new node, CMName is required    
     if uploadOption == "add_node" or uploadOption == "add_uses":
         mask = pd.Series(False, index=dataset.index)
@@ -1025,6 +1244,7 @@ def input_Nodes_Uses(
         if mask.any():
             invalid_rows = dataset[mask]
             raise ValueError(f"When adding new nodes, new node must have non-empty Name or CMName. Check : {invalid_rows}")
+    
 
     """checks if all required columns are present"""
 
@@ -1135,12 +1355,12 @@ def input_Nodes_Uses(
         raise ValueError(error_msg)
     
     # checks for year validities
-    if "recordEnd" in dataset.columns:
+    if "recordEnd" in dataset.columns and "recordStart" in dataset.columns:
         invalid_rows = get_invalid_ranges(dataset, "recordStart", "recordEnd")
         if not invalid_rows.empty:
             raise ValueError(f"Found {len(invalid_rows)} invalid rows where 'recordEnd' < 'recordStart'")
     
-    if "yearEnd" in dataset.columns:
+    if "yearEnd" in dataset.columns and "yearStart" in dataset.columns:
         invalid_rows = get_invalid_ranges(dataset, "yearStart", "yearEnd")
         if not invalid_rows.empty:
             raise ValueError(f"Found {len(invalid_rows)} invalid rows where 'yearEnd' < 'yearStart'")
@@ -1180,9 +1400,9 @@ def input_Nodes_Uses(
 
         for i in cmids:
             if not bool(re.match(pattern, i)):
-                raise ValueError("There is a malformed CMID in the CMID column.")
+                raise ValueError(f"There is a malformed CMID in the CMID column. {i}")
 
-        if (
+        if ( 
             not cmids.str.startswith(("SD", "AD")).all()
             and not cmids.str.startswith(("SM", "AM")).all()
         ):
@@ -1203,6 +1423,7 @@ def input_Nodes_Uses(
         "polity",
     ]
     
+    # Checks CMID-based columns for validity of the CMIDs in the columns, checks to see if CMID are in the database.
     error_columns = ["CMID", "datasetID"] + multi_value_columns
 
     for i in error_columns:
@@ -1211,6 +1432,7 @@ def input_Nodes_Uses(
                 f"log/{user}uploadProgress.txt", f"validating column {i}", write="a"
             )
 
+            # search label defines which labels we are querying on.
             search_label = "CATEGORY"
 
             if isDataset and (i == "CMID" or  i == "parent"):
@@ -1219,8 +1441,6 @@ def input_Nodes_Uses(
             if i == "datasetID":
                 search_label = "DATASET"
             
-            print(search_label)
-
             query = f"""
             UNWIND $rows AS row
             OPTIONAL MATCH (n:{search_label} {{CMID: row.value}})
@@ -1245,14 +1465,10 @@ def input_Nodes_Uses(
             if not rows_to_check:
                 continue
 
-            print(rows_to_check)
-
             with driver.session() as session:
                 results = session.run(query, rows=rows_to_check)
                 missing_values = [r["value"] for r in results.data() if r["count"] == 0]
             
-            print(missing_values)
-
             if missing_values:
                 if i == "datasetID":
                     raise ValueError(
@@ -1369,62 +1585,94 @@ def input_Nodes_Uses(
                     raise ValueError(
                         f"Error: Wrong labels in database for column '{i}': {wrong_labels}"
                     )
-            elif i == "parent":
-                if uploadOption == "add_node":
-                    child_column = "label"
-                else:
-                    child_column = "CMID"
 
-                combined = []
-                
-                for _, row in dataset.iterrows():
-                    child_value = row[child_column]
-                    parent_values = str(row['parent']).split(';')
-                    
-                    for i in parent_values:
-                        i = i.strip()
-                        # if i:  # skip empty strings
-                        #     combined.append((child_value, i))
-                        combined.append((child_value, i))
-                
-                dict_with_index = {i: {child_column: a, 'parent': b} for i, (a, b) in enumerate(combined)}
+            elif i == "parent":
+                # if uploadOption == "add_node":
+                #     child_column = "label"
+                # else:
+                #     child_column = "CMID"
 
                 query = """
-                        MATCH (n)
-                        WHERE n.CMID IN $rows
-                        RETURN n.CMID as CMID, labels(n) AS labels
+                        MATCH (n {CMID: $cmid})
+                        WITH head([lbl IN labels(n) WHERE lbl <> 'CATEGORY']) AS otherLabel
+                        MATCH (m:LABEL {CMName: otherLabel})
+                        RETURN m.groupLabel AS groupLabel
                         """
 
-                parent_values = list({row['parent'] for row in dict_with_index.values()})
-                child_values = list({row[child_column] for row in dict_with_index.values()})
+                # combined is a list of tuples
+                combined = []
 
-                with driver.session() as session:
-                    result = session.run(query, rows=parent_values)
-                    parent_dict = {record["CMID"]: record["labels"] for record in result}
-
-                    if uploadOption != "add_node":
-                        result= session.run(query,rows=child_values)
-                        child_dict = {record["CMID"]: record["labels"] for record in result}
-
-                for idx, row in dict_with_index.items():
-                        row['parent_label'] = parent_dict.get(row['parent'], [])
-
-                if uploadOption == "add_node":
-                    for idx, row in dict_with_index.items():
-                        row['child_label'] = [row['label']]
-                else:
-                    for idx, row in dict_with_index.items():
-                        row['child_label'] = child_dict.get(row['CMID'], [])
+                # Builds dictionary of labels for parents and children
+                # dictionary can have more elements than the original number of rows if there are multiple parents in a row
+                for i, row in dataset.iterrows():
+                    if "CMID" in dataset.columns and row["CMID"]:
+                        child_value = getQuery(query,driver,params={"cmid":row["CMID"]},type="list")
+                    elif "groupLabel" in dataset.columns and row["groupLabel"]:
+                        child_value = row['groupLabel']
+                    else:
+                        raise ValueError(
+                           
+                            f"Both CMID and labels are missing for row {i} "
+                        )
                     
+                    if row['parent'] != "":
+                                        
+                        parent_values = str(row['parent']).split(';')
+
+                        # iterating through parents in a single row
+                        for j in parent_values:
+                            j = j.strip()
+                            print(j)
+                            j = getQuery(query,driver,params={"cmid":j},type="list")
+                            print(j)
+                            if isinstance(child_value,list):
+                                combined.append((child_value, j))
+                            else:
+                                combined.append(([child_value],j))
+                    else:
+                        if isinstance(child_value,list):
+                                combined.append((child_value, child_value))
+                        else:
+                            combined.append(([child_value],[child_value]))
+                                       
+                # dict_with_index = {i: {child_column: a, 'parent': b} for i, (a, b) in enumerate(combined)}
+
+                # query = """
+                #         MATCH (n)
+                #         WHERE n.CMID IN $rows
+                #         RETURN n.CMID as CMID, labels(n) AS labels
+                #         """
+
+                # parent_values = list({row['parent'] for row in dict_with_index.values()})
+                # child_values = list({row[child_column] for row in dict_with_index.values()})
+
+                # with driver.session() as session:
+                #     result = session.run(query, rows=parent_values)
+                #     parent_dict = {record["CMID"]: record["labels"] for record in result}
+
+                #     if uploadOption != "add_node":
+                #         result= session.run(query,rows=child_values)
+                #         child_dict = {record["CMID"]: record["labels"] for record in result}
+
+                # for idx, row in dict_with_index.items():
+                #         row['parent_label'] = parent_dict.get(row['parent'], [])
+
+                # if uploadOption == "add_node":
+                #     for idx, row in dict_with_index.items():
+                #         row['child_label'] = [row['label']]
+                # else:
+                #     for idx, row in dict_with_index.items():
+                #         row['child_label'] = child_dict.get(row['CMID'], [])
+
                 parent_labels = []
                 child_labels = []
                 
-                for row in dict_with_index.values():
-                    parent_labels.append(row["parent_label"])
-                    child_labels.append(row['child_label'])
-                                       
+                for a, b in combined:
+                    parent_labels.append(b)
+                    child_labels.append(a)
+                                               
                 validate_labels(uploadOption,driver,parent_labels, child_labels)
-    
+            
     # checks if the eventType value is valid
 
     if "eventType" in dataset.columns:
@@ -1502,8 +1750,9 @@ def input_Nodes_Uses(
         write="a",
     )
 
-    # prevents adding shortName if the node has the property
-    if isDataset and uploadOption == "add_node":
+    # if using add to existing node function (function 5)
+    # prevents adding shortName if the node has the shortname property
+    if isDataset and uploadOption == "node_add":
         query = "unwind $rows as row match (d:DATASET {shortName: row.shortName}) return d.shortName as shortName"
         shortNames = getQuery(
             query,
@@ -1549,6 +1798,9 @@ def input_Nodes_Uses(
                     f"Error:CMID, Key and datasetID triplet already exists for {keyExists}"
                 )
     
+        
+    # For function 2, if two rows have the same uses tie(CMID,Key,datasetID) triplet and they both contain different values for
+    # string type variable, throw an error
 
     query = """MATCH (n:PROPERTY) WHERE n.type="relationship" and n.metaType="string" RETURN n.CMName as n"""
 
@@ -1557,9 +1809,7 @@ def input_Nodes_Uses(
             driver,
             type="list",
         )
-        
-    # For function 2, if two rows have the same uses tie(CMID,Key,datasetID) triplet and they both contain different values for
-    # string type variable, throw an error
+
     if uploadOption == "add_uses":
 
         group_cols = ["CMID", "Key", "datasetID"]
@@ -1586,7 +1836,7 @@ def input_Nodes_Uses(
             if i in optionalProperties:
                 query = """UNWIND $rows AS row
                     OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
-                    RETURN r.[$column] AS existing_value, row"""
+                    RETURN r[$column] AS existing_value, row"""
 
                 result = getQuery(
                     query,
@@ -1602,6 +1852,8 @@ def input_Nodes_Uses(
                             f"DATASET {j['row']['datasetID']} and CATEGORY {j['row']['CMID']} with Key {j['row']['Key']}"
                         )
 
+    # For function 5, if a non-null value in a string-value column already exists in the database for a given CMID,
+    # throws an error
     updateLog(
         f"log/{user}uploadProgress.txt",
         "obtaining string-type node properties",
@@ -1615,8 +1867,8 @@ def input_Nodes_Uses(
             type="list",
         )
     
-    # For function 5, if a non-null value in a string-value column already exists in the database for a given CMID,
-    # throws an error
+    node_string_cols = [col for col in node_string_cols if col not in ["CMID","label"]]
+    
     if uploadOption == "node_add":
     
         for i in node_string_cols:
