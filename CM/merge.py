@@ -37,9 +37,9 @@ def split_vars_values(s):
 # joins two datasets that have previously been translated into CatMapper’s database.Each dataset must include two columns: datasetiD and the Key pointing to a category.
 # It returns a single spreadsheet with: 1) datasetIDs, 2) data columns from the original dataset (renamed with _left and _right suffixes if overlapping.  Rows with keys pointing to the same category are aligned in the output spreadsheet.
 # When keys point to a CatMapper category, standardized identifiers are also returned (CMID, CMName).
-database = "ArchaMap"
-joinLeft = pd.read_excel("tmp/joinLeft.xlsx")
-joinRight = pd.read_excel("tmp/joinRight.xlsx")
+# database = "ArchaMap"
+# joinLeft = pd.read_excel("tmp/joinLeft.xlsx")
+# joinRight = pd.read_excel("tmp/joinRight.xlsx")
 def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
     try:
 
