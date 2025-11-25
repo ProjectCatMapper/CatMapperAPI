@@ -2024,8 +2024,6 @@ def runRoutinesStream(databases="all", mail=None):
         else:
             dbs = databases
 
-        print("in")
-
         routines = [
             ("Modifications", lambda db: reportChanges(db, return_type="info")),
             ("Check Domains", lambda db: checkDomains(db, mail=None, return_type="info")),
@@ -2045,6 +2043,7 @@ def runRoutinesStream(databases="all", mail=None):
             ("Invalid Node and USES properties", lambda db: getInappropriateprops_Nodes_Rels(db, mail=None, return_type="info")),
             ("Empty Node properties", lambda db: get_empty_nodeprops(db, mail=None, return_type="info")),
             ("Label Checks", lambda db: get_label_check(db, mail=None, return_type="info")),
+            ("Numeric Checks", lambda db: getNumeric_Checks(db, mail=None, return_type="info")),
             ("Process DATASETs", lambda db: processDATASETs(db)),
             ("Fix MetaTypes", lambda db: fixMetaTypes(db, return_type="info")),
         ]
@@ -2115,6 +2114,7 @@ def runRoutinesStream(databases="all", mail=None):
           <tr><td>Process USES</td><td>processUSES</td><td>Processes and reconciles USES relationships for consistency and downstream use.</td></tr>
           <tr><td>Invalid Node and USES props</td><td>getInappropriateprops_Nodes_Rels</td><td>Identifies invalid node and USES ties properties.</td></tr>
           <tr><td>Multiple label checks</td><td>get_label_check</td><td>Identifies label discrepancies.</td></tr>
+          <tr><td>Numeric checks</td><td>getNumeric_Checks</td><td>Identifies numeric discrepancies in nodes and USES ties.</td></tr>
           <tr><td>Empty Node props</td><td>get_empty_nodeprops</td><td>Identifies empty node properties.</td></tr>
           <tr><td>Process DATASETs</td><td>processDATASETs</td><td>Processes dataset nodes to ensure correct structure and metadata integration.</td></tr>
           <tr><td>Fix MetaTypes</td><td>fixMetaTypes</td><td>Validates and corrects property data types on nodes and relationships based on metadata definitions.</td></tr>
