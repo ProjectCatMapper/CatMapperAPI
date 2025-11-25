@@ -73,8 +73,9 @@ def submitjoinDatasets():
     database = unlist(data.get("database", ""))
     joinLeft = data.get("joinLeft")
     joinRight = data.get("joinRight")
+    domain = unlist(data.get("domain", ""))
 
-    result = joinDatasets(database, joinLeft, joinRight)
+    result = joinDatasets(database, joinLeft, joinRight, domain)
 
     return jsonify(result)
 
@@ -135,11 +136,11 @@ def getvalidKeysForDataset():
         first_parts = []
 
         for key in keys:
-            # Split by ';' in case there are multiple pairs
-            pairs = key.split(";")
+            # Split by ' && ' in case there are multiple pairs
+            pairs = key.split(" && ")
             for pair in pairs:
-                # Split by ':' and take the first part, stripping whitespace
-                first_part = pair.split(":")[0].strip()
+                # Split by ' == ' and take the first part, stripping whitespace
+                first_part = pair.split(" == ")[0].strip()
                 first_parts.append(first_part)
 
         # Remove duplicates if needed

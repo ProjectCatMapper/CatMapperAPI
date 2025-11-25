@@ -994,7 +994,6 @@ def create_mties_variables(database, user, dataset):
     
     return f"Merging variable ties created successfully for mergingID(s): {', '.join(mergingID)}"
 
-# testing for merging template
 # database = "ArchaMap"
 # user = "1"
 # dataset = pd.read_excel("tmp/BecomingHopiMergingTemplate.xlsx")
@@ -1207,7 +1206,9 @@ def input_Nodes_Uses(
     # Disabled for now as it is too restrictive -- RJB        
     # # When uploading keys or new keys, need to make sure they follow the standard convention
         
-    # pattern = re.compile(r"^\s*[^:;]+?\s*:\s*[^:;]+?(?:\s*;\s*[^:;]+?\s*:\s*[^:;]+?)*\s*$")
+    #pattern = re.compile(r"^\s*[^:;]+?\s*:\s*[^:;]+?(?:\s*;\s*[^:;]+?\s*:\s*[^:;]+?)*\s*$")
+    pattern = re.compile(r"^\s*[^=&&]+?\s*==\s*[^=&&]+?(?:\s*&&\s*[^=&&]+?\s*==\s*[^=&&]+?)*\s*$")
+
 
     # if (uploadOption == "add_node" and not isDataset) or uploadOption == "add_uses":
     #     invalid_rows = dataset.index[~dataset["Key"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].map(lambda x:x+1).tolist()
