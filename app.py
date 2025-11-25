@@ -16,9 +16,9 @@ app = create_app()
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB
 
 # routes
-app.register_blueprint(root_bp)
 app.register_blueprint(merge_bp)  
 app.register_blueprint(admin_bp)  
+app.register_blueprint(metadata_bp)  
 
 @app.route("/")
 def root():
@@ -522,25 +522,6 @@ def net():
     r = session.run(q)
     resultnet = r.data()
     return resultnet
-
-@app.route(f"/getDomains", methods=['GET'])
-def getDomainsBase():
-    return "Please specify a database. E.g., /getDomains/sociomap or /getDomains/archamap", 400
-    
-@app.route(f"/getDomains/<database>", methods=['GET'])
-def getDomains(database):
-    
-    driver = getDriver(database)
-    query = '''
-            MATCH (g:LABEL)
-            WHERE g.displayOrder IS NOT NULL
-            RETURN g.groupLabel as domain, g.CMName as subdomain, g.description as description
-            ORDER BY domain
-            '''
-    
-    result = getQuery(query,driver)
-    
-    return jsonify(result)
 
 @app.route("/explore", methods=['GET'])
 def getExplore():
@@ -1939,19 +1920,6 @@ app.add_url_rule('/CSVURLs/<database>', 'get_backup_csv_urls_route',
                  get_backup_csv_urls_route, methods=['GET'])
 
 
-app.add_url_rule('/metadata/domains/<database>', 'getDomains',
-                 getDomains, methods=['GET'])
-
-app.add_url_rule('/metadata/subdomains/<database>', 'getSubdomains',
-                 getSubdomains, methods=['GET'])
-
-app.add_url_rule('/metadata/domainDescriptions/<database>', 'getDomainDescriptions',
-                 getDomainDescriptions, methods=['GET'])
-
-app.add_url_rule('/metadata/CMIDProperties/<database>/<domain>', 'getProperties_route',
-                 getProperties_route, methods=['POST'])
-
-
 @app.route("/download/test", methods=["GET"])
 def test_download():
 
@@ -2002,4 +1970,4 @@ app.add_url_rule('/admin/view_graph', 'display_graph',
                  display_graph, methods=['GET'])
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5010)
+    app.run(debug=True, port=5020)
