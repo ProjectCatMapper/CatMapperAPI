@@ -183,7 +183,7 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
             suffixes=('_'+datasetID_left, '_'+datasetID_right)
         )
 
-        # Step 7: Final clean-up to drop duplicates and sort by specified columns
+        # Final clean-up to drop duplicates and sort by specified columns
         link_file = link_file.drop_duplicates().sort_values(
             by=['datasetID_' + datasetID_left, 'datasetID_' + datasetID_right, 'CMName', 'CMID'])
 
