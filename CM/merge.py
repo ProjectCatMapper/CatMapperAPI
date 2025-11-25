@@ -20,59 +20,72 @@ def generate_unique_hash():
         hashlib.sha256(now.encode()).digest()
     ).decode()[:16]
 
+def split_vars_values(s):
+    if pd.isna(s):
+        return pd.Series([None, None])
+    # Split by semicolon first
+    pairs = [p.strip() for p in s.split(";")]
+    variables = []
+    values = []
+    for pair in pairs:
+        if ": " in pair:
+            var, val = pair.split(": ", 1)
+            variables.append(var.strip())
+            values.append(val.strip())
+    return pd.Series(["; ".join(variables), "; ".join(values)])
 
-def joinDatasets(database, joinLeft, joinRight):
+# joins two datasets that have previously been translated into CatMapper’s database.Each dataset must include two columns: datasetiD and the Key pointing to a category.
+# It returns a single spreadsheet with: 1) datasetIDs, 2) data columns from the original dataset (renamed with _left and _right suffixes if overlapping.  Rows with keys pointing to the same category are aligned in the output spreadsheet.
+# When keys point to a CatMapper category, standardized identifiers are also returned (CMID, CMName).
+# database = "ArchaMap"
+# joinLeft = pd.read_excel("tmp/joinLeft.xlsx")
+# joinRight = pd.read_excel("tmp/joinRight.xlsx")
+def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
     try:
 
+        # ensure dataframes
         joinLeft = pd.DataFrame(joinLeft)
         joinRight = pd.DataFrame(joinRight)
 
         if 'datasetID' not in joinLeft.columns:
             raise ValueError(
-                "The 'datasetID' column is missing from the joinLeft DataFrame.")
+                "The 'datasetID' column is missing from the first DataFrame.")
 
         if 'datasetID' not in joinRight.columns:
             raise ValueError(
-                "The 'datasetID' column is missing from the joinRight DataFrame.")
-
+                "The 'datasetID' column is missing from the second DataFrame.")
         driver = getDriver(database)
 
-        joinLeft = pd.DataFrame(joinLeft)
-        joinRight = pd.DataFrame(joinRight)
-
         # Drop 'CMID' and 'CMName' only if they exist in the columns
-        joinLeft = joinLeft.drop(
-            columns=[col for col in ['CMID', 'CMName'] if col in joinLeft.columns]).copy()
-        joinRight = joinRight.drop(
-            columns=[col for col in ['CMID', 'CMName'] if col in joinRight.columns]).copy()
+        joinLeft.drop(
+            columns=[col for col in ['CMID', 'CMName'] if col in joinLeft.columns], inplace=True)
+        joinRight.drop(
+            columns=[col for col in ['CMID', 'CMName'] if col in joinRight.columns], inplace=True)
 
-        datasetID_left = joinLeft['datasetID'].unique()
-        datasetID_right = joinRight['datasetID'].unique()
+        datasetID_left = joinLeft['datasetID'].unique()[0]
+        datasetID_right = joinRight['datasetID'].unique()[0]
 
         # Query keys for left dataset
-        match_left_query = """
+        match_query = f"""
         UNWIND $datasetID AS id
-        MATCH (d:DATASET {CMID: id})-[r:USES]->()
-        WITH d, split(r.Key, ';') AS Key
-        WITH d, [i IN Key | split(i, ':')[0]] AS Key
+        MATCH (d:DATASET {{CMID: id}})-[r:USES]->(:{domain})
+        WITH d, split(r.Key, '; ') AS Key
+        WITH d, [i IN Key | trim(split(i, ': ')[0])] AS Key
         RETURN DISTINCT d.CMID AS datasetID, Key
         """
-        match_left = getQuery(match_left_query, driver, {
-                              "datasetID": datasetID_left})
+        match_left = getQuery(match_query, driver, {"datasetID": datasetID_left}, type = "df")
+        
+        if match_left.empty:
+            raise ValueError(
+                "No categories found in first DataFrame for domain: " + domain)
 
         # Query keys for right dataset
-        match_right_query = """
-        UNWIND $datasetID AS id
-        MATCH (d:DATASET {CMID: id})-[r:USES]->()
-        WITH d, split(r.Key, ';') AS Key
-        WITH d, [i IN Key | split(i, ':')[0]] AS Key
-        RETURN DISTINCT d.CMID AS datasetID, Key
-        """
-        match_right = getQuery(match_right_query, driver, {
-                               "datasetID": datasetID_right})
 
-        match_left = pd.DataFrame(match_left)
-        match_right = pd.DataFrame(match_right)
+        match_right = getQuery(match_query, driver, {"datasetID": datasetID_right}, type = "df")
+
+        if match_right.empty:
+            raise ValueError(
+                "No categories found in second DataFrame for domain: " + domain)
 
         left_keys = match_left['Key'].explode(
         ).unique() if 'Key' in match_left else []
@@ -87,10 +100,10 @@ def joinDatasets(database, joinLeft, joinRight):
         # Throw an error only if none of the keys are found
         if not found_left_keys:
             print(
-                {"error": "Cannot continue with merge: no matching required columns found in 'joinLeft'"})
+                {"error": "Cannot continue with merge: no matching required columns found in first DataFrame"})
         if not found_right_keys:
             print(
-                {"error": "Cannot continue with merge: no matching required columns found in 'joinRight'"})
+                {"error": "Cannot continue with merge: no matching required columns found in second DataFrame"})
 
         # Convert only the found columns to string type
         joinLeft[found_left_keys] = joinLeft[found_left_keys].astype(
@@ -101,11 +114,17 @@ def joinDatasets(database, joinLeft, joinRight):
         merge_left = joinLeft[['datasetID'] + found_left_keys].copy()
         merge_left = createKey(merge_left, cols=found_left_keys).rename(
             columns={'Key': 'term', 'datasetID': 'dataset'})
-        translate_left = translate(database=database, property="Key", domain="CATEGORY", term="term", table=merge_left,
-                                   key='false', country=None, context=None, dataset='dataset', yearStart=None, yearEnd=None, query='false', uniqueRows=False)
-        translate_left = translate_left.rename(
+        translate_left = translate(database=database, property="Key", domain=domain, term="term", table=merge_left,
+                                   key='false', country=None, context=None, dataset='dataset', yearStart=None, yearEnd=None, query='false', uniqueRows=False, countsamename=False)
+        if not 'CMID_term' in translate_left[0].columns:
+            raise ValueError(
+                f"Translation failed: 'CMID_term' not found in translation results for first dataset. Check domain ({domain}) and keys.")
+         # rename columns to remove _term suffix
+        translate_left = translate_left[0].rename(
             columns=lambda x: x.replace('_term', ''))
-        merge_left = translate_left[['term', 'CMID', 'CMName', 'dataset']].merge(merge_left, on=['term', 'dataset']).drop(
+        merge_left = translate_left[
+            ['term', 'CMID', 'CMName', 'dataset']
+            ].merge(merge_left, on=['term', 'dataset']).drop(
             columns='term').rename(columns={'dataset': 'datasetID'}).drop_duplicates()
 
         # merge right
@@ -125,9 +144,13 @@ def joinDatasets(database, joinLeft, joinRight):
             yearStart=None,
             yearEnd=None,
             query='false',
-            uniqueRows=False
+            uniqueRows=False,
+            countsamename=False
         )
-        translate_right = translate_right.rename(
+        if not 'CMID_term' in translate_right[0].columns:
+            raise ValueError(
+                "Translation failed: 'CMID_term' not found in translation results for second dataset. Check domain and keys.")
+        translate_right = translate_right[0].rename(
             columns=lambda x: x.replace('_term', ''))
         merge_right = (
             translate_right[['term', 'CMID', 'CMName', 'dataset']]
@@ -138,67 +161,55 @@ def joinDatasets(database, joinLeft, joinRight):
         )
 
         # Final joining
-        # Step 1: Identify overlapping columns between merge_left and merge_right, excluding CMID and CMName
+        # Identify overlapping columns between merge_left and merge_right, excluding CMID and CMName
         overlapping_columns = [
             col for col in merge_left.columns if col in merge_right.columns and col not in ['CMID', 'CMName']]
 
-        # Step 2: Perform the first merge between merge_left and merge_right with suffixes for overlapping columns
+        # Perform the first merge between merge_left and merge_right with suffixes for overlapping columns
         link_file = merge_left.merge(
             merge_right,
             on=['CMID', 'CMName'],
-            suffixes=('_left', '_right')
+            how='outer',
+            suffixes=('_'+datasetID_left, '_'+datasetID_right)
         )
+        
+        # Rename datasetID in joinLeft and joinRight for consistent merging
+        joinLeft.rename(columns={'datasetID': 'datasetID_' + datasetID_left}, inplace=True)
+        joinRight.rename(columns={'datasetID': 'datasetID_' + datasetID_right}, inplace=True)
 
-        # Step 3: Update found_left_keys and found_right_keys to include suffixes for the identified overlapping columns
-        found_left_keys_with_suffix = [
-            f"{key}_left" if key in overlapping_columns else key for key in found_left_keys]
-        found_right_keys_with_suffix = [
-            f"{key}_right" if key in overlapping_columns else key for key in found_right_keys]
-
-        # Step 4: Rename datasetID in joinLeft and joinRight for consistent merging
-        joinLeft = joinLeft.rename(columns={'datasetID': 'datasetID_left'})
-        joinRight = joinRight.rename(columns={'datasetID': 'datasetID_right'})
-
-        left_rename_mapping = dict(
-            zip(found_left_keys, found_left_keys_with_suffix))
-        right_rename_mapping = dict(
-            zip(found_right_keys, found_right_keys_with_suffix))
-        joinLeft = joinLeft.rename(columns=left_rename_mapping)
-        joinRight = joinRight.rename(columns=right_rename_mapping)
-
-        # Step 5: Merge link_file with joinLeft without adding further suffixes for overlapping columns
+        # Merge link_file with joinLeft without adding further suffixes for overlapping columns
         link_file = link_file.merge(
             joinLeft,
-            left_on=['datasetID_left'] + found_left_keys_with_suffix,
-            right_on=['datasetID_left'] + found_left_keys_with_suffix,
-            how='left',
+            left_on=['datasetID_' + datasetID_left] + found_left_keys,
+            right_on=['datasetID_' + datasetID_left] + found_left_keys,
+            how='outer',
             # Prevents adding additional _x suffixes
-            suffixes=('_left', '_right')
+            suffixes=('_'+datasetID_left, '_'+datasetID_right)
         )
 
-        # Step 6: Merge link_file with joinRight without adding further suffixes for overlapping columns
+        # Merge link_file with joinRight without adding further suffixes for overlapping columns
         link_file = link_file.merge(
             joinRight,
-            left_on=['datasetID_right'] + found_right_keys_with_suffix,
-            right_on=['datasetID_right'] + found_right_keys_with_suffix,
-            how='left',
-            suffixes=('_left', '_right')
+            left_on=['datasetID_' + datasetID_right] + found_right_keys,
+            right_on=['datasetID_' + datasetID_right] + found_right_keys,
+            how='outer',
+            suffixes=('_'+datasetID_left, '_'+datasetID_right)
         )
 
-        # Step 7: Final clean-up to drop duplicates and sort by specified columns
+        # Final clean-up to drop duplicates and sort by specified columns
         link_file = link_file.drop_duplicates().sort_values(
-            by=['datasetID_left', 'datasetID_right', 'CMName', 'CMID'])
+            by=['datasetID_' + datasetID_left, 'datasetID_' + datasetID_right, 'CMName', 'CMID'])
 
         # replace NaN with empty string
         link_file = link_file.fillna("")
 
         desired_order = ['CMID', 'CMName',
-                         'datasetID_left', 'datasetID_right']
+                         'datasetID_' + datasetID_left, 'datasetID_' + datasetID_right]
         remaining_cols = [
             col for col in link_file.columns if col not in desired_order]
         link_file = link_file[desired_order + remaining_cols]
 
-        return link_file.to_dict(orient='records')
+        return link_file.to_dict(orient='records'), 200
 
     except Exception as e:
         try:
@@ -207,9 +218,10 @@ def joinDatasets(database, joinLeft, joinRight):
             return {"Error": "Unable to process error"}, 500
 
 
-def proposeMerge(dataset_choices, category_label, criteria, database, intersection, ncontains=2):
+def proposeMerge(dataset_choices, category_label, criteria, database, intersection, selectedKeyvariables, ncontains=2, resultFormat = "key-to-key"):
 
     try:
+        #return resultFormat
         driver = getDriver(database)
 
         if len(dataset_choices) < 1:
@@ -228,36 +240,52 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
             merged = getQuery(query, driver=driver, params={
                               'datasets': dataset_choices}, type = "df")
 
-            if not merged.empty:
-                dataset_list = []
-                for dataset in dataset_choices:
-                    tmp = merged[merged['datasetID'] == dataset].copy()
-                    dataset_list.append(tmp)
-                merged_df = dataset_list[0]
-                merged_df.rename(columns={"Key": f"Key_{merged_df['datasetID'].iloc[0]}", "Name": f"Name_{merged_df['datasetID'].iloc[0]}"}, inplace=True)
-                merged_df.drop(columns=["datasetID"], inplace=True)
-
-                for dataset in dataset_list[1:]:
-                    dataset.rename(columns={"Key": f"Key_{dataset['datasetID'].iloc[0]}", "Name": f"Name_{dataset['datasetID'].iloc[0]}"}, inplace=True)
-                    dataset.drop(columns=["datasetID"], inplace=True)
-                    merged_df = pd.merge(merged_df, dataset, on=["CMName", "CMID"], how="outer")
-                    
-                # reorder columns
-                cols = merged_df.columns.tolist()
-                cols = ["CMName", "CMID"] + [col for col in cols if col not in ["CMName", "CMID"]]
-                merged_df = merged_df[cols]
-
-                # filter keys if intersection is off
-                if intersection:
-                    for col in merged_df.columns:
-                        if 'Key_' in col:
-                            merged_df = merged_df[merged_df[col].notna()]
-
-                merged = merged_df.fillna("")
-                merged = merged.to_dict(orient='records')
-                return merged
-            else:
+            if merged.empty:
                 return jsonify({"message": "No data found"}), 404
+            
+            if resultFormat == "key-to-category":
+                cols = ['datasetID', 'CMName', 'CMID', 'Key', 'Name']
+                result = merged[cols].copy()
+                result = result.fillna("")
+                return result.to_dict(orient='records')
+                
+            # filter to have one row per category
+            if resultFormat =="category-to-category":
+                merged = merged.groupby(['datasetID', 'CMName', 'CMID']).agg({
+                    'Key': lambda x: list(x),
+                    'Name': lambda x: list(x)
+                }).reset_index()
+                for col in merged.columns:
+                    if merged[col].apply(lambda x: isinstance(x, list)).any():
+                        merged[col] = merged[col].apply(lambda x: ' || '.join(map(str, x)) if isinstance(x, list) else x)
+                        
+            dataset_list = []
+            for dataset in dataset_choices:
+                tmp = merged[merged['datasetID'] == dataset].copy()
+                dataset_list.append(tmp)
+            merged_df = dataset_list[0]
+            merged_df.rename(columns={"Key": f"Key_{merged_df['datasetID'].iloc[0]}", "Name": f"Name_{merged_df['datasetID'].iloc[0]}"}, inplace=True)
+            merged_df.drop(columns=["datasetID"], inplace=True)
+
+            for dataset in dataset_list[1:]:
+                dataset.rename(columns={"Key": f"Key_{dataset['datasetID'].iloc[0]}", "Name": f"Name_{dataset['datasetID'].iloc[0]}"}, inplace=True)
+                dataset.drop(columns=["datasetID"], inplace=True)
+                merged_df = pd.merge(merged_df, dataset, on=["CMName", "CMID"], how="outer")
+                
+            # reorder columns
+            cols = merged_df.columns.tolist()
+            cols = ["CMName", "CMID"] + [col for col in cols if col not in ["CMName", "CMID"]]
+            merged_df = merged_df[cols]
+
+            # filter keys if intersection is off
+            if intersection:
+                for col in merged_df.columns:
+                    if 'Key_' in col:
+                        merged_df = merged_df[merged_df[col].notna()]
+
+            merged = merged_df.fillna("")
+            merged = merged.to_dict(orient='records')
+            return merged
 
         elif criteria == "extended":
             if len(dataset_choices) > 2:
@@ -265,12 +293,25 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
 
             query = generate_cypher_query(unlist(category_label), ncontains)
 
-            matches = getQuery(query, driver, {"datasets": dataset_choices})
-
-            matches = pd.DataFrame(matches)
+            matches = getQuery(query, driver, {"datasets": dataset_choices}, type="df")
 
             if matches.empty:
                 return jsonify({"message": "No data found"}), 404
+            
+            if resultFormat == "key-to-category":
+                cols = ['datasetID', 'LCA_CMName', 'LCA_CMID', 'tie','Key', 'Name']
+                result = matches[cols].copy()
+                result = result.fillna("")
+                return result.to_dict(orient='records')
+            
+            if resultFormat == "category-to-category":
+                matches = matches.groupby(['datasetID', 'LCA_CMName', 'LCA_CMID']).agg({
+                    'Key': lambda x: list(x),
+                    'Name': lambda x: list(x)
+                }).reset_index()
+                for col in matches.columns:
+                    if matches[col].apply(lambda x: isinstance(x, list)).any():
+                        matches[col] = matches[col].apply(lambda x: ' || '.join(map(str, x)) if isinstance(x, list) else x)
 
             # Split into groups by 'datasetID'
             matches_grp = [group for _, group in matches.groupby("datasetID")]
@@ -288,29 +329,63 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
             if result.empty:
                 return jsonify({"message": "No common ancestors found"}), 404
 
-            result["nTie"] = result.filter(like="tie").sum(axis=1, skipna=True)
+            selectedKeyvariables = {f"Key_{k.strip()}": v for k, v in selectedKeyvariables.items()}
 
-            key1 = f"Key_{dataset_choices[0]}"
-            key2 = f"Key_{dataset_choices[1]}"
+            for col, prefix in selectedKeyvariables.items():
+                if col in result.columns:
+                    result = result[result[col].str.startswith(prefix,na=False)]
+                   
+            # Select all columns with "tie" in the name, sum across the columns (there should be one tie column per dataset)
+            # if any row value is NaN, then penalize by adding infinity
+            infinity = 1000
+            tie_cols = result.filter(like="tie").columns
+            nTie = result[tie_cols].sum(axis=1, skipna=True)
+            nTie += result[tie_cols].isna().any(axis=1) * infinity
+            result["nTie"] = nTie
 
-            min_nTie_1 = result.groupby(key1)["nTie"].transform("min")
-            min_nTie_2 = result.groupby(key2)["nTie"].transform("min")
+            # only consider rows within search radius and non-matches rows
+            result = result[(result["nTie"] <= ncontains) | (result["nTie"] >= infinity)]
 
-            df_filtered = result[(result["nTie"] == min_nTie_1) | (
-                result["nTie"] == min_nTie_2)]
+            # for each key in each dataset, keeps the rows with the best match
+            # best match is defined as lowest nTie
+            # if there are multiple non-matches for a key, it keeps the tie row with 0
+            rows_to_keep = np.zeros(len(result), dtype=int)
 
-            df_filtered = df_filtered.drop_duplicates(
-                subset=[key1, key2], keep="first")
+            for i in range(0,len(dataset_choices)):
+                key = f"Key_{dataset_choices[i]}"
+                minTie = result.groupby(key)["nTie"].transform("min")
+                minTie = minTie.fillna(infinity)
+                rows_to_keep[(result["nTie"] == minTie) & (result[key].notna())] = 1
+            
+            df_filtered = result[rows_to_keep == 1]
 
-            # filter df nTie to exclude values greater than ncontains
-            df_filtered = df_filtered[df_filtered["nTie"] <= ncontains]
+            # result["nTie"] = result.filter(like="tie").sum(axis=1, skipna=True)
+
+            # key1 = f"Key_{dataset_choices[0]}"
+            # key2 = f"Key_{dataset_choices[1]}"
+
+            # min_nTie_1 = result.groupby(key1)["nTie"].transform("min")
+            # min_nTie_2 = result.groupby(key2)["nTie"].transform("min")
+           
+            # for every key from every dataset, choose the best match that exists
+            # df_filtered = result[(result["nTie"] == min_nTie_1) | (
+            #     result["nTie"] == min_nTie_2)]
+            
+            # df_filtered = df_filtered.drop_duplicates(
+            #     subset=[key1, key2], keep="first")
+
+            # # filter df nTie to exclude values greater than ncontains
+            # df_filtered = df_filtered[df_filtered["nTie"] <= ncontains]
 
            # Reorder columns
             cols = ["LCA_CMID", "LCA_CMName", "nTie"] + \
-                [col for col in result.columns if col not in [
+                [col for col in df_filtered.columns if col not in [
                     "LCA_CMID", "LCA_CMName", "nTie"]]
             result = df_filtered[cols]
             result = result.fillna("")
+
+            for col in result.filter(like="Key_").columns:
+                result[[f"variable_{col}", f"value_{col}"]] = result[col].apply(split_vars_values)
 
             return result.to_dict(orient='records')
 
@@ -355,27 +430,6 @@ def generate_cypher_query(domain, nContains):
 
     full_query = base_query + "\n".join(union_queries)
     return full_query
-
-
-def transform_variables_r(variables):
-    variables["transform"] = variables["transform"].str.replace(
-        "~", "!", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "=", "==", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "!==", "!=", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "concat", "paste0", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        r',0\)', ',na.rm = True', regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "in", "%in%", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "na.rm == T", "na.rm = True", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "== as.numeric", "= as.numeric", regex=True)
-    return variables
-
 
 def load_r_syntax_template(filename, replacements):
     """ Reads R syntax template and replaces placeholders """
@@ -441,10 +495,16 @@ def getMergingTemplate(datasetID, database):
         except:
             return {"Error": "Unable to process error"}, 500
 
-
-def createSyntax(template, database="SocioMap", domain="ETHNICITY",
+# template = pd.read_excel("tmp/BecomingHopiMergingTemplate.xlsx")
+# database = "ArchaMap"
+# syntax = "R"
+# dirpath = None
+# download=True
+def createSyntax(template, database="SocioMap",
                  syntax="R", dirpath=None, download=True):
     try:
+        
+        driver = getDriver(database)
 
         try:
             template = pd.DataFrame(template)
@@ -454,26 +514,32 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
         if template.empty:
             raise ValueError("Template DataFrame is empty.")
 
-        if "datasetID" not in template.columns:
-            raise ValueError(
-                "Template DataFrame must contain 'datasetID' column.")
-
-        if "mergingID" not in template.columns:
-            raise ValueError(
-                "Template DataFrame must contain 'mergingID' column.")
+        required_cols = ["mergingID", "datasetID", "filePath"]
+        for col in required_cols:
+            if col not in template.columns:
+                raise ValueError(
+                    f"Required column '{col}' is missing from the template.")
 
         if "stackID" not in template.columns:
-            raise ValueError(
-                "Template DataFrame must contain 'stackID' column.")
+            # obtain stackID from database
+            query = """
+            UNWIND $rows as row
+            MATCH (m:DATASET {CMID: row.mergingID})-[rs:MERGING]->(s:DATASET)-[rm:MERGING]->(d:DATASET {CMID: row.datasetID})
+            RETURN
+            m.CMID as mergingID, s.CMID as stackID, d.CMID as datasetID
+            """
+            stacks = getQuery(query, driver=driver, params={
+                              "rows": template.to_dict(orient='records')}, type="df")
+            if stacks.empty:
+                raise ValueError(
+                    "Could not retrieve stackIDs from the database. Please ensure mergingID and datasetID are correct.")
+            template = pd.merge(template, stacks, on=[
+                                "mergingID", "datasetID"], how="left")
+        template = template[["mergingID", "stackID",
+                                 "datasetID", "filePath"]]
 
         if dirpath is None:
             dirpath = "./tmp"
-
-        driver = getDriver(database)
-
-        if "filePath" not in template.columns:
-            raise ValueError(
-                "Must upload a list of datasets with the filePath column before generating syntax.")
 
         wd = template.iloc[0]["filePath"]
 
@@ -490,7 +556,6 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
 
         # verify CMIDs
         cols = ["mergingID", "stackID", "datasetID"]
-        cols = [col for col in cols if col in template.columns]
         CMIDs = list(set(template[cols].values.flatten().tolist()))
 
         check = getQuery(
@@ -502,7 +567,7 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
             params={"CMIDs": CMIDs},
             type="df"
         )
-
+        
         missing = set(CMIDs) - set(check["CMID"].tolist())
         missing = [str(m) + "\n" for m in missing]
 
@@ -511,32 +576,22 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
                 "Error: One or more CMIDs not found in the database\nMissing CMIDs: ", missing)
         else:
             print("All CMIDs found in the database.")
-        # need to adjust query to account for no stack datasets and for potentially different keys to variables using equivalence ties
-        db_query = """
+            
+        # get merging variables
+        variable_query = """
             unwind $rows as row
-            match (m:DATASET {CMID: row.mergingID})-[rs:MERGING]->(s:DATASET {CMID: row.stackID})-[rm:MERGING]->(v:VARIABLE)<-[ru:USES]-(d:DATASET {CMID: row.datasetID})
-            return
-            m.CMID as mergingID, m.CMName as mergingName, s.CMID as stackID, s.CMName as stackName, d.CMID as datasetID, d.CMName as datasetName, rs.aggBy as aggBy, v.CMID as variableCMID, head(apoc.coll.flatten(collect(rm.varName),true)) as varName, rm.transform as transform, rm.Rtransform as Rtransform, rm.Rfunction as Rfunction, rm.summaryStatistic as summaryStatistic, ru.Key as Key
+            match (m:DATASET {CMID: row.mergingID})-[:MERGING]->(s:DATASET {CMID: row.stackID})-[rsv:MERGING]->(v:VARIABLE)<-[rdv:MERGING]-(d:DATASET {CMID: row.datasetID}) where rdv.stack = s.CMID
+            optional match (v)<-[ru:USES]-(d) 
+            RETURN DISTINCT
+            m.CMID as mergingID, m.CMName as mergingName, s.CMID as stackID, s.CMName as stackName, d.CMID as datasetID, d.CMName as datasetName, rsv.varName as varName, v.CMID as variableID, rsv.stackTransform as stackTransform, rsv.summaryStatistic as summaryStatistic, rdv.datasetTransform as datasetTransform, ru.Key as variableKey
             """
-        data = getQuery(db_query, driver=driver, params={
+        variables = getQuery(variable_query, driver=driver, params={
                         "rows": template.to_dict(orient='records')}, type="df")
 
-        # pd.set_option('display.max_rows', None)
 
-        # print(data.head(10))
-
-        if "transform" in data.columns:
-            print("transforming variables")
-
-            if "Rtransform" in data.columns:
-                data['transform'] = data['Rtransform'].combine_first(
-                    data['transform'])
-                data = transform_variables_r(data)
-        data = data.reset_index()
-
-        variables = data[["datasetID", "Key"]].copy()
+        template_names = variables[['mergingID', 'mergingName','stackID','stackName']].drop_duplicates()
+        variables = data[["datasetID", "variableKey"]].copy()
         variables = variables.drop_duplicates()
-        # variables = extract_key(variables, col="Key")
         variables[['variable', 'value']] = variables['Key'].str.split(
             ': ', n=1, expand=True)
 

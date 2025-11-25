@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify, render_template, make_response
-from CM import getDriver, verifyUser, login, mergeNodes, processUSES, replaceProperty, add_edit_delete_Node, add_edit_delete_USES, createLabel, deleteNode, deleteUSES, moveUSESties, check_ambiguous_ties_moveUSESties, cleanCMID, unlist, createNodes, waitingUSES
+from CM import getDriver, verifyUser, login, mergeNodes, processUSES, replaceProperty, add_edit_delete_Node, add_edit_delete_USES, createLabel, deleteNode, deleteUSES, moveUSESties, check_ambiguous_ties_moveUSESties, cleanCMID, unlist, createNodes, waitingUSES, mergeUSESties
 import json
 
 admin_bp = Blueprint('admin', __name__)
@@ -9,6 +9,7 @@ admin_bp = Blueprint('admin', __name__)
 def admin_nodeproperties():
     CMID = request.args.get('CMID')
     database = request.args.get('database')
+    option = request.args.get('option')
 
     driver = getDriver(database)
 
@@ -30,7 +31,6 @@ def admin_nodeproperties():
 
         if r == []:
             return jsonify({"error": "Invalid CMID"})
-
         props = [k for k in r[0]['props'].keys()] if r else []
 
         # Run q1 to get allowed properties
@@ -39,7 +39,7 @@ def admin_nodeproperties():
 
         r = {k: v for k, v in r[0]['props'].items() if k in allowed_props}
 
-        if r == {}:
+        if option != "add" and r == {}:
             return jsonify({"error": "No editable features on this node."})
 
         # Filter props to only include allowed keys
@@ -89,6 +89,7 @@ def admin_usesproperties():
     }
 
 
+
 @admin_bp.route('/create_label_helper', methods=['GET'])
 def create_label():
     database = request.args.get('database')
@@ -129,6 +130,17 @@ def getAdmin():
 
     Returns:
     - Response: A Flask response containing the 'admin.html' template.
+
+    Example:
+    ```python
+    from flask import Flask
+
+    app = Flask(__name__)
+
+    @admin_bp.route('/admin')
+    def admin_route():
+        return getAdmin()
+    ```
     """
     headers = {'Content-Type': 'text/html'}
     return make_response(render_template('admin.html'), 200, headers)
@@ -169,7 +181,7 @@ def getAdminEdit():
             if apikey == apikeyEnv:
                 validated = True
             if not validated:
-                credentials = login(database, user, pwd)
+                credentials = login(user, pwd)
                 if isinstance(credentials, dict) and credentials.get('role') == "admin":
                     validated = True
                     user = credentials.get('userid')
@@ -178,8 +190,8 @@ def getAdminEdit():
         
         result = "Nothing returned"
         if fun == "mergeNodes":
-            keepcmid = unlist(data.get('keepcmid'))
-            deletecmid = unlist(data.get('deletecmid'))
+            keepcmid = unlist(data.get('keepcmid').strip())
+            deletecmid = unlist(data.get('deletecmid').strip())
             result = mergeNodes(keepcmid, deletecmid, user, database)
         elif fun == "processUSES":
             CMID = cleanCMID(data.get('CMID'))
@@ -217,6 +229,7 @@ def getAdminEdit():
         data = str(e)
         return data, 500
 
+
 @admin_bp.route('/createNodes', methods=['POST'])
 def createNodesapi():
     try:
@@ -252,4 +265,22 @@ def getUpdateWaitingUSES():
     data = json.loads(data)
     database = data.get("database")
     result = waitingUSES(database)
+    return result
+
+@admin_bp.route('/mergeUSESties', methods=['GET','POST'])
+def getMergeUSESties():
+    if request.method == 'GET':
+        database = request.args.get('database')
+        CMID = request.args.get('CMID')
+        Key = request.args.get('Key')
+        datasetID = request.args.get('datasetID')
+    else:
+        data = request.get_data()
+        data = json.loads(data)
+        database = data.get("database")
+        CMID = data.get("CMID")
+        Key = data.get("Key")
+        datasetID = data.get("datasetID")
+    
+    result = mergeUSESties(database, CMID, Key, datasetID)
     return result
