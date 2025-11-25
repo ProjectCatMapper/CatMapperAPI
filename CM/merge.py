@@ -37,9 +37,13 @@ def split_vars_values(s):
 # joins two datasets that have previously been translated into CatMapper’s database.Each dataset must include two columns: datasetiD and the Key pointing to a category.
 # It returns a single spreadsheet with: 1) datasetIDs, 2) data columns from the original dataset (renamed with _left and _right suffixes if overlapping.  Rows with keys pointing to the same category are aligned in the output spreadsheet.
 # When keys point to a CatMapper category, standardized identifiers are also returned (CMID, CMName).
-def joinDatasets(database, joinLeft, joinRight):
+# database = "ArchaMap"
+# joinLeft = pd.read_excel("tmp/joinLeft.xlsx")
+# joinRight = pd.read_excel("tmp/joinRight.xlsx")
+def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
     try:
 
+        # ensure dataframes
         joinLeft = pd.DataFrame(joinLeft)
         joinRight = pd.DataFrame(joinRight)
 
@@ -53,42 +57,28 @@ def joinDatasets(database, joinLeft, joinRight):
 
         driver = getDriver(database)
 
-        joinLeft = pd.DataFrame(joinLeft)
-        joinRight = pd.DataFrame(joinRight)
-
         # Drop 'CMID' and 'CMName' only if they exist in the columns
-        joinLeft = joinLeft.drop(
-            columns=[col for col in ['CMID', 'CMName'] if col in joinLeft.columns]).copy()
-        joinRight = joinRight.drop(
-            columns=[col for col in ['CMID', 'CMName'] if col in joinRight.columns]).copy()
+        joinLeft.drop(
+            columns=[col for col in ['CMID', 'CMName'] if col in joinLeft.columns], inplace=True)
+        joinRight.drop(
+            columns=[col for col in ['CMID', 'CMName'] if col in joinRight.columns], inplace=True)
 
-        datasetID_left = joinLeft['datasetID'].unique()
-        datasetID_right = joinRight['datasetID'].unique()
+        datasetID_left = joinLeft['datasetID'].unique()[0]
+        datasetID_right = joinRight['datasetID'].unique()[0]
 
         # Query keys for left dataset
-        match_left_query = """
+        match_query = f"""
         UNWIND $datasetID AS id
-        MATCH (d:DATASET {CMID: id})-[r:USES]->()
-        WITH d, split(r.Key, ';') AS Key
-        WITH d, [i IN Key | split(i, ':')[0]] AS Key
+        MATCH (d:DATASET {{CMID: id}})-[r:USES]->(:{domain})
+        WITH d, split(r.Key, '; ') AS Key
+        WITH d, [i IN Key | trim(split(i, ': ')[0])] AS Key
         RETURN DISTINCT d.CMID AS datasetID, Key
         """
-        match_left = getQuery(match_left_query, driver, {
-                              "datasetID": datasetID_left})
+        match_left = getQuery(match_query, driver, {"datasetID": datasetID_left}, type = "df")
 
         # Query keys for right dataset
-        match_right_query = """
-        UNWIND $datasetID AS id
-        MATCH (d:DATASET {CMID: id})-[r:USES]->()
-        WITH d, split(r.Key, ';') AS Key
-        WITH d, [i IN Key | split(i, ':')[0]] AS Key
-        RETURN DISTINCT d.CMID AS datasetID, Key
-        """
-        match_right = getQuery(match_right_query, driver, {
-                               "datasetID": datasetID_right})
 
-        match_left = pd.DataFrame(match_left)
-        match_right = pd.DataFrame(match_right)
+        match_right = getQuery(match_query, driver, {"datasetID": datasetID_right}, type = "df")
 
         left_keys = match_left['Key'].explode(
         ).unique() if 'Key' in match_left else []
@@ -117,11 +107,14 @@ def joinDatasets(database, joinLeft, joinRight):
         merge_left = joinLeft[['datasetID'] + found_left_keys].copy()
         merge_left = createKey(merge_left, cols=found_left_keys).rename(
             columns={'Key': 'term', 'datasetID': 'dataset'})
-        translate_left = translate(database=database, property="Key", domain="CATEGORY", term="term", table=merge_left,
-                                   key='false', country=None, context=None, dataset='dataset', yearStart=None, yearEnd=None, query='false', uniqueRows=False)
-        translate_left = translate_left.rename(
+        translate_left = translate(database=database, property="Key", domain=domain, term="term", table=merge_left,
+                                   key='false', country=None, context=None, dataset='dataset', yearStart=None, yearEnd=None, query='false', uniqueRows=False, countsamename=False)
+         # rename columns to remove _term suffix
+        translate_left = translate_left[0].rename(
             columns=lambda x: x.replace('_term', ''))
-        merge_left = translate_left[['term', 'CMID', 'CMName', 'dataset']].merge(merge_left, on=['term', 'dataset']).drop(
+        merge_left = translate_left[
+            ['term', 'CMID', 'CMName', 'dataset']
+            ].merge(merge_left, on=['term', 'dataset']).drop(
             columns='term').rename(columns={'dataset': 'datasetID'}).drop_duplicates()
 
         # merge right
@@ -141,9 +134,10 @@ def joinDatasets(database, joinLeft, joinRight):
             yearStart=None,
             yearEnd=None,
             query='false',
-            uniqueRows=False
+            uniqueRows=False,
+            countsamename=False
         )
-        translate_right = translate_right.rename(
+        translate_right = translate_right[0].rename(
             columns=lambda x: x.replace('_term', ''))
         merge_right = (
             translate_right[['term', 'CMID', 'CMName', 'dataset']]
@@ -154,62 +148,50 @@ def joinDatasets(database, joinLeft, joinRight):
         )
 
         # Final joining
-        # Step 1: Identify overlapping columns between merge_left and merge_right, excluding CMID and CMName
+        # Identify overlapping columns between merge_left and merge_right, excluding CMID and CMName
         overlapping_columns = [
             col for col in merge_left.columns if col in merge_right.columns and col not in ['CMID', 'CMName']]
 
-        # Step 2: Perform the first merge between merge_left and merge_right with suffixes for overlapping columns
+        # Perform the first merge between merge_left and merge_right with suffixes for overlapping columns
         link_file = merge_left.merge(
             merge_right,
             on=['CMID', 'CMName'],
+            how='outer',
             suffixes=('_'+datasetID_left, '_'+datasetID_right)
         )
+        
+        # Rename datasetID in joinLeft and joinRight for consistent merging
+        joinLeft.rename(columns={'datasetID': 'datasetID_' + datasetID_left}, inplace=True)
+        joinRight.rename(columns={'datasetID': 'datasetID_' + datasetID_right}, inplace=True)
 
-        # Step 3: Update found_left_keys and found_right_keys to include suffixes for the identified overlapping columns
-        found_left_keys_with_suffix = [
-            f"{key}_left" if key in overlapping_columns else key for key in found_left_keys]
-        found_right_keys_with_suffix = [
-            f"{key}_right" if key in overlapping_columns else key for key in found_right_keys]
-
-        # Step 4: Rename datasetID in joinLeft and joinRight for consistent merging
-        joinLeft = joinLeft.rename(columns={'datasetID': 'datasetID_left'})
-        joinRight = joinRight.rename(columns={'datasetID': 'datasetID_right'})
-
-        left_rename_mapping = dict(
-            zip(found_left_keys, found_left_keys_with_suffix))
-        right_rename_mapping = dict(
-            zip(found_right_keys, found_right_keys_with_suffix))
-        joinLeft = joinLeft.rename(columns=left_rename_mapping)
-        joinRight = joinRight.rename(columns=right_rename_mapping)
-
-        # Step 5: Merge link_file with joinLeft without adding further suffixes for overlapping columns
+        # Merge link_file with joinLeft without adding further suffixes for overlapping columns
         link_file = link_file.merge(
             joinLeft,
-            left_on=['datasetID_left'] + found_left_keys_with_suffix,
-            right_on=['datasetID_left'] + found_left_keys_with_suffix,
-            how='left',
+            left_on=['datasetID_' + datasetID_left] + found_left_keys,
+            right_on=['datasetID_' + datasetID_left] + found_left_keys,
+            how='outer',
             # Prevents adding additional _x suffixes
             suffixes=('_'+datasetID_left, '_'+datasetID_right)
         )
 
-        # Step 6: Merge link_file with joinRight without adding further suffixes for overlapping columns
+        # Merge link_file with joinRight without adding further suffixes for overlapping columns
         link_file = link_file.merge(
             joinRight,
-            left_on=['datasetID_right'] + found_right_keys_with_suffix,
-            right_on=['datasetID_right'] + found_right_keys_with_suffix,
-            how='left',
+            left_on=['datasetID_' + datasetID_right] + found_right_keys,
+            right_on=['datasetID_' + datasetID_right] + found_right_keys,
+            how='outer',
             suffixes=('_'+datasetID_left, '_'+datasetID_right)
         )
 
-        # Step 7: Final clean-up to drop duplicates and sort by specified columns
+        # Final clean-up to drop duplicates and sort by specified columns
         link_file = link_file.drop_duplicates().sort_values(
-            by=['datasetID_left', 'datasetID_right', 'CMName', 'CMID'])
+            by=['datasetID_' + datasetID_left, 'datasetID_' + datasetID_right, 'CMName', 'CMID'])
 
         # replace NaN with empty string
         link_file = link_file.fillna("")
 
         desired_order = ['CMID', 'CMName',
-                         'datasetID_left', 'datasetID_right']
+                         'datasetID_' + datasetID_left, 'datasetID_' + datasetID_right]
         remaining_cols = [
             col for col in link_file.columns if col not in desired_order]
         link_file = link_file[desired_order + remaining_cols]
