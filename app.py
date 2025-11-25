@@ -529,7 +529,7 @@ def getTranslatedomains():
     driver = getDriver(database)
     query = '''MATCH (m:METADATA)
             WHERE m.displayOrder IS NOT NULL
-            AND NOT m.CMName IN ['ALL NODES', 'ATTRIBUTE']
+            AND NOT m.CMName IN ['ALL NODES']
             WITH m.groupLabel AS group, m.CMName AS node, m.displayOrder AS nodeOrder
             MATCH (g:METADATA {CMName: group})
             WHERE g.displayOrder IS NOT NULL
