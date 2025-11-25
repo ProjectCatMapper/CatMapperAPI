@@ -994,7 +994,6 @@ def create_mties_variables(database, user, dataset):
     
     return f"Merging variable ties created successfully for mergingID(s): {', '.join(mergingID)}"
 
-# testing for merging template
 # database = "ArchaMap"
 # user = "1"
 # dataset = pd.read_excel("tmp/BecomingHopiMergingTemplate.xlsx")

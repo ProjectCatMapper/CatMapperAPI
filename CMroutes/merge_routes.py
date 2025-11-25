@@ -73,8 +73,9 @@ def submitjoinDatasets():
     database = unlist(data.get("database", ""))
     joinLeft = data.get("joinLeft")
     joinRight = data.get("joinRight")
+    domain = unlist(data.get("domain", ""))
 
-    result = joinDatasets(database, joinLeft, joinRight)
+    result = joinDatasets(database, joinLeft, joinRight, domain)
 
     return jsonify(result)
 
