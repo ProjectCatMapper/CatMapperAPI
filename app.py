@@ -523,32 +523,24 @@ def net():
     resultnet = r.data()
     return resultnet
 
-@app.route("/getTranslatedomains", methods=['GET'])
-def getTranslatedomains():
-    database = request.args.get("database")
+@app.route(f"/getDomains", methods=['GET'])
+def getDomainsBase():
+    return "Please specify a database. E.g., /getDomains/sociomap or /getDomains/archamap", 400
+    
+@app.route(f"/getDomains/<database>", methods=['GET'])
+def getDomains(database):
+    
     driver = getDriver(database)
-    query = '''MATCH (m:METADATA)
-            WHERE m.displayOrder IS NOT NULL
-            AND NOT m.CMName IN ['ALL NODES', 'ATTRIBUTE']
-            WITH m.groupLabel AS group, m.CMName AS node, m.displayOrder AS nodeOrder
-            MATCH (g:METADATA {CMName: group})
+    query = '''
+            MATCH (g:LABEL)
             WHERE g.displayOrder IS NOT NULL
-            WITH g.groupLabel AS group, g.displayOrder AS groupOrder, node, nodeOrder
-            ORDER BY group, nodeOrder, node 
-            WITH group, groupOrder, collect(node) AS nodes
-            RETURN group, nodes
-            ORDER BY groupOrder
+            RETURN g.groupLabel as domain, g.CMName as subdomain, g.description as description
+            ORDER BY domain
             '''
     
     result = getQuery(query,driver)
-
-    result_list = []
-    for record in result:
-        group = record["group"]
-        members = record["nodes"]
-        result_list.append({"group": group, "nodes": members})
     
-    return jsonify(result_list)
+    return jsonify(result)
 
 @app.route("/explore", methods=['GET'])
 def getExplore():
