@@ -37,9 +37,9 @@ def split_vars_values(s):
 # joins two datasets that have previously been translated into CatMapper’s database.Each dataset must include two columns: datasetiD and the Key pointing to a category.
 # It returns a single spreadsheet with: 1) datasetIDs, 2) data columns from the original dataset (renamed with _left and _right suffixes if overlapping.  Rows with keys pointing to the same category are aligned in the output spreadsheet.
 # When keys point to a CatMapper category, standardized identifiers are also returned (CMID, CMName).
-database = "ArchaMap"
-joinLeft = pd.read_excel("tmp/joinLeft.xlsx")
-joinRight = pd.read_excel("tmp/joinRight.xlsx")
+# database = "ArchaMap"
+# joinLeft = pd.read_excel("tmp/joinLeft.xlsx")
+# joinRight = pd.read_excel("tmp/joinRight.xlsx")
 def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
     try:
 
@@ -49,12 +49,11 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
 
         if 'datasetID' not in joinLeft.columns:
             raise ValueError(
-                "The 'datasetID' column is missing from the joinLeft DataFrame.")
+                "The 'datasetID' column is missing from the first DataFrame.")
 
         if 'datasetID' not in joinRight.columns:
             raise ValueError(
-                "The 'datasetID' column is missing from the joinRight DataFrame.")
-
+                "The 'datasetID' column is missing from the second DataFrame.")
         driver = getDriver(database)
 
         # Drop 'CMID' and 'CMName' only if they exist in the columns
@@ -75,10 +74,18 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
         RETURN DISTINCT d.CMID AS datasetID, Key
         """
         match_left = getQuery(match_query, driver, {"datasetID": datasetID_left}, type = "df")
+        
+        if match_left.empty:
+            raise ValueError(
+                "No categories found in first DataFrame for domain: " + domain)
 
         # Query keys for right dataset
 
         match_right = getQuery(match_query, driver, {"datasetID": datasetID_right}, type = "df")
+
+        if match_right.empty:
+            raise ValueError(
+                "No categories found in second DataFrame for domain: " + domain)
 
         left_keys = match_left['Key'].explode(
         ).unique() if 'Key' in match_left else []
@@ -93,10 +100,10 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
         # Throw an error only if none of the keys are found
         if not found_left_keys:
             print(
-                {"error": "Cannot continue with merge: no matching required columns found in 'joinLeft'"})
+                {"error": "Cannot continue with merge: no matching required columns found in first DataFrame"})
         if not found_right_keys:
             print(
-                {"error": "Cannot continue with merge: no matching required columns found in 'joinRight'"})
+                {"error": "Cannot continue with merge: no matching required columns found in second DataFrame"})
 
         # Convert only the found columns to string type
         joinLeft[found_left_keys] = joinLeft[found_left_keys].astype(
@@ -109,6 +116,9 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
             columns={'Key': 'term', 'datasetID': 'dataset'})
         translate_left = translate(database=database, property="Key", domain=domain, term="term", table=merge_left,
                                    key='false', country=None, context=None, dataset='dataset', yearStart=None, yearEnd=None, query='false', uniqueRows=False, countsamename=False)
+        if not 'CMID_term' in translate_left[0].columns:
+            raise ValueError(
+                f"Translation failed: 'CMID_term' not found in translation results for first dataset. Check domain ({domain}) and keys.")
          # rename columns to remove _term suffix
         translate_left = translate_left[0].rename(
             columns=lambda x: x.replace('_term', ''))
@@ -137,6 +147,9 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
             uniqueRows=False,
             countsamename=False
         )
+        if not 'CMID_term' in translate_right[0].columns:
+            raise ValueError(
+                "Translation failed: 'CMID_term' not found in translation results for second dataset. Check domain and keys.")
         translate_right = translate_right[0].rename(
             columns=lambda x: x.replace('_term', ''))
         merge_right = (
@@ -196,7 +209,7 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
             col for col in link_file.columns if col not in desired_order]
         link_file = link_file[desired_order + remaining_cols]
 
-        return link_file.to_dict(orient='records')
+        return link_file.to_dict(orient='records'), 200
 
     except Exception as e:
         try:
