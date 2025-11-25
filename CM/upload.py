@@ -994,11 +994,12 @@ def create_mties_variables(database, user, dataset):
     
     return f"Merging variable ties created successfully for mergingID(s): {', '.join(mergingID)}"
 
-database = "ArchaMap"
-user = "1"
+# testing for merging template
+# database = "ArchaMap"
+# user = "1"
 # dataset = pd.read_excel("tmp/BecomingHopiMergingTemplate.xlsx")
 # dataset = pd.read_excel("tmp/BecomingHopiMergingVariables.xlsx")
-dataset = pd.read_excel("tmp/BecomingHopiEquivalenceTies.xlsx")
+# dataset = pd.read_excel("tmp/BecomingHopiEquivalenceTies.xlsx")
 
 def create_equivalence_ties(database, user, dataset):
     driver = getDriver(database)
