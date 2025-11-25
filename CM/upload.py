@@ -913,8 +913,9 @@ def input_Nodes_Uses(
     # Input is dataset if: 1) label is DATASET (function 1), or 
     # 2) all CMIDs have dataset format (functions 5,6)
     isDataset = False
+    # remove hardcoding
     if "label" in dataset.columns:
-        if dataset["label"].iloc[0] == "DATASET":
+        if dataset["label"].iloc[0] == "DATASET" or dataset["label"].iloc[0] == "STACK" or dataset["label"].iloc[0] == "MERGING":
             isDataset = True
     elif "CMID" in dataset.columns:
         if dataset["CMID"].astype(str).str.startswith(("SD", "AD")).all():
@@ -1210,6 +1211,7 @@ def input_Nodes_Uses(
         "polity",
     ]
     
+    # Checks CMID-based columns for validity of the CMIDs in the columns, checks to see if CMID are in the database.
     error_columns = ["CMID", "datasetID"] + multi_value_columns
 
     for i in error_columns:
@@ -1218,6 +1220,7 @@ def input_Nodes_Uses(
                 f"log/{user}uploadProgress.txt", f"validating column {i}", write="a"
             )
 
+            # search label defines which labels we are querying on.
             search_label = "CATEGORY"
 
             if isDataset and (i == "CMID" or  i == "parent"):
@@ -1535,8 +1538,9 @@ def input_Nodes_Uses(
         write="a",
     )
 
-    # prevents adding shortName if the node has the property
-    if isDataset and uploadOption == "add_node":
+    # if using add to existing node function (function 5)
+    # prevents adding shortName if the node has the shortname property
+    if isDataset and uploadOption == "node_add":
         query = "unwind $rows as row match (d:DATASET {shortName: row.shortName}) return d.shortName as shortName"
         shortNames = getQuery(
             query,
