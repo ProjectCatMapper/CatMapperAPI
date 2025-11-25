@@ -15,6 +15,11 @@ from CMroutes import *
 app = create_app()
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB
 
+# routes
+app.register_blueprint(merge_bp)  
+app.register_blueprint(admin_bp)  
+app.register_blueprint(metadata_bp)  
+
 @app.route("/")
 def root():
     headers = {'Content-Type': 'text/html'}
@@ -518,33 +523,6 @@ def net():
     resultnet = r.data()
     return resultnet
 
-@app.route("/getTranslatedomains", methods=['GET'])
-def getTranslatedomains():
-    database = request.args.get("database")
-    driver = getDriver(database)
-    query = '''MATCH (m:METADATA)
-            WHERE m.displayOrder IS NOT NULL
-            AND NOT m.CMName IN ['ALL NODES', 'ATTRIBUTE']
-            WITH m.groupLabel AS group, m.CMName AS node, m.displayOrder AS nodeOrder
-            MATCH (g:METADATA {CMName: group})
-            WHERE g.displayOrder IS NOT NULL
-            WITH g.groupLabel AS group, g.displayOrder AS groupOrder, node, nodeOrder
-            ORDER BY group, nodeOrder, node 
-            WITH group, groupOrder, collect(node) AS nodes
-            RETURN group, nodes
-            ORDER BY groupOrder
-            '''
-    
-    result = getQuery(query,driver)
-
-    result_list = []
-    for record in result:
-        group = record["group"]
-        members = record["nodes"]
-        result_list.append({"group": group, "nodes": members})
-    
-    return jsonify(result_list)
-
 @app.route("/explore", methods=['GET'])
 def getExplore():
 
@@ -875,83 +853,6 @@ return a, collect(distinct r) as r, collect(distinct e) as e
         return {"node": node, "relations": rel, "relNodes": end, "query": cypher_query, "params": [{"cmid": cmid, "database": database, "domain": domain, "relation": relation, "endcmid": endcmid}]}
     except Exception as e:
         return str(e), 500
-
-
-# what about calling this createLinkfile internally? # do we want to?
-@app.route('/proposeMergeSubmit', methods=['POST'])
-def submit_merge():
-    data = request.get_data()
-    data = json.loads(data)
-    dataset_choices = data.get("datasetChoices")
-    dataset_choices = [choice.strip() for choice in dataset_choices.split(",")]
-    ncontains = data.get("mergelevel")
-    category_label = unlist(data.get("categoryLabel", ""))
-    intersection = unlist(data.get("intersection", False))
-    database = unlist(data.get('database'))
-    criteria = str.lower(unlist(data.get('equivalence')))
-    if category_label == "ANY DOMAIN":
-        category_label = "CATEGORY"
-    elif category_label == "AREA":
-        category_label = "DISTRICT"
-
-    result = proposeMerge(dataset_choices=dataset_choices, category_label=category_label,
-                          criteria=criteria, database=database, intersection=intersection, ncontains=ncontains)
-
-    return result
-
-
-@app.route('/downloadMergeCode', methods=['POST'])
-def get_merge_code():
-    data = request.get_data()
-    data = json.loads(data)
-
-
-@app.route('/joinDatasets', methods=['POST'])
-def submitjoinDatasets():
-    data = request.get_data()
-    data = json.loads(data)
-    # print(data)
-    database = unlist(data.get("database", ""))
-    joinLeft = data.get("joinLeft")
-    joinRight = data.get("joinRight")
-
-    result = joinDatasets(database, joinLeft, joinRight)
-
-    return jsonify(result)
-
-
-@app.route('/validateDatasets', methods=['POST'])
-def submitvalidateDatasets():
-    data = request.get_data()
-    data = json.loads(data)
-    database = unlist(data.get("database", ""))
-    names = data.get("names").split(",")
-
-    driver = getDriver(database)
-
-    with driver.session() as session:
-        for i in names:
-            q = """
-            MATCH (n:DATASET)
-            WHERE n.CMID = $prop
-            RETURN COUNT(n) > 0 AS nodeExists
-            """
-            result = session.run(q, prop=i.strip())
-            node_exists = result.single()["nodeExists"]
-            if not node_exists:
-                return jsonify({"success": False, "message": "Check your Dataset IDs."})
-    driver.close()
-    return jsonify({"success": True, "message": "All IDs exist."})
-
-
-# Download template
-app.add_url_rule('/merge/template/<database>/<datasetID>', 'get_merge_template',
-                 get_merge_template, methods=['GET'])
-
-# Merging syntax -- only accepts R syntax for now
-app.add_url_rule('/merge/syntax/<database>', 'get_merge_syntax_route',
-                 get_merge_syntax_route, methods=['POST'])
-
 
 @app.route('/networksjs', methods=['GET'])
 def getNetworkjs():
@@ -1347,228 +1248,15 @@ return true as exists
             return jsonify({"error": "please contact admin@catmapper.org. Error:" + error_message}), 500
 
 
-@app.route("/admin_add_edit_delete_nodeproperties", methods=['GET'])
-def admin_nodeproperties():
-    CMID = request.args.get('CMID')
-    database = request.args.get('database')
-
-    driver = getDriver(database)
-
-    # q captures the actual properties of a node
-    q = "MATCH (n) WHERE n.CMID = $cmid return properties(n) AS props"
-
-    # q1 captures relevant properties of node
-    if "CP" in CMID:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'PROPERTY' RETURN p.CMName as property"
-    elif "CL" in CMID:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'LABEL' RETURN p.CMName as property"
-    elif "D" in CMID:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'DATASET' RETURN p.CMName as property"
-    else:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'CATEGORY' RETURN p.CMName as property"
-
-    with driver.session() as session:
-        r = session.run(q, cmid=CMID).data()
-
-        if r == []:
-            return jsonify({"error": "Invalid CMID"})
-
-        props = [k for k in r[0]['props'].keys()] if r else []
-
-        # Run q1 to get allowed properties
-        allowed = session.run(q1).data()
-        allowed_props = {row['property'] for row in allowed}
-
-        r = {k: v for k, v in r[0]['props'].items() if k in allowed_props}
-
-        if r == {}:
-            return jsonify({"error": "No editable features on this node."})
-
-        # Filter props to only include allowed keys
-        r1 = [k for k in allowed_props if k not in props]
-
-    return jsonify({
-        "r": r,
-        "r1": r1,
-        "error": ""
-    })
 
 
-@app.route("/admin_add_edit_delete_usesproperties", methods=['GET'])
-def admin_usesproperties():
-    CMID = request.args.get('CMID')
-    database = request.args.get('database')
-    func = request.args.get("func")
-
-    driver = getDriver(database)
-
-    q = "MATCH (n:CATEGORY)<-[r:USES]-(d:DATASET) WHERE n.CMID = $cmid RETURN {CMName: n.CMName, CMID: n.CMID,elementId: elementId(n)} AS n,r,d"
-    
-    q1 = "MATCH (p:PROPERTY) WHERE p.type='relationship' RETURN p.CMName as property"
-
-    with driver.session() as session:
-        result = session.run(q, cmid=CMID)
-
-        records_list = []
-        temp_list = []
-        for record in result:
-            n = dict(record["n"].items())
-            r = dict(record["r"].items())
-            r["id"] = record["r"].element_id
-            d = dict(record["d"].items())
-            temp_list.append((n, r, d))
-        
-        temp_list.sort(key=lambda x: (x[2].get("CMName", ""), x[1].get("Key", "")))
-        records_list.extend(temp_list)
-        
-        allowed = session.run(q1).data()
-        allowed_props = list({row['property'] for row in allowed})
-        
-    return {
-        "r": records_list,
-        "r1": allowed_props,
-        "error": ""
-    }
 
 
-@app.route('/create_label_helper', methods=['GET'])
-def create_label():
-    database = request.args.get('database')
-    driver = getDriver(database)
-
-    q = "MATCH (p:LABEL) WHERE p.groupLabel=p.CMName RETURN p.CMName"
-
-    with driver.session() as session:
-        result = session.run(q)
-
-        values = [record["p.CMName"] for record in result]
-
-        final_values = [v for v in values if v not in (
-            "ALL NODES", "ANY DOMAIN")]
-
-    return {"res": final_values}
-
-@app.route('/check_ambiguous_usesties', methods=['POST'])
-def check_ambiguous_usesties():
-    data = request.get_data()
-    data = json.loads(data)
-    database = unlist(data.get('database'))
-    credentials = unlist(data.get("cred"))
-    input = unlist(data.get("input"))
-    CMID_from = input.get('s1_2')
-    CMID_to = input.get('s1_3')
-    USES_property = json.loads(input.get('s1_7'))
-    rel_id = USES_property[1]["id"]
-    driver = getDriver(database)
-
-    result = check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id)
-    return result
-
-@app.route('/admin', methods=['GET'])
-def getAdmin():
-    """
-    Retrieve the 'admin.html' template and return it as a response.
-
-    Returns:
-    - Response: A Flask response containing the 'admin.html' template.
-
-    Example:
-    ```python
-    from flask import Flask
-
-    app = Flask(__name__)
-
-    @app.route('/admin')
-    def admin_route():
-        return getAdmin()
-    ```
-    """
-    headers = {'Content-Type': 'text/html'}
-    return make_response(render_template('admin.html'), 200, headers)
 
 
-@app.route('/admin/edit', methods=['GET', 'POST'])
-def getAdminEdit():
-    from configparser import ConfigParser
-    config = ConfigParser()
-    config.read('config.ini')
-    apikeyEnv = config['DB']['apikey']
-    # will not be documented in swagger at this point
-    try:
-        if request.method == 'GET':
-            data = request.args
-        elif request.method == "POST":
-            data = request.get_data()
-            data = json.loads(data)
-        else:
-            raise Exception("invalid request method")
-        database = unlist(data.get('database'))
-        if database is None:
-            raise Exception("Database not specified")
-        driver = getDriver(database)
-        fun = unlist(data.get('fun'))
-        user = unlist(data.get('user'))
-        pwd = unlist(data.get('pwd'))
-        apikey = unlist(data.get('apikey'))
-        credentials = unlist(data.get("cred"))
-        input = unlist(data.get("input"))
-        if credentials:
-            verified = verifyUser(credentials.get(
-                "userid"), credentials.get("key"), "admin")
-            if verified != "verified":
-                raise Exception("Error: User is not verified")
-        else:
-            validated = False
-            if apikey == apikeyEnv:
-                validated = True
-            if not validated:
-                credentials = login(database, user, pwd)
-                if isinstance(credentials, dict) and credentials.get('role') == "admin":
-                    validated = True
-                    user = credentials.get('userid')
-            if not validated:
-                raise Exception("User not authorized")
-        
-        result = "Nothing returned"
-        if fun == "mergeNodes":
-            keepcmid = unlist(data.get('keepcmid').strip())
-            deletecmid = unlist(data.get('deletecmid').strip())
-            result = mergeNodes(keepcmid, deletecmid, user, database)
-        elif fun == "processUSES":
-            CMID = cleanCMID(data.get('CMID'))
-            result = processUSES(database=database, CMID=CMID)
-        elif fun == "replaceProperty":
-            cmid = unlist(data.get('cmid'))
-            property = unlist(data.get('property'))
-            old = unlist(data.get('old'))
-            new = unlist(data.get('new'))
-            result = replaceProperty(cmid, property, old, new, database)
-        elif fun == "add/edit/delete node property":
-            result = add_edit_delete_Node(
-                database, credentials.get("userid"), input)
-        elif fun == "add/edit/delete USES property":
-            result = add_edit_delete_USES(
-                database, credentials.get("userid"), input)
-        elif fun == "merge nodes":
-            result = mergeNodes(input.get('s1_2'), input.get(
-                's1_3'), credentials.get("userid"), database)
-        elif fun == "create new label":
-            result = createLabel(database, credentials.get("userid"), input)
-        elif fun == "delete node":
-            result = deleteNode(database, credentials.get("userid"), input)
-        elif fun == "delete USES relation":
-            result = deleteUSES(database, credentials.get("userid"), input)
-        elif fun == "move USES tie":
-            tabledata = data.get("tabledata")
-            dataset = data.get("datasetID")
-            result = moveUSESties(database, credentials.get("userid"), input,dataset,tabledata)
-        else:
-            raise Exception("Function does not exist")
-        return result
-    except Exception as e:
-        # In case of an error, return an error response with an appropriate HTTP status code
-        data = str(e)
-        return data, 500
+
+
+
 
 @app.route('/dataset', methods=['GET', 'POST'])
 def getDataset():
@@ -1967,34 +1655,7 @@ return custom.getName(foci) as Focus, custom.getDisplayName(label) as domain, n 
         return result, 500
 
 
-@app.route('/createNodes', methods=['POST'])
-def createNodesapi():
-    try:
 
-        data = request.get_data()
-        data = json.loads(data)
-        df = data.get('df')
-        database = unlist(data.get('database'))
-        user = unlist(data.get('user'))
-        pwd = unlist(data.get('password'))
-
-        verify = verifyUser(user, pwd)
-
-        if not verify == "verified":
-            raise Exception("User is not verified.")
-
-        if not df or len(df) == 0:
-            return jsonify({"error": "Data is empty"}), 400
-
-        df = pd.DataFrame(df)
-
-        results = createNodes(df, database, user)
-
-        return results
-
-    except Exception as e:
-        result = str(e)
-        return result, 500
 
 
 @app.route('/login', methods=['POST'])
@@ -2183,14 +1844,6 @@ def getMergeDatasets():
     return data
 
 
-@app.route('/updateWaitingUSES', methods=['POST'])
-def getUpdateWaitingUSES():
-    data = request.get_data()
-    data = json.loads(data)
-    database = data.get("database")
-    result = waitingUSES(database)
-    return result
-
 @app.route('/updateNewUsers', methods=['POST'])
 def updateNewUsers():
     try:
@@ -2267,19 +1920,6 @@ app.add_url_rule('/CSVURLs/<database>', 'get_backup_csv_urls_route',
                  get_backup_csv_urls_route, methods=['GET'])
 
 
-app.add_url_rule('/metadata/domains/<database>', 'getDomains',
-                 getDomains, methods=['GET'])
-
-app.add_url_rule('/metadata/subdomains/<database>', 'getSubdomains',
-                 getSubdomains, methods=['GET'])
-
-app.add_url_rule('/metadata/domainDescriptions/<database>', 'getDomainDescriptions',
-                 getDomainDescriptions, methods=['GET'])
-
-app.add_url_rule('/metadata/CMIDProperties/<database>/<domain>', 'getProperties_route',
-                 getProperties_route, methods=['POST'])
-
-
 @app.route("/download/test", methods=["GET"])
 def test_download():
 
@@ -2330,4 +1970,4 @@ app.add_url_rule('/admin/view_graph', 'display_graph',
                  display_graph, methods=['GET'])
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5001)
+    app.run(debug=True, port=5020)
