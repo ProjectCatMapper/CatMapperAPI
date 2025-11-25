@@ -49,12 +49,11 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
 
         if 'datasetID' not in joinLeft.columns:
             raise ValueError(
-                "The 'datasetID' column is missing from the joinLeft DataFrame.")
+                "The 'datasetID' column is missing from the first DataFrame.")
 
         if 'datasetID' not in joinRight.columns:
             raise ValueError(
-                "The 'datasetID' column is missing from the joinRight DataFrame.")
-
+                "The 'datasetID' column is missing from the second DataFrame.")
         driver = getDriver(database)
 
         # Drop 'CMID' and 'CMName' only if they exist in the columns
@@ -75,10 +74,18 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
         RETURN DISTINCT d.CMID AS datasetID, Key
         """
         match_left = getQuery(match_query, driver, {"datasetID": datasetID_left}, type = "df")
+        
+        if match_left.empty:
+            raise ValueError(
+                "No categories found in first DataFrame for domain: " + domain)
 
         # Query keys for right dataset
 
         match_right = getQuery(match_query, driver, {"datasetID": datasetID_right}, type = "df")
+
+        if match_right.empty:
+            raise ValueError(
+                "No categories found in second DataFrame for domain: " + domain)
 
         left_keys = match_left['Key'].explode(
         ).unique() if 'Key' in match_left else []
@@ -93,10 +100,10 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
         # Throw an error only if none of the keys are found
         if not found_left_keys:
             print(
-                {"error": "Cannot continue with merge: no matching required columns found in 'joinLeft'"})
+                {"error": "Cannot continue with merge: no matching required columns found in first DataFrame"})
         if not found_right_keys:
             print(
-                {"error": "Cannot continue with merge: no matching required columns found in 'joinRight'"})
+                {"error": "Cannot continue with merge: no matching required columns found in second DataFrame"})
 
         # Convert only the found columns to string type
         joinLeft[found_left_keys] = joinLeft[found_left_keys].astype(
@@ -109,6 +116,9 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
             columns={'Key': 'term', 'datasetID': 'dataset'})
         translate_left = translate(database=database, property="Key", domain=domain, term="term", table=merge_left,
                                    key='false', country=None, context=None, dataset='dataset', yearStart=None, yearEnd=None, query='false', uniqueRows=False, countsamename=False)
+        if not 'CMID_term' in translate_left[0].columns:
+            raise ValueError(
+                f"Translation failed: 'CMID_term' not found in translation results for first dataset. Check domain ({domain}) and keys.")
          # rename columns to remove _term suffix
         translate_left = translate_left[0].rename(
             columns=lambda x: x.replace('_term', ''))
@@ -137,6 +147,9 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
             uniqueRows=False,
             countsamename=False
         )
+        if not 'CMID_term' in translate_right[0].columns:
+            raise ValueError(
+                "Translation failed: 'CMID_term' not found in translation results for second dataset. Check domain and keys.")
         translate_right = translate_right[0].rename(
             columns=lambda x: x.replace('_term', ''))
         merge_right = (
@@ -196,7 +209,7 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
             col for col in link_file.columns if col not in desired_order]
         link_file = link_file[desired_order + remaining_cols]
 
-        return link_file.to_dict(orient='records')
+        return link_file.to_dict(orient='records'), 200
 
     except Exception as e:
         try:
@@ -418,27 +431,6 @@ def generate_cypher_query(domain, nContains):
     full_query = base_query + "\n".join(union_queries)
     return full_query
 
-
-def transform_variables_r(variables):
-    variables["transform"] = variables["transform"].str.replace(
-        "~", "!", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "=", "==", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "!==", "!=", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "concat", "paste0", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        r',0\)', ',na.rm = True', regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "in", "%in%", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "na.rm == T", "na.rm = True", regex=True)
-    variables["transform"] = variables["transform"].str.replace(
-        "== as.numeric", "= as.numeric", regex=True)
-    return variables
-
-
 def load_r_syntax_template(filename, replacements):
     """ Reads R syntax template and replaces placeholders """
     try:
@@ -503,10 +495,16 @@ def getMergingTemplate(datasetID, database):
         except:
             return {"Error": "Unable to process error"}, 500
 
-
-def createSyntax(template, database="SocioMap", domain="ETHNICITY",
+# template = pd.read_excel("tmp/BecomingHopiMergingTemplate.xlsx")
+# database = "ArchaMap"
+# syntax = "R"
+# dirpath = None
+# download=True
+def createSyntax(template, database="SocioMap",
                  syntax="R", dirpath=None, download=True):
     try:
+        
+        driver = getDriver(database)
 
         try:
             template = pd.DataFrame(template)
@@ -516,26 +514,32 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
         if template.empty:
             raise ValueError("Template DataFrame is empty.")
 
-        if "datasetID" not in template.columns:
-            raise ValueError(
-                "Template DataFrame must contain 'datasetID' column.")
-
-        if "mergingID" not in template.columns:
-            raise ValueError(
-                "Template DataFrame must contain 'mergingID' column.")
+        required_cols = ["mergingID", "datasetID", "filePath"]
+        for col in required_cols:
+            if col not in template.columns:
+                raise ValueError(
+                    f"Required column '{col}' is missing from the template.")
 
         if "stackID" not in template.columns:
-            raise ValueError(
-                "Template DataFrame must contain 'stackID' column.")
+            # obtain stackID from database
+            query = """
+            UNWIND $rows as row
+            MATCH (m:DATASET {CMID: row.mergingID})-[rs:MERGING]->(s:DATASET)-[rm:MERGING]->(d:DATASET {CMID: row.datasetID})
+            RETURN
+            m.CMID as mergingID, s.CMID as stackID, d.CMID as datasetID
+            """
+            stacks = getQuery(query, driver=driver, params={
+                              "rows": template.to_dict(orient='records')}, type="df")
+            if stacks.empty:
+                raise ValueError(
+                    "Could not retrieve stackIDs from the database. Please ensure mergingID and datasetID are correct.")
+            template = pd.merge(template, stacks, on=[
+                                "mergingID", "datasetID"], how="left")
+        template = template[["mergingID", "stackID",
+                                 "datasetID", "filePath"]]
 
         if dirpath is None:
             dirpath = "./tmp"
-
-        driver = getDriver(database)
-
-        if "filePath" not in template.columns:
-            raise ValueError(
-                "Must upload a list of datasets with the filePath column before generating syntax.")
 
         wd = template.iloc[0]["filePath"]
 
@@ -552,7 +556,6 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
 
         # verify CMIDs
         cols = ["mergingID", "stackID", "datasetID"]
-        cols = [col for col in cols if col in template.columns]
         CMIDs = list(set(template[cols].values.flatten().tolist()))
 
         check = getQuery(
@@ -564,7 +567,7 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
             params={"CMIDs": CMIDs},
             type="df"
         )
-
+        
         missing = set(CMIDs) - set(check["CMID"].tolist())
         missing = [str(m) + "\n" for m in missing]
 
@@ -573,32 +576,22 @@ def createSyntax(template, database="SocioMap", domain="ETHNICITY",
                 "Error: One or more CMIDs not found in the database\nMissing CMIDs: ", missing)
         else:
             print("All CMIDs found in the database.")
-        # need to adjust query to account for no stack datasets and for potentially different keys to variables using equivalence ties
-        db_query = """
+            
+        # get merging variables
+        variable_query = """
             unwind $rows as row
-            match (m:DATASET {CMID: row.mergingID})-[rs:MERGING]->(s:DATASET {CMID: row.stackID})-[rm:MERGING]->(v:VARIABLE)<-[ru:USES]-(d:DATASET {CMID: row.datasetID})
-            return
-            m.CMID as mergingID, m.CMName as mergingName, s.CMID as stackID, s.CMName as stackName, d.CMID as datasetID, d.CMName as datasetName, rs.aggBy as aggBy, v.CMID as variableCMID, head(apoc.coll.flatten(collect(rm.varName),true)) as varName, rm.transform as transform, rm.Rtransform as Rtransform, rm.Rfunction as Rfunction, rm.summaryStatistic as summaryStatistic, ru.Key as Key
+            match (m:DATASET {CMID: row.mergingID})-[:MERGING]->(s:DATASET {CMID: row.stackID})-[rsv:MERGING]->(v:VARIABLE)<-[rdv:MERGING]-(d:DATASET {CMID: row.datasetID}) where rdv.stack = s.CMID
+            optional match (v)<-[ru:USES]-(d) 
+            RETURN DISTINCT
+            m.CMID as mergingID, m.CMName as mergingName, s.CMID as stackID, s.CMName as stackName, d.CMID as datasetID, d.CMName as datasetName, rsv.varName as varName, v.CMID as variableID, rsv.stackTransform as stackTransform, rsv.summaryStatistic as summaryStatistic, rdv.datasetTransform as datasetTransform, ru.Key as variableKey
             """
-        data = getQuery(db_query, driver=driver, params={
+        variables = getQuery(variable_query, driver=driver, params={
                         "rows": template.to_dict(orient='records')}, type="df")
 
-        # pd.set_option('display.max_rows', None)
 
-        # print(data.head(10))
-
-        if "transform" in data.columns:
-            print("transforming variables")
-
-            if "Rtransform" in data.columns:
-                data['transform'] = data['Rtransform'].combine_first(
-                    data['transform'])
-                data = transform_variables_r(data)
-        data = data.reset_index()
-
-        variables = data[["datasetID", "Key"]].copy()
+        template_names = variables[['mergingID', 'mergingName','stackID','stackName']].drop_duplicates()
+        variables = data[["datasetID", "variableKey"]].copy()
         variables = variables.drop_duplicates()
-        # variables = extract_key(variables, col="Key")
         variables[['variable', 'value']] = variables['Key'].str.split(
             ': ', n=1, expand=True)
 
