@@ -17,7 +17,7 @@ from .USES import processUSES
 from .USES import addCMNameRel,processDATASETs,waitingUSES
 from .upload import updateProperty,createUSES
 from flask import jsonify
-
+from itertools import groupby
 
 # This is a module for admin functions in CatMapper
 
@@ -197,10 +197,16 @@ def add_edit_delete_USES(database,user,input):
         processUSES(CMID=CMID,database=database,user=user)
     elif addOrEditNode == "delete":
         q = f"""
-                MATCH (a:CATEGORY {{CMID: '{CMID}'}})<-[r:USES {{Key: '{key}'}}]-(d:DATASET {{CMID: '{datasetID}'}})
-                REMOVE r.{USES_property} RETURN elementId(r) as relID
+                MATCH (a:CATEGORY {{CMID: $CMID}})<-[r:USES {{Key: $key}}]-(d:DATASET {{CMID: $datasetID}})
+                REMOVE r[$USES_property] RETURN elementId(r) as relID
             """
-        result = getQuery(q,driver=driver)
+        params = {
+            "CMID": CMID,
+            "key": key,
+            "datasetID": datasetID,
+            "USES_property": USES_property
+        }
+        result = getQuery(q,driver=driver,params = params)
         processUSES(CMID=CMID,database=database,user=user)
 
         createLog(id=[row["relID"] for row in result], type="relation",
@@ -555,7 +561,7 @@ def USESLogText(relid, driver):
 #this creates ambiguity in whether C should be a child of A or B.
 #This function detects that issue and leads to the user being prompted to make decisions about this ambiguity.
 def check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id):
-
+    
     try:
         #checks to see if CMID is valid
         validCMID_to = isValidCMID(CMID_to, driver)
@@ -563,11 +569,27 @@ def check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id):
         if len(validCMID_to) == 0:
             raise Exception(f"{CMID_to} is invalid")
         
-        #checks to see if labels are consistent
-        to_label = getGroupLabels(CMID_from,driver)
-        from_label = getGroupLabels(CMID_to,driver)
+        # gets labels of uses tie using relID, then gets groupLabel of the label and returns it.
+        query = """
+                MATCH ()-[r:USES]->()
+                WHERE elementId(r) = $relID
+                WITH r.label AS label
+                MATCH (m:LABEL {CMName: label})
+                RETURN m.groupLabel as groupLabel
+                """
 
-        if to_label != from_label:
+        uses_label = getQuery(query,driver,params = {'relID': rel_id})
+
+        if uses_label:
+            uses_label = uses_label[0]['groupLabel']
+        else:
+            return "No label found for this USES tie."
+        
+        #checks to see if uses tie labels is consistent with label of destination node
+        to_label = getGroupLabels(CMID_to,driver)
+        #from_label = getGroupLabels(uses_label,driver)
+
+        if to_label != uses_label:
             raise Exception(f"The CMIDs are not of the same group label.")
         
         # 1. Get dataset CMID linked to the relID
@@ -633,11 +655,6 @@ def moveUSESties(database,user,input,dataset,tabledata):
     rel_id = USES_property[1]["id"]
     # only need to revise operation if user wants to keep some parent-child ties with the FROM node.
     USES_to_change = [row for row in tabledata if row['optionA'] != 'From']
-
-    print(CMID_from)
-    print(CMID_to)
-
-    return
     
     try:
         if len(USES_to_change) > 0:
@@ -902,19 +919,18 @@ def deleteNode(database,user,input):
                     createLog(id=[row['ids'] for row in ids], type="node",
                           log=f"removed reference to deleted node {input.get('s1_2')} from {prop}",
                           user=user, driver=driver)
-                    
+                                
             # getting all the affected relationships and extracting the safe data and setting it back
             if len(rels) > 0:
-                from itertools import groupby
-                import re
 
                 sepRels = []
                 for row in rels:
                     for val in re.split(r' \|\|', row['val']):
+                    #for val in row['val']:
                         val = val.strip()
-                        if {input.get('s1_2')} not in val:
+                        if input.get('s1_2') not in val:
                             sepRels.append({"id": row["id"], "key": row["key"], "val": val})
-
+                
                 # if there's saved data, it is set back before removing the purely unsaved data
                 if len(sepRels) > 0:
                     grouped = {}
@@ -945,7 +961,7 @@ def deleteNode(database,user,input):
                 createLog(id=[row["id"] for row in rels], type="relation",
                       log=f"removed reference to deleted node {input.get('s1_2')}",
                       user=user, driver=driver)
-
+        
         nodeID = getID(input.get('s1_2'), "CMID", driver)
         create_deleted_query = f"""
             MATCH (n) WHERE elementId(n) = '{nodeID}'
@@ -954,6 +970,7 @@ def deleteNode(database,user,input):
             RETURN elementId(n2) AS nodeID
         """
         deletedID = getQuery(create_deleted_query,driver=driver)
+        print("Stgae 3")
         createLog(id=[deletedID[0]['nodeID']], type="node",
               log=[f"deleted node {input.get('s1_2')}"],
               user=user, driver=driver)
@@ -1022,6 +1039,112 @@ def createLabel(database,user,input):
     result = getQuery(q,driver=driver)
 
     return "done"
+
+
+def mergeUSESties(database, CMID, Key, datasetID):
+    """
+    Merge all `USES` relationships between a CATEGORY node and a DATASET node 
+    in a Neo4j database while respecting constraints on which properties can 
+    or cannot be combined.
+
+    Parameters
+    ----------
+    database : str
+        Name of the Neo4j database to connect to.
+    CMID : str
+        The unique identifier of the CATEGORY node.
+    Key : str
+        The key value identifying the specific USES relationships to merge.
+    datasetID : str
+        The unique identifier of the DATASET node.
+
+    Returns
+    -------
+    str
+        Success message confirming that the USES relationships were merged.
+
+    Raises
+    ------
+    Exception
+        If multiple distinct values are found for a non-combinable property, 
+        or if no relationships are found to merge.
+    """
+
+    # Obtain a Neo4j driver connection for the specified database.
+    driver = getDriver(database)
+
+    # Query for properties that cannot be combined when merging relationships.
+    props_query = """
+    MATCH (p:PROPERTY)
+    WHERE p.type = "relationship" AND p.metaType = "string"
+    RETURN p.CMName AS property
+    """
+    non_combinable_props = getQuery(props_query, driver=driver)
+
+    # Query for all existing USES relationships matching the given identifiers,
+    # and extract property-value pairs for the non-combinable properties.
+    existing_query = """
+    MATCH (:CATEGORY {CMID: $cmid})<-[r:USES {Key: $key}]-(:DATASET {CMID: $datasetID})
+    UNWIND keys(r) AS prop
+    WITH prop, r
+    WHERE prop IN $props AND r[prop] IS NOT NULL
+    RETURN DISTINCT prop AS property, r[prop] AS value
+    """
+    existing_props = getQuery(
+        existing_query,
+        driver=driver,
+        params={
+            "cmid": CMID,
+            "key": Key,
+            "datasetID": datasetID,
+            "props": [row['property'] for row in non_combinable_props]
+        }
+    )
+
+    # Check for any non-combinable properties that have conflicting values.
+    # If found, merging is aborted to prevent data loss or inconsistency.
+    for row in existing_props:
+        if isinstance(row['value'], list) and len(set(row['value'])) > 1:
+            raise Exception(
+                f"Cannot merge USES ties for CMID {CMID} with Key {Key} in Dataset {datasetID} "
+                f"due to multiple distinct values for property {row['property']}"
+            )
+
+    # Construct a property merge map defining which properties to combine or discard.
+    # Non-combinable properties are discarded; all others are combined.
+    properties_map = {row['property']: 'discard' for row in non_combinable_props}
+    properties_map[".*"] = 'combine'  # Default: combine all unspecified properties.
+
+    # Execute the merge operation using APOC's refactor.mergeRelationships procedure.
+    merge_query = """
+    MATCH (:CATEGORY {CMID: $cmid})<-[r:USES {Key: $key}]-(:DATASET {CMID: $datasetID})
+    WITH collect(r) AS rels
+    CALL apoc.refactor.mergeRelationships(rels, {properties: $propsMap}) YIELD rel
+    RETURN count(rel) AS mergedCount
+    """
+    result = getQuery(
+        merge_query,
+        driver=driver,
+        params={
+            "cmid": CMID,
+            "key": Key,
+            "datasetID": datasetID,
+            "propsMap": properties_map
+        }
+    )
+
+    # Raise an error if no relationships were merged (indicating a mismatch or missing ties).
+    if result[0]['mergedCount'] == 0:
+        raise Exception(
+            f"No USES ties found to merge for CMID {CMID} with Key {Key} in Dataset {datasetID}"
+        )
+
+    # Return success confirmation.
+    return f"Merged USES ties successfully for CMID {CMID} with Key {Key} in Dataset {datasetID}"
+
+
+
+
 
 ############################
 #section for potentially deprecating functions
