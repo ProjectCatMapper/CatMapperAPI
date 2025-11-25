@@ -108,7 +108,7 @@ def search(
     elif property == "Key":
         qStart = f"""
     call db.index.fulltext.queryRelationships('keys','"' + custom.escapeText($term) + '"') yield relationship
-    with endnode(relationship) as a, relationship.Key as matching, case when $term contains ":" then $term else ": " + $term end as term
+    with endnode(relationship) as a, relationship.Key as matching, case when $term contains " == " then $term else " == " + $term end as term
     where '{domain}' in labels(a) and matching ends with term
     with a, matching, 0 as score
     """
@@ -379,12 +379,12 @@ def translate(
     row.term AS term
     WITH row,a,matching,term,
         CASE
-            WHEN term CONTAINS ':' AND matching = term THEN true
-            WHEN NOT term CONTAINS ':' AND matching ENDS WITH ": " + term THEN true
+            WHEN term CONTAINS ' == ' AND matching = term THEN true
+            WHEN NOT term CONTAINS ' == ' AND matching ENDS WITH ' == ' + term THEN true
             ELSE false
         END AS isMatch
     where '{domain}' in labels(a) and isMatch
-    AND ( (matching CONTAINS ";" AND row.term CONTAINS ";") OR NOT matching CONTAINS ";" )
+    AND ( (matching CONTAINS " && " AND row.term CONTAINS " && ") OR NOT matching CONTAINS " && " )
     with row, a, matching,0 as score
     """
     elif property in ["glottocode", "ISO", "CMID"]:
