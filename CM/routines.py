@@ -570,6 +570,39 @@ def getBadJSON(database, mail=None, return_type="data"):
             database=database, property='geoCoords', path=fp1)
         results2 = validateJSON(
             database=database, property='parentContext', path=fp2)
+        
+        driver = getDriver(database)
+        query = """
+        MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+        WITH d, c, r,
+
+            CASE
+                WHEN apoc.meta.cypher.type(r.parent) = 'LIST OF STRING'
+                    THEN r.parent
+                WHEN apoc.meta.cypher.type(r.parent) = 'STRING'
+                    THEN apoc.text.split(r.parent, ",")
+                ELSE []
+            END AS parentList,
+
+            CASE
+                WHEN apoc.meta.cypher.type(r.parentContext) = 'LIST OF MAP'
+                    THEN r.parentContext
+                ELSE []
+            END AS ctxList
+
+        UNWIND ctxList AS ctxEntry
+        WITH d, c, r, parentList, ctxEntry
+        WHERE NOT ctxEntry.parent IN parentList
+        RETURN
+            d.CMID AS datasetID,
+            c.CMID AS CMID,
+            r.Key AS Key,
+            parentList AS parentValues,
+            ctxEntry.parent AS contextParent,
+            ctxEntry AS contextEntry
+        ORDER BY datasetID, CMID;
+        """
+        results3 = getQuery(query, driver, type="df")
 
         mailSent = "False"
 
@@ -583,14 +616,25 @@ def getBadJSON(database, mail=None, return_type="data"):
                 sendEmail(mail, subject=f"Invalid parentContext properties for {database}", recipients=[
                           "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
                 mailSent = "True"
+        fp3 = None
+        if isinstance(results3, pd.DataFrame) and not results3.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"parent_notIN_parentContext_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp3 = tmpfile.name
+                results3.to_excel(fp3, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Parent not in parentContext for {database}", recipients=[
+                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp3])
+                mailSent = "True"
         if return_type == "data":
-            return {"geoCoords": len(results1), "parentContext": len(results2), "geoCoords": results1, "parentContext": results2, "emailSent": mailSent}
+            return {"geoCoords": len(results1), "parentContext": len(results2), "Parent not in parentContext": len(results3), "geoCoords": results1, "parentContext": results2, "Parent not in parentContext": results3, "emailSent": mailSent}
         elif return_type == "info":
             if len(results1) == 0:
                 fp1 = None
             if len(results2) == 0:
                 fp2 = None
-            return {"info": f"Invalid geoCoords: {len(results1)}; Invalid parentContext: {len(results2)}", "filepath": [fp1, fp2]}
+            if results3.empty:
+                fp3 = None
+            return {"info": f"Invalid geoCoords: {len(results1)}; Invalid parentContext: {len(results2)}; Parent not in parentContext: {len(results3)}", "filepath": [fp1, fp2, fp3]}
     except Exception as e:
         result = str(e)
         return result, 500
@@ -911,7 +955,17 @@ def CMNameNotInName(database, mail=None, return_type="data"):
         RETURN n.CMID as CMID
         """
 
+        dataset_query = """MATCH (n:DATASET)
+                        WHERE any(v IN [n.datasetCitation, n.shortName, n.CMName] 
+                                WHERE v IS NOT NULL AND (n.names IS NULL OR NOT v IN n.names))
+                        SET n.names = coalesce(n.names, []) +
+                                    [v IN [n.datasetCitation, n.shortName, n.CMName]
+                                    WHERE v IS NOT NULL AND NOT v IN coalesce(n.names, [])]
+                        RETURN n.CMID as CMID
+                        """
         cmids = getQuery(query, driver, type="list")
+
+        dataset_cmids = getQuery(dataset_query,driver, type="list")
 
         fp1 = None
         if len(cmids) > 0:
@@ -1167,6 +1221,24 @@ def checkUSES(database, save=True, mail=None, return_type="data"):
         
         # Check for missing label, Key, and Name in USES relationships
         
+        # query = """
+        # MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+        # where r.label is null or r.label = ''
+        # RETURN "No label" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
+        # UNION ALL
+        # MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+        # where r.Key is null or r.Key = ''
+        # RETURN "No Key" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
+        # UNION ALL
+        # MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+        # where not r.Key contains ": "
+        # RETURN "Malformed Key" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
+        # UNION ALL
+        # MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+        # where r.Name is null or r.Name = ''
+        # RETURN "No Name" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
+        # """
+
         query = """
         MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
         where r.label is null or r.label = ''
@@ -1177,13 +1249,15 @@ def checkUSES(database, save=True, mail=None, return_type="data"):
         RETURN "No Key" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
         UNION ALL
         MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
-        where not r.Key contains ": "
+        WITH c, d, r, [segment IN split(r.Key, " && ") | trim(segment)] AS segments
+        WHERE any(seg IN segments WHERE NOT seg CONTAINS " == ")
         RETURN "Malformed Key" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
         UNION ALL
         MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
         where r.Name is null or r.Name = ''
         RETURN "No Name" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
         """
+
         result = getQuery(query, driver, type="df")
         fp1 = None
         if isinstance(result, pd.DataFrame) and not result.empty:
@@ -1360,6 +1434,529 @@ def reportChanges(database, dateStart=None, dateEnd=None, action="default", user
     except Exception as e:
         return "Error in reportChanges: " + str(e)
     
+def missingCMName(database, mail=None, return_type="data"):
+    """
+    Identify categories in a Neo4j database that are missing 
+    a `CMName` property, and optionally export results to Excel 
+    or send via email.
+
+    This function searches for `CATEGORY`, `DATASET`, and `METADATA` nodes that lack a defined `CMName`. 
+
+    Parameters
+    ----------
+    database : str
+        The database name used to obtain a Neo4j driver instance.
+    mail : Mail, optional
+        A Mail object for sending notifications (default: None).
+        If provided and results exist, the Excel file is attached 
+        and sent via email.
+    return_type : {"data", "info"}, default="data"
+        Determines the format of the return value:
+        - "data" : return detailed results as a dictionary.
+        - "info" : return a dictionary with summary information 
+          and the file path.
+    Returns
+    -------
+    dict or tuple
+        If return_type == "data":
+            {"Total": number of nodes missing CMName,
+             "Missing CMName": list of dicts with CMID and labels}
+        If return_type == "info":
+            {"info": number of nodes missing CMName,
+             "filepath": path to the Excel file or None}
+        If an error occurs:
+            A tuple of (error_message, 500).
+    """
+    
+    try:
+        driver = getDriver(database)
+        query = """
+        MATCH (n)
+        WHERE (n:CATEGORY OR n:DATASET OR n:METADATA) AND (n.CMName IS NULL OR n.CMName = '')
+        RETURN n.CMID as CMID, labels(n) as labels
+        """
+        results = getQuery(query, driver, type="df")
+
+        fp1 = None
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"missing_cmname_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp1 = tmpfile.name
+                results.to_excel(fp1, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Missing CMName for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+        if return_type == "data":
+            return {"Total": len(results), "Missing CMName": results.to_dict(orient="records")}
+        elif return_type == "info":
+            return {"info": str(len(results)), "filepath": fp1}
+    except Exception as e:
+        result = str(e)
+        return result, 500
+
+def getBadContextual(database, mail=None, return_type="data"):
+    try:
+        driver = getDriver(database)
+        query = """
+        match (d:DATASET) with collect(d.shortName) as sn
+        match (c:CATEGORY)<-[r:CONTAINS]-(p:CATEGORY) where not r.referenceKey is null 
+        with sn, r  unwind r.referenceKey as rf with r, sn, split(rf," Key: ")[0] as rf 
+        where not rf in sn return distinct rf
+        """
+        results = getQuery(query, driver, type="df")
+
+        fp1 = None
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"invalidShortName_refKeys_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp1 = tmpfile.name
+                results.to_excel(fp1, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Invalid short names for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+        query = """
+        MATCH (n)-[r]->(m)
+        WHERE type(r) IN ["CONTAINS", "LANGUOID_OF", "RELIGION_OF", "DISTRICT_OF"]
+        WITH n, m, type(r) AS relType, COUNT(r) AS relCount
+        WHERE relCount > 1
+        RETURN n.CMID AS CMID,
+            m.CMID AS targetCMID,
+            relType,
+            relCount
+        """
+        results2 = getQuery(query, driver, type="df")
+
+        fp2 = None
+        if isinstance(results2, pd.DataFrame) and not results2.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"duplicate_contextual_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp2 = tmpfile.name
+                results2.to_excel(fp2, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Duplicate contextual ties for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
+        
+        query = """
+                MATCH (n)-[r:CONTAINS]->(n)
+                RETURN n.CMID AS startCMID, [n.CMID] AS relatedNodes, 'Self-loop' AS issueType, 'CONTAINS' AS relType
+                UNION ALL
+                MATCH (a)-[r1:CONTAINS]->(b)
+                WHERE EXISTS { MATCH (b)-[:CONTAINS]->(a) } AND id(a) < id(b)
+                RETURN a.CMID AS startCMID, [b.CMID] AS relatedNodes, 'Reciprocal' AS issueType, 'CONTAINS' AS relType
+                UNION ALL
+                MATCH (n:CATEGORY)
+                MATCH p = (n)-[:CONTAINS*3..5]->(n)
+                WHERE all(x IN nodes(p) WHERE single(y IN nodes(p) WHERE y = x))
+                RETURN n.CMID AS startCMID, [x IN nodes(p) | x.CMID] AS relatedNodes, 'Cycle' AS issueType, 'CONTAINS' AS relType
+                """
+        results3 = getQuery(query, driver, type="df")
+
+        fp3 = None
+        if isinstance(results3, pd.DataFrame) and not results3.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"cyclic_contextual_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp3 = tmpfile.name
+                results3.to_excel(fp3, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Cyclic contextual ties for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp3])
+
+        if return_type == "data":
+            return {"Invalid short names": len(results), "Invalid short names": results.to_dict(orient="records"),"Duplicate contextual ties": len(results2), "Duplicate contextual ties": results2.to_dict(orient="records"),"Cyclical contextual ties": len(results3), "Cyclical contextual ties": results3.to_dict(orient="records")}
+        elif return_type == "info":
+            return {"info":f"Invalid short names: {str(len(results))},Duplicate contextual ties: {str(len(results2))},Cyclical contextual ties: {str(len(results3))}","filepath":[fp1,fp2,fp3]}
+    except Exception as e:
+        result = str(e)
+        return result, 500
+
+def get_duplicate_empty_USES(database, mail=None, return_type="data"):    
+    try:
+        driver = getDriver(database)
+        query = """
+        MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+        WITH d, c, r, [prop IN keys(r) | prop] AS allProps
+        UNWIND allProps AS prop
+        WITH d, c, r, prop, r[prop] AS value
+        WHERE value IS NULL 
+        OR (apoc.meta.cypher.type(value) = 'STRING' AND trim(value) = '')
+        OR (apoc.meta.cypher.type(value) = 'LIST OF ANY' AND size(value) = 0)
+        RETURN d.CMID AS datasetID,
+            c.CMID AS CMID,
+            prop AS emptyProperty,
+            value AS propertyValue
+        ORDER BY datasetID, CMID, prop
+        """
+        results = getQuery(query, driver, type="df")
+
+        fp1 = None
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"USES_emptyprops_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp1 = tmpfile.name
+                results.to_excel(fp1, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Empty USES properties for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+        query = """
+        MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+        WHERE r.Name IS NOT NULL AND size(r.Name) > 1
+        WITH d, c, r, r.Name AS names
+        WHERE size(names) <> size(apoc.coll.toSet(names))
+        RETURN d.CMID AS datasetID,
+            c.CMID AS CMID,
+            names AS allNames,
+            apoc.coll.toSet([x IN names WHERE size([y IN names WHERE y = x]) > 1]) AS duplicateNames,
+            size(names) - size(apoc.coll.toSet(names)) AS duplicateCount
+        ORDER BY datasetID, CMID
+        """
+        results2 = getQuery(query, driver, type="df")
+
+        fp2 = None
+        if isinstance(results2, pd.DataFrame) and not results2.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"duplicate_uses_name_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp2 = tmpfile.name
+                results2.to_excel(fp2, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Duplicate USES names for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
+        
+        query = """
+                MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+                WITH r, d, c,
+                    [prop IN keys(r) WHERE prop IN ['religion','country','district','language','parent']] AS cmidProps
+                UNWIND cmidProps AS prop
+                WITH r, d, c, prop, r[prop] AS values
+                WHERE values IS NOT NULL AND size(values) <> size(apoc.coll.toSet(values))
+                RETURN d.CMID AS datasetID,
+                    c.CMID AS CMID,
+                    prop AS propertyWithDuplicates,
+                    values AS duplicateValues,
+                    size(values) - size(apoc.coll.toSet(values)) AS duplicateCount
+                ORDER BY datasetID, CMID, prop
+                """
+        results3 = getQuery(query, driver, type="df")
+
+        fp3 = None
+        if isinstance(results3, pd.DataFrame) and not results3.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"duplicate_uses_properties_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp3 = tmpfile.name
+                results3.to_excel(fp3, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Duplicate uses properties for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp3])
+
+        query = """
+                MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+                WITH d, c, r,
+                    [prop IN keys(r) 
+                    WHERE prop IN ['populationSize','sampleSize','yearStart','yearEnd','recordStart','recordEnd']] AS singleProps
+                UNWIND singleProps AS prop
+                WITH d, c, r, prop, r[prop] AS value
+                WHERE value IS NOT NULL AND apoc.meta.cypher.type(value) = 'LIST OF ANY' AND size(value) > 1
+                RETURN d.CMID AS datasetID,
+                    c.CMID AS CMID,
+                    prop AS propertyWithMultipleValues,
+                    value AS allValues,
+                    size(value) AS valueCount
+                ORDER BY datasetID, CMID, prop
+                """
+        results4 = getQuery(query, driver, type="df")
+
+        fp4 = None
+        if isinstance(results4, pd.DataFrame) and not results4.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"Supposed_Singular_USES_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp4 = tmpfile.name
+                results4.to_excel(fp4, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Supposed to be singular value USES property for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp4])
+
+        if return_type == "data":
+            return {"Empty USES properties": len(results), "Empty USES properties": results.to_dict(orient="records"),"Duplicate USES Names": len(results2), "Duplicate USES Names": results2.to_dict(orient="records"),"Duplicate USES ties properties": len(results3), "Duplicate USES ties properties": results3.to_dict(orient="records"),"Supposed to be Singular USES ties properties": len(results4), "Supposed to be Singular USES ties properties": results4.to_dict(orient="records")}
+        elif return_type == "info":
+            return {"info":f"Empty USES properties: {str(len(results))}, Duplicate USES Names: {str(len(results2))}, Duplicate USES ties properties: {str(len(results3))},Supposed to be Singular USES ties properties: {str(len(results4))}", "filepath":[fp1,fp2,fp3,fp4]}
+    except Exception as e:
+        result = str(e)
+        return result, 500
+
+def get_empty_nodeprops(database, mail=None, return_type="data"):
+    try:
+        driver = getDriver(database)
+        query = """
+        MATCH (n)
+        WITH n, keys(n) AS props
+        UNWIND props AS prop
+        WITH n, prop, n[prop] AS value
+        WHERE value IS NULL
+        OR (apoc.meta.cypher.type(value) = 'STRING' AND trim(value) = '')
+        OR (apoc.meta.cypher.type(value) STARTS WITH 'LIST' AND size(value) = 0)
+        RETURN labels(n) AS labels,
+            n.CMID AS CMID,
+            prop AS emptyProperty,
+            value AS propertyValue
+        ORDER BY labels, CMID, emptyProperty;
+        """
+        results = getQuery(query, driver, type="df")
+
+        fp1 = None
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"Empty_nodeprops_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp1 = tmpfile.name
+                results.to_excel(fp1, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Empty Node props for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+        if return_type == "data":
+            return {"Total": len(results), "Empty Node props": results.to_dict(orient="records")}
+        elif return_type == "info":
+            return {"info": str(len(results)), "filepath": fp1}
+    except Exception as e:
+        result = str(e)
+        return result, 500
+
+def get_duplicate_triplets(database, mail=None, return_type="data"):
+    try:
+        driver = getDriver(database)
+        query = """
+        MATCH (a:DATASET)-[r:USES]->(b:CATEGORY)
+        WITH a, b, r.Key AS Key, COUNT(r) AS rel_count
+        WHERE rel_count > 1
+        RETURN 
+            a.CMID AS datasetID,
+            b.CMID AS CMID,
+            Key,
+            rel_count
+        ORDER BY datasetID, CMID, Key;
+                """
+        results = getQuery(query, driver, type="df")
+
+        fp1 = None
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"duplicate_triplets_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp1 = tmpfile.name
+                results.to_excel(fp1, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Duplicate Triplets for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+        if return_type == "data":
+            return {"Total": len(results), "Duplicate Triplets": results.to_dict(orient="records")}
+        elif return_type == "info":
+            return {"info": str(len(results)), "filepath": fp1}
+    except Exception as e:
+        result = str(e)
+        return result, 500
+
+def getInappropriateprops_Nodes_Rels(database, mail=None, return_type="data"):
+    try:
+        driver = getDriver(database)
+        query = """
+        MATCH (p:PROPERTY)
+        WHERE p.type = "node"
+        WITH collect(p.CMName) AS allowedNodeProps
+        MATCH (n)
+        WHERE n:CATEGORY OR n:DATASET
+        WITH n, allowedNodeProps,
+            [k IN keys(n) WHERE NOT k IN allowedNodeProps] AS invalidProps
+        WHERE size(invalidProps) > 0
+        RETURN n.CMID AS nodeWithInvalidProps, invalidProps;
+        """
+        results = getQuery(query, driver, type="df")
+
+        fp1 = None
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"invalidnode_props_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp1 = tmpfile.name
+                results.to_excel(fp1, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Nodes with invalid props for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+
+        query = """
+        MATCH (p:PROPERTY)
+        WHERE p.type = "relationship"
+        WITH collect(p.CMName) + ['logID'] AS allowedRelProps
+        MATCH (n:CATEGORY)<-[r:USES]-(d:DATASET)
+        WITH n.CMID as n,r,d.CMID as d, allowedRelProps,
+            [k IN keys(r) WHERE NOT k IN allowedRelProps] AS invalidProps
+        WHERE size(invalidProps) > 0
+        RETURN n,d, invalidProps;
+        """
+        results2 = getQuery(query, driver, type="df")
+
+        fp2 = None
+        if isinstance(results2, pd.DataFrame) and not results2.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"invalidRel_props_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp2 = tmpfile.name
+                results2.to_excel(fp2, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Rels with invalid props for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
+
+        if return_type == "data":
+            return {"Nodes with invalid props": len(results), "Nodes with invalid props": results.to_dict(orient="records"),"Rels with invalid props": len(results2), "Rels with invalid props": results2.to_dict(orient="records")}
+        elif return_type == "info":
+            return {"info":f"Nodes with invalid props: {str(len(results))}, Rels with invalid props: {str(len(results2))}","filepath":[fp1,fp2]}
+    except Exception as e:
+        result = str(e)
+        return result, 500
+
+def get_label_check(database, mail=None, return_type="data"):
+    try:
+        driver = getDriver(database)
+        query = """
+        MATCH (n)-[:CONTAINS]->(m)
+        WHERE NOT n:GENERIC
+        AND m:GENERIC
+        RETURN n, m;
+        """
+        results = getQuery(query, driver, type="df")
+
+        fp1 = None
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"nongeneric_parent_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp1 = tmpfile.name
+                results.to_excel(fp1, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Non-generic parent to generic node for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+        query = """
+        MATCH ()-[r:USES]-()
+        WHERE r.label IS NOT NULL
+        AND size(split(r.label, ",")) > 1
+        RETURN r, r.label;
+        """
+        results2 = getQuery(query, driver, type="df")
+
+        fp2 = None
+        if isinstance(results2, pd.DataFrame) and not results2.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"multiple_USES_label_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp2 = tmpfile.name
+                results2.to_excel(fp2, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Mutliple USES ties labels for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
+        
+        query = """
+                MATCH (l:LABEL)
+                WITH collect({label: l.CMName, group: l.groupLabel}) AS labelGroups
+                MATCH (n)
+                WITH n, labelGroups,[lbl IN labels(n) WHERE lbl <> 'CATEGORY'] AS filteredLabels,labelGroups AS lg
+                WITH n, filteredLabels,[lbl IN filteredLabels |[entry IN lg WHERE entry.label = lbl | entry.group]] AS groupsPerLabel
+                WITH n,apoc.coll.toSet(apoc.coll.flatten(groupsPerLabel)) AS distinctGroups
+                WHERE size(distinctGroups) > 1
+                RETURN n AS nodeWithMultipleGroups, distinctGroups;
+
+                """
+        results3 = getQuery(query, driver, type="df")
+
+        fp3 = None
+        if isinstance(results3, pd.DataFrame) and not results3.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"multiplelabelgroups_nodes_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp3 = tmpfile.name
+                results3.to_excel(fp3, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Nodes with multiple group labels for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp3])
+
+        if return_type == "data":
+            return {"Non-generic parent to generic node": len(results), "Non-generic parent to generic node": results.to_dict(orient="records"),"Mutliple USES ties labels": len(results2), "Mutliple USES ties labels": results2.to_dict(orient="records"),"Nodes with multiple group labels": len(results3), "Nodes with multiple group labels": results3.to_dict(orient="records")}
+        elif return_type == "info":
+            return {"info":f"Non-generic parent to generic node: {str(len(results))},Mutliple USES ties labels: {str(len(results2))},Nodes with multiple group labels: {str(len(results3))}","filepath":[fp1,fp2,fp3]}
+    except Exception as e:
+        result = str(e)
+        return result, 500
+
+def getNumeric_Checks(database, mail=None, return_type="data"):
+    try:
+        driver = getDriver(database)
+        query = """
+        MATCH ()<-[r:USES]-()
+        WHERE r.geoCoords IS NOT NULL
+        WITH r,
+            CASE
+                WHEN r.geoCoords IS :: LIST<ANY> THEN r.geoCoords
+                ELSE [r.geoCoords]
+            END AS geoStrings
+        UNWIND geoStrings AS geoStr
+        WITH r, apoc.convert.fromJsonMap(geoStr) AS geo
+        WITH r, geo,
+            CASE geo.type
+                WHEN "Point" THEN [geo.coordinates]
+                WHEN "MultiPoint" THEN geo.coordinates
+                ELSE []
+            END AS coords
+        UNWIND coords AS c
+        WITH r, c
+        WHERE 
+            c[0] < -180 OR c[0] > 180 OR
+            c[1] < -90 OR  c[1] > 90
+        RETURN id(r) AS relationshipWithOutOfBoundsCoords, c AS invalidCoordinate;
+        """
+        results = getQuery(query, driver, type="df")
+
+        fp1 = None
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"invalidgeoCoords_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp1 = tmpfile.name
+                results.to_excel(fp1, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Uses ties with invalid geoCoords for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+
+        query = """
+        MATCH ()<-[r:USES]-()
+        WHERE 
+            (r.yearEnd IS NOT NULL AND toInteger(r.yearEnd) IS NULL) OR
+            (r.yearStart IS NOT NULL AND toInteger(r.yearStart) IS NULL) OR
+            (r.recordEnd IS NOT NULL AND toInteger(r.recordEnd) IS NULL) OR
+            (r.recordStart IS NOT NULL AND toInteger(r.recordStart) IS NULL) OR
+            (r.sampleSize IS NOT NULL AND toInteger(r.sampleSize) IS NULL) OR
+            (r.populationEstimate IS NOT NULL AND toFloat(r.populationEstimate) IS NULL)
+        RETURN id(r) AS relId,
+            CASE WHEN r.yearEnd IS NOT NULL AND toInteger(r.yearEnd) IS NULL THEN r.yearEnd ELSE NULL END AS invalidYearEnd,
+            CASE WHEN r.yearStart IS NOT NULL AND toInteger(r.yearStart) IS NULL THEN r.yearStart ELSE NULL END AS invalidYearStart,
+            CASE WHEN r.recordEnd IS NOT NULL AND toInteger(r.recordEnd) IS NULL THEN r.recordEnd ELSE NULL END AS invalidRecordEnd,
+            CASE WHEN r.recordStart IS NOT NULL AND toInteger(r.recordStart) IS NULL THEN r.recordStart ELSE NULL END AS invalidRecordStart,
+            CASE WHEN r.sampleSize IS NOT NULL AND toInteger(r.sampleSize) IS NULL THEN r.sampleSize ELSE NULL END AS invalidSampleSize,
+            CASE WHEN r.populationEstimate IS NOT NULL AND toFloat(r.populationEstimate) IS NULL THEN r.populationEstimate ELSE NULL END AS invalidPopulationEstimate;
+        """
+        results2 = getQuery(query, driver, type="df")
+
+        fp2 = None
+        if isinstance(results2, pd.DataFrame) and not results2.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"invalidInteger_USES_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp2 = tmpfile.name
+                results2.to_excel(fp2, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"USES with invalid integer or float values for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
+        
+        query = """
+                MATCH (n)
+                WHERE 
+                    (n.recordStart IS NOT NULL AND toInteger(n.recordStart) IS NULL) OR
+                    (n.recordEnd IS NOT NULL AND toInteger(n.recordEnd) IS NULL) OR
+                    (n.yearPublished IS NOT NULL AND toInteger(n.yearPublished) IS NULL)
+                RETURN n.CMID as CMID,
+                    CASE WHEN n.recordStart IS NOT NULL AND toInteger(n.recordStart) IS NULL THEN n.recordStart ELSE NULL END AS invalidRecordStart,
+                    CASE WHEN n.recordEnd IS NOT NULL AND toInteger(n.recordEnd) IS NULL THEN n.recordEnd ELSE NULL END AS invalidRecordEnd,
+                    CASE WHEN n.yearPublished IS NOT NULL AND toInteger(n.yearPublished) IS NULL THEN n.yearPublished ELSE NULL END AS invalidYearPublished;
+                """
+        results3 = getQuery(query, driver, type="df")
+
+        fp3 = None
+        if isinstance(results3, pd.DataFrame) and not results3.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"invalidIntegerprops_nodes_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp3 = tmpfile.name
+                results3.to_excel(fp3, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Nodes with invalid integer values for {database}", recipients=[
+                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp3])
+
+        if return_type == "data":
+            return {"Uses ties with invalid geoCoords": len(results), "Uses ties with invalid geoCoords": results.to_dict(orient="records"),"USES with invalid integer or float values": len(results2), "USES with invalid integer or float values": results2.to_dict(orient="records"), "Nodes with invalid integer values": len(results2), "Nodes with invalid integer values": results2.to_dict(orient="records")}
+        elif return_type == "info":
+            return {"info":f"Uses ties with invalid geoCoords: {str(len(results))}, USES with invalid integer or float values: {str(len(results2))}, Nodes with invalid integer values: {str(len(results3))}","filepath":[fp1,fp2,fp3]}
+    except Exception as e:
+        result = str(e)
+        return result, 500
+
+    
 def runRoutinesStream(databases="all", mail=None):
     """
     Run a sequence of validation and processing routines for one or more 
@@ -1436,9 +2033,17 @@ def runRoutinesStream(databases="all", mail=None):
             ("Bad JSON", lambda db: getBadJSON(db, mail=None, return_type="info")),
             ("Bad Relations", lambda db: getBadRelations(db, mail=None, return_type="info")),
             ("CMName Not In Name", lambda db: CMNameNotInName(db, mail=None, return_type="info")),
+            ("Missing CMName", lambda db: missingCMName(db, mail=None, return_type="info")),
+            ("Invalid shortname", lambda db: getBadContextual(db, mail=None, return_type="info")),
             ("No USES", lambda db: noUSES(db, save=True, mail=None, return_type="info")),
             ("Check USES", lambda db: checkUSES(db, save=True, mail=None, return_type="info")),
+            ("Check USES for empty and duplicates", lambda db: get_duplicate_empty_USES(db, mail=None, return_type="info")),
+            ("Check USES for duplicate triplets", lambda db: get_duplicate_triplets(db, mail=None, return_type="info")),
             ("Process USES", lambda db: processUSES(db, detailed=False)),
+            ("Invalid Node and USES properties", lambda db: getInappropriateprops_Nodes_Rels(db, mail=None, return_type="info")),
+            ("Empty Node properties", lambda db: get_empty_nodeprops(db, mail=None, return_type="info")),
+            ("Label Checks", lambda db: get_label_check(db, mail=None, return_type="info")),
+            ("Numeric Checks", lambda db: getNumeric_Checks(db, mail=None, return_type="info")),
             ("Process DATASETs", lambda db: processDATASETs(db)),
             ("Fix MetaTypes", lambda db: fixMetaTypes(db, return_type="info")),
         ]
@@ -1500,9 +2105,17 @@ def runRoutinesStream(databases="all", mail=None):
           <tr><td>Bad JSON</td><td>getBadJSON</td><td>Validates JSON properties (geoCoords, parentContext) and reports invalid entries.</td></tr>
           <tr><td>Bad Relations</td><td>getBadRelations</td><td>Checks for invalid or inconsistent parent–child category relationships and mis-specified CONTAINS links.</td></tr>
           <tr><td>CMName Not In Name</td><td>CMNameNotInName</td><td>Finds categories where the primary CMName is missing from the alternate names list and updates them.</td></tr>
+          <tr><td>Missing CMName</td><td>missingCMName</td><td>Identifies CATEGORY, DATASET, and METADATA nodes that lack a defined CMName property.</td></tr>
+          <tr><td>Invalid shortName and bad contextual ties</td><td>getbadContextual</td><td>Identifies bad shortnames and also duplicate and cylical contextual ties.</td></tr>
           <tr><td>No USES</td><td>noUSES</td><td>Lists categories that are not connected to any datasets through USES relationships.</td></tr>
           <tr><td>Check USES</td><td>checkUSES</td><td>Validates USES relationships, checking for missing or malformed label, Key, or Name fields.</td></tr>
+          <tr><td>Check USES for empty and duplicates</td><td>get_duplicate_empty_USES</td><td>Validates USES relationships, checking for missing or duplicate properties including properties that are supposed to be singular and are not.</td></tr>
+          <tr><td>Check USES for duplicate triplets</td><td>get_duplicate_triplets</td><td>Validates USES for duplicate datasetID,CMID and Key triplets.</td></tr>
           <tr><td>Process USES</td><td>processUSES</td><td>Processes and reconciles USES relationships for consistency and downstream use.</td></tr>
+          <tr><td>Invalid Node and USES props</td><td>getInappropriateprops_Nodes_Rels</td><td>Identifies invalid node and USES ties properties.</td></tr>
+          <tr><td>Multiple label checks</td><td>get_label_check</td><td>Identifies label discrepancies.</td></tr>
+          <tr><td>Numeric checks</td><td>getNumeric_Checks</td><td>Identifies numeric discrepancies in nodes and USES ties.</td></tr>
+          <tr><td>Empty Node props</td><td>get_empty_nodeprops</td><td>Identifies empty node properties.</td></tr>
           <tr><td>Process DATASETs</td><td>processDATASETs</td><td>Processes dataset nodes to ensure correct structure and metadata integration.</td></tr>
           <tr><td>Fix MetaTypes</td><td>fixMetaTypes</td><td>Validates and corrects property data types on nodes and relationships based on metadata definitions.</td></tr>
         </table>
