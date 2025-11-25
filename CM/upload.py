@@ -1037,7 +1037,7 @@ def create_equivalence_ties(database, user, dataset):
     """
     
     results = getQuery(query=equivalence_ties_query, driver=driver, params={"rows": dataset[["originalID","categoryID","stackID","datasetID","Key"]].to_dict(orient="records")}, type = "df")
-    if results[0]['count'] == len(dataset)::
+    if results[0]['count'] == len(dataset):
         updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results[0]['count']} EQUIVALENT ties", write="a")
     else:
         raise ValueError(f"Expected to create {len(dataset)} EQUIVALENT ties, but created {results[0]['count']}")
