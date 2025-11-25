@@ -1249,8 +1249,8 @@ def checkUSES(database, save=True, mail=None, return_type="data"):
         RETURN "No Key" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
         UNION ALL
         MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
-        WITH c, d, r, [segment IN split(r.Key, ";") | trim(segment)] AS segments
-        WHERE any(seg IN segments WHERE NOT seg CONTAINS ": ")
+        WITH c, d, r, [segment IN split(r.Key, " && ") | trim(segment)] AS segments
+        WHERE any(seg IN segments WHERE NOT seg CONTAINS " == ")
         RETURN "Malformed Key" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
         UNION ALL
         MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
