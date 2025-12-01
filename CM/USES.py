@@ -65,7 +65,7 @@ def mergeDupRelations(database, CMID=None):
             qFilterb = ""
 
         query = qFiltera + """
-match (a)-[r]-(b) 
+match (a)-[r]->(b) 
 where 
 """ + qFilterb + """
 not type(r) = 'USES' 
@@ -358,7 +358,7 @@ def processUSES(database, CMID=None, user="0", detailed = True):
             print("running merge duplicate relations")
             mergeDupRelationsResults = mergeDupRelations(CMID=CMID, database = database)
         else:
-            mergeDupRelationsResults = "Not ran"
+            mergeDupRelationsResults = mergeDupRelations(CMID=None, database = database)
 
         # Update structural properties and referenceKeys
         properties = getPropertiesMetadata(driver=driver)

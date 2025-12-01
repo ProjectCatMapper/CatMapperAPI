@@ -1606,6 +1606,19 @@ def get_duplicate_empty_USES(database, mail=None, return_type="data"):
         """
         results2 = getQuery(query, driver, type="df")
 
+        query = """
+        MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+        WHERE r.Name IS NOT NULL AND size(r.Name) > 1
+        AND size(r.Name) <> size(apoc.coll.toSet(r.Name))
+        SET r.Name = apoc.coll.toSet(r.Name)
+        RETURN
+        d.CMID AS datasetID,
+        c.CMID AS CMID,
+        r.Name AS cleanedNames;
+        """
+
+        action_result = getQuery(query, driver, type ="df")
+
         fp2 = None
         if isinstance(results2, pd.DataFrame) and not results2.empty:
             with tempfile.NamedTemporaryFile(delete=False, prefix=f"duplicate_uses_name_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
@@ -1630,6 +1643,25 @@ def get_duplicate_empty_USES(database, mail=None, return_type="data"):
                 ORDER BY datasetID, CMID, prop
                 """
         results3 = getQuery(query, driver, type="df")
+
+        query = """
+        MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+        WITH r,
+            [prop IN keys(r) WHERE prop IN ['religion','country','district','language','parent']] AS cmidProps
+        UNWIND cmidProps AS prop
+        WITH r, prop, r[prop] AS values
+        WHERE values IS NOT NULL AND size(values) <> size(apoc.coll.toSet(values))
+
+        // overwrite the property with a de-duplicated version
+        SET r[prop] = apoc.coll.toSet(values)
+
+        RETURN id(r)     AS relId,
+            prop      AS fixedProperty,
+            values    AS oldValues,
+            r[prop]   AS newValues;
+        """
+
+        action_result = getQuery(query, driver, type ="df")
 
         fp3 = None
         if isinstance(results3, pd.DataFrame) and not results3.empty:
@@ -1692,6 +1724,24 @@ def get_empty_nodeprops(database, mail=None, return_type="data"):
         ORDER BY labels, CMID, emptyProperty;
         """
         results = getQuery(query, driver, type="df")
+
+        query1 = """
+        MATCH (n)
+        WITH n, keys(n) AS props
+        UNWIND props AS prop
+        WITH n, prop, n[prop] AS value
+        WHERE value IS NULL
+        OR (apoc.meta.cypher.type(value) = 'STRING' AND trim(value) = '')
+        OR (apoc.meta.cypher.type(value) STARTS WITH 'LIST' AND size(value) = 0)
+
+        REMOVE n[prop]
+
+        RETURN 
+        labels(n) AS labels,
+        n.CMID AS CMID,
+        prop AS removedProperty;
+        """
+        action_results = getQuery(query1, driver, type="df")
 
         fp1 = None
         if isinstance(results, pd.DataFrame) and not results.empty:
@@ -1780,17 +1830,17 @@ def getInappropriateprops_Nodes_Rels(database, mail=None, return_type="data"):
 
         fp2 = None
         if isinstance(results2, pd.DataFrame) and not results2.empty:
-            with tempfile.NamedTemporaryFile(delete=False, prefix=f"invalidRel_props_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"invalidUSES_props_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
                 fp2 = tmpfile.name
                 results2.to_excel(fp2, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Rels with invalid props for {database}", recipients=[
+                sendEmail(mail, subject=f"USES with invalid props for {database}", recipients=[
                           "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
 
         if return_type == "data":
-            return {"Nodes with invalid props": len(results), "Nodes with invalid props": results.to_dict(orient="records"),"Rels with invalid props": len(results2), "Rels with invalid props": results2.to_dict(orient="records")}
+            return {"Nodes with invalid props": len(results), "Nodes with invalid props": results.to_dict(orient="records"),"USES with invalid props": len(results2), "USES with invalid props": results2.to_dict(orient="records")}
         elif return_type == "info":
-            return {"info":f"Nodes with invalid props: {str(len(results))}, Rels with invalid props: {str(len(results2))}","filepath":[fp1,fp2]}
+            return {"info":f"Nodes with invalid props: {str(len(results))}, USES with invalid props: {str(len(results2))}","filepath":[fp1,fp2]}
     except Exception as e:
         result = str(e)
         return result, 500
@@ -1802,7 +1852,7 @@ def get_label_check(database, mail=None, return_type="data"):
         MATCH (n)-[:CONTAINS]->(m)
         WHERE NOT n:GENERIC
         AND m:GENERIC
-        RETURN n, m;
+        RETURN n.CMID as node1, m.CMID as node2;
         """
         results = getQuery(query, driver, type="df")
 
@@ -1899,7 +1949,7 @@ def getNumeric_Checks(database, mail=None, return_type="data"):
                           "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
 
         query = """
-        MATCH ()<-[r:USES]-()
+        MATCH (a)<-[r:USES]-(b)
         WHERE 
             (r.yearEnd IS NOT NULL AND toInteger(r.yearEnd) IS NULL) OR
             (r.yearStart IS NOT NULL AND toInteger(r.yearStart) IS NULL) OR
@@ -1907,7 +1957,8 @@ def getNumeric_Checks(database, mail=None, return_type="data"):
             (r.recordStart IS NOT NULL AND toInteger(r.recordStart) IS NULL) OR
             (r.sampleSize IS NOT NULL AND toInteger(r.sampleSize) IS NULL) OR
             (r.populationEstimate IS NOT NULL AND toFloat(r.populationEstimate) IS NULL)
-        RETURN id(r) AS relId,
+        RETURN a.CMID as node,
+            b.CMID as dataset,
             CASE WHEN r.yearEnd IS NOT NULL AND toInteger(r.yearEnd) IS NULL THEN r.yearEnd ELSE NULL END AS invalidYearEnd,
             CASE WHEN r.yearStart IS NOT NULL AND toInteger(r.yearStart) IS NULL THEN r.yearStart ELSE NULL END AS invalidYearStart,
             CASE WHEN r.recordEnd IS NOT NULL AND toInteger(r.recordEnd) IS NULL THEN r.recordEnd ELSE NULL END AS invalidRecordEnd,
