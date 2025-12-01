@@ -1210,11 +1210,11 @@ def input_Nodes_Uses(
     pattern = re.compile(r"^\s*[^=&&]+?\s*==\s*[^=&&]+?(?:\s*&&\s*[^=&&]+?\s*==\s*[^=&&]+?)*\s*$")
 
 
-    # if (uploadOption == "add_node" and not isDataset) or uploadOption == "add_uses":
-    #     invalid_rows = dataset.index[~dataset["Key"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].map(lambda x:x+1).tolist()
+    if (uploadOption == "add_node" and not isDataset) or uploadOption == "add_uses":
+        invalid_rows = dataset.index[~dataset["Key"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].map(lambda x:x+1).tolist()
 
-    #     if invalid_rows:
-    #         raise ValueError(f"Invalid 'Key' format in rows:\n{invalid_rows}. Must be of form VARIABLE : VALUE")
+        if invalid_rows:
+            raise ValueError(f"Invalid 'Key' format in rows:\n{invalid_rows}. Must be of form VARIABLE : VALUE")
         
     
     if uploadOption == "update_replace":
