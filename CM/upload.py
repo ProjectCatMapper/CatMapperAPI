@@ -1214,7 +1214,7 @@ def input_Nodes_Uses(
         invalid_rows = dataset.index[~dataset["Key"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].map(lambda x:x+1).tolist()
 
         if invalid_rows:
-            raise ValueError(f"Invalid 'Key' format in rows:\n{invalid_rows}. Must be of form VARIABLE : VALUE")
+            raise ValueError(f"Invalid 'Key' format in rows:\n{invalid_rows}. Must be of form VARIABLE == VALUE")
         
     
     if uploadOption == "update_replace":
@@ -1222,7 +1222,7 @@ def input_Nodes_Uses(
             invalid_rows = dataset.index[~dataset["NewKey"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].tolist()
 
             if invalid_rows:
-                raise ValueError(f"Invalid 'NewKey' format in rows:\n{invalid_rows}. Must be of form VARIABLE : VALUE")
+                raise ValueError(f"Invalid 'NewKey' format in rows:\n{invalid_rows}. Must be of form VARIABLE == VALUE")
 
     # When uploading uses ties, if we need to create new nodes and CMName is not present, then create CMName from Name
     if uploadOption == "add_uses":
