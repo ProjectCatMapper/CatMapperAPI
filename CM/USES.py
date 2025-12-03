@@ -65,7 +65,7 @@ def mergeDupRelations(database, CMID=None):
             qFilterb = ""
 
         query = qFiltera + """
-match (a)-[r]->(b) 
+match (a)-[r]-(b) 
 where 
 """ + qFilterb + """
 not type(r) = 'USES' 
