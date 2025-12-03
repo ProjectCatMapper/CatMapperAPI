@@ -1,1 +1,79 @@
-[]
+[
+    {
+        "cood": [
+            21.909,
+            38.8047
+        ],
+        "source": "Price1990"
+    },
+    {
+        "cood": [
+            20.58,
+            38.15
+        ],
+        "source": "GlobalJukebox"
+    },
+    {
+        "cood": [
+            20.91,
+            39.51
+        ],
+        "source": "GlobalJukebox"
+    },
+    {
+        "cood": [
+            22.35,
+            37.35
+        ],
+        "source": "GlobalJukebox"
+    },
+    {
+        "cood": [
+            21.63,
+            39.72
+        ],
+        "source": "GlobalJukebox"
+    },
+    {
+        "cood": [
+            22.94,
+            40.64
+        ],
+        "source": "GeLaTo-HO"
+    },
+    {
+        "cood": [
+            23.7,
+            37.9
+        ],
+        "source": "GeLaTo-HO"
+    },
+    {
+        "cood": [
+            22.25,
+            41.78
+        ],
+        "source": "Price1990"
+    },
+    {
+        "cood": [
+            23,
+            39
+        ],
+        "source": "EthnographicAtlas"
+    },
+    {
+        "cood": [
+            23,
+            39
+        ],
+        "source": "HRAF"
+    },
+    {
+        "cood": [
+            22.967,
+            40.633
+        ],
+        "source": "HRAF"
+    }
+]
