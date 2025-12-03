@@ -106,12 +106,16 @@ def search(
             qStart = f"match (a:{domain}) with a, '' as matching, 0 as score"
 
     elif property == "Key":
+        domain2 = domain
+        if domain == "ALLNODES":
+            domain2 = "CATEGORY"
+
         qStart = f"""
-    call db.index.fulltext.queryRelationships('keys','"' + custom.escapeText($term) + '"') yield relationship
-    with endnode(relationship) as a, relationship.Key as matching, case when $term contains " == " then $term else " == " + $term end as term
-    where '{domain}' in labels(a) and matching ends with term
-    with a, matching, 0 as score
-    """
+                call db.index.fulltext.queryRelationships('keys','"' + custom.escapeText($term) + '"') yield relationship
+                with endnode(relationship) as a, relationship.Key as matching, case when $term contains " == " then $term else " == " + $term end as term
+                where '{domain2}' in labels(a) and matching ends with term
+                with a, matching, 0 as score
+                """
         
     elif property == "Name":
         #The operation using size was the only way we could get it to determine if something was a list
