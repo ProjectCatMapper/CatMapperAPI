@@ -1535,10 +1535,14 @@ def getBadContextual(database, mail=None, return_type="data"):
         
         query = """
                 MATCH (n)-[r:CONTAINS]->(n)
+                WITH n,r,[ref in r.referenceKeys | split(ref," Key")[0]] AS names 
+                WHERE ANY(name IN names 
+                                WHERE NOT (name IN ['GADM3.6','GeoNames202005']))
                 RETURN n.CMID AS startCMID, [n.CMID] AS relatedNodes, 'Self-loop' AS issueType, 'CONTAINS' AS relType
                 UNION ALL
                 MATCH (a)-[r1:CONTAINS]->(b)
-                WHERE EXISTS { MATCH (b)-[:CONTAINS]->(a) } AND id(a) < id(b)
+                MATCH (b)-[r2:CONTAINS]->(a) 
+                WHERE id(a) < id(b) AND (r1.eventDate IS NULL OR r2.eventDate IS NULL OR r1.eventDate = r2.eventDate)
                 RETURN a.CMID AS startCMID, [b.CMID] AS relatedNodes, 'Reciprocal' AS issueType, 'CONTAINS' AS relType
                 UNION ALL
                 MATCH (n:CATEGORY)
@@ -1959,6 +1963,7 @@ def getNumeric_Checks(database, mail=None, return_type="data"):
             (r.populationEstimate IS NOT NULL AND toFloat(r.populationEstimate) IS NULL)
         RETURN a.CMID as node,
             b.CMID as dataset,
+            r.Key,
             CASE WHEN r.yearEnd IS NOT NULL AND toInteger(r.yearEnd) IS NULL THEN r.yearEnd ELSE NULL END AS invalidYearEnd,
             CASE WHEN r.yearStart IS NOT NULL AND toInteger(r.yearStart) IS NULL THEN r.yearStart ELSE NULL END AS invalidYearStart,
             CASE WHEN r.recordEnd IS NOT NULL AND toInteger(r.recordEnd) IS NULL THEN r.recordEnd ELSE NULL END AS invalidRecordEnd,
