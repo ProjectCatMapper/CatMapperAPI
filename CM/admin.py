@@ -1038,6 +1038,16 @@ def createLabel(database,user,input):
 
     result = getQuery(q,driver=driver)
 
+    # create index after creation
+
+    q =    """UNWIND $label_name as label_name
+            match (d:METADATA:LABEL)
+            where (d.public = true or tolower(d.public) = "true") AND d.CMName= label_name
+            with d.label as l
+            call apoc.cypher.runSchema('CREATE FULLTEXT INDEX ' + l + ' IF NOT EXISTS FOR (n:' + l + ') ON EACH [n.names]',{}) yield value return count(*)"""
+
+    result = getQuery(q,driver=driver,params={"label_name":input.get('s1_5')})
+
     return "done"
 
 
