@@ -1287,7 +1287,7 @@ def input_Nodes_Uses(
     if uploadOption == "add_uses":
         if "CMID" not in dataset.columns:
             dataset["CMID"] = ""
-    if (advselectedOption == "add_merging" and mergingType == "merging_ties_to_datasets"):
+    if (uploadOption == "add_merging" and mergingType == "merging_ties_to_datasets"):
         if "stackID" not in dataset.columns:
             dataset["stackID"] = ""
 
