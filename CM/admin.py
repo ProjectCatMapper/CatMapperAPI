@@ -105,6 +105,101 @@ def validatePropertyCMID(value,proptoChange,validgroupLabel,driver):
         if not (proptoChange == "parent" and grouplabel == "GENERIC"):
             if validgroupLabel != grouplabel:
                 raise Exception(f"All {proptoChange} CMIDS should be a {validgroupLabel}")
+
+def validate_parent_context_list(driver,parent_context_list):
+    """
+    parent_context_list: list of JSON strings
+    """
+
+    VALID_EVENT_TYPES = {
+    "SPLIT",
+    "HIERARCHY",
+    "SPLITMERGE",
+    "MERGED",
+    "FOLLOWS",
+    }
+
+    CURRENT_YEAR = datetime.now().year
+
+    errors = []
+
+    for idx, raw in enumerate(parent_context_list):
+        # here we load the string as a JSON element
+        try:
+            # use object_pairs_hook to get all key occurrences
+            def check_duplicates(pairs):
+                keys = [k for k, _ in pairs]
+                counts = Counter(keys)
+                duplicates = [k for k, v in counts.items() if v > 1]
+                if duplicates:
+                    raise ValueError(f"Duplicate keys found: {duplicates}")
+                return dict(pairs)
+            
+            pc = json.loads(raw, object_pairs_hook=check_duplicates)
+        except ValueError as ve:
+            errors.append((idx, str(ve)))
+            continue
+        except Exception:
+            errors.append((idx, "Invalid JSON"))
+            continue
+
+        # 1️⃣ Must be a dict
+        if not isinstance(pc, dict):
+            errors.append((idx, "parentContext entry is not an object"))
+            continue
+
+        # 2️⃣ Must contain ONLY allowed keys
+        allowed_keys = {"parent", "eventType", "eventDate"}
+        extra_keys = set(pc.keys()) - allowed_keys
+        missing_keys = {"parent"} - set(pc.keys())
+
+        if extra_keys:
+            errors.append((idx, f"Extra keys found: {extra_keys}"))
+            continue
+
+        if missing_keys:
+            errors.append((idx, f"Missing required keys: {missing_keys}"))
+            continue
+
+        parent = pc.get("parent")
+        event_type = pc.get("eventType")
+        event_date = pc.get("eventDate")
+
+        # 3️⃣ parent validation
+        if not isinstance(parent, str):
+            errors.append((idx, "Invalid parent value - parent is not string"))
+            continue
+
+        q = """
+            unwind $CMID as cmid
+            RETURN EXISTS { MATCH (p { CMID: cmid })} AS cmidExists
+            """
+        result = getQuery(q,driver=driver,params = {"CMID": CMID})
+
+        if result:
+            errors.append((idx, "Parent CMID not in database"))
+            continue
+
+        # 4️⃣ eventType validation
+        if not isinstance(event_type, str) or event_type not in VALID_EVENT_TYPES:
+            errors.append((idx, f"Invalid eventType: {event_type}"))
+            continue
+
+        # 5️⃣ eventDate validation
+        if event_date not in (None, ""):
+            if event_type in (None, ""):
+                errors.append((idx, "eventType is required when eventDate exists."))
+                continue
+
+            if not isinstance(event_date, int):
+                errors.append((idx, "eventDate must be an integer year"))
+                continue
+
+            if event_date > CURRENT_YEAR:
+                errors.append((idx, f"eventDate out of range: {event_date}"))
+                continue
+
+    return errors
         
 ############################
 #section for add, edit, delete USES ties
@@ -178,6 +273,13 @@ def add_edit_delete_USES(database,user,input):
                     )
         
         else:
+            if USES_property == "parentContext":
+                result = validate_parent_context_list(driver,new_property_value)
+                if result:
+                    raise ValueError(
+                        f"Error: {result}"
+                    )
+
             data = {
                     'CMID': CMID,
                     'Key': key,
@@ -440,6 +542,35 @@ def mergeNodes(keepcmid,deletecmid,user,database):
         else: 
             domain = "CATEGORY"
         
+        if domain == "CATEGORY":
+            query = f"""
+            MATCH (c)-[e1:EQUIVALENT]->(k {{CMID: $keepcmid}})
+            MATCH (c)-[e2:EQUIVALENT]->(d {{CMID: $deletecmid}})
+            WHERE e1.stack     = e2.stack
+            AND e1.datasetID = e2.datasetID
+            AND e1.key       = e2.key
+
+            WITH e2
+
+            DELETE e2
+            """
+
+            getQuery(query, driver, keepcmid=keepcmid, deletecmid=deletecmid)
+
+            query = f"""
+            MATCH (c)<-[e1:EQUIVALENT]-(k {{CMID: $keepcmid}})
+            MATCH (c)<-[e2:EQUIVALENT]-(d {{CMID: $deletecmid}})
+            WHERE e1.stack     = e2.stack
+            AND e1.datasetID = e2.datasetID
+            AND e1.key       = e2.key
+
+            WITH  e2
+
+            DELETE e2
+            """
+
+            getQuery(query, driver, keepcmid=keepcmid, deletecmid=deletecmid)
+        
         # combine the nodes
 
         query = f"""
@@ -696,6 +827,36 @@ def moveUSESties(database,user,input,dataset,tabledata):
             print("completed moving props")
 
             processUSES(CMID=[row['CMID']for row in USES_to_change], database=database)
+        
+        query = f"""
+                MATCH (d1)-[r:USES]->(c1)
+                WHERE c1.CMID = '{CMID_from}' AND elementId(r) = '{rel_id}'
+
+                WITH c1, r.Key as Key, d1.CMID as datasetID
+
+                OPTIONAL MATCH (s:STACK)-[:MERGING]->(d1)
+                WHERE d1.CMID = datasetID
+
+                WITH c1, Key, datasetID, s.CMID as stackID
+
+                OPTIONAL MATCH (c1)-[e:EQUIVALENT]->(c3)
+                WHERE e.stack = stackID AND e.dataset = datasetID AND e.Key = Key
+
+                WITH c1, e, c3, '{CMID_to}' AS c2CMID
+                WHERE e IS NOT NULL
+
+                MATCH (c2:CATEGORY)
+                WHERE c2.CMID = c2CMID
+                CREATE (c2)-[newEq:EQUIVALENT {
+                stack: e.stack,
+                dataset: e.dataset,
+                Key: e.Key
+                }]->(c3)
+                DELETE e
+                RETURN 'Moved equivalence', c1.CMID AS oldCategory, c2.CMID AS newCategory, c3.CMID AS target
+                """
+        
+        result = getQuery(query,driver)
 
         # Move the relationship itself
         # Fetch relationship details for log
@@ -817,6 +978,30 @@ def deleteNode(database,user,input):
         # If you delete a dataset node, need to remove it’s CMID from all parent properties 
         # in other dataset nodes and Dataset in USES ties
         if "DATASET" in label:
+
+            query = """
+                    unwind $cmid as cmid
+                    MATCH ()-[r:EQUIVALENT]->()
+                    WHERE r.datasetID = $cmid
+                    RETURN DISTINCT r.stackID AS stackID
+                    """
+
+            result = getQuery(query, driver=driver, params={"cmid": input.get('s1_2')})
+
+            if result:
+                raise ValueError(f"this dataset can't be deleted, because it is used by an existing stack for a merge(stackID={result}).")
+
+            # if a merging template is being deleted, need to remove references to that merging template from all equivalence ties.            
+            if "STACK" in label:
+                query = """
+                    unwind $cmid as cmid
+                    MATCH ()-[r:EQUIVALENT]->()
+                    WHERE r.stack = $cmid
+                    DELETE r
+                    """
+
+                getQuery(query, driver=driver, params={"cmid": input.get('s1_2')})
+
             ids_query = f"""
                 MATCH (:DATASET)-[r:USES]->(:CATEGORY)
                 WHERE '{input.get('s1_2')}' IN r.Dataset
@@ -867,11 +1052,6 @@ def deleteNode(database,user,input):
                     createLog(id=[row['ids'] for row in ids], type="node",
                           log=f"removed reference to deleted node {input.get('s1_2')} from {prop}",
                           user=user, driver=driver)
-            
-            # if a merging template is being deleted, need to remove references to that merging template from all equivalence ties.            
-            if "MERGING" in label:
-                pass
-
 
         # If you delete a category node, need to remove it’s CMID from all properties (including parentContext) 
         # in all USES ties (district, country, parent, language, culture….) and 
@@ -879,6 +1059,25 @@ def deleteNode(database,user,input):
         else:
             props = getPropertiesMetadata(driver=driver)
             props = list(set([p['property'] for p in props if p['relationship'] is not None] + ["parentContext"]))
+
+            query = """
+                    MATCH (c:CATEGORY)<-[r:USES]-(n:DATASET)
+                    WHERE c.CMID = $cmid
+
+                    WITH c.CMID as cmid, r.Key as Key, d.CMID as datasetID
+
+                    MATCH ()-[e:EQUIVALENT]->()
+                    WHERE e.key = Key
+                    AND e.datasetID = datasetID
+                    
+                    RETURN DISTINCT
+                    e.stackID as stackID
+                    """
+
+            result = getQuery(query, driver=driver, params={"cmid": input.get('s1_2')})
+
+            if result:
+                raise ValueError(f"This category can't be deleted, because it is used by an existing stack for a merge(stackID={result}).")
 
             rels_query = f"""
                 UNWIND $keys AS key
@@ -990,12 +1189,34 @@ def deleteUSES(database,user,input):
     USES_property = json.loads(input.get('s1_7'))
     id = USES_property[1]["id"]
 
+    q = f"""MATCH (a)-[r:USES]->(d:DATASET)
+            WHERE elementId(r) = '{id}'
+
+            WITH d.CMID as datasetID,a.CMID as CMID, r.Key as Key
+            OPTIONAL MATCH (a {{"CMID" : CMID}})-[e:EQUIVALENT]->(target)
+            WHERE e.key = Key AND e.datasetID = datasetID
+            WITH CMID, Key, datasetID, e.stackID as stackID, COUNT(e) > 0 AS hasEquivalent
+
+            WITH CMID, Key, datasetID, stackID, hasEquivalent
+
+            WHERE hasEquivalent = true
+
+            RETURN 
+            CMID,
+            datasetID,
+            Key,
+            stackID
+            """
+    
+    result = getQuery(q, driver=driver)
+
+    if result:
+        raise ValueError(f"There is a stack that uses this USES tie for a merging template. It is not possible to delete this USES tie using admin functions.(stackID = {result})")
+
     q = f"MATCH ()-[r]->() WHERE elementId(r) = '{id}' DELETE r RETURN count(*) AS count"
     result = getQuery(q, driver=driver)
 
     processUSES(database,CMID)
-
-    print("Action completed")
 
     return "done"
 

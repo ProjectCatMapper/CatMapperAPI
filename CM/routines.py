@@ -502,7 +502,7 @@ def getMultipleLabels(database, mail=None, return_type="data"):
         return str(e)
 
 
-def getBadJSON(database, mail=None, return_type="data"):
+def getBadComplexProperties(database, mail=None, return_type="data"):
     """
     Validate JSON properties stored in a Neo4j database and identify 
     invalid records for specific fields, optionally exporting results 
@@ -511,6 +511,8 @@ def getBadJSON(database, mail=None, return_type="data"):
     This function checks two JSON-encoded properties on nodes:
       - `geoCoords`
       - `parentContext`
+    
+    This function also checks if parent in r.parentContext exist in r.parent.
 
     It validates the JSON structure of each property and collects 
     any invalid entries. Results are written to separate Excel files 
@@ -604,6 +606,278 @@ def getBadJSON(database, mail=None, return_type="data"):
         """
         results3 = getQuery(query, driver, type="df")
 
+        query = """
+        MATCH (n)<-[r:CONTAINS]-(source)
+        WHERE NOT n:RELIGION AND NOT n:POLITY
+            AND r.eventType IS NOT NULL
+            AND r.eventDate IS NOT NULL
+
+        // Get SPLIT and SPLITMERGE dates per relationship
+        WITH n,source, [i IN range(0, size(r.eventType)-1) WHERE r.eventType[i] = 'SPLIT'] AS splitIndexes, [i IN range(0, size(r.eventType)-1) WHERE r.eventType[i] = 'SPLITMERGE'] AS splitMergeIndexes,
+        r
+
+        WITH n,source, [i IN splitIndexes | r.eventDate[i]] AS splitDates, [i IN splitMergeIndexes | r.eventDate[i]] AS splitMergeDates
+
+        // Collect dates across all relationships pointing to n
+        WITH n,source,
+        REDUCE(s=[], d IN COLLECT(splitDates) |s+ [sd IN d WHERE sd IS NOT NULL AND NOT EXISTS {
+        MATCH (n3)-[r2:CONTAINS]->(source)
+        MATCH (n3)-[r3:CONTAINS]->(n)
+        WHERE n3 <> n AND n3 <> source
+        AND r3.eventType IS NOT NULL
+        AND ANY(j IN RANGE(0, SIZE(r3.eventType)-1)
+        WHERE j < SIZE(r3.eventDate)
+        AND r3.eventType[j] = 'SPLIT'
+        AND r3.eventDate[j] = sd)
+        }]) AS allSplitDates,
+        REDUCE(m=[], d IN COLLECT(splitMergeDates) | m + d) AS allSplitMergeDates
+
+        // Optional outgoing MERGED relationships
+        OPTIONAL MATCH (n)-[r_out:CONTAINS]->()
+        WHERE r_out.eventType IS NOT NULL AND r_out.eventDate IS NOT NULL
+
+        WITH n, allSplitDates, allSplitMergeDates,
+        CASE
+        WHEN r_out IS NOT NULL AND r_out.eventType IS NOT NULL THEN [i IN range(0, size(r_out.eventType)-1) WHERE r_out.eventType[i] = 'MERGED']
+        ELSE []
+        END AS mergeIndexes,
+        r_out
+
+        WITH n, allSplitDates, allSplitMergeDates, [i IN mergeIndexes | r_out.eventDate[i]] AS mergeDates
+
+        // Flatten all splitDates
+        UNWIND allSplitDates AS splitDate
+        WITH n, splitDate, allSplitDates, allSplitMergeDates, mergeDates
+        WHERE splitDate IS NOT NULL
+
+        // Check if splitDate appears in other sets
+        WITH n, splitDate,
+        CASE WHEN size([d IN allSplitDates WHERE d = splitDate]) > 1 THEN true ELSE false END AS inOtherSplit,
+        CASE WHEN splitDate IN allSplitMergeDates THEN true ELSE false END AS inSplitMerge,
+        CASE WHEN splitDate IN mergeDates THEN true ELSE false END AS inMerged`
+
+        WHERE inOtherSplit OR inSplitMerge OR inMerged
+
+        RETURN DISTINCT n.CMID AS nodeId,
+        splitDate,
+        inOtherSplit,
+        inSplitMerge,
+        inMerged
+        """
+
+        results4 = getQuery(query, driver, type="df")
+
+        query = """
+            MATCH (n)<-[r_in:CONTAINS]-()
+            WHERE NOT n:RELIGION AND NOT n:POLITY
+                AND r_in.eventType IS NOT NULL AND r_in.eventDate IS NOT NULL
+
+            WITH n, collect(r_in) AS inboundRels
+
+            WITH n, [rel IN inboundRels | [i IN range(0, size(rel.eventType)-1)
+            WHERE rel.eventType[i] = 'SPLITMERGE' | rel.eventDate[i]]
+            ] AS allSMLists
+
+            WITH n, reduce(all = [], lst IN allSMLists | all + lst) AS allSplitMergeDates
+
+            OPTIONAL MATCH (n)-[r_out:CONTAINS]->()
+            WHERE r_out.eventType IS NOT NULL AND r_out.eventDate IS NOT NULL
+
+            WITH n, allSplitMergeDates, collect(r_out) AS outboundRels
+
+            WITH n, allSplitMergeDates, [rel IN outboundRels | [i IN range(0, size(rel.eventType)-1)
+            WHERE rel.eventType[i] = 'MERGED' | rel.eventDate[i]]
+            ] AS allMergedLists
+
+            WITH n, allSplitMergeDates,
+            reduce(all = [], lst IN allMergedLists | all + lst) AS allMergedDates
+
+            WITH n,(allSplitMergeDates + allMergedDates) AS candidateDates
+
+            WITH n,candidateDates AS my_list
+            UNWIND my_list AS item
+            WITH n,item, count(item) AS count
+            WHERE count = 1
+            RETURN n.CMID,collect(item) AS singletons
+            """
+        
+        results5 = getQuery(query, driver, type="df")
+
+        query = """
+            MATCH (n)-[r_out:CONTAINS]->()
+            WHERE NOT n:RELIGION AND NOT n:POLITY
+            AND r_out.eventType IS NOT NULL
+            AND r_out.eventDate IS NOT NULL
+
+            WITH n, collect(r_out) AS outboundRels
+
+            WITH n,
+            reduce(events = [], rel IN outboundRels |
+            events +
+            reduce(inner = [], idx IN range(0, size(rel.eventType)-1) |
+            CASE
+            WHEN rel.eventType[idx] IN ['SPLIT','SPLITMERGE']
+            THEN inner + {date: rel.eventDate[idx], type: rel.eventType[idx]}
+            ELSE inner
+            END
+            )
+            ) AS allEvents
+
+            WITH n, allEvents, [ev IN allEvents |
+            {
+            date: ev.date,
+            type: ev.type,
+            count: size([x IN allEvents WHERE x.date = ev.date])
+            }
+            ] AS counted
+
+            UNWIND counted AS item
+            WITH n,item
+            WHERE item.count = 1
+
+            RETURN DISTINCT
+            n.CMID AS CMID,
+            item.date AS uniqueDate,
+            item.type AS eventType
+            ORDER BY CMID, uniqueDate;
+            """
+
+        results6 = getQuery(query, driver, type="df")
+
+        query = """
+            // 1. Incoming MERGED ties
+            MATCH (n)<-[r_in:CONTAINS]-(source)
+            WHERE NOT n:RELIGION AND NOT n:POLITY
+                AND r_in.eventType IS NOT NULL AND r_in.eventDate IS NOT NULL
+                AND ANY(idx IN RANGE(0, SIZE(r_in.eventType)-1) WHERE r_in.eventType[idx] = 'MERGED')
+
+            // 2. Extract each MERGED date
+            UNWIND CASE WHEN SIZE(r_in.eventType) = 0 THEN [] ELSE RANGE(0, SIZE(r_in.eventType)-1) END AS idx
+            WITH n, source, r_in, idx
+            WHERE r_in.eventType[idx] = 'MERGED' AND r_in.eventDate[idx] IS NOT NULL
+            WITH n, source, r_in.eventDate[idx] AS mDate
+
+            // 3. Exclude nested MERGED (source contained by another node to same target)
+            WHERE NOT EXISTS {
+            MATCH (n3)-[r2:CONTAINS]->(source)
+            MATCH (n3)-[r3:CONTAINS]->(n)
+            WHERE n3 <> source AND n3 <> n
+            AND r3.eventType IS NOT NULL
+            AND ANY(i IN CASE WHEN SIZE(r3.eventType) > 0 THEN RANGE(0, SIZE(r3.eventType)-1) ELSE [] END
+            WHERE i < size(r3.eventDate) AND r3.eventType[i] = 'MERGED' AND r3.eventDate[i] = mDate)
+            }
+
+            WITH n, COLLECT(mDate) AS mergedDates
+
+            // Optional outgoing SPLIT/SPLITMERGE relationships
+            OPTIONAL MATCH (n)-[r_out:CONTAINS]->(source2)
+            WHERE r_out.eventType IS NOT NULL AND r_out.eventDate IS NOT NULL
+
+            UNWIND CASE WHEN r_out.eventType IS NULL OR SIZE(r_out.eventType) IS NULL OR SIZE(r_out.eventType) = 0 THEN [] ELSE RANGE(0, size(r_out.eventType)-1) END AS idx
+            WITH n,mergedDates, r_out, source2, idx
+            WHERE idx < size(r_out.eventDate) AND r_out.eventType[idx] IN ['SPLIT','SPLITMERGE']
+            AND r_out.eventDate[idx] IS NOT NULL
+
+            WITH n,mergedDates, r_out, source2, r_out.eventDate[idx] AS outDate
+            WHERE NOT EXISTS {
+            MATCH (n3)-[r2:CONTAINS]->(source2)
+            MATCH (n3)-[r3:CONTAINS]->(n)
+            WHERE n3 <> source2 AND n3 <> n
+            AND r3.eventType IS NOT NULL
+            AND ANY(j IN CASE WHEN SIZE(r3.eventType) > 0 THEN RANGE(0, SIZE(r3.eventType)-1) ELSE [] END
+            WHERE j < size(r3.eventDate) AND r3.eventType[j] IN ['MERGED']
+            AND r3.eventDate[j] = outDate)
+            }
+
+            // 3. Collect cleaned dates per node
+            WITH n,mergedDates, COLLECT(DISTINCT outDate) AS allSplitOutDates
+
+            // 7. Unwind mergedDates to count duplicates
+            UNWIND mergedDates AS mDate
+            WITH n, mDate, mergedDates, allSplitOutDates
+
+            WITH n, mDate,
+            size([d IN mergedDates WHERE d = mDate]) AS mergedCount,
+            allSplitOutDates
+
+            // 8. Apply conditions
+            WHERE mergedCount > 1 // duplicate MERGED date from multiple sources
+            OR mDate IN allSplitOutDates // or matching outgoing SPLIT/SPLITMERGE
+
+            RETURN DISTINCT
+            n.CMID AS nodeId,
+            mDate AS eventDate,
+            mergedCount AS numMergedOccurrences,
+            (mDate IN allSplitOutDates) AS hasOutgoingSplitOrSplitMerge
+            ORDER BY nodeId, eventDate;
+            """
+
+        results7 = getQuery(query, driver, type="df")
+
+        query = """
+                MATCH ()-[r:CONTAINS]->()
+                WHERE r.eventType IS NOT NULL
+                AND ANY(et IN r.eventType WHERE NOT et IN [
+                    "SPLIT",
+                    "HIERARCHY",
+                    "SPLITMERGE",
+                    "MERGED",
+                    "FOLLOWS"
+                ])
+                RETURN r, r.eventType
+                 """
+        results8 = getQuery(query, driver, type="df")
+
+        query = """
+                MATCH ()-[r:CONTAINS]->()
+                WHERE r.eventDate IS NOT NULL
+                AND size(r.eventDate) > 0
+                AND ALL(d IN r.eventDate
+                    WHERE d =~ '^[0-9]{4}$'
+                        AND toInteger(d) >= 1000
+                        AND toInteger(d) <= date().year
+                )
+                RETURN r
+                 """
+        results9 = getQuery(query, driver, type="df")
+
+        query = """
+                MATCH ()-[r:USES]->()
+                WHERE r.parentContext IS NOT NULL
+                UNWIND r.parentContext AS pc
+                WITH r, pc, apoc.convert.fromJsonMap(pc) AS m
+                WHERE
+                m.parent IS NULL
+                OR m.eventType IS NULL
+                OR m.parent CONTAINS ","
+                OR m.eventType CONTAINS ","
+                OR (
+                    m.eventDate IS NOT NULL
+                    AND m.eventDate <> ""
+                    AND (
+                    NOT m.eventDate =~ '^[0-9]{4}$'
+                    OR toInteger(m.eventDate) < 1000
+                    OR toInteger(m.eventDate) > date().year
+                    )
+                )
+                RETURN r, pc
+                """
+        results10 = getQuery(query, driver, type="df")
+
+        query = """MATCH ()-[r:USES]->()
+                WHERE r.parentContext IS NOT NULL
+                UNWIND r.parentContext AS pc
+                WITH r, pc, apoc.convert.fromJsonMap(pc) AS m
+                WHERE m.parent IS NOT NULL
+                AND NOT EXISTS {
+                    MATCH (p)
+                    WHERE p.CMID = m.parent
+                }
+                RETURN r, m.parent AS missingParent
+                """
+
+        results11 = getQuery(query, driver, type="df")
+
         mailSent = "False"
 
         if isinstance(mail, Mail):
@@ -616,29 +890,90 @@ def getBadJSON(database, mail=None, return_type="data"):
                 sendEmail(mail, subject=f"Invalid parentContext properties for {database}", recipients=[
                           "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
                 mailSent = "True"
-        fp3 = None
+        fp3, fp4, fp5, fp6, fp7, fp8, fp9, fp10, fp11 = None, None, None, None, None, None, None, None, None
         if isinstance(results3, pd.DataFrame) and not results3.empty:
-            with tempfile.NamedTemporaryFile(delete=False, prefix=f"parent_notIN_parentContext_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"CMID_in_parentContext_not_in_parent_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
                 fp3 = tmpfile.name
                 results3.to_excel(fp3, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Parent not in parentContext for {database}", recipients=[
+                sendEmail(mail, subject=f"CMID in parentContext but not in parent {database}", recipients=[
                         "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp3])
                 mailSent = "True"
+        if isinstance(results4, pd.DataFrame) and not results4.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"CMID_in_parentContext_not_in_parent_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp4 = tmpfile.name
+                results4.to_excel(fp4, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Clean split constraint in {database}", recipients=[
+                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp4])
+                mailSent = "True"
+        if isinstance(results5, pd.DataFrame) and not results5.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"CMID_in_parentContext_not_in_parent_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp5 = tmpfile.name
+                results5.to_excel(fp5, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Non-singular merge constraint in  {database}", recipients=[
+                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp5])
+                mailSent = "True"
+        if isinstance(results6, pd.DataFrame) and not results6.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"CMID_in_parentContext_not_in_parent_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp6 = tmpfile.name
+                results6.to_excel(fp6, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Non-singular split constraint in  {database}", recipients=[
+                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp6])
+                mailSent = "True"
+        if isinstance(results7, pd.DataFrame) and not results7.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"CMID_in_parentContext_not_in_parent_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp7 = tmpfile.name
+                results7.to_excel(fp7, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Can't split merging entity constraint in  {database}", recipients=[
+                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp7])
+                mailSent = "True"
+        if isinstance(results8, pd.DataFrame) and not results8.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"Improper_eventTypes_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp8 = tmpfile.name
+                results8.to_excel(fp8, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Improper eventTypes in  {database}", recipients=[
+                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp8])
+                mailSent = "True"
+        if isinstance(results9, pd.DataFrame) and not results9.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"Valid_eventDate_{database}", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp9 = tmpfile.name
+                results9.to_excel(fp9, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Valid eventDate in {database}", recipients=[
+                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp9])
+                mailSent = "True"
+        if isinstance(results10, pd.DataFrame) and not results10.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"Single_parentContext_json_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp10 = tmpfile.name
+                results10.to_excel(fp10, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Not more than one parent, eventDate and eventType are in a single json in {database}", recipients=[
+                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp10])
+                mailSent = "True"
+        if isinstance(results11, pd.DataFrame) and not results11.empty:
+            with tempfile.NamedTemporaryFile(delete=False, prefix=f"Valid_parent_CMID_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp11 = tmpfile.name
+                results11.to_excel(fp11, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Parent is valid CMID in  {database}", recipients=[
+                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp11])
+                mailSent = "True"
         if return_type == "data":
-            return {"geoCoords": len(results1), "parentContext": len(results2), "Parent not in parentContext": len(results3), "geoCoords": results1, "parentContext": results2, "Parent not in parentContext": results3, "emailSent": mailSent}
+            return {"geoCoords": len(results1), "parentContext": len(results2), "CMID in parentContext but not in parent": len(results3), "geoCoords": results1, "parentContext": results2, "CMID in parentContext but not in parent": results3, "emailSent": mailSent}
         elif return_type == "info":
             if len(results1) == 0:
                 fp1 = None
             if len(results2) == 0:
-                fp2 = None
-            if results3.empty:
-                fp3 = None
-            return {"info": f"Invalid geoCoords: {len(results1)}; Invalid parentContext: {len(results2)}; Parent not in parentContext: {len(results3)}", "filepath": [fp1, fp2, fp3]}
+                fp2 = None            
+            return {"info": f"Invalid geoCoords: {len(results1)}; Invalid parentContext: {len(results2)}; CMID in parentContext but not in parent: {len(results3)}; Clean split constraint: {len(results4)}; Non-singular merge constraint: {len(results5)}; Non-singular split constraint: {len(results6)}; Can't split merging entity constraint: {len(results7)}; Valid eventType: {len(results8)}; Valid evnetDate: {len(results9)}; Valid parenContext Json: {len(results10)}; Valid parent CMID: {len(results11)}", "filepath": [fp1, fp2, fp3, fp4, fp5, fp6, fp7, fp8, fp9, fp10, fp11]}
     except Exception as e:
         result = str(e)
         return result, 500
-
 
 def getBadDomains(database, mail=None, return_type="data"):
     """
@@ -2086,7 +2421,7 @@ def runRoutinesStream(databases="all", mail=None):
             ("Bad Domains", lambda db: getBadDomains(db, mail=None, return_type="info")),
             ("Bad CMID", lambda db: getBadCMID(db, mail=None, return_type="info")),
             ("Multiple Labels", lambda db: getMultipleLabels(db, mail=None, return_type="info")),
-            ("Bad JSON", lambda db: getBadJSON(db, mail=None, return_type="info")),
+            ("Bad JSON", lambda db: getBadComplexProperties(db, mail=None, return_type="info")),
             ("Bad Relations", lambda db: getBadRelations(db, mail=None, return_type="info")),
             ("CMName Not In Name", lambda db: CMNameNotInName(db, mail=None, return_type="info")),
             ("Missing CMName", lambda db: missingCMName(db, mail=None, return_type="info")),
@@ -2158,7 +2493,7 @@ def runRoutinesStream(databases="all", mail=None):
           <tr><td>Bad Domains</td><td>getBadDomains</td><td>Identifies invalid or missing labels: bad subdomain labels, nodes missing CATEGORY, or nodes missing DATASET.</td></tr>
           <tr><td>Bad CMID</td><td>getBadCMID</td><td>Finds invalid or outdated CMIDs used in USES relationships, including replacements from deleted nodes.</td></tr>
           <tr><td>Multiple Labels</td><td>getMultipleLabels</td><td>Flags USES relationships that have multiple subdomain labels assigned.</td></tr>
-          <tr><td>Bad JSON</td><td>getBadJSON</td><td>Validates JSON properties (geoCoords, parentContext) and reports invalid entries.</td></tr>
+          <tr><td>Bad JSON</td><td>getBadComplexProperties</td><td>Validates JSON properties (geoCoords, parentContext) and reports invalid entries.</td></tr>
           <tr><td>Bad Relations</td><td>getBadRelations</td><td>Checks for invalid or inconsistent parent–child category relationships and mis-specified CONTAINS links.</td></tr>
           <tr><td>CMName Not In Name</td><td>CMNameNotInName</td><td>Finds categories where the primary CMName is missing from the alternate names list and updates them.</td></tr>
           <tr><td>Missing CMName</td><td>missingCMName</td><td>Identifies CATEGORY, DATASET, and METADATA nodes that lack a defined CMName property.</td></tr>
