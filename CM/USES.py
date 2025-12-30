@@ -238,34 +238,66 @@ def updateContains(database, CMID=None):
 
         // Match categories using parent CMID and prepare for collecting events
         match (a)<-[rC:CONTAINS]-(c:CATEGORY {CMID: p.parent})
-        with a, rC, c, 
-        apoc.coll.toSet(apoc.coll.flatten(collect(p.eventType))) as eventType, 
-        apoc.coll.toSet(apoc.coll.flatten(collect(p.eventDate))) as eventDate
+        WITH rC, p,
+                CASE
+                    WHEN p.eventType IS NULL THEN []
+                    WHEN apoc.meta.cypher.type(p.eventType) = "STRING" THEN [p.eventType]
+                    ELSE p.eventType
+                END AS eventType,
+                CASE
+                    WHEN p.eventDate IS NULL THEN []
+                    WHEN apoc.meta.cypher.type(p.eventDate) = "STRING" THEN [p.eventDate]
+                    ELSE p.eventDate
+                END AS eventDate
 
-        // Update rC properties with events data using APOC
-        call {
-        with rC, eventDate
-        call apoc.do.when(
-            size(eventDate) > 0,
-            "set rC.eventDate = $eventDate",
-            "set rC.eventDate = NULL",
-            {rC: rC, eventDate: eventDate}
-        ) yield value
-        }
-        with rC, eventType
-        call {
-        with rC, eventType
-        call apoc.do.when(
-            size(eventType) > 0,
-            "set rC.eventType = $eventType",
-            "set rC.eventType = NULL",
-            {rC: rC, eventType: eventType}
-        ) yield value
-        }
-        return count(*)
+        WITH rC, eventType, eventDate, range(0, size(eventType)-1) AS idxs
+        UNWIND idxs AS i
+        WITH rC, eventType[i] AS et,
+            CASE WHEN size(eventDate) <= i THEN NULL ELSE eventDate[i] END AS ed
+        WHERE et IS NOT NULL
 
+        WITH rC,collect([et,ed]) AS eventPairs
+        WITH rC,
+            reduce(acc = [], pair IN eventPairs |
+                CASE WHEN NOT pair IN acc THEN acc + [pair] ELSE acc END
+            ) AS uniquePairs
+        WITH rC,
+                [p in uniquePairs | p[0]] AS eventType,
+                [p in uniquePairs | p[1]] AS eventDate
+        WITH rC,eventType,[x IN eventDate | coalesce(x, "NULL")] AS eventDate
+        
+        SET rC.eventType = eventType,
+            rC.eventDate = eventDate
+        
+        RETURN count(rC) AS updatedRelationships
         """
 
+        # apoc.coll.toSet(apoc.coll.flatten(collect(p.eventType))) as eventType, 
+        # apoc.coll.toSet(apoc.coll.flatten(collect(p.eventDate))) as eventDate
+
+        # // Update rC properties with events data using APOC
+        # call {
+        # with rC, eventDate
+        # call apoc.do.when(
+        #     size(eventDate) > 0,
+        #     "set rC.eventDate = $eventDate",
+        #     "set rC.eventDate = NULL",
+        #     {rC: rC, eventDate: eventDate}
+        # ) yield value
+        # }
+        # with rC, eventType
+        # call {
+        # with rC, eventType
+        # call apoc.do.when(
+        #     size(eventType) > 0,
+        #     "set rC.eventType = $eventType",
+        #     "set rC.eventType = NULL",
+        #     {rC: rC, eventType: eventType}
+        # ) yield value
+        # }
+        # return count(*)
+
+        # When a contains tie going to node "a" has a non-empty eventDate list or eventType list, but there are no USES ties to "a" with a parentContext, then remove eventDate and eventType lists.
         query2 = qFiltera + """
         match (d:DATASET)-[rU:USES]->(a:CATEGORY)<-[rC:CONTAINS]-(p:CATEGORY) 
         """ + qFilterb + """
@@ -490,7 +522,7 @@ def addCMNameRel(database, CMID=None):
             WITH DISTINCT c
             MATCH (d:DATASET) WHERE d.CMID = "{datasetID}"
             CREATE (c)<-[r:USES]-(d)
-            SET r.Key = "Key: " + c.CMID,
+            SET r.Key = "Key == " + c.CMID,
                 r.label = ['CATEGORY'],
                 r.Name = [c.CMName]
             return elementId(r) as relID
