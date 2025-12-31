@@ -828,35 +828,35 @@ def moveUSESties(database,user,input,dataset,tabledata):
 
             processUSES(CMID=[row['CMID']for row in USES_to_change], database=database)
         
-        query = f"""
-                MATCH (d1)-[r:USES]->(c1)
-                WHERE c1.CMID = '{CMID_from}' AND elementId(r) = '{rel_id}'
+        # query = f"""
+        #         MATCH (d1)-[r:USES]->(c1)
+        #         WHERE c1.CMID = '{CMID_from}' AND elementId(r) = '{rel_id}'
 
-                WITH c1, r.Key as Key, d1.CMID as datasetID
+        #         WITH c1, r.Key as Key, d1.CMID as datasetID
 
-                OPTIONAL MATCH (s:STACK)-[:MERGING]->(d1)
-                WHERE d1.CMID = datasetID
+        #         OPTIONAL MATCH (s:STACK)-[:MERGING]->(d1)
+        #         WHERE d1.CMID = datasetID
 
-                WITH c1, Key, datasetID, s.CMID as stackID
+        #         WITH c1, Key, datasetID, s.CMID as stackID
 
-                OPTIONAL MATCH (c1)-[e:EQUIVALENT]->(c3)
-                WHERE e.stack = stackID AND e.dataset = datasetID AND e.Key = Key
+        #         OPTIONAL MATCH (c1)-[e:EQUIVALENT]->(c3)
+        #         WHERE e.stack = stackID AND e.dataset = datasetID AND e.Key = Key
 
-                WITH c1, e, c3, '{CMID_to}' AS c2CMID
-                WHERE e IS NOT NULL
+        #         WITH c1, e, c3, '{CMID_to}' AS c2CMID
+        #         WHERE e IS NOT NULL
 
-                MATCH (c2:CATEGORY)
-                WHERE c2.CMID = c2CMID
-                CREATE (c2)-[newEq:EQUIVALENT {
-                stack: e.stack,
-                dataset: e.dataset,
-                Key: e.Key
-                }]->(c3)
-                DELETE e
-                RETURN 'Moved equivalence', c1.CMID AS oldCategory, c2.CMID AS newCategory, c3.CMID AS target
-                """
+        #         MATCH (c2:CATEGORY)
+        #         WHERE c2.CMID = c2CMID
+        #         CREATE (c2)-[newEq:EQUIVALENT {
+        #         stack: e.stack,
+        #         dataset: e.dataset,
+        #         Key: e.Key
+        #         }]->(c3)
+        #         DELETE e
+        #         RETURN 'Moved equivalence', c1.CMID AS oldCategory, c2.CMID AS newCategory, c3.CMID AS target
+        #         """
         
-        result = getQuery(query,driver)
+        # result = getQuery(query,driver)
 
         # Move the relationship itself
         # Fetch relationship details for log
