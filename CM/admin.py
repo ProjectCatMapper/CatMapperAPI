@@ -697,6 +697,9 @@ def check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id):
         #checks to see if CMID is valid
         validCMID_to = isValidCMID(CMID_to, driver)
 
+        if CMID_from == CMID_to:
+            raise Exception(f"Both CMIDs cannot be the same.")
+
         if len(validCMID_to) == 0:
             raise Exception(f"{CMID_to} is invalid")
         
@@ -787,9 +790,43 @@ def moveUSESties(database,user,input,dataset,tabledata):
     # only need to revise operation if user wants to keep some parent-child ties with the FROM node.
     USES_to_change = [row for row in tabledata if row['optionA'] != 'From']
     
-    try:
-        if len(USES_to_change) > 0:
+    if len(USES_to_change) > 0:
 
+        try:
+            query = f"""
+                MATCH (d1)-[r:USES]->(c1)
+                WHERE c1.CMID = '{CMID_from}' AND elementId(r) = '{rel_id}'
+
+                WITH c1, r.Key as Key, d1.CMID as datasetID
+
+                OPTIONAL MATCH (s:STACK)-[:MERGING]->(d1)
+                WHERE d1.CMID = datasetID
+
+                WITH c1, Key, datasetID, s.CMID as stackID
+
+                OPTIONAL MATCH (c1)-[e:EQUIVALENT]->(c3)
+                WHERE e.stack = stackID AND e.dataset = datasetID AND e.Key = Key
+
+                WITH c1, e, c3, '{CMID_to}' AS c2CMID
+                WHERE e IS NOT NULL
+
+                MATCH (c2:CATEGORY)
+                WHERE c2.CMID = c2CMID
+                CREATE (c2)-[newEq:EQUIVALENT {
+                stack: e.stack,
+                dataset: e.dataset,
+                Key: e.Key
+                }]->(c3)
+                DELETE e
+                RETURN 'Moved equivalence', c1.CMID AS oldCategory, c2.CMID AS newCategory, c3.CMID AS target
+                """
+        
+            result = getQuery(query,driver)
+            
+        except Exception as e:
+            return "Error occurred while moving equivalence ties."
+        
+        try:
             query_update_parents = """
             UNWIND $changes AS change
             MATCH (c {CMID: change.cmid})<-[r:USES {Key: change.Key}]-(d:DATASET {CMID: $dataset})
@@ -827,39 +864,14 @@ def moveUSESties(database,user,input,dataset,tabledata):
             print("completed moving props")
 
             processUSES(CMID=[row['CMID']for row in USES_to_change], database=database)
+        except Exception as e:
+            return "Error occurred while moving USES ties."
+
         
-        # query = f"""
-        #         MATCH (d1)-[r:USES]->(c1)
-        #         WHERE c1.CMID = '{CMID_from}' AND elementId(r) = '{rel_id}'
-
-        #         WITH c1, r.Key as Key, d1.CMID as datasetID
-
-        #         OPTIONAL MATCH (s:STACK)-[:MERGING]->(d1)
-        #         WHERE d1.CMID = datasetID
-
-        #         WITH c1, Key, datasetID, s.CMID as stackID
-
-        #         OPTIONAL MATCH (c1)-[e:EQUIVALENT]->(c3)
-        #         WHERE e.stack = stackID AND e.dataset = datasetID AND e.Key = Key
-
-        #         WITH c1, e, c3, '{CMID_to}' AS c2CMID
-        #         WHERE e IS NOT NULL
-
-        #         MATCH (c2:CATEGORY)
-        #         WHERE c2.CMID = c2CMID
-        #         CREATE (c2)-[newEq:EQUIVALENT {
-        #         stack: e.stack,
-        #         dataset: e.dataset,
-        #         Key: e.Key
-        #         }]->(c3)
-        #         DELETE e
-        #         RETURN 'Moved equivalence', c1.CMID AS oldCategory, c2.CMID AS newCategory, c3.CMID AS target
-        #         """
-        
-        # result = getQuery(query,driver)
-
-        # Move the relationship itself
-        # Fetch relationship details for log
+    
+    # Move the relationship itself
+    # Fetch relationship details for log
+    try:
         logtext = USESLogText(rel_id,driver)
         
         log_msg = f"moved relationship {logtext} from {CMID_from} to {CMID_to}"
@@ -882,15 +894,12 @@ def moveUSESties(database,user,input,dataset,tabledata):
         #CMlog(id=from_node_id, type_="node", log=log_msg, user=user, con=con)
         #CMlog(id=to_node_id, type_="node", log=log_msg, user=user, con=con)
 
-        try:
-            if new_rel_id is not None:
-                createLog(id=new_rel_id, type="relation", log=log_msg, user=user, driver=driver)
-        except Exception as e:
-            print(f"Warning while logging relation: {e}")
-
+    
+        if new_rel_id is not None:
+            createLog(id=new_rel_id, type="relation", log=log_msg, user=user, driver=driver)
     except Exception as e:
-        return str(e)
-
+        return f"Warning while logging relation: {e}"
+    
     # Final updates and notifications
     print("move completed: updating USES ties")
     processUSES(CMID=[CMID_from, CMID_to], database=database)
