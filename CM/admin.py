@@ -18,6 +18,7 @@ from .USES import addCMNameRel,processDATASETs,waitingUSES
 from .upload import updateProperty,createUSES
 from flask import jsonify
 from itertools import groupby
+from collections import Counter
 
 # This is a module for admin functions in CatMapper
 
@@ -139,8 +140,8 @@ def validate_parent_context_list(driver,parent_context_list):
         except ValueError as ve:
             errors.append((idx, str(ve)))
             continue
-        except Exception:
-            errors.append((idx, "Invalid JSON"))
+        except Exception as e:
+            errors.append((idx, f"Invalid JSON:{e}"))
             continue
 
         # 1️⃣ Must be a dict
@@ -174,9 +175,9 @@ def validate_parent_context_list(driver,parent_context_list):
             unwind $CMID as cmid
             RETURN EXISTS { MATCH (p { CMID: cmid })} AS cmidExists
             """
-        result = getQuery(q,driver=driver,params = {"CMID": CMID})
+        result = getQuery(q,driver=driver,params = {"CMID": parent})
 
-        if result:
+        if not result[0]['cmidExists']:
             errors.append((idx, "Parent CMID not in database"))
             continue
 
@@ -238,7 +239,7 @@ def add_edit_delete_USES(database,user,input):
             groupLabel = groupLabel[0]['groupLabel']
             if groupLabel:
                 validatePropertyCMID(new_property_value,USES_property,groupLabel,driver)
-    
+        
     if "list" in metaType:        
         if "||" in new_property_value:
             new_property_value=new_property_value.split("||")
@@ -1070,7 +1071,7 @@ def deleteNode(database,user,input):
             props = list(set([p['property'] for p in props if p['relationship'] is not None] + ["parentContext"]))
 
             query = """
-                    MATCH (c:CATEGORY)<-[r:USES]-(n:DATASET)
+                    MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
                     WHERE c.CMID = $cmid
 
                     WITH c.CMID as cmid, r.Key as Key, d.CMID as datasetID
@@ -1087,6 +1088,8 @@ def deleteNode(database,user,input):
 
             if result:
                 raise ValueError(f"This category can't be deleted, because it is used by an existing stack for a merge(stackID={result}).")
+
+            print("1")
 
             rels_query = f"""
                 UNWIND $keys AS key
@@ -1202,13 +1205,11 @@ def deleteUSES(database,user,input):
             WHERE elementId(r) = '{id}'
 
             WITH d.CMID as datasetID,a.CMID as CMID, r.Key as Key
-            OPTIONAL MATCH (a {{"CMID" : CMID}})-[e:EQUIVALENT]->(target)
+            OPTIONAL MATCH (a)-[e:EQUIVALENT]->(target)
             WHERE e.key = Key AND e.datasetID = datasetID
-            WITH CMID, Key, datasetID, e.stackID as stackID, COUNT(e) > 0 AS hasEquivalent
+            WITH CMID, Key, datasetID, e.stackID as stackID
 
-            WITH CMID, Key, datasetID, stackID, hasEquivalent
-
-            WHERE hasEquivalent = true
+            WHERE e IS NOT NULL
 
             RETURN 
             CMID,
