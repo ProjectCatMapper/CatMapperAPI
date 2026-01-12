@@ -1241,6 +1241,8 @@ def CMNameNotInName(database, mail=None, return_type="data"):
     The affected CMIDs are written to an Excel file if any are found.
     If a valid `Mail` object is provided, the file is sent via email.
 
+    This finction also rebuilds normNames for all nodes, which is used in search Indexes.
+
     Parameters
     ----------
     database : str
@@ -1301,6 +1303,18 @@ def CMNameNotInName(database, mail=None, return_type="data"):
         cmids = getQuery(query, driver, type="list")
 
         dataset_cmids = getQuery(dataset_query,driver, type="list")
+
+        normalize_query = """
+        MATCH (n)
+        AND (n:CATEGORY OR n:DATASET)
+        AND n.names IS NOT NULL
+        WITH n, [name IN n.names | toLower(apoc.text.clean(name))] AS cleaned
+        WITH n, apoc.coll.flatten([x IN cleaned | split(x, ' ')]) AS toks
+        SET n.normNames = apoc.coll.toSet([t IN toks WHERE t <> ''])
+        RETURN count(n) AS normalizedCount
+        """
+
+        getQuery(query=normalize_query, driver=driver)
 
         fp1 = None
         if len(cmids) > 0:
