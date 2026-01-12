@@ -163,6 +163,21 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
 
         results_df = pd.DataFrame(results)
 
+        node_ids = results_df["nodeID"].tolist()
+
+        normalize_query = """
+        MATCH (n)
+        WHERE elementId(n) IN $nodeIDs
+        AND (n:CATEGORY OR n:DATASET)
+        AND n.names IS NOT NULL
+        WITH n, [name IN n.names | toLower(apoc.text.clean(name))] AS cleaned
+        WITH n, apoc.coll.flatten([x IN cleaned | split(x, ' ')]) AS toks
+        SET n.normNames = apoc.coll.toSet([t IN toks WHERE t <> ''])
+        RETURN count(n) AS normalizedCount
+        """
+
+        getQuery(query=normalize_query, driver=driver, params={"nodeIDs": node_ids})
+
         updateLog(f"log/{user}uploadProgress.txt", "Updating log", write="a")
 
         log_entries = results_df[vars + ["nodeID"]].to_dict(orient="records")
@@ -284,6 +299,18 @@ def createUSES(links, database, user):
         # Update alternate names
         CMIDs = [item["CMID"] for item in result]
         updateAltNames(driver, CMIDs)
+
+        normalize_query = """
+                            MATCH (n)
+                            WHERE n.CMID IN $nodeIDs
+                            AND (n:CATEGORY OR n:DATASET)
+                            AND n.names IS NOT NULL
+                            WITH n, [name IN n.names | toLower(apoc.text.clean(name))] AS cleaned
+                            WITH n, apoc.coll.flatten([x IN cleaned | split(x, ' ')]) AS toks
+                            SET n.normNames = apoc.coll.toSet([t IN toks WHERE t <> ''])
+                            RETURN count(n) AS normalizedCount
+                        """
+        getQuery(normalize_quer, driver, params={"nodeIDs": CMIDs})
 
         updateLog(
             f"log/{user}uploadProgress.txt", "adding logs to USES ties", write="a"
