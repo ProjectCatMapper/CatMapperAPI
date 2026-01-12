@@ -402,6 +402,18 @@ def add_edit_delete_Node(database,user,input):
                 try:
                     #CMaddCMNameRel(CMID=changeNodeID, user=user, con=con)
                     addCMNameRel(database,CMID=changeNodeID)
+                    normalize_single_query = """
+                            MATCH (n)
+                            WHERE n.CMID = $nodeID
+                            AND (n:CATEGORY OR n:DATASET)
+                            AND n.names IS NOT NULL
+                            WITH n, [name IN n.names | toLower(apoc.text.clean(name))] AS cleaned
+                            WITH n, apoc.coll.flatten([x IN cleaned | split(x, ' ')]) AS toks
+                            SET n.normNames = apoc.coll.toSet([t IN toks WHERE t <> ''])
+                            RETURN count(n) AS normalizedCount
+                            """
+                
+                    getQuery(normalize_single_query,driver,params={"nodeID": changeNodeID})
                 except Exception as e:
                     print(f"CMaddCMNameRel failed: {e}")
 
@@ -657,6 +669,19 @@ def mergeNodes(keepcmid,deletecmid,user,database):
 
         results = results + \
             [f"Completed combining {deletecmid} into {keepcmid}"]
+        
+        normalize_single_query = """
+        MATCH (n)
+        WHERE n.CMID = $nodeID
+        AND (n:CATEGORY OR n:DATASET)
+        AND n.names IS NOT NULL
+        WITH n, [name IN n.names | toLower(apoc.text.clean(name))] AS cleaned
+        WITH n, apoc.coll.flatten([x IN cleaned | split(x, ' ')]) AS toks
+        SET n.normNames = apoc.coll.toSet([t IN toks WHERE t <> ''])
+        RETURN count(n) AS normalizedCount
+        """
+    
+        getQuery(normalize_single_query,driver,params={"nodeID": keepcmid})
 
         return results
 
@@ -782,7 +807,7 @@ def check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id):
 
 # table data includes user decisions about ambiguous parents
 #Function that moves uses tie from one category node to another category node
-def moveUSESties(database,user,input,dataset,tabledata): 
+def moveUSESties(database,user,input,dataset,tabledata):
     driver = getDriver(database)
     CMID_from = input.get('s1_2').strip()
     CMID_to = input.get('s1_3').strip()
@@ -794,9 +819,9 @@ def moveUSESties(database,user,input,dataset,tabledata):
     if len(USES_to_change) > 0:
 
         try:
-            query = f"""
+            query = """
                 MATCH (d1)-[r:USES]->(c1)
-                WHERE c1.CMID = '{CMID_from}' AND elementId(r) = '{rel_id}'
+                WHERE c1.CMID = $CMID_from AND elementId(r) = $rel_id
 
                 WITH c1, r.Key as Key, d1.CMID as datasetID
 
@@ -808,21 +833,17 @@ def moveUSESties(database,user,input,dataset,tabledata):
                 OPTIONAL MATCH (c1)-[e:EQUIVALENT]->(c3)
                 WHERE e.stack = stackID AND e.dataset = datasetID AND e.Key = Key
 
-                WITH c1, e, c3, '{CMID_to}' AS c2CMID
+                WITH c1, e, c3, $CMID_to AS c2CMID
                 WHERE e IS NOT NULL
 
                 MATCH (c2:CATEGORY)
                 WHERE c2.CMID = c2CMID
-                CREATE (c2)-[newEq:EQUIVALENT {
-                stack: e.stack,
-                dataset: e.dataset,
-                Key: e.Key
-                }]->(c3)
+                CREATE (c2)-[newEq:EQUIVALENT {stack: e.stack,dataset: e.dataset,Key: e.Key}]->(c3)
                 DELETE e
                 RETURN 'Moved equivalence', c1.CMID AS oldCategory, c2.CMID AS newCategory, c3.CMID AS target
                 """
-        
-            result = getQuery(query,driver)
+                    
+            result = getQuery(query,driver,params = {"CMID_from": CMID_from, "rel_id": rel_id, "CMID_to": CMID_to})
             
         except Exception as e:
             return "Error occurred while moving equivalence ties."
@@ -867,8 +888,6 @@ def moveUSESties(database,user,input,dataset,tabledata):
             processUSES(CMID=[row['CMID']for row in USES_to_change], database=database)
         except Exception as e:
             return "Error occurred while moving USES ties."
-
-        
     
     # Move the relationship itself
     # Fetch relationship details for log
@@ -900,10 +919,24 @@ def moveUSESties(database,user,input,dataset,tabledata):
             createLog(id=new_rel_id, type="relation", log=log_msg, user=user, driver=driver)
     except Exception as e:
         return f"Warning while logging relation: {e}"
-    
+            
     # Final updates and notifications
     print("move completed: updating USES ties")
     processUSES(CMID=[CMID_from, CMID_to], database=database)
+
+    normalize_single_query = """
+        MATCH (n)
+        WHERE n.CMID = $nodeID
+        AND (n:CATEGORY OR n:DATASET)
+        AND n.names IS NOT NULL
+        WITH n, [name IN n.names | toLower(apoc.text.clean(name))] AS cleaned
+        WITH n, apoc.coll.flatten([x IN cleaned | split(x, ' ')]) AS toks
+        SET n.normNames = apoc.coll.toSet([t IN toks WHERE t <> ''])
+        RETURN count(n) AS normalizedCount
+        """
+    
+    getQuery(normalize_single_query,driver,params={"nodeID": CMID_to})
+
     print("Completed USES ties update")
 
     return "done"
@@ -1105,10 +1138,10 @@ def deleteNode(database,user,input):
 
             datasetIDs_query = f"""
                 MATCH (d:DATASET)
-                WHERE '{input.get('s1_2')}' IN d.District
+                WHERE $cmid IN d.District
                 RETURN id(d) AS ids
             """
-            datasetIDs = getQuery(datasetIDs_query,driver=driver)
+            datasetIDs = getQuery(datasetIDs_query,driver=driver,params = {"cmid": input.get("s1_2")})
 
             # removing CMID for deleted node from District property in dataset nodes
             if len(datasetIDs) > 0:
@@ -1130,18 +1163,28 @@ def deleteNode(database,user,input):
                     createLog(id=[row['ids'] for row in ids], type="node",
                           log=f"removed reference to deleted node {input.get('s1_2')} from {prop}",
                           user=user, driver=driver)
-                                
+                                            
             # getting all the affected relationships and extracting the safe data and setting it back
             if len(rels) > 0:
 
                 sepRels = []
                 for row in rels:
-                    for val in re.split(r' \|\|', row['val']):
-                    #for val in row['val']:
+                    vals = row['val']
+                    if isinstance(vals, list):
+                        vals = vals  # already a list
+                    else:
+                        vals = re.split(r' \|\|', vals)  # split string
+
+                    for val in vals:
                         val = val.strip()
                         if input.get('s1_2') not in val:
                             sepRels.append({"id": row["id"], "key": row["key"], "val": val})
-                
+                    # for val in re.split(r' \|\|', row['val']):
+                    # #for val in row['val']:
+                    #     val = val.strip()
+                    #     if input.get('s1_2') not in val:
+                    #         sepRels.append({"id": row["id"], "key": row["key"], "val": val})
+                                
                 # if there's saved data, it is set back before removing the purely unsaved data
                 if len(sepRels) > 0:
                     grouped = {}
@@ -1172,7 +1215,7 @@ def deleteNode(database,user,input):
                 createLog(id=[row["id"] for row in rels], type="relation",
                       log=f"removed reference to deleted node {input.get('s1_2')}",
                       user=user, driver=driver)
-        
+                
         nodeID = getID(input.get('s1_2'), "CMID", driver)
         create_deleted_query = f"""
             MATCH (n) WHERE elementId(n) = '{nodeID}'
@@ -1181,6 +1224,7 @@ def deleteNode(database,user,input):
             RETURN elementId(n2) AS nodeID
         """
         deletedID = getQuery(create_deleted_query,driver=driver)
+        print(deletedID)
         print("Stgae 3")
         createLog(id=[deletedID[0]['nodeID']], type="node",
               log=[f"deleted node {input.get('s1_2')}"],
