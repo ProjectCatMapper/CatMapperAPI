@@ -356,15 +356,28 @@ def updateAltNames(database, CMID=None, domain = "CATEGORY"):
                     """
         elif domain == "CATEGORY":
             query = qFiltera + """
-match (n:CATEGORY)<-[r:USES]-(:DATASET)
-""" + qFilterb + """
-with n, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.Name),true)) as names
-set n.names = names
-return count(n)
-"""
+                    match (n:CATEGORY)<-[r:USES]-(:DATASET)
+                    """ + qFilterb + """
+                    with n, apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.Name),true)) as names
+                    set n.names = names
+                    return count(n)
+                    """
         else:
             raise ValueError("Invalid domain. Must be 'DATASET' or 'CATEGORY'.")
         getQuery(query, driver, params={'cmid': CMID}, type = "list")
+
+        normalize_query = """
+                            UNWIND $CMID as cmid
+                            MATCH (n:CATEGORY|DATASET)
+                            WHERE n.CMID = cmid
+                            AND n.names IS NOT NULL
+                            WITH n, [name IN n.names | toLower(apoc.text.clean(name))] AS cleaned
+                            WITH n, apoc.coll.flatten([x IN cleaned | split(x, ' ')]) AS toks
+                            SET n.normNames = apoc.coll.toSet([t IN toks WHERE t <> ''])
+                            RETURN count(n) AS normalizedCount
+                            """
+                
+        getQuery(normalize_query,driver,params={"CMID": CMID})
 
         return f"Completed updating alternate names for {CMID}" if CMID else f"Completed updating alternate names for all {domain} nodes."
     except Exception as e:
