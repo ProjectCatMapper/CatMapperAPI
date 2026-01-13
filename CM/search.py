@@ -120,19 +120,17 @@ def search(
     elif property == "Name":
         #The operation using size was the only way we could get it to determine if something was a list
         qStart = f"""
-            call {{with $term as term
+            call {{with replace(toLower(apoc.text.clean($term)), ' ', '') as term
             call db.index.fulltext.queryNodes('{domain}', '"' + term +'"') yield node return node
-            union with $term as term
-            call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term)) yield node return node
-            union with $term as term
-            call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term) + '~') yield node return node}}
+            union with replace(toLower(apoc.text.clean($term)), ' ', '') as term
+            call db.index.fulltext.queryNodes('{domain}', term + '~') yield node return node}}
             with node as a
             with a, 
                 CASE
                     WHEN size(a.names + 11) = size(a.names)+1 THEN a.names
                     ELSE [a.names]
                 END AS nameList
-            with a, nameList,  [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText($term))] as scores
+            with a, nameList,  [i in nameList | apoc.text.distance(i,$term)] as scores
             with a, nameList, scores, apoc.coll.min(scores) as score
             with a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
             """
@@ -407,35 +405,18 @@ def translate(
 
     elif property == "Name":
 
-        if domain != "DATASET":
-            qStart = f"""
-    with row call {{ with row 
-    call db.index.fulltext.queryNodes('{domain}', '"' + row.term + '"') yield node return node
-    union with row 
-    call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term)) yield node return node
-    union with row 
-    call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term) + '~') yield node return node}}
+        qStart = f"""
+    with row call {{ with row
+    call db.index.fulltext.queryNodes('{domain}', '"' + replace(toLower(apoc.text.clean(row.term)), ' ', '') + '"') yield node return node
+    union with row
+    call db.index.fulltext.queryNodes('{domain}', replace(toLower(apoc.text.clean(row.term)), ' ', '') + '~') yield node return node}}
     with row, node as a
     with row, a, a.names as nameList
-    with row, a, nameList, [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText(row.term))] as scores
+    with row, a, nameList, [i in nameList | apoc.text.distance(i,row.term)] as scores
     with row, a, nameList, scores, apoc.coll.min(scores) as score
     with row, a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
     """
-        else:
-            qStart = f"""
-    with row call {{ with row 
-    call db.index.fulltext.queryNodes('{domain}', '"' + row.term + '"') yield node return node
-    union with row 
-    call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term)) yield node return node
-    union with row 
-    call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term) + '~') yield node return node}}
-    with row, node as a
-    with row, a, [a.CMName, a.shortName, a.DatasetCitation] as nameList
-    with row, a, nameList,  [i in nameList | apoc.text.levenshteinDistance(custom.cleanText(i),custom.cleanText(row.term))] as scores
-    with row, a, nameList, scores, apoc.coll.min(scores) as score
-    with row, a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
-    """
-
+   
     else:
         qStart = f""" 
     with row call apoc.cypher.run('match (a:{domain}) 
