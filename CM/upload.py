@@ -310,7 +310,7 @@ def createUSES(links, database, user):
                             SET n.normNames = apoc.coll.toSet([t IN toks WHERE t <> ''])
                             RETURN count(n) AS normalizedCount
                         """
-        getQuery(normalize_quer, driver, params={"nodeIDs": CMIDs})
+        getQuery(normalize_query, driver, params={"nodeIDs": CMIDs})
 
         updateLog(
             f"log/{user}uploadProgress.txt", "adding logs to USES ties", write="a"
