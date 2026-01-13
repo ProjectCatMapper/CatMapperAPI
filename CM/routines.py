@@ -1304,18 +1304,6 @@ def CMNameNotInName(database, mail=None, return_type="data"):
 
         dataset_cmids = getQuery(dataset_query,driver, type="list")
 
-        normalize_query = """
-        MATCH (n)
-        AND (n:CATEGORY OR n:DATASET)
-        AND n.names IS NOT NULL
-        WITH n, [name IN n.names | toLower(apoc.text.clean(name))] AS cleaned
-        WITH n, apoc.coll.flatten([x IN cleaned | split(x, ' ')]) AS toks
-        SET n.normNames = apoc.coll.toSet([t IN toks WHERE t <> ''])
-        RETURN count(n) AS normalizedCount
-        """
-
-        getQuery(query=normalize_query, driver=driver)
-
         fp1 = None
         if len(cmids) > 0:
             addCMNameRel(database, CMID=cmids)
