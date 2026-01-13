@@ -402,18 +402,6 @@ def add_edit_delete_Node(database,user,input):
                 try:
                     #CMaddCMNameRel(CMID=changeNodeID, user=user, con=con)
                     addCMNameRel(database,CMID=changeNodeID)
-                    normalize_single_query = """
-                            MATCH (n)
-                            WHERE n.CMID = $nodeID
-                            AND (n:CATEGORY OR n:DATASET)
-                            AND n.names IS NOT NULL
-                            WITH n, [name IN n.names | toLower(apoc.text.clean(name))] AS cleaned
-                            WITH n, apoc.coll.flatten([x IN cleaned | split(x, ' ')]) AS toks
-                            SET n.normNames = apoc.coll.toSet([t IN toks WHERE t <> ''])
-                            RETURN count(n) AS normalizedCount
-                            """
-                
-                    getQuery(normalize_single_query,driver,params={"nodeID": changeNodeID})
                 except Exception as e:
                     print(f"CMaddCMNameRel failed: {e}")
 
@@ -670,19 +658,6 @@ def mergeNodes(keepcmid,deletecmid,user,database):
         results = results + \
             [f"Completed combining {deletecmid} into {keepcmid}"]
         
-        normalize_single_query = """
-        MATCH (n)
-        WHERE n.CMID = $nodeID
-        AND (n:CATEGORY OR n:DATASET)
-        AND n.names IS NOT NULL
-        WITH n, [name IN n.names | toLower(apoc.text.clean(name))] AS cleaned
-        WITH n, apoc.coll.flatten([x IN cleaned | split(x, ' ')]) AS toks
-        SET n.normNames = apoc.coll.toSet([t IN toks WHERE t <> ''])
-        RETURN count(n) AS normalizedCount
-        """
-    
-        getQuery(normalize_single_query,driver,params={"nodeID": keepcmid})
-
         return results
 
     except Exception as e:
@@ -923,19 +898,6 @@ def moveUSESties(database,user,input,dataset,tabledata):
     # Final updates and notifications
     print("move completed: updating USES ties")
     processUSES(CMID=[CMID_from, CMID_to], database=database)
-
-    normalize_single_query = """
-        MATCH (n)
-        WHERE n.CMID = $nodeID
-        AND (n:CATEGORY OR n:DATASET)
-        AND n.names IS NOT NULL
-        WITH n, [name IN n.names | toLower(apoc.text.clean(name))] AS cleaned
-        WITH n, apoc.coll.flatten([x IN cleaned | split(x, ' ')]) AS toks
-        SET n.normNames = apoc.coll.toSet([t IN toks WHERE t <> ''])
-        RETURN count(n) AS normalizedCount
-        """
-    
-    getQuery(normalize_single_query,driver,params={"nodeID": CMID_to})
 
     print("Completed USES ties update")
 
