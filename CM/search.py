@@ -127,8 +127,8 @@ def search(
             with node as a
             with a, 
                 CASE
-                    WHEN size(a.names + 11) = size(a.names)+1 THEN a.names
-                    ELSE [a.names]
+                    WHEN size(a.normNames + 11) = size(a.normNames)+1 THEN a.normNames
+                    ELSE [a.normNames]
                 END AS nameList
             with a, nameList,  [i in nameList | apoc.text.distance(i,$term)] as scores
             with a, nameList, scores, apoc.coll.min(scores) as score
@@ -411,7 +411,7 @@ def translate(
     union with row
     call db.index.fulltext.queryNodes('{domain}', replace(toLower(apoc.text.clean(row.term)), ' ', '') + '~') yield node return node}}
     with row, node as a
-    with row, a, a.names as nameList
+    with row, a, a.normNames as nameList
     with row, a, nameList, [i in nameList | apoc.text.distance(i,row.term)] as scores
     with row, a, nameList, scores, apoc.coll.min(scores) as score
     with row, a, nameList[apoc.coll.indexOf(scores,score)] as matching, score

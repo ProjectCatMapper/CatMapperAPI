@@ -213,6 +213,10 @@ def add_edit_delete_USES(database,user,input):
     indexValue = input.get('s1_7')
     key = input.get('s1_4')[indexValue-1][1]["Key"]
     datasetID = input.get('s1_4')[indexValue-1][2]["CMID"]
+    integer_constrained_properties = {
+        "yearStart", "yearEnd", "recordStart", 
+        "recordEnd", "sampleSize", "yearPublished"
+    }
 
     driver = getDriver(database)
 
@@ -240,6 +244,22 @@ def add_edit_delete_USES(database,user,input):
             if groupLabel:
                 validatePropertyCMID(new_property_value,USES_property,groupLabel,driver)
         
+        if USES_property in integer_constrained_properties:
+            try:
+                temp_val = float(new_property_value)
+                if not temp_val.is_integer():
+                    raise ValueError(f"Property '{USES_property}' must be an integer, but received decimal: {new_property_value}")
+                new_property_value = int(temp_val)
+            except (ValueError, TypeError):
+                raise TypeError(f"Property '{USES_property}' requires a valid integer value. Received: {new_property_value}")
+
+        elif USES_property == "populationEstimate":
+            try:
+                new_property_value = float(new_property_value)
+            except (ValueError, TypeError):
+                raise TypeError(f"Property '{USES_property}' requires a floating-point number. Received: {new_property_value}")
+
+                
     if "list" in metaType:        
         if "||" in new_property_value:
             new_property_value=new_property_value.split("||")
