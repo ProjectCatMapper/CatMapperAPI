@@ -154,7 +154,6 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         return distinct elementId(a) as nodeID,
         {return_clause}
         """
-
         rows = df.to_dict(orient="records")
         updateLog(f"log/{user}uploadProgress.txt", q, write="a")
 
@@ -162,6 +161,14 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         results = getQuery(query=q, driver=driver, params={"rows": rows})
 
         results_df = pd.DataFrame(results)
+
+        # for all stack and merging nodes, we also add DATASET label for indexing and search purposes
+        q = """MATCH (n)
+            WHERE n:STACK OR n:MERGING
+            SET n:DATASET
+            RETURN count(n) AS updatedNodes"""
+        
+        getQuery(query=q,driver=driver)
 
         node_ids = results_df["nodeID"].tolist()
 
@@ -846,7 +853,7 @@ def create_mties_stacks(database, user, dataset):
         else:
             rows_needing_stack = dataset.copy()
         merging = getQuery(f"Match (m:MERGING) WHERE m.CMID in $mergingID unwind keys(m) as key WITH m, key where not key = 'names' return distinct m.CMID as mergingID, key, m[key] as value order by value desc", driver, mergingID = mergingID, type = "df")
-        if not merging:
+        if merging.empty:
             raise ValueError("No merging nodes found for the provided mergingIDs")
         # modify CMName and shortName to include datasetID
         stack = merging.pivot(index="mergingID", columns="key", values="value").reset_index()
@@ -1014,16 +1021,15 @@ def create_equivalence_ties(database, user, dataset):
     for col in required_cols:
         if col not in dataset.columns:
             raise ValueError(f"Missing required column: {col}")
-    
-    # changed to requiring stackIDs and not emrgingIDs
+        
     # add stack ids if missing
-    # if not "stackID" in dataset.columns:
-    #     updateLog(f"log/{user}uploadProgress.txt", "Finding missing stackIDs", write="a")
-    #     stacks = getQuery("unwind $rows as row Match (m:MERGING {CMID: row.mergingID})-[:MERGING]->(s:STACK)-[:MERGING]->(d:DATASET {CMID: row.datasetID}) return distinct m.CMID as mergingID, s.CMID as stackID, d.CMID as datasetID", driver, rows = dataset[["mergingID", "datasetID"]].drop_duplicates().to_dict(orient="records"), type = "df")
-    #     if stacks.empty:
-    #         raise ValueError("No stacks found for the provided mergingIDs and datasetIDs")
-    #     dataset = dataset.merge(stacks[["mergingID","stackID","datasetID"]], on=["mergingID","datasetID"], how="left")
-    
+    if not "stackID" in dataset.columns:
+        updateLog(f"log/{user}uploadProgress.txt", "Finding missing stackIDs", write="a")
+        stacks = getQuery("unwind $rows as row Match (m:MERGING {CMID: row.mergingID})-[:MERGING]->(s:STACK)-[:MERGING]->(d:DATASET {CMID: row.datasetID}) return distinct m.CMID as mergingID, s.CMID as stackID, d.CMID as datasetID", driver, rows = dataset[["mergingID", "datasetID"]].drop_duplicates().to_dict(orient="records"), type = "df")
+        if stacks.empty:
+            raise ValueError("No stacks found for the provided mergingIDs and datasetIDs")
+        dataset = dataset.merge(stacks[["mergingID","stackID","datasetID"]], on=["mergingID","datasetID"], how="left")
+        
     # return original CMIDs for dataset and Key
     original_cmids_query = """
     unwind $rows as row
@@ -1047,10 +1053,10 @@ def create_equivalence_ties(database, user, dataset):
     """
     
     results = getQuery(query=equivalence_ties_query, driver=driver, params={"rows": dataset[["originalID","categoryID","stackID","datasetID","Key"]].to_dict(orient="records")}, type = "df")
-    if results[0]['count'] == len(dataset):
-        updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results[0]['count']} EQUIVALENT ties", write="a")
+    if results['count'].iloc[0] == len(dataset):
+        updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results['count'].iloc[0]} EQUIVALENT ties", write="a")
     else:
-        raise ValueError(f"Expected to create {len(dataset)} EQUIVALENT ties, but created {results[0]['count']}")
+        raise ValueError(f"Expected to create {len(dataset)} EQUIVALENT ties, but created {results['count'].iloc[0]}")
     
     return {
         "result": dataset
@@ -1289,9 +1295,6 @@ def input_Nodes_Uses(
     if uploadOption == "add_uses":
         if "CMID" not in dataset.columns:
             dataset["CMID"] = ""
-    if (uploadOption == "add_merging" and mergingType == "merging_ties_to_datasets"):
-        if "stackID" not in dataset.columns:
-            dataset["stackID"] = ""
 
     #database must be either SocioMap or ArchaMap
     if database.lower() == "sociomap":
@@ -1373,19 +1376,21 @@ def input_Nodes_Uses(
 
     # When dealing with equivalence ties, if there in a wide format, convert to long format    
     if mergingType == "equivalence_ties":
-        key_cols = [c for c in df.columns if c.startswith("Key_")]
+        key_cols = [c for c in dataset.columns if c.startswith("Key_")]
         if key_cols and len(key_cols) == 2:
             # melt into long form
             long_df = (
-                dataset.melt(id_vars=["stackID", "categoryID"],value_vars=key_cols,var_name="key_col", value_name="Key",).dropna(subset=["Key"])
+                dataset.melt(id_vars=["mergingID", "categoryID"],value_vars=key_cols,var_name="key_col", value_name="Key",).dropna(subset=["Key"])
             )
 
             # extract datasetID from column name (Key_d1 -> d1)
             long_df["datasetID"] = long_df["key_col"].str.replace("Key_", "", regex=False)
 
-            # keep only required columns
-            dataset = long_df[["stackID", "categoryID", "Key", "datasetID"]]
+            long_df = long_df.assign(Key=long_df["Key"].replace(r'^\s*$', pd.NA, regex=True)).dropna(subset=["Key"])
 
+            # keep only required columns
+            dataset = long_df[["mergingID", "categoryID", "Key", "datasetID"]]
+    
     """............................"""
     """ Error checking starts here """
     """............................"""
@@ -1406,9 +1411,9 @@ def input_Nodes_Uses(
     
     # check if any optional property columns are completely empty
     for i in optionalProperties:
-        if dataset[i].replace("",pd.NA).isna().all():
-            raise ValueError(f"{dataset[i]} has all empty values")
-    
+        if i not in dataset.columns:
+            raise ValueError(f"{i} has all empty values")
+            
     # For function 5 and 6, if the CMID column has duplicates, throws an error
     if uploadOption == "node_add" or uploadOption == "node_replace":
         duplicate_CMIDs = dataset[dataset['CMID'].duplicated(keep=False)]
@@ -1986,6 +1991,39 @@ def input_Nodes_Uses(
             raise ValueError(
                 f"Missing MERGING tie between stackID and mergingID: {missing_stack_merging}"
             )
+
+    # check for existence of stackID that bridges datasetID and mergingID when they exist in input
+    if "mergingID" in dataset.columns and "datasetID" in dataset.columns:
+        query_stack_merging = """
+                UNWIND $rows AS row
+                WITH DISTINCT row.datasetID AS datasetID, row.mergingID AS mergingID
+                OPTIONAL MATCH (d:DATASET {CMID: datasetID})<-[r1:MERGING]-(s:STACK)<-[r:MERGING]-(m:MERGING {CMID: mergingID})
+                RETURN
+                datasetID as datasetID,
+                s.CMID AS stackID,
+                mergingID AS mergingID,
+                count(s) AS stack_count
+                """
+
+        with driver.session() as session:
+            res = session.run(query_stack_merging, rows=data_dict)
+
+            missing_stack_merging = [
+                {
+                    "datasetID": r["datasetID"], 
+                    "mergingID": r["mergingID"], 
+                    "stackID": r["stackID"], 
+                    "count": r["stack_count"]
+                }
+                for r in res.data()
+                if r["stack_count"] != 1
+            ]
+        
+        if missing_stack_merging:
+            raise ValueError(
+                f"There is not a unique stackID bridging between datasetID and mergingID: {missing_stack_merging}"
+            )
+
     # # check for merging ties b/w stackID and datasetID when they exist in input
     if "datasetID" in dataset.columns and "stackID" in dataset.columns:
         query_stack_dataset = """
@@ -2250,7 +2288,6 @@ def input_Nodes_Uses(
     '''Error checking ends here'''
 
     '''Data pre-processing starts'''
-
     # removes the mentioned control characters and trailing\leading spaces from each cell in the dataframe
     updateLog(
         f"log/{user}uploadProgress.txt",
