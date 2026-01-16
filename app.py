@@ -208,6 +208,37 @@ def catm():
 
                 """
         
+        qCategories = """
+                    UNWIND $cmid AS cmid
+                    MATCH (d:DATASET {CMID: cmid})
+
+                    // --- 1. Primary Stats (Direct USES) ---
+                    OPTIONAL MATCH (d)-[r:USES]->(c:CATEGORY)
+                    UNWIND r.label AS Domain
+                    WITH cmid, d, Domain, c, r
+
+                    // Aggregate Primary Stats per Domain
+                    WITH cmid, d, Domain, 
+                        COUNT(DISTINCT c) AS distinctNodeCount, 
+                        COUNT(r) AS totalUses
+
+                    // --- 2. Child Stats (CONTAINS -> USES) ---
+                    OPTIONAL MATCH (d)-[:CONTAINS]-(a:DATASET)-[b:USES]->(cc:CATEGORY)
+                    // We filter child relationships by the same Domain we found above
+                    WHERE Domain IN b.label
+
+                    WITH Domain, distinctNodeCount, totalUses, 
+                        COUNT(DISTINCT cc) AS childCount, 
+                        COUNT(b) AS totalChildUses
+
+                    RETURN Domain, 
+                        distinctNodeCount AS Count, 
+                        totalUses AS TotalUses,
+                        childCount AS UnderChildCount,
+                        totalChildUses AS TotalChildUses
+                    ORDER BY Domain
+                    """
+        
         qparents = """
                     unwind $cmid as cmid
                     MATCH (n {CMID: cmid})

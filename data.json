@@ -1,1 +1,51 @@
-[]
+[
+    {
+        "cood": [
+            23.77,
+            12.46
+        ],
+        "source": "GlobalJukebox"
+    },
+    {
+        "cood": [
+            20.0,
+            14.0
+        ],
+        "source": "GlobalJukebox"
+    },
+    {
+        "cood": [
+            14.5,
+            12.5
+        ],
+        "source": "GeLaTo-Pemberton"
+    },
+    {
+        "cood": [
+            14.5,
+            12.5
+        ],
+        "source": "Tishkoff2009_S1S8"
+    },
+    {
+        "cood": [
+            15,
+            13
+        ],
+        "source": "EthnographicAtlas"
+    },
+    {
+        "cood": [
+            13.83,
+            12.19
+        ],
+        "source": "Price1990"
+    },
+    {
+        "cood": [
+            15,
+            13
+        ],
+        "source": "HRAF"
+    }
+]
