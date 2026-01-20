@@ -148,6 +148,8 @@ def catm():
                     return distinct Domain, Count order by Domain
                     """
         
+        qChildCategories = None
+        
         qparents = """
                     unwind $cmid as cmid
                     MATCH (n {CMID: cmid})
@@ -208,34 +210,18 @@ def catm():
 
                 """
         
-        qCategories = """
+        qChildCategories = """
                     UNWIND $cmid AS cmid
                     MATCH (d:DATASET {CMID: cmid})
 
-                    // --- 1. Primary Stats (Direct USES) ---
-                    OPTIONAL MATCH (d)-[r:USES]->(c:CATEGORY)
-                    UNWIND r.label AS Domain
-                    WITH cmid, d, Domain, c, r
-
-                    // Aggregate Primary Stats per Domain
-                    WITH cmid, d, Domain, 
-                        COUNT(DISTINCT c) AS distinctNodeCount, 
-                        COUNT(r) AS totalUses
-
-                    // --- 2. Child Stats (CONTAINS -> USES) ---
-                    OPTIONAL MATCH (d)-[:CONTAINS]-(a:DATASET)-[b:USES]->(cc:CATEGORY)
+                    OPTIONAL MATCH (d)-[:CONTAINS]->(a:DATASET)-[b:USES]->(cc:CATEGORY)
                     // We filter child relationships by the same Domain we found above
-                    WHERE Domain IN b.label
+                    UNWIND b.label AS Domain
 
-                    WITH Domain, distinctNodeCount, totalUses, 
-                        COUNT(DISTINCT cc) AS childCount, 
-                        COUNT(b) AS totalChildUses
-
-                    RETURN Domain, 
-                        distinctNodeCount AS Count, 
-                        totalUses AS TotalUses,
-                        childCount AS UnderChildCount,
-                        totalChildUses AS TotalChildUses
+                    RETURN
+                        Domain,
+                        COUNT(DISTINCT cc) AS ChildCount,
+                        COUNT(b) AS TotalChildUses
                     ORDER BY Domain
                     """
         
@@ -270,6 +256,8 @@ def catm():
         qSamples = None
 
         qCategories = None
+
+        qChildCategories = None
 
         qparents = None
     
@@ -363,6 +351,9 @@ def catm():
 
         else:
             samples = []
+        if qChildCategories is not None:
+            childCategories = session.run(qChildCategories, cmid=cmid)
+            childCategories = [dict(record) for record in childCategories]
         if qparents is not None:
             parents = session.run(qparents, cmid=cmid)
             parents = [dict(record) for record in parents]
@@ -524,11 +515,12 @@ def catm():
         info[0]['direct_Parents'] = len(parents[0].get('directParents', 0))
         info[0]['direct_Children'] = len(parents[0].get('directChildren', 0))
         info[0]['all_Descendants'] = len(parents[0].get('allDescendants', 0))
-
+        
     return jsonify({
         "info": info[0],
         "samples": samples,
         "categories": categories,
+        "childcategories": childCategories,
         "polygons": polygons,
         "points": points,
         "datasetpoints": transformed_points,
@@ -536,7 +528,6 @@ def catm():
         "polysource": polysources,
         "badsources": bad_sources,
     })
-
 
 @app.route("/network", methods=['GET'])
 def net():
