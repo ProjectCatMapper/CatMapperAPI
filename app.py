@@ -214,7 +214,7 @@ def catm():
                     UNWIND $cmid AS cmid
                     MATCH (d:DATASET {CMID: cmid})
 
-                    OPTIONAL MATCH (d)-[:CONTAINS]->(a:DATASET)-[b:USES]->(cc:CATEGORY)
+                    OPTIONAL MATCH (d)-[:CONTAINS*..5]->(a:DATASET)-[b:USES]->(cc:CATEGORY)
                     // We filter child relationships by the same Domain we found above
                     UNWIND b.label AS Domain
 
@@ -262,6 +262,8 @@ def catm():
         qparents = None
     
     parents = []
+
+    childCategories = []
 
     with driver.session() as session:
         info = session.run(qInfo, cmid=cmid)
@@ -1270,17 +1272,6 @@ return true as exists
         else:
             # Default error message
             return jsonify({"error": "please contact admin@catmapper.org. Error:" + error_message}), 500
-
-
-
-
-
-
-
-
-
-
-
 
 @app.route('/dataset', methods=['GET', 'POST'])
 def getDataset():
