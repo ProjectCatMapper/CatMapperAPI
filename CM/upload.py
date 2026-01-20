@@ -1431,8 +1431,8 @@ def input_Nodes_Uses(
        
     # When uploading keys or new keys, need to make sure they follow the standard convention
         
-    #pattern = re.compile(r"^\s*[^:;]+?\s*:\s*[^:;]+?(?:\s*;\s*[^:;]+?\s*:\s*[^:;]+?)*\s*$")
-    pattern = re.compile(r"^\s*[^=&&]+?\s*==\s*[^=&&]+?(?:\s*&&\s*[^=&&]+?\s*==\s*[^=&&]+?)*\s*$")
+    #pattern = re.compile(r"^\s*[^=&&]+?\s*==\s*[^=&&]+?(?:\s*&&\s*[^=&&]+?\s*==\s*[^=&&]+?)*\s*$")
+    pattern = re.compile(r"^.+?\s==\s.+?(?:\s&&\s.+?\s==\s.+?)*$")
 
     # currently we do not permit function 8 or 9 for equivalence ties, but added check for future reference
     if (uploadOption == "add_node" and not isDataset) or uploadOption == "add_uses" or mergingType == "equivalence_ties" :
@@ -1440,8 +1440,7 @@ def input_Nodes_Uses(
 
         if invalid_rows:
             raise ValueError(f"Invalid 'Key' format in rows:\n{invalid_rows}. Must be of form VARIABLE == VALUE")
-        
-    
+          
     if uploadOption == "update_replace":
         if "NewKey" in dataset.columns:
             invalid_rows = dataset.index[~dataset["NewKey"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].tolist()
@@ -1966,6 +1965,8 @@ def input_Nodes_Uses(
                 raise ValueError(
                     f"Error: Invalid categoryID or Key or datasetID for {missing}"
                 )
+        
+        
     
     # check for merging ties b/w stackID and mergingID when they exist in input
     if "mergingID" in dataset.columns and "stackID" in dataset.columns:
@@ -1993,7 +1994,8 @@ def input_Nodes_Uses(
             )
 
     # check for existence of stackID that bridges datasetID and mergingID when they exist in input
-    if "mergingID" in dataset.columns and "datasetID" in dataset.columns:
+    # this only applies if the stack already exists, i.e, creating merging ties to variables and equivalence ties
+    if ("mergingID" in dataset.columns and "datasetID" in dataset.columns) and mergingType != "merging_ties_to_datasets":
         query_stack_merging = """
                 UNWIND $rows AS row
                 WITH DISTINCT row.datasetID AS datasetID, row.mergingID AS mergingID
@@ -2100,18 +2102,19 @@ def input_Nodes_Uses(
     # if using add to existing node function (function 5)
     # prevents adding shortName if the node has the shortname property
     if isDataset and uploadOption == "node_add":
-        query = "unwind $rows as row match (d:DATASET {shortName: row.shortName}) return d.shortName as shortName"
-        shortNames = getQuery(
-            query,
-            driver,
-            params={"rows": dataset[["shortName"]].to_dict(orient="records")},
-            type="list",
-        )
-        if len(shortNames) > 0:
-            raise ValueError(
-                "Error: shortName already exists for: " + ", ".join(shortNames)
+        if "shortName" in dataset.columns:
+            query = "unwind $rows as row match (d:DATASET {shortName: row.shortName}) return d.shortName as shortName"
+            shortNames = getQuery(
+                query,
+                driver,
+                params={"rows": dataset[["shortName"]].to_dict(orient="records")},
+                type="list",
             )
-    
+            if len(shortNames) > 0:
+                raise ValueError(
+                    "Error: shortName already exists for: " + ", ".join(shortNames)
+                )
+        
     #Check if (datasetID, CMID, Key) triplet already exists when creating a new Key in one of two ways:
     # 1) Creating new uses tie for existing node (function 2)
     # 2) Replacing Key in function 4
