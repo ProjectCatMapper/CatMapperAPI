@@ -268,6 +268,12 @@ def catm():
     with driver.session() as session:
         info = session.run(qInfo, cmid=cmid)
         info = [dict(record) for record in info]
+        for row in info:
+            if 'Domains' in row and isinstance(row['Domains'], list) and 'DATASET' in row['Domains']:
+                # Assign the last element of the array as the new Domains value
+                row['Domains'] = row['Domains'][-1]
+
+        print(info)
         if qCategories is None:
             categories = []
         else:
