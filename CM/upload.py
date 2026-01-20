@@ -834,6 +834,7 @@ def validate_labels(uploadOption,driver,parent_labels, child_labels):
                     f"Parent Labels: {i}\n"
                     f"Child Labels: {j}"
                 )
+
 # creates merging ties from merging dataset to stack and stack to dataset.
 # if CMID for stackID is missing it creates a new stackID for that row
 def create_mties_stacks(database, user, dataset):
@@ -1966,8 +1967,6 @@ def input_Nodes_Uses(
                     f"Error: Invalid categoryID or Key or datasetID for {missing}"
                 )
         
-        
-    
     # check for merging ties b/w stackID and mergingID when they exist in input
     if "mergingID" in dataset.columns and "stackID" in dataset.columns:
         query_stack_merging = """
@@ -1991,6 +1990,39 @@ def input_Nodes_Uses(
         if missing_stack_merging:
             raise ValueError(
                 f"Missing MERGING tie between stackID and mergingID: {missing_stack_merging}"
+            )
+
+    # check for non-existence of stackID that bridges datasetID and mergingID when they exist in input
+    # this only applies if the stack already exists, i.e, creating merging ties to datasets
+    if ("mergingID" in dataset.columns and "datasetID" in dataset.columns) and mergingType == "merging_ties_to_datasets":
+        query_stack_merging = """
+                UNWIND $rows AS row
+                WITH DISTINCT row.datasetID AS datasetID, row.mergingID AS mergingID
+                OPTIONAL MATCH (d:DATASET {CMID: datasetID})<-[r1:MERGING]-(s:STACK)<-[r:MERGING]-(m:MERGING {CMID: mergingID})
+                RETURN
+                datasetID as datasetID,
+                s.CMID AS stackID,
+                mergingID AS mergingID,
+                count(s) AS stack_count
+                """
+
+        with driver.session() as session:
+            res = session.run(query_stack_merging, rows=data_dict)
+
+            missing_stack_merging = [
+                {
+                    "datasetID": r["datasetID"], 
+                    "mergingID": r["mergingID"], 
+                    "stackID": r["stackID"], 
+                    "count": r["stack_count"]
+                }
+                for r in res.data()
+                if r["stack_count"] > 0
+            ]
+        
+        if missing_stack_merging:
+            raise ValueError(
+                f"There is already a stackID bridging between datasetID and mergingID: {missing_stack_merging}"
             )
 
     # check for existence of stackID that bridges datasetID and mergingID when they exist in input
@@ -2051,6 +2083,35 @@ def input_Nodes_Uses(
                 f"Missing MERGING tie between stackID and datasetID: {missing_stack_dataset}"
             )
     
+    if mergingType == "equivalence_ties":
+
+        grouped = df.groupby(["datasetID", "mergingID", "Key"])["categoryID"].nunique()
+
+        # Check for any groups with more than 1 unique categoryID
+        conflicts = grouped[grouped > 1]
+
+        if not conflicts.empty:
+            # Optional: show conflicting rows
+            conflicting_rows = df.merge(
+                conflicts.reset_index()[["datasetID", "mergingID", "Key"]],
+                on=["datasetID", "mergingID", "Key"]
+            )
+            raise ValueError(f"Duplicate datasetID + mergingID + Key with different categoryID found:\n{conflicting_rows}")
+        
+        query_check_ties = """
+        UNWIND $rows AS row
+        MATCH (m:MERGING {CMID: row.mergingID})-[:MERGING]->(s:STACK)-[:MERGING]->(d:DATASET {CMID: row.datasetID})
+        OPTIONAL MATCH (x1:CATEGORY)-[r:EQUIVALENT {Key: row.Key, stack: s.CMID, dataset: row.datasetID}]->(x2:CATEGORY)
+        WITH row, COUNT(r) AS existingCount
+        WHERE existingCount > 0
+        RETURN row.mergingID AS mergingID, row.Key AS Key, row.datasetID AS datasetID
+        """
+
+        conflicts = getQuery(query_check_ties, driver=driver, params={"rows": df.to_dict("records")}, type="df")
+
+        if not conflicts.empty:
+            raise ValueError(f"Equivalence ties with given dataset, key and inferred stack already go to a different CMID:\n{conflicts}")
+
     # for functions 8 and 9, for type equivalence_ties, we need to make sure equivalent tie exists
     if (uploadOption == "merging_add" or uploadOption == "merging_replace") and mergingType == "equivalence_ties":
         query_equivalence_check = """
