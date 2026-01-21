@@ -737,7 +737,7 @@ def upload_API():
         user = data.get("user")
         mergingType = data.get("mergingType")
 
-        if data.get("so") == "advanced":
+        if data.get("so") == "standard":
 
             uploadOption = data.get("ao")
 
