@@ -2085,18 +2085,26 @@ def input_Nodes_Uses(
     
     if mergingType == "equivalence_ties":
 
-        grouped = df.groupby(["datasetID", "mergingID", "Key"])["categoryID"].nunique()
+        grouped = dataset.groupby(["datasetID", "mergingID", "Key"])["categoryID"].nunique()
 
         # Check for any groups with more than 1 unique categoryID
         conflicts = grouped[grouped > 1]
 
         if not conflicts.empty:
             # Optional: show conflicting rows
-            conflicting_rows = df.merge(
+            conflicting_rows = dataset.merge(
                 conflicts.reset_index()[["datasetID", "mergingID", "Key"]],
                 on=["datasetID", "mergingID", "Key"]
             )
-            raise ValueError(f"Duplicate datasetID + mergingID + Key with different categoryID found:\n{conflicting_rows}")
+
+            lines = [
+                f"(datasetID={r.datasetID}, mergingID={r.mergingID}, Key: {r.Key}, categoryID={r.categoryID})"
+                for r in conflicting_rows.itertuples()
+            ]
+
+            msg = ",\n".join(lines)
+
+            raise ValueError(f"Duplicate datasetID + mergingID + Key with different categoryID found:\n{msg}")
         
         query_check_ties = """
         UNWIND $rows AS row
@@ -2107,7 +2115,7 @@ def input_Nodes_Uses(
         RETURN row.mergingID AS mergingID, row.Key AS Key, row.datasetID AS datasetID
         """
 
-        conflicts = getQuery(query_check_ties, driver=driver, params={"rows": df.to_dict("records")}, type="df")
+        conflicts = getQuery(query_check_ties, driver=driver, params={"rows": dataset.to_dict("records")}, type="df")
 
         if not conflicts.empty:
             raise ValueError(f"Equivalence ties with given dataset, key and inferred stack already go to a different CMID:\n{conflicts}")
