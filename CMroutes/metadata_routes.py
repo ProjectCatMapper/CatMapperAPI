@@ -100,3 +100,19 @@ def getDomains(database):
     result = result.fillna("")
     
     return jsonify(result.to_dict(orient='records'))
+
+@metadata_bp.route(f"/metadata/getCountries/<database>", methods=['GET'])
+def getCountries(database):
+    
+    driver = getDriver(database)
+    query = '''
+        MATCH (c:ADM0)
+        RETURN distinct c.CMName as name, c.CMID as code
+        ORDER BY name
+        '''
+    result = getQuery(query,driver, type = "df")
+    
+    # change nan to ""
+    result = result.fillna("")
+    
+    return jsonify(result.to_dict(orient='records'))
