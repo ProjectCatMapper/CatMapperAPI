@@ -1774,27 +1774,40 @@ def getProgress():
         where l.public = 'TRUE' and l.groupLabel = l.CMName and not l.CMName IN ["CATEGORY","GENERIC"]
         return l.CMName as label, l.displayName as newlabel
         """
-        domains = getQuery(query=query, driver=driver)
-        domains = pd.DataFrame(domains)
+        domains = getQuery(query=query, driver=driver, type = "df")
 
         query = """
-        match (a)
-        unwind labels(a) as label
-        with label, count(*) as current
-        where label in $labels
-        return label, current, 'nodes' as type
-        order by label
-        union match ()-[r]->()
-        where not type(r) in ["IS","MERGING"]
-        with type(r) as label, count(*) as current
-        return label, current, 'relations' as type
-        order by label
-        union match (a:DATASET)-[r:USES]->(b)
-        unwind labels(b) as label
-        with label, count(r) as current
-        where label in $labels
-        return distinct label, current, 'encodings' as type
-        order by label
+        UNWIND $labels AS label
+        RETURN 
+            label, 
+            apoc.meta.nodes.count([label]) AS current, 
+            'nodes' AS type
+        ORDER BY label
+
+        UNION
+
+        CALL apoc.meta.stats() YIELD relTypesCount
+        UNWIND keys(relTypesCount) AS relType
+        WITH relType, relTypesCount[relType] AS current
+        WHERE NOT relType IN ["IS", "MERGING"]
+        RETURN 
+            relType AS label, 
+            current, 
+            'relations' AS type
+        ORDER BY label
+
+        UNION
+
+        MATCH (:DATASET)-[:USES]->(b)
+        WITH labels(b) AS lbls
+        UNWIND lbls AS label
+        WITH label, count(*) AS current
+        WHERE label IN ["SITE", "CULTURE", "PERIOD"]
+        RETURN 
+            label, 
+            current, 
+            'encodings' AS type
+        ORDER BY label
         """
 
         data = getQuery(query=query, driver=driver, params={
