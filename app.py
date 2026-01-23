@@ -1,6 +1,7 @@
 """First layer of contact between the frontend and backend, some functions diverge from here to other files but the rest are computed here."""
 
 from enum import unique
+from logging import raiseExceptions
 from flask import request, send_file, send_from_directory, jsonify, render_template, make_response, send_from_directory
 import os
 from bs4 import BeautifulSoup
@@ -1734,27 +1735,62 @@ def gethomepageCount():
 
         driver = getDriver(database)
 
-        if database == "SocioMap":
-            domains = ["ETHNICITY","RELIGION","LANGUOID","DISTRICT"]
-        elif database == "ArchaMap":
-            domains = ["SITE","PERIOD","CULTURE","CERAMIC","STONE","PROJECTILE_POINT","WEAPON","COIN"]
-        
-        query = """
-                UNWIND $labels AS lbl
-                RETURN lbl AS label, count { MATCH (n) WHERE lbl IN labels(n) } AS node_count
-                """
+        database_lower = database.lower()
 
-        data = getQuery(query=query, driver=driver, params={
-            "labels": domains})
-        
-        if database == "ArchaMap":
-            data.append({"label": "Artifact","node_count":data[3]["node_count"] + data[4]["node_count"] + data[5]["node_count"] + data[6]["node_count"] + data[7]["node_count"]})
-            del data[7]
-            del data[6]
-            del data[5]
-            del data[4]
-            del data[3]
-        
+        # Define the mappings for each database type
+        if database_lower == "sociomap":
+            # Mapping: { "DATABASE_LABEL": "Display Name" }
+            mapping = {
+                "ETHNICITY": "Ethnicities",
+                "RELIGION": "Religions",
+                "LANGUOID": "Languages",
+                "DISTRICT": "Districts"
+            }
+        elif database_lower == "archamap":
+            mapping = {
+                "SITE": "Sites",
+                "PERIOD": "Periods",
+                "CULTURE": "Cultures",
+                "CERAMIC": "Artifact",
+                "STONE": "Artifact",
+                "PROJECTILE_POINT": "Artifact",
+                "WEAPON": "Artifact",
+                "COIN": "Artifact"
+            }
+        else:
+            raise Exception("database not recognized")
+
+        # Query uses the keys from our mapping
+        query = """
+            UNWIND $labels AS lbl
+            RETURN lbl AS label, apoc.meta.nodes.count([lbl]) AS node_count
+        """
+
+        raw_data = getQuery(query=query, driver=driver, params={"labels": list(mapping.keys())})
+
+        # logic for Archamap: Summing artifacts into one display row
+        if database_lower == "archamap":
+            counts = {item['label']: item['node_count'] for item in raw_data}
+            artifact_labels = ["CERAMIC", "STONE", "PROJECTILE_POINT", "WEAPON", "COIN"]
+            total_artifacts = sum(counts.get(lbl, 0) for lbl in artifact_labels)
+            
+            # Manually construct the combined list with the 'display' key
+            data = [
+                {"label": "SITE", "display": "Sites", "node_count": counts.get("SITE", 0)},
+                {"label": "PERIOD", "display": "Periods", "node_count": counts.get("PERIOD", 0)},
+                {"label": "CULTURE", "display": "Cultures", "node_count": counts.get("CULTURE", 0)},
+                {"label": "Artifact", "display": "Artifact Types", "node_count": total_artifacts}
+            ]
+        else:
+            # Logic for Sociomap: Simple 1-to-1 mapping
+            data = []
+            for item in raw_data:
+                data.append({
+                    "label": item["label"],
+                    "display": mapping.get(item["label"]),
+                    "node_count": item["node_count"]
+                })
+
         return data
 
     except Exception as e:
