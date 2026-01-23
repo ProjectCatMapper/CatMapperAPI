@@ -1,6 +1,7 @@
 """First layer of contact between the frontend and backend, some functions diverge from here to other files but the rest are computed here."""
 
 from enum import unique
+from logging import raiseExceptions
 from flask import request, send_file, send_from_directory, jsonify, render_template, make_response, send_from_directory
 import os
 from bs4 import BeautifulSoup
@@ -1734,10 +1735,12 @@ def gethomepageCount():
 
         driver = getDriver(database)
 
-        if database == "SocioMap":
+        if database.lower() == "sociomap":
             domains = ["ETHNICITY","RELIGION","LANGUOID","DISTRICT"]
-        elif database == "ArchaMap":
+        elif database.lower() == "archamap":
             domains = ["SITE","PERIOD","CULTURE","CERAMIC","STONE","PROJECTILE_POINT","WEAPON","COIN"]
+        else:
+            raise Exception("database not recognized")
         
         query = """
                 UNWIND $labels AS lbl
