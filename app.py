@@ -1198,7 +1198,6 @@ def getnewuser():
 
         queryExists = """
 MATCH (u:USER {username: $username})
-WHERE $database IN u.database
 return true as exists
 """
         with driver.session() as session:
@@ -1214,7 +1213,6 @@ return true as exists
 
         queryExists = """
 match (u:USER {email: $email})
-WHERE $database IN u.database
 return true as exists
 """
         with driver.session() as session:
