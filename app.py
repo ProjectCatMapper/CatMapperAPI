@@ -897,46 +897,39 @@ def getNetworkjs():
         if domain is not None:
             domain = re.split(",", domain)
         else:
-            domain = ["CATEGORY", "DATASET"]
-        
-        #endcmid = request.args.get('endcmid')
-        relation = request.args.get('relation')
+            if cmid[0].startswith(("SD", "AD")):
+                domain = "DATASET"
+            else:
+                domain = "CATEGORY"
+
+        relation = unlist(request.args.get('relation'))
         if relation is None:
             relation = "USES"
         database = request.args.get('database')
 
         driver = getDriver(database)
-
-        #         if endcmid is not None:
-        #             cypher_query = """
-        # unwind $cmid as cmid unwind $endcmid as endcmid unwind $relation as relation
-        # MATCH (a)
-        # WHERE a.CMID = cmid
-        # optional match (a)-[r]-(e)
-        # where type(r) = relation and e.CMID = endcmid and
-        # not isEmpty([label IN labels(e)
-        # WHERE label IN apoc.coll.flatten([$domain],true)])
-        # with collect(distinct a) as a, r, e
-        # return a, collect(distinct r) as r, collect(distinct e) as e
-        # LIMIT 300
-        # """
-        #         else:
-
-        cypher_query = """
-        unwind $cmid as cmid unwind $relation as relation MATCH (a)
-        WHERE a.CMID = cmid
-        optional match (a)-[r]-(e)
-        where type(r) = relation and
-        not isEmpty([label IN labels(e)
-        WHERE label IN apoc.coll.flatten([$domain],true)])
-        with collect(distinct a) as a, r, e
-        return a,collect(distinct r) as r, collect(distinct e) as e
-        """
+        
+        if domain == "DATASET" and relation == "USES":
+            cypher_query = """
+            unwind $cmid as cmid
+            MATCH (a:DATASET {CMID: cmid})
+            optional match (a)-[r:USES]->(e:CATEGORY)
+            with a, r, e limit $limit
+            return collect(distinct a) as a, collect(distinct r) as r, collect(distinct e) as e
+            """
+        else:
+            cypher_query = f"""
+            unwind $cmid as cmid
+            MATCH (a:CATEGORY|DATASET {{CMID: cmid}})
+            optional match (a)-[r:{relation}]-(e:CATEGORY|DATASET)
+            with a, r, e limit $limit
+            return collect(distinct a) as a, collect(distinct r) as r, collect(distinct e) as e
+            """
 
         with driver.session() as session:
             # Execute the Cypher queries
             result = session.run(
-                cypher_query, cmid=cmid, relation=relation, domain=domain)
+                cypher_query, cmid=cmid, limit=limit)
             result = unlist([dict(record) for record in result])
             node = []
             rel = []
