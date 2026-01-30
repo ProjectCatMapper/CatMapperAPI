@@ -48,33 +48,28 @@ def catm():
     session = driver.session()
 
     '''Gets the list of relations for the node'''
-    relnames = []
-    visible_relations = ["USES", "CONTAINS", "DISTRICT_OF",
-                         "LANGUOID_OF", "RELIGION_OF", "PERIOD_OF", "CULTURE_OF", "POLITY_OF","EQUIVALENT"]
-    q = "MATCH (n)-[r]-(n1) WHERE n.CMID='"+cmid + \
-        "' RETURN DISTINCT TYPE(r) as relation_name"
-    node_relation_types = session.run(q).data()
-    for i in node_relation_types:
-        if i['relation_name'] in visible_relations:
-            relnames.append(i['relation_name'])
-    driver.close()
+    bad_relations = ["HAS_LOG","IS","MERGING","HAS_VECTOR"]
+    q = """
+    UNWIND $cmid as cmid
+    MATCH (n:CATEGORY|DATASET {CMID: cmid}) optional match path=((n)-[r]-())
+    RETURN distinct labels(n) as labels, apoc.coll.toSet(apoc.coll.flatten(collect([rel in relationships(path) | type(rel)]))) AS relation_names
+    """
+    nodeMetaData = getQuery(q,driver=driver, cmid = cmid)
+    
+    relnames = nodeMetaData[0]['relation_names']
+    relnames = [rel for rel in relnames if rel not in bad_relations]    
 
-    driver = getDriver(database)
-
-    # this query gets the labels for the node
-    q = f"match (a) where a.CMID = '{cmid}' return labels(a) as label"
-    labels = getQuery(q,driver=driver,type='list')
-    if "DATASET" in labels[0]:
+    if "DATASET" in nodeMetaData[0]['labels'][0]:
         label = "DATASET"
-    elif "CATEGORY" in labels[0]:
+    elif "CATEGORY" in nodeMetaData[0]['labels'][0]:
         label = "CATEGORY"
-    elif "DELETED" in labels[0]:
+    elif "DELETED" in nodeMetaData[0]['labels'][0]:
         label = "DELETED"
 
     if label == "CATEGORY":
         qInfo = '''
-    unwind $cmid as cmid match (a)<-[r:USES]-(d:DATASET)
-    where a.CMID = cmid with a,r,d
+    unwind $cmid as cmid match (a:CATEGORY  {CMID: cmid})<-[r:USES]-(d:DATASET)
+    with a,r,d
     call apoc.when(r.country is not null and not r.country = [],'return custom.getName($id) as name','return null as name',{id:r.country}) yield value as country
     call apoc.when(r.district is not null and not r.district = [],'return custom.getName($id) as name','return null as name',{id:r.district}) yield value as district
     call apoc.when(r.language is not null and not r.language = [],'return custom.getGlot($id) as name','return null as name',{id:r.language}) yield value as language
@@ -92,8 +87,7 @@ def catm():
     # custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
         qSamples = '''
                 UNWIND $cmid AS cmid
-                MATCH (a:CATEGORY)<-[r:USES]-(d:DATASET)
-                WHERE a.CMID = cmid
+                MATCH (a:CATEGORY {CMID: cmid})<-[r:USES]-(d:DATASET)
 
                 WITH a, d, r, coalesce(d.project,d.CMName) AS Source, d.CMID AS datasetID, d.DatasetVersion AS Version
 
@@ -155,13 +149,13 @@ def catm():
                     unwind $cmid as cmid
                     MATCH (n {CMID: cmid})
 
-                    OPTIONAL MATCH (parent)-[:CONTAINS]->(n)
+                    OPTIONAL MATCH (parent)-[:CONTAINS]->(n:CATEGORY)
                     WITH n, collect(DISTINCT parent.CMID) AS directParents
 
-                    OPTIONAL MATCH (n)-[:CONTAINS]->(child)
+                    OPTIONAL MATCH (n)-[:CONTAINS]->(child:CATEGORY)
                     WITH n, directParents, collect(DISTINCT child.CMID) AS directChildren
 
-                    OPTIONAL MATCH (n)-[:CONTAINS*1..]->(descendant)
+                    OPTIONAL MATCH (n)-[:CONTAINS*1..]->(descendant:CATEGORY)
                     RETURN 
                     directParents,
                     directChildren,
@@ -230,13 +224,13 @@ def catm():
                     unwind $cmid as cmid
                     MATCH (n {CMID: cmid})
 
-                    OPTIONAL MATCH (parent)-[:CONTAINS]->(n)
+                    OPTIONAL MATCH (parent)-[:CONTAINS]->(n:DATASET)
                     WITH n, collect(DISTINCT parent.CMID) AS directParents
 
-                    OPTIONAL MATCH (n)-[:CONTAINS]->(child)
+                    OPTIONAL MATCH (n)-[:CONTAINS]->(child:DATASET)
                     WITH n, directParents, collect(DISTINCT child.CMID) AS directChildren
 
-                    OPTIONAL MATCH (n)-[:CONTAINS*1..]->(descendant)
+                    OPTIONAL MATCH (n)-[:CONTAINS*1..]->(descendant:DATASET)
                     RETURN 
                     directParents,
                     directChildren,
@@ -375,138 +369,9 @@ def catm():
             if link_tag:
                 info[0]["Dataset Location"] = link_tag.get('href')
 
-    polygons = getPolygon(cmid, driver)
-    points = getPoints(cmid, driver)
-    dataset_points = getDatasetPoints(cmid, driver)
-
-    transformed_points = []
-
-    for point in dataset_points:
-        try:
-            geom = json.loads(point["geometry"])
-            if not geom:
-                continue
-            coords = geom.get("coordinates")
-            geom_type = geom.get("type")
-
-            if geom_type == "Point" and isinstance(coords, list) and len(coords) == 2:
-                new_point = point.copy()
-                new_point["cood"] = [coords[0], coords[1]]
-                transformed_points.append(new_point)
-
-            elif geom_type == "MultiPoint" and isinstance(coords, list):
-                for lng, lat in coords:
-                    if isinstance(lng, (int, float)) and isinstance(lat, (int, float)):
-                        new_point = point.copy()
-                        new_point["cood"] = [lng, lat]
-                        transformed_points.append(new_point)
-
-            else:
-                point["cood"] = None
-                transformed_points.append(point)
-
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-            point["cood"] = None
-            transformed_points.append(point)
-
-    with open('poly.json', 'w', encoding='utf-8') as f:
-        json.dump(polygons, f, ensure_ascii=False, indent=4)
-
-    polysources = []
-
-    if len(polygons) != 0:
-        # polygons != "" or polygons != [] or
-        if len(polygons) > 1:
-            poly = {"type": 'FeatureCollection', "features": []}
-            for i in range(0, len(polygons)):
-                poly["features"].append(json.loads(polygons[i]['geometry']))
-                poly["features"][i]["source"] = (polygons[i]['source'])
-                polysources.append(polygons[i]['source'])
-            polygons = poly
-            # polygons = json.loads(polygons)
-        else:
-            temp = polygons
-            polygons = [json.loads(polygons[0]['geometry'])]
-            polygons[0]["source"] = (temp[0]['source'])
-            polysources.append(temp[0]['source'])
-            temp = None
-
-    with open('new.json', 'w', encoding='utf-8') as f:
-        json.dump(polygons, f, ensure_ascii=False, indent=4)
-
-    with open('data.json', 'w', encoding='utf-8') as f:
-        json.dump(points, f, ensure_ascii=False, indent=4)
-
-    with open('data1.json', 'w', encoding='utf-8') as f:
-        json.dump(transformed_points, f, ensure_ascii=False, indent=4)
-
-    valid_data = []
-
-    bad_sources = []
-
-    def is_valid_lat_long(lat, long):
-        return -90 <= lat <= 90 and -180 <= long <= 180
-
-    for entry in points:
-        try:
-            geometry = entry['geometry']
-
-            if isinstance(geometry, list):
-                if len(geometry) == 1:
-                    geometry = geometry[0]
-                else:
-                    raise ValueError(
-                        "Multiple geometries found where one was expected")
-
-            if isinstance(geometry, str):
-                if geometry.count("{") != geometry.count("}"):
-                    raise ValueError("Missing brackets in geometry JSON")
-
-                geometry = json.loads(geometry)
-
-            if 'coordinates' not in geometry:
-                raise ValueError("Coordinates missing in geometry JSON")
-
-            if geometry['type'] == 'Point':
-                long, lat = geometry['coordinates']
-                if not is_valid_lat_long(lat, long):
-                    raise ValueError(
-                        f"Out of range latitude/longitude: {lat}, {long}")
-            elif geometry['type'] == 'MultiPoint':
-                for coord in geometry['coordinates']:
-                    long, lat = coord
-                    if not is_valid_lat_long(lat, long):
-                        raise ValueError(
-                            f"Out of range latitude/longitude in MultiPoint: {lat}, {long}")
-            else:
-                raise ValueError(
-                    f"Unsupported geometry type: {geometry['type']}")
-
-            entry['geometry'] = geometry
-            valid_data.append(entry)
-        except (json.JSONDecodeError, KeyError, ValueError) as e:
-            bad_sources.append({'source': entry.get(
-                'source', 'Unknown'), 'key': entry.get('key', 'Unknown'), 'error': str(e)})
-
-    if len(valid_data) > 0:
-        point = []
-        for i in range(0, len(valid_data)):
-            if valid_data[i]['geometry'] == "null":
-                continue
-            if valid_data[i]['geometry']["type"] != "MultiPoint":
-                point.append(
-                    {"cood": valid_data[i]['geometry']["coordinates"], "source": valid_data[i]["source"]})
-            else:
-                temp = valid_data[i]
-                source = temp['source']
-                for j in range(0, len(temp['geometry']['coordinates'])):
-                    point.append(
-                        {'cood': temp['geometry']['coordinates'][j], "source": source})
-        if point:
-            points = point
-
-    with open('data.json', 'w', encoding='utf-8') as f:
-        json.dump(points, f, ensure_ascii=False, indent=4)
+    
+    # with open('data.json', 'w', encoding='utf-8') as f:
+    #     json.dump(points, f, ensure_ascii=False, indent=4)
 
     relnames = sorted(relnames, key=custom_sort)
 
@@ -530,14 +395,159 @@ def catm():
         "samples": samples,
         "categories": categories,
         "childcategories": childCategories,
-        "polygons": polygons,
-        "points": points,
-        "datasetpoints": transformed_points,
-        "relnames": relnames,
-        "polysource": polysources,
-        "badsources": bad_sources,
+        # "polygons": polygons,
+        # "points": points,
+        # "datasetpoints": transformed_points,
+        "relnames": relnames
+        # "polysource": polysources,
+        # "badsources": bad_sources,
     })
 
+@app.route("/exploreGeometry/<database>/<cmid>", methods=['GET'])
+def exploreGeometry(database, cmid):
+    try:
+        driver = getDriver(database)
+        polygons = getPolygon(cmid, driver)
+        points = getPoints(cmid, driver)
+        dataset_points = getDatasetPoints(cmid, driver)
+
+        transformed_points = []
+
+        for point in dataset_points:
+            try:
+                geom = json.loads(point["geometry"])
+                if not geom:
+                    continue
+                coords = geom.get("coordinates")
+                geom_type = geom.get("type")
+
+                if geom_type == "Point" and isinstance(coords, list) and len(coords) == 2:
+                    new_point = point.copy()
+                    new_point["cood"] = [coords[0], coords[1]]
+                    transformed_points.append(new_point)
+
+                elif geom_type == "MultiPoint" and isinstance(coords, list):
+                    for lng, lat in coords:
+                        if isinstance(lng, (int, float)) and isinstance(lat, (int, float)):
+                            new_point = point.copy()
+                            new_point["cood"] = [lng, lat]
+                            transformed_points.append(new_point)
+
+                else:
+                    point["cood"] = None
+                    transformed_points.append(point)
+
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+                point["cood"] = None
+                transformed_points.append(point)
+
+        # with open('poly.json', 'w', encoding='utf-8') as f:
+        #     json.dump(polygons, f, ensure_ascii=False, indent=4)
+
+        polysources = []
+
+        if len(polygons) != 0:
+            # polygons != "" or polygons != [] or
+            if len(polygons) > 1:
+                poly = {"type": 'FeatureCollection', "features": []}
+                for i in range(0, len(polygons)):
+                    poly["features"].append(json.loads(polygons[i]['geometry']))
+                    poly["features"][i]["source"] = (polygons[i]['source'])
+                    polysources.append(polygons[i]['source'])
+                polygons = poly
+                # polygons = json.loads(polygons)
+            else:
+                temp = polygons
+                polygons = [json.loads(polygons[0]['geometry'])]
+                polygons[0]["source"] = (temp[0]['source'])
+                polysources.append(temp[0]['source'])
+                temp = None
+
+        # with open('new.json', 'w', encoding='utf-8') as f:
+        #     json.dump(polygons, f, ensure_ascii=False, indent=4)
+
+        # with open('data.json', 'w', encoding='utf-8') as f:
+        #     json.dump(points, f, ensure_ascii=False, indent=4)
+
+        # with open('data1.json', 'w', encoding='utf-8') as f:
+        #     json.dump(transformed_points, f, ensure_ascii=False, indent=4)
+
+        valid_data = []
+
+        bad_sources = []
+
+        def is_valid_lat_long(lat, long):
+            return -90 <= lat <= 90 and -180 <= long <= 180
+
+        for entry in points:
+            try:
+                geometry = entry['geometry']
+
+                if isinstance(geometry, list):
+                    if len(geometry) == 1:
+                        geometry = geometry[0]
+                    else:
+                        raise ValueError(
+                            "Multiple geometries found where one was expected")
+
+                if isinstance(geometry, str):
+                    if geometry.count("{") != geometry.count("}"):
+                        raise ValueError("Missing brackets in geometry JSON")
+
+                    geometry = json.loads(geometry)
+
+                if 'coordinates' not in geometry:
+                    raise ValueError("Coordinates missing in geometry JSON")
+
+                if geometry['type'] == 'Point':
+                    long, lat = geometry['coordinates']
+                    if not is_valid_lat_long(lat, long):
+                        raise ValueError(
+                            f"Out of range latitude/longitude: {lat}, {long}")
+                elif geometry['type'] == 'MultiPoint':
+                    for coord in geometry['coordinates']:
+                        long, lat = coord
+                        if not is_valid_lat_long(lat, long):
+                            raise ValueError(
+                                f"Out of range latitude/longitude in MultiPoint: {lat}, {long}")
+                else:
+                    raise ValueError(
+                        f"Unsupported geometry type: {geometry['type']}")
+
+                entry['geometry'] = geometry
+                valid_data.append(entry)
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                bad_sources.append({'source': entry.get(
+                    'source', 'Unknown'), 'key': entry.get('key', 'Unknown'), 'error': str(e)})
+
+        if len(valid_data) > 0:
+            point = []
+            for i in range(0, len(valid_data)):
+                if valid_data[i]['geometry'] == "null":
+                    continue
+                if valid_data[i]['geometry']["type"] != "MultiPoint":
+                    point.append(
+                        {"cood": valid_data[i]['geometry']["coordinates"], "source": valid_data[i]["source"]})
+                else:
+                    temp = valid_data[i]
+                    source = temp['source']
+                    for j in range(0, len(temp['geometry']['coordinates'])):
+                        point.append(
+                            {'cood': temp['geometry']['coordinates'][j], "source": source})
+            if point:
+                points = point
+
+        return jsonify({
+            "polygons": polygons,
+            "points": points,
+            "datasetpoints": transformed_points,
+            "polysources": polysources,
+            "badsources": bad_sources,
+        })
+        
+    except Exception as e:
+        return "Error returning results: " + str(e), 500
+    
 @app.route("/network", methods=['GET'])
 def net():
     p0 = request.args.get('value')
@@ -614,20 +624,20 @@ def getExplore():
     Version, Link order by `Time span`, Source, Name
     '''
             qCategories = """
-unwind $cmid as cmid
-match (a:ADM0 {CMID: cmid})-[:DISTRICT_OF]->(c:CATEGORY)
-unwind labels(c) as Domain
-with distinct c, apoc.coll.toSet(apoc.coll.flatten(collect(Domain),true)) as Domains
-unwind Domains as Domain
-with Domain, count(*) as Count
-return distinct Domain, Count order by Domain
-"""
+            UNWIND $cmid AS cmid
+            MATCH (:ADM0 {CMID: cmid})-[:DISTRICT_OF]->(c:CATEGORY)
+            WITH c
+            UNWIND labels(c) AS Domain
+            WITH Domain, count(DISTRICT c) AS Count
+            WHERE Domain <> 'CATEGORY' // Optional: filter out the base label if needed
+            RETURN Domain, Count 
+            ORDER BY Domain
+            """
 
         else:
             qInfo = '''
     unwind $cmid as cmid
-    match (a:DATASET)
-    where a.CMID = cmid
+    match (a:DATASET {CMID: cmid})
     with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
     'return null as name',{id:a.District}) yield value as Location
     return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID,
@@ -639,13 +649,13 @@ return distinct Domain, Count order by Domain
     '''
             qSamples = None
             qCategories = """
-unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY)
-unwind r.label as Domain
-with distinct c, apoc.coll.toSet(apoc.coll.flatten(collect(Domain),true)) as Domains
-unwind Domains as Domain
-with Domain, count(*) as Count
-return distinct Domain, Count order by Domain
-"""
+            unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY)
+            unwind r.label as Domain
+            with distinct c, apoc.coll.toSet(apoc.coll.flatten(collect(Domain),true)) as Domains
+            unwind Domains as Domain
+            with Domain, count(*) as Count
+            return distinct Domain, Count order by Domain
+            """
 
         with driver.session() as session:
             info = session.run(qInfo, cmid=cmid)
