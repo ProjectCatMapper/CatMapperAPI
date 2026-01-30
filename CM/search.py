@@ -118,21 +118,21 @@ def search(
                 """
         
     elif property == "Name":
-        #The operation using size was the only way we could get it to determine if something was a list
+
         qStart = f"""
-            call {{with replace(toLower(apoc.text.clean($term)), ' ', '') as term
-            call db.index.fulltext.queryNodes('{domain}', '"' + term +'"') yield node return node
-            union with replace(toLower(apoc.text.clean($term)), ' ', '') as term
-            call db.index.fulltext.queryNodes('{domain}', term + '~') yield node return node}}
+            with replace(toLower(apoc.text.clean($term)), ' ', '') as cleanTerm
+            call {{
+                with cleanTerm
+                call db.index.fulltext.queryNodes('{domain}', '"' + cleanTerm + '"') yield node return node
+                                union with cleanTerm
+                call db.index.fulltext.queryNodes('{domain}', '*' + cleanTerm + '*') yield node return node
+                union with cleanTerm
+                call db.index.fulltext.queryNodes('{domain}', cleanTerm + '~') yield node return node
+            }}
             with node as a
-            with a, 
-                CASE
-                    WHEN size(a.normNames + 11) = size(a.normNames)+1 THEN a.normNames
-                    ELSE [a.normNames]
-                END AS nameList
-            with a, nameList,  [i in nameList | apoc.text.distance(i,$term)] as scores
-            with a, nameList, scores, apoc.coll.min(scores) as score
-            with a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
+            with a, [i in a.names | apoc.text.distance(lower(i),lower($term))] as scores
+            with a, scores, apoc.coll.min(scores) as score
+            with a, a.names[apoc.coll.indexOf(scores,score)] as matching, score
             """
 
     elif property == "CMID":
@@ -406,15 +406,20 @@ def translate(
     elif property == "Name":
 
         qStart = f"""
-    with row call {{ with row
-    call db.index.fulltext.queryNodes('{domain}', '"' + replace(toLower(apoc.text.clean(row.term)), ' ', '') + '"') yield node return node
-    union with row
-    call db.index.fulltext.queryNodes('{domain}', replace(toLower(apoc.text.clean(row.term)), ' ', '') + '~') yield node return node}}
-    with row, node as a
-    with row, a, a.normNames as nameList
-    with row, a, nameList, [i in nameList | apoc.text.distance(i,row.term)] as scores
-    with row, a, nameList, scores, apoc.coll.min(scores) as score
-    with row, a, nameList[apoc.coll.indexOf(scores,score)] as matching, score
+    with row
+    with row, replace(toLower(apoc.text.clean(row.term)), ' ', '') as cleanTerm
+    call {{with cleanTerm
+                call db.index.fulltext.queryNodes('{domain}', '"' + cleanTerm + '"') yield node return node
+                UNION
+                with cleanTerm
+                call db.index.fulltext.queryNodes('{domain}', '*' + cleanTerm + '*') yield node return node
+                union with cleanTerm
+                call db.index.fulltext.queryNodes('{domain}', cleanTerm + '~') yield node return node
+                }}
+            with node as a, row
+            with a, row, [i in a.names | apoc.text.distance(lower(i),lower(row.term))] as scores
+            with a, row, scores, apoc.coll.min(scores) as score
+            with a, row, a.names[apoc.coll.indexOf(scores,score)] as matching, score
     """
    
     else:
