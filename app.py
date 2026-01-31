@@ -38,11 +38,8 @@ def swagger_yaml():
 
 
 # gets samples, info data, categories and map data
-@app.route("/category", methods=['GET'])
-def catm():
-
-    cmid = request.args.get('cmid')
-    database = request.args.get('database')
+@app.route("/category/<database>/<cmid>", methods=['GET'])
+def catm(database, cmid):
 
     driver = getDriver(database)
     session = driver.session()
