@@ -54,7 +54,8 @@ def catm(database, cmid):
     nodeMetaData = getQuery(q,driver=driver, cmid = cmid)
     
     relnames = nodeMetaData[0]['relation_names']
-    relnames = [rel for rel in relnames if rel not in bad_relations]    
+    relnames = [rel for rel in relnames if rel not in bad_relations] 
+    label = "CATEGORY"   
 
     if "DATASET" in nodeMetaData[0]['labels'][0]:
         label = "DATASET"
