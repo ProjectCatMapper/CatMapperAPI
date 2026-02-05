@@ -1,16 +1,18 @@
 from flask import Blueprint, request, jsonify
-from CM import getDriver, password_hash, sendEmail, verifyUser, login, enableUser, unlist
+from CM import getDriver, password_hash, sendEmail, verifyUser, login, enableUser, unlist, getQuery
 from flask_mail import Mail
 import json
 
 user_bp = Blueprint('user', __name__)
 
+from configparser import ConfigParser
+config = ConfigParser()
+config.read('config.ini')
+
 @user_bp.route('/newuser', methods=['POST'])
 def getnewuser():
     try:
-        from configparser import ConfigParser
-        config = ConfigParser()
-        config.read('config.ini')
+
         mail_default = config['MAIL']['mail_default']
         data = request.get_data()
         data = json.loads(data)
@@ -33,31 +35,22 @@ def getnewuser():
         driver = getDriver("userdb")
 
         queryExists = """
-MATCH (u:USER {username: $username})
-WHERE $database IN u.database
-return true as exists
-"""
-        with driver.session() as session:
-            result = session.run(
-                queryExists, username=username, database=database)
-            data = [dict(record) for record in result]
-            driver.close()
-
-        print(data)
+        MATCH (u:USER {username: $username})
+        return true as exists
+        """
+        data = getQuery(
+            queryExists, driver = driver, username=username, database=database)
 
         if isinstance(data, list) and data and data[0].get("exists") is not None:
             raise Exception(
                 "Username already exists. Please try another username.")
 
         queryExists = """
-match (u:USER {email: $email})
-WHERE $database IN u.database
-return true as exists
-"""
-        with driver.session() as session:
-            result = session.run(queryExists, email=email, database=database)
-            data = [dict(record) for record in result]
-            driver.close()
+        MATCH (u:USER {email: $email})
+        return true as exists
+        """
+        data = getQuery(
+            queryExists, driver = driver, email=email, database=database)
 
         if isinstance(data, list) and data and data[0].get("exists") is not None:
             raise Exception(
@@ -81,11 +74,8 @@ return true as exists
                 return u.userid as userid
                 """
 
-        with driver.session() as session:
-            result = session.run(query, firstName=firstName, lastName=lastName, email=email,
+        data = getQuery(query, driver = driver, firstName=firstName, lastName=lastName, email=email,
                                  password=password, username=username, intendedUse=intendedUse, database=database)
-            data = [dict(record) for record in result]
-            driver.close()
 
         body = f"""
                 Hello,
@@ -153,21 +143,6 @@ def updateNewUsers():
 
         result = enableUser(database, process=process,
                             userid=userid, approver=approver)
-
-#         users = [user for user in result if user.get("email")]
-#         mail = Mail()
-
-#         for user in users:
-#             body = f"""
-# Hello {user.get("first")} {user.get("last")},
-
-# Your registration has been approved. You can now access the {'and '.join(user.get("database"))} database. Please see catmapper.org/help or email support@catmapper.org for any questions.
-
-# Best,
-# CatMapper Team
-#             """
-#             sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
-#                 "email"), 'admin@catmapper.org'], body=body, sender=os.getenv("mail_default"))
 
         if isinstance(result, list) and process == "approve":
 

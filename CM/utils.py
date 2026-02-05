@@ -2,38 +2,231 @@
 
 # general utility functions
 
+from email import message
+import itertools
 import re
-from datetime import datetime
 from neo4j import GraphDatabase
 import pandas as pd
-import numpy as np
-import os
-from flask import abort
-import itertools
 from collections.abc import Iterable
 import json
+from configparser import ConfigParser
+import threading
+from datetime import datetime, timedelta
+import warnings
+
+_driver_cache = {}
+_driver_lock = threading.Lock()
+_last_verified = {}
+
+config = ConfigParser()
+config.read('config.ini')
+    
+def getDriver(database):
+    """
+    Get or create a cached Neo4j driver with health checking.
+    Automatically handles defunct connections.
+    """
+    database = database.lower()
+    
+    with _driver_lock:
+        now = datetime.now()
+        
+        # 1. Check if driver exists in cache
+        if database in _driver_cache:
+            last_check = _last_verified.get(database, datetime.min)
+            
+            # Only verify if it's been more than 2 minutes
+            if now - last_check < timedelta(minutes=2):
+                return _driver_cache[database]
+            
+            # Time to verify connection
+            driver = _driver_cache[database]
+            try:
+                driver.verify_connectivity()
+                _last_verified[database] = now
+                return driver
+            except Exception as e:
+                print(f"Driver for {database} is defunct, removing from cache: {e}")
+                
+                # Cleanup old driver
+                try:
+                    driver.close()
+                except:
+                    pass # Ignore errors during close
+                
+                # Remove from cache and fall through to creation
+                _driver_cache.pop(database, None)
+                _last_verified.pop(database, None)
+        
+        # 2. Create new driver 
+        # (Reaches here if driver was not in cache OR if it was just removed above)
+        try:
+            driver = _create_driver(database)
+            _driver_cache[database] = driver
+            _last_verified[database] = now
+            return driver
+        except Exception as e:
+            print(f"Failed to create driver for {database}: {e}")
+            raise
 
 
-def getQuery(query, driver, params=None, type="dict", **kwargs):
+def _create_driver(database):
+    """Create a new Neo4j driver with optimal settings."""
+
+    
+    # Validate database
+    valid_databases = ['sociomap', 'archamap', 'gisdb', 'userdb']
+    if database not in valid_databases:
+        raise ValueError(f"Invalid database: {database}")
+    
+     # Determine config section
+    config_opt = 'DB'
     try:
-        params = params or {}
-        params.update(kwargs)
-        with driver.session() as session:
-            result = session.run(query, params)
-            if type == "dict":
-                result = [dict(record) for record in result]
-            elif type == "list":
-                result = list(itertools.chain.from_iterable(
-                    record.values() for record in result))
-            elif type == "df":
-                result = pd.DataFrame([dict(record) for record in result])
-            else:
-                raise Exception("invalid type")
-            driver.close()
-        return result
+        if not testConnection():
+            config_opt = 'OFFLINE'
+            warnings.warn("Using OFFLINE config due to failed connection test", RuntimeWarning)
+    except:
+        config_opt = 'DB'  # Fallback to DB config
+    if database not in config[config_opt]:
+        raise ValueError(f"Database '{database}' not found in config")
+    
+    user = config[config_opt]['user']
+    pwd = config[config_opt]['pwd']
+    uri = config[config_opt][database]
+    
+    # Create driver with optimal connection settings
+    driver = GraphDatabase.driver(
+        uri,
+        auth=(user, pwd),
+        max_connection_lifetime=3600,
+        max_connection_pool_size=50,
+        connection_acquisition_timeout=60,
+        keep_alive=True,
+        connection_timeout=30,
+        max_transaction_retry_time=30,        # Correct v5 name
+        resolver=None,
+        encrypted=False                       # Removed 'trust'
+    )
+    
+    # warnings.warn(f"Created new driver for {database} at {uri} with user {user} and pwd length {len(pwd)}")
+    
+    # Verify connection works
+    try:
+        driver.verify_connectivity()
     except Exception as e:
-        raise RuntimeError(f"An error occurred: {e}")
+        driver.close()
+        raise ConnectionError(f"Driver created but cannot connect to {database}: {e}")
+    
+    return driver
 
+
+def closeAllDrivers():
+    """Close all cached drivers. Call on application shutdown."""
+    with _driver_lock:
+        for database, driver in list(_driver_cache.items()):
+            try:
+                driver.close()
+                print(f"Closed driver for {database}")
+            except Exception as e:
+                print(f"Error closing {database}: {e}")
+        _driver_cache.clear()
+        _last_verified.clear()
+
+
+def getCacheStats():
+    """Get driver cache statistics for monitoring."""
+    with _driver_lock:
+        return {
+            'cached_databases': list(_driver_cache.keys()),
+            'count': len(_driver_cache),
+            'last_verified': {
+                db: timestamp.isoformat() 
+                for db, timestamp in _last_verified.items()
+            }
+        }
+
+# CM/utils.py
+
+def getQuery(query, driver, params=None, type="dict", max_retries=3, **kwargs):
+    """
+    Execute a Neo4j query with automatic retry on connection failures.
+    
+    Args:
+        query: Cypher query string
+        driver: Neo4j driver instance
+        params: Query parameters (dict)
+        type: Return type - "records", "dict", "list"
+        max_retries: Maximum retry attempts
+        **kwargs
+    Returns:
+        Consumed query results
+    """
+    params = params.copy() if params else {}
+    params.update(kwargs)
+    
+    for attempt in range(max_retries):
+        try:
+            with driver.session() as session:
+                result = session.run(query, params)
+                
+                # Consume results BEFORE session closes
+                
+                if type == "dict":
+                    # For queries returning key-value pairs
+                    result = [dict(record) for record in result]
+                    return result
+                
+                elif type == "df" or type == "dataframe":
+                    result = [dict(record) for record in result]
+                    df = pd.DataFrame(result)
+                    return df
+                elif type == "list":
+                    # For queries returning single column
+                    result = list(itertools.chain.from_iterable(
+                    record.values() for record in result))
+                    return result
+                
+                elif type == "records":
+                    # For queries returning multiple columns (default)
+                    data = []
+                    for record in result:
+                        data.append(dict(record))
+                    return data
+                
+                else:
+                    raise ValueError(f"Invalid type parameter: '{type}'. Must be 'records', 'dict', or 'list'")
+                    
+        except Exception as e:
+            error_msg = str(e).lower()
+            
+            # Check for connection/session errors
+            is_connection_error = any(keyword in error_msg for keyword in [
+                'defunct', 'connection', 'session', 'expired', 'closed',
+                'failed to read', 'unable to retrieve routing'
+            ])
+            
+            if is_connection_error and attempt < max_retries - 1:
+                print(f"Connection error on attempt {attempt + 1}/{max_retries}, retrying: {e}")
+                
+                # Try to verify driver connectivity
+                try:
+                    driver.verify_connectivity()
+                except Exception as verify_error:
+                    print(f"Driver verification failed: {verify_error}")
+                    # Driver will be recreated on next getDriver() call
+                
+                continue  # Retry
+            
+            elif is_connection_error:
+                # All retries exhausted
+                raise RuntimeError(f"Query failed after {max_retries} attempts due to connection issues: {e}")
+            
+            else:
+                # Not a connection error, raise immediately
+                raise RuntimeError(f"Query execution error: {e}")
+    
+    # Should not reach here, but just in case
+    raise RuntimeError(f"Query failed after {max_retries} attempts")
 
 def unlist(l):
     if isinstance(l, list):
@@ -43,78 +236,11 @@ def unlist(l):
 # it returns true if CMID exists else returns empty list
 def isValidCMID(cmid, driver):
 
-    query = "unwind $cmid as cmid match (c) where c.CMID = cmid AND (c:CATEGORY OR c:DATASET) return c.CMID as cmid, true as exists"
+    query = "unwind $cmid as cmid match (c:CATEGORY|DATASET {CMID: cmid}) return c.CMID as cmid, true as exists"
 
-    with driver.session() as session:
-        result = session.run(query, cmid=cmid)
-        result = [dict(record) for record in result]
-        driver.close()
+    result = getQuery(query, driver, params={"cmid": cmid}, type="dict")
     
     return result
-
-
-def getPropertiesMetadata(driver):
-    try:
-
-        query = """
-match (n:PROPERTY) 
-return n.CMName as property, n.type as type, 
-n.relationship as relationship, n.description as description, 
-n.display as display, n.group as group,
-n.metaType as metaType, n.search as search,
-n.translation as translation
-"""
-        data = getQuery(query=query, driver=driver)
-        return data
-
-    except Exception as e:
-        return str(e), 500
-
-
-def getLabelsMetadata(driver):
-    try:
-
-        query = """
-match (n:LABEL)
-return n.CMName as label, n.groupLabel as groupLabel, 
-n.relationship as relationship, n.public as public, 
-n.default as default, n.description as description, 
-n.displayName as displayName, n.remove as remove, n.color as color  
-"""
-        data = getQuery(query=query, driver=driver)
-        return data
-
-    except Exception as e:
-        return str(e), 500
-
-
-def getDriver(database):
-    try:
-        from configparser import ConfigParser
-        config = ConfigParser()
-        config.read('config.ini')
-        user = config['DB']['user']
-        pwd = config['DB']['pwd']
-        database = str.lower(database)
-        if not database in config['DB']:
-            raise ValueError(
-                f"Database must be 'SocioMap', 'ArchaMap', 'gisdb', or 'userdb', but database is {database}")
-        uri = config['DB'][database]
-        configOpt='DB'
-        if not testConnection():
-            configOpt = 'OFFLINE'
-        if not testConnection(configOpt=configOpt, database=database):
-            raise Exception(
-                f"Database connection failed for {database}. Please check your configuration.")
-        driver = GraphDatabase.driver(config[configOpt][uri], auth=(
-                user, pwd))
-
-        return driver
-
-    except Exception as e:
-        print(f"Error validating database: {e}")
-        abort(500, description=f"An unexpected error occurred: {str(e)}")
-
 
 def validateCols(df, required):
     missing = [col for col in df.columns if col not in required]
@@ -270,14 +396,11 @@ def testConnection(configOpt="DB",database="SocioMap"):
     Test the connection to the specified database.
     """
     try:
-        from configparser import ConfigParser
-        config = ConfigParser()
-        config.read('config.ini')
         user = config['DB']['user']
         pwd = config['DB']['pwd']
         database = str.lower(database)
         uri = config['DB'][database]  # Default to SocioMap URI
-        driver = GraphDatabase.driver(config[configOpt][uri], auth=(
+        driver = GraphDatabase.driver(uri, auth=(
                 user, pwd))
         with driver.session() as session:
             result = session.run("RETURN 1")
@@ -287,40 +410,6 @@ def testConnection(configOpt="DB",database="SocioMap"):
     except Exception as e:
         return False
     
-def getNodeProperties(database, domain, CMID):
-    """
-    Get the properties of a node in the specified database.
-    Args:
-        database (str): The name of the database.
-        domain (str): The domain of the node (e.g., "CATEGORY", "DATASET").
-        CMID (list): A list of CMIDs to query.
-    """
-    driver = getDriver(database)
-    if domain == "CATEGORY":
-        query = """
-        unwind $CMID as cmid
-        match (c:CATEGORY {CMID: cmid})<-[r:USES]-(d:DATASET)
-        with distinct apoc.coll.toSet(apoc.coll.flatten(collect(keys(c) + keys(r)))) as properties
-        with [i in properties where not i in ["log","logID","CMName","CMID","names","label"]] as properties
-        unwind properties as property
-        return property
-        """
-    elif domain == "DATASET":
-        query = """
-        unwind $CMID as cmid
-        match (d:DATASET {CMID: cmid})
-        with distinct apoc.coll.toSet(collect(keys(d))) as properties
-        with [i in properties where not i in ["log","logID","CMName","CMID","names"]] as properties
-        unwind properties as property
-        return property
-        """
-    else: 
-        raise ValueError("Invalid domain specified")
-
-    properties = getQuery(query, driver, CMID = CMID, type = "list")
-    
-    return properties
-
 
 # Function to serialize a Neo4j Node object into a serializable dictionary
 def serialize_node(node):
@@ -329,7 +418,6 @@ def serialize_node(node):
         "labels": list(node.labels),
         "properties": dict(node)
     }
-
 # Function to serialize Neo4j Relationship object into a serializable dictionary
 
 

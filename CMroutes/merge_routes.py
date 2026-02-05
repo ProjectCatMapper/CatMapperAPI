@@ -89,18 +89,16 @@ def submitvalidateDatasets():
 
     driver = getDriver(database)
 
-    with driver.session() as session:
-        for i in names:
-            q = """
-            MATCH (n:DATASET)
-            WHERE n.CMID = $prop
-            RETURN COUNT(n) > 0 AS nodeExists
-            """
-            result = session.run(q, prop=i.strip())
-            node_exists = result.single()["nodeExists"]
-            if not node_exists:
-                return jsonify({"success": False, "message": "Check your Dataset IDs."})
-    driver.close()
+    for i in names:
+        q = """
+        MATCH (n:DATASET)
+        WHERE n.CMID = $prop
+        RETURN COUNT(n) > 0 AS nodeExists
+        """
+        result = getQuery(q, driver, params={'prop': i.strip()})
+        node_exists = result[0]["nodeExists"] if result else False
+        if not node_exists:
+            return jsonify({"success": False, "message": "Check your Dataset IDs."})
     return jsonify({"success": True, "message": "All IDs exist."})
 
 @merge_bp.route('/getKeys', methods=['POST'])
@@ -170,14 +168,12 @@ def getLinkFile():
         driver = getDriver(database)
 
         query = f"""
-match (c:{domain})<-[r:USES]-(d:DATASET) where d.CMID in $datasets
-return distinct d.CMName as DatasetName, r.Key as Key, c.CMName as CMName, c.CMID as CMID, apoc.text.join(r.Name,'; ') as Name order by CMName
-"""
+        match (c:{domain})<-[r:USES]-(d:DATASET) where d.CMID in $datasets
+        return distinct d.CMName as DatasetName, r.Key as Key, c.CMName as CMName, c.CMID as CMID, apoc.text.join(r.Name,'; ') as Name order by CMName
+        """
 
-        with driver.session() as session:
-            result = session.run(query, datasets=datasets)
-            data = [dict(record) for record in result]
-            driver.close()
+        result = getQuery(query, driver, params={'datasets': datasets})
+        data = [dict(record) for record in result]
 
         return data
 
