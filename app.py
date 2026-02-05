@@ -27,6 +27,7 @@ app.register_blueprint(dev_bp)
 app.register_blueprint(routine_bp)  
 app.register_blueprint(download_bp)  
 app.register_blueprint(homepage_bp)  
+app.register_blueprint(search_bp)  
 
 atexit.register(closeAllDrivers) # closes all active web drivers on exit
 
