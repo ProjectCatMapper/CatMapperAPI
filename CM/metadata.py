@@ -1,5 +1,7 @@
 from functools import lru_cache
 from .utils import getDriver, getQuery
+import pandas as pd
+
 
 @lru_cache(maxsize=128)
 def get_metadata_groups(database):
