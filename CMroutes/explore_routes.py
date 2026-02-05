@@ -342,7 +342,7 @@ def getDataset():
         children = unlist(params.get('children'))
 
         result = getDatasetData(database, cmid, domain, children)
-        return jsonify(result)
+        return result
 
     except Exception as e:
         result = str(e)
