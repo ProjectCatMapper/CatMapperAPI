@@ -1,4 +1,5 @@
 from neo4j import GraphDatabase
+from CM import getQuery
 
 class Neo4jWriter:
     """
@@ -17,8 +18,8 @@ class Neo4jWriter:
         MERGE (s:STACK {CMID: $stackID})
         RETURN s
         """
-        with self.driver.session() as session:
-            session.run(cypher, stackID=stackID)
+        getQuery(cypher, driver=self.driver, params={"stackID": stackID})
+
 
 
     def insert_merging_stack(self, mergingID, stackID):
@@ -27,8 +28,7 @@ class Neo4jWriter:
         MATCH (s:STACK {CMID: $stackID})
         MERGE (m)-[:MERGING]->(s)
         """
-        with self.driver.session() as session:
-            session.run(cypher, mergingID=mergingID, stackID=stackID)
+        getQuery(cypher, driver=self.driver, params={"mergingID": mergingID, "stackID": stackID})
 
    
     def insert_stack_dataset(self, stackID, datasetID):
@@ -37,9 +37,6 @@ class Neo4jWriter:
         MATCH (d:DATASET {CMID: $datasetID})
         MERGE (s)-[:CONTAINS]->(d)
         """
-        with self.driver.session() as session:
-            session.run(cypher, stackID=stackID, datasetID=datasetID)
+        getQuery(cypher, driver=self.driver, params={"stackID": stackID, "datasetID": datasetID})
 
 
-    def close(self):
-        self.driver.close()

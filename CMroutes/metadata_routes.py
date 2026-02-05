@@ -1,42 +1,28 @@
-from CM import getDriver, getQuery, getNodeProperties
+import json
+from CM import *
 from flask import jsonify, request, Blueprint
 
 metadata_bp = Blueprint('metadata', __name__)
 
 @metadata_bp.route('/metadata/domains/<database>', methods=['GET'])
 def getDomains1(database):
-    driver = getDriver(database)
-    if not driver:
-        return "Database connection failed."
-
-    domains = getQuery(
-        "MATCH (n:LABEL) where n.public = 'TRUE' and not n.CMName = 'CATEGORY' and n.groupLabel=n.CMName RETURN  n.groupLabel AS domain order by n.displayOrder,domain", driver, type="list")
-
+    domains = get_public_domains(database)
     return domains
 
 @metadata_bp.route('/metadata/subdomains/<database>', methods=['GET'])
 def getSubdomains(database):
-    driver = getDriver(database)
-    if not driver:
-        return "Database connection failed."
 
-    # subdomains = getQuery("MATCH (n:LABEL) where n.public = 'TRUE' and not n.CMName = 'CATEGORY' WITH DISTINCT n.groupLabel AS domain, n.CMName as label order by domain, label WITH domain, collect(label) AS subdomains RETURN domain, [domain] + [x IN subdomains WHERE x <> domain] AS subdomains", driver, type="dict")
-
-    subdomains = getQuery(
-        "MATCH (n:LABEL) WHERE n.public = 'TRUE' AND NOT n.CMName = 'CATEGORY' WITH DISTINCT n.groupLabel AS domain, n.CMName AS label, n.displayOrder AS displayOrder ORDER BY domain, displayOrder WITH domain, collect(label) AS subdomains MATCH (d:LABEL {CMName: domain}) WITH domain, subdomains, d.displayOrder AS domainOrder RETURN domain, [domain] + [x IN subdomains WHERE x <> domain] AS subdomains ORDER BY domainOrder, domain", driver, type="dict")
+    subdomains = get_public_subdomains(database)
 
     return subdomains
 
 @metadata_bp.route('/metadata/domainDescriptions/<database>', methods=['GET'])
 def getDomainDescriptions(database):
     driver = getDriver(database)
-    if not driver:
-        return "Database connection failed."
-
-    descriptions = getQuery(
-        "MATCH (n:LABEL) where n.CMName = n.groupLabel and n.public = 'TRUE' and not n.CMName = 'CATEGORY' RETURN DISTINCT n.CMName AS label, n.description AS description order by label", driver, type="dict")
+    descriptions = get_domain_descriptions(database)
 
     return descriptions
+
 @metadata_bp.route('/metadata/CMIDProperties/<database>/<domain>', methods=['POST'])
 def getProperties_route(database, domain):
     try:
@@ -51,28 +37,7 @@ def getProperties_route(database, domain):
 @metadata_bp.route("/getTranslatedomains", methods=['GET'])
 def getTranslatedomains():
     database = request.args.get("database")
-    driver = getDriver(database)
-    query = '''MATCH (m:METADATA)
-            WHERE m.displayOrder IS NOT NULL
-            AND NOT m.CMName IN ['ALL NODES']
-            WITH m.groupLabel AS group, m.CMName AS node, m.displayOrder AS nodeOrder
-            MATCH (g:METADATA {CMName: group})
-            WHERE g.displayOrder IS NOT NULL
-            WITH g.groupLabel AS group, g.displayOrder AS groupOrder, node, nodeOrder
-            ORDER BY group, nodeOrder, node 
-            WITH group, groupOrder, collect(node) AS nodes
-            RETURN group, nodes
-            ORDER BY groupOrder
-            '''
-    
-    result = getQuery(query,driver)
-
-    result_list = []
-    for record in result:
-        group = record["group"]
-        members = record["nodes"]
-        result_list.append({"group": group, "nodes": members})
-    
+    result_list = get_metadata_groups(database)
     return jsonify(result_list)
     
 @metadata_bp.route(f"/getDomains/<database>", methods=['GET'])
@@ -116,3 +81,109 @@ def getCountries(database):
     result = result.fillna("")
     
     return jsonify(result.to_dict(orient='records'))
+
+@metadata_bp.route('/datasetDomains', methods=['POST'])
+def getdatasetDomains():
+    try:
+        data = request.get_data()
+        data = json.loads(data)
+
+        database = unlist(data.get('database'))
+        cmid = unlist(data.get('cmid'))
+        children = unlist(data.get('children'))
+
+        driver = getDriver(database)
+
+        # combine queries
+        if children == True:
+            query = """
+unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[:CONTAINS*..5]->(:DATASET)-[r:USES]->(c:CATEGORY)
+with distinct apoc.coll.toSet(apoc.coll.flatten(collect(r.label), true)) as labels
+unwind labels as label
+return label
+"""
+        else:
+            query = """
+unwind $cmid as cmid match (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY)
+with distinct apoc.coll.toSet(apoc.coll.flatten(collect(r.label), true)) as labels
+unwind labels as label
+return label
+"""
+
+        data = getQuery(query=query, driver=driver, params={"cmid": cmid})
+
+        return data
+
+    except Exception as e:
+        # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+
+@metadata_bp.route('/allDatasets', methods=['GET'])
+def getAllDatasets():
+    try:
+        database = request.args.get('database')
+
+        driver = getDriver(database)
+
+        query = """
+match (d:DATASET)
+return elementId(d) as nodeID,
+d.CMName as CMName,
+d.CMID as CMID,
+d.shortName as shortName,
+d.project as project,
+d.Unit as Unit,
+d.parent as parent,
+d.ApplicableYears as ApplicableYears,
+d.DatasetCitation as DatasetCitation,
+d.District as District,
+d.DatasetLocation as DatasetLocation,
+d.DatasetVersion as DatasetVersion,
+d.DatasetScope as DatasetScope,
+d.Subnational as Subnational,
+d.Note as Note
+"""
+        result = getQuery(query=query, driver=driver)
+
+        return result
+
+    except Exception as e:
+        # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+    
+@metadata_bp.route('/linkfile', methods=['GET'])
+def getLinkFile():
+    try:
+        database = request.args.get('database')
+        datasets = request.args.get('datasets')
+        intersection = request.args.get('intersection')
+        domain = request.args.get('domain')
+
+        if not isinstance(datasets, list):
+            raise Exception("datasets must be a list")
+
+        if not isinstance(domain, str):
+            raise Exception("domain must be a string")
+
+        if not isinstance(intersection, bool):
+            raise Exception("intersection must be a boolean")
+
+        driver = getDriver(database)
+
+        query = f"""
+match (c:{domain})<-[r:USES]-(d:DATASET) where d.CMID in $datasets
+return distinct d.CMName as DatasetName, r.Key as Key, c.CMName as CMName, c.CMID as CMID, apoc.text.join(r.Name,'; ') as Name order by CMName
+"""
+
+        result = getQuery(query=query, driver=driver, params={"datasets": datasets})
+
+        return result
+
+    except Exception as e:
+        # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
+    
+    
