@@ -1,6 +1,7 @@
 ''' USES.py '''
 
 from .utils import *
+from .metadata import getPropertiesMetadata
 from datetime import datetime
 from .log import createLog
 

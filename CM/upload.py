@@ -5,6 +5,8 @@ from .USES import *
 from .keys import *
 from .GIS import *
 from .log import *
+from .metadata import getPropertiesMetadata
+
 import json
 import pandas as pd
 from flask import jsonify

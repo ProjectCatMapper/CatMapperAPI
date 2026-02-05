@@ -7,6 +7,7 @@ from neo4j import GraphDatabase
 from CM.utils import *
 from CM.email import *
 from CM.USES import *
+from CM.metadata import *
 import pandas as pd
 import json
 import tempfile
