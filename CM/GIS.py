@@ -81,17 +81,14 @@ def correct_geojson(CMID, database):
 
 def getPolygon(CMID, driver, simple=True):
     try:
-        with driver.session() as session:
-            query = """
+        query = """
     match (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET) where not r.geoPolygon is null 
     return distinct r.geoPolygon as geomID, d.shortName as source
     """
-            results = session.run(query, CMID=CMID)
-            result = [dict(record) for record in results]
-            driver.close()
+        result = getQuery(query, driver, params={"CMID": CMID})
+
         driverGIS = getDriver('gisdb')
-        with driverGIS.session() as session:
-            if simple == True:
+        if simple == True:
                 query = """
     unwind $rows as row 
     unwind row.geomID as geomID
@@ -101,7 +98,7 @@ def getPolygon(CMID, driver, simple=True):
     where g.geomID = geomID
     return source, coalesce(g.simplified,g.geometry) as geometry, g.simplified is not null as simple
     """
-            else:
+        else:
                 query = """
     unwind $rows as row 
     unwind row.geomID as geomID
@@ -112,36 +109,27 @@ def getPolygon(CMID, driver, simple=True):
     return source, g.geometry as geometry
     """
             # query = "unwind $rows as row return row"
-            polygons = session.run(query, rows=result)
-            polygons = [dict(record) for record in polygons]
-            driverGIS.close()
+        polygons = getQuery(query, driverGIS, params={"rows": result})
         return polygons
     except Exception as e:
         return {"firstResult": result, "query": query, "error": str(e)}
 
 
 def getPoints(CMID, driver):
-    with driver.session() as session:
-        query = "match (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET) where not r.geoCoords is null return distinct r.geoCoords as geometry, d.shortName as source, r.Key as Key"
-        result = session.run(query, CMID=CMID)
-        points = [dict(record) for record in result]
-        driver.close()
+    query = "match (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET) where not r.geoCoords is null return distinct r.geoCoords as geometry, d.shortName as source, r.Key as Key"
+    result = getQuery(query, driver, params={"CMID": CMID})
+    points = [dict(record) for record in result]
     return points
 
 def getDatasetPoints(CMID, driver):
-    with driver.session() as session:
-        query = "match (c:CATEGORY)<-[r:USES]-(:DATASET {CMID: $CMID}) where not r.geoCoords is null return distinct r.geoCoords as geometry, c.CMName as source"
-        result = session.run(query, CMID=CMID)
-        points = [dict(record) for record in result]
-        driver.close()
+
+    query = "match (c:CATEGORY)<-[r:USES]-(:DATASET {CMID: $CMID}) where not r.geoCoords is null return distinct r.geoCoords as geometry, c.CMName as source"
+    result = getQuery(query, driver, params={"CMID": CMID})
+    points = [dict(record) for record in result]
     return points
 
 
 def getRelations(CMID, driver):
-    with driver.session() as session:
-        query = "match ({CMID: $CMID})-[r]-() return distinct type(r) as relation"
-        result = session.run(query, CMID=CMID)
-        for record in result:
-            relations = record["relation"]
-        driver.close()
-    return relations
+    query = "match ({CMID: $CMID})-[r]-() return distinct type(r) as relation"
+    result = getQuery(query, driver, params={"CMID": CMID})
+    return result

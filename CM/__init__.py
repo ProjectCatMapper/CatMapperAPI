@@ -12,3 +12,6 @@ from .merge import *
 from .GIS import *
 from .log import *
 from .download import *
+from .metadata import *
+from .explore import *
+from .datasets import *

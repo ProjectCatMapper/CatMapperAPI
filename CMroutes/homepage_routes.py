@@ -28,13 +28,9 @@ where label in ["DISTRICT","LANGUOID","ETHNICITY","RELIGION"]
 unwind d.foci as foci with foci, label, count(distinct c) as n
 return custom.getName(foci) as Focus, custom.getDisplayName(label) as domain, n order by Focus, domain
 """
+        data1 = getQuery(query1, driver)
+        data2 = getQuery(query2, driver)
 
-        with driver.session() as session:
-            result1 = session.run(query1)
-            result2 = session.run(query2)
-            data1 = [dict(record) for record in result1]
-            data2 = [dict(record) for record in result2]
-            driver.close()
 
         df1 = pd.DataFrame(data1)
 
@@ -59,7 +55,6 @@ return custom.getName(foci) as Focus, custom.getDisplayName(label) as domain, n 
         # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
         return result, 500
-
 
 
 @homepage_bp.route('/addFoci', methods=['GET'])
@@ -100,32 +95,68 @@ def gethomepageCount():
 
         driver = getDriver(database)
 
-        if database == "SocioMap":
-            domains = ["ETHNICITY","RELIGION","LANGUOID","DISTRICT"]
-        elif database == "ArchaMap":
-            domains = ["SITE","PERIOD","CULTURE","CERAMIC","STONE","PROJECTILE_POINT","WEAPON","COIN"]
-        
-        query = """
-                UNWIND $labels AS lbl
-                RETURN lbl AS label, count { MATCH (n) WHERE lbl IN labels(n) } AS node_count
-                """
+        database_lower = database.lower()
 
-        data = getQuery(query=query, driver=driver, params={
-            "labels": domains})
-        
-        if database == "ArchaMap":
-            data.append({"label": "Artifact","node_count":data[3]["node_count"] + data[4]["node_count"] + data[5]["node_count"] + data[6]["node_count"] + data[7]["node_count"]})
-            del data[7]
-            del data[6]
-            del data[5]
-            del data[4]
-            del data[3]
-        
+        # Define the mappings for each database type
+        if database_lower == "sociomap":
+            # Mapping: { "DATABASE_LABEL": "Display Name" }
+            mapping = {
+                "ETHNICITY": "Ethnicities",
+                "RELIGION": "Religions",
+                "LANGUOID": "Languages",
+                "DISTRICT": "Districts"
+            }
+        elif database_lower == "archamap":
+            mapping = {
+                "SITE": "Sites",
+                "PERIOD": "Periods",
+                "CULTURE": "Cultures",
+                "CERAMIC": "Artifact",
+                "STONE": "Artifact",
+                "PROJECTILE_POINT": "Artifact",
+                "WEAPON": "Artifact",
+                "COIN": "Artifact"
+            }
+        else:
+            raise Exception("database not recognized")
+
+        # Query uses the keys from our mapping
+        query = """
+            UNWIND $labels AS lbl
+            RETURN lbl AS label, apoc.meta.nodes.count([lbl]) AS node_count
+        """
+
+        raw_data = getQuery(query=query, driver=driver, params={"labels": list(mapping.keys())})
+
+        # logic for Archamap: Summing artifacts into one display row
+        if database_lower == "archamap":
+            counts = {item['label']: item['node_count'] for item in raw_data}
+            artifact_labels = ["CERAMIC", "STONE", "PROJECTILE_POINT", "WEAPON", "COIN"]
+            total_artifacts = sum(counts.get(lbl, 0) for lbl in artifact_labels)
+            
+            # Manually construct the combined list with the 'display' key
+            data = [
+                {"label": "SITE", "display": "Sites", "node_count": counts.get("SITE", 0)},
+                {"label": "PERIOD", "display": "Periods", "node_count": counts.get("PERIOD", 0)},
+                {"label": "CULTURE", "display": "Cultures", "node_count": counts.get("CULTURE", 0)},
+                {"label": "Artifact", "display": "Artifact Types", "node_count": total_artifacts}
+            ]
+        else:
+            # Logic for Sociomap: Simple 1-to-1 mapping
+            data = []
+            for item in raw_data:
+                data.append({
+                    "label": item["label"],
+                    "display": mapping.get(item["label"]),
+                    "node_count": item["node_count"]
+                })
+
         return data
 
     except Exception as e:
         result = str(e)
         return result, 500
+
 
 
 @homepage_bp.route('/progress', methods=['GET'])
@@ -140,27 +171,40 @@ def getProgress():
         where l.public = 'TRUE' and l.groupLabel = l.CMName and not l.CMName IN ["CATEGORY","GENERIC"]
         return l.CMName as label, l.displayName as newlabel
         """
-        domains = getQuery(query=query, driver=driver)
-        domains = pd.DataFrame(domains)
+        domains = getQuery(query=query, driver=driver, type = "df")
 
         query = """
-        match (a)
-        unwind labels(a) as label
-        with label, count(*) as current
-        where label in $labels
-        return label, current, 'nodes' as type
-        order by label
-        union match ()-[r]->()
-        where not type(r) in ["IS","MERGING"]
-        with type(r) as label, count(*) as current
-        return label, current, 'relations' as type
-        order by label
-        union match (a:DATASET)-[r:USES]->(b)
-        unwind labels(b) as label
-        with label, count(r) as current
-        where label in $labels
-        return distinct label, current, 'encodings' as type
-        order by label
+        UNWIND $labels AS label
+        RETURN 
+            label, 
+            apoc.meta.nodes.count([label]) AS current, 
+            'nodes' AS type
+        ORDER BY label
+
+        UNION
+
+        CALL apoc.meta.stats() YIELD relTypesCount
+        UNWIND keys(relTypesCount) AS relType
+        WITH relType, relTypesCount[relType] AS current
+        WHERE NOT relType IN ["IS", "MERGING"]
+        RETURN 
+            relType AS label, 
+            current, 
+            'relations' AS type
+        ORDER BY label
+
+        UNION
+
+        MATCH (:DATASET)-[:USES]->(b)
+        WITH labels(b) AS lbls
+        UNWIND lbls AS label
+        WITH label, count(*) AS current
+        WHERE label IN ["SITE", "CULTURE", "PERIOD"]
+        RETURN 
+            label, 
+            current, 
+            'encodings' AS type
+        ORDER BY label
         """
 
         data = getQuery(query=query, driver=driver, params={

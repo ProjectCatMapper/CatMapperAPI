@@ -39,8 +39,9 @@ def upload_API():
             addRecordYear = True
 
         user = data.get("user")
+        mergingType = data.get("mergingType")
 
-        if data.get("so") == "advanced":
+        if data.get("so") == "standard":
 
             uploadOption = data.get("ao")
 
@@ -63,6 +64,7 @@ def upload_API():
                 user=user,
                 addDistrict=addDistrict,
                 addRecordYear=addRecordYear,
+                mergingType=mergingType,
                 geocode=False,
                 batchSize=1000)
         else:
@@ -116,4 +118,3 @@ def upload_API():
         }
 
         return json.dumps(response_data), 500
-
