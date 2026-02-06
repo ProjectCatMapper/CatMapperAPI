@@ -84,7 +84,7 @@ def _create_driver(database):
     try:
         if not testConnection():
             config_opt = 'OFFLINE'
-            warnings.warn("Using OFFLINE config due to failed connection test", RuntimeWarning)
+            # warnings.warn("Using OFFLINE config due to failed connection test", RuntimeWarning)
     except:
         config_opt = 'DB'  # Fallback to DB config
     if database not in config[config_opt]:

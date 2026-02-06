@@ -5,6 +5,52 @@ from collections import defaultdict
 from collections import defaultdict
 from bs4 import BeautifulSoup
 
+def getCategoryInfo(database, cmid):
+    """
+    Get basic category/dataset info for a given CMID.
+    
+    Args:
+        database: Database identifier
+        cmid: Content Management ID
+    """
+    driver = getDriver(database)
+    
+     # Get info
+    
+    label = getQuery(
+        """
+            UNWIND $cmid AS cmid
+            MATCH (n:CATEGORY|DATASET {CMID: cmid})
+            RETURN labels(n) AS labels
+            """,
+            driver=driver, cmid=cmid, type = "list")
+    
+    if not label or not label[0]:
+        return {"error": "Node not found"}
+    
+    label = "DATASET" if "DATASET" in label[0] else "CATEGORY"
+    
+    queries = _get_queries_for_label(label, database = database)
+    
+    info = getQuery(queries['info'], driver = driver, cmid=cmid, type = "dict")    
+ 
+    # Process Domains field for DATASET
+    for row in info:
+        if 'Domains' in row and isinstance(row['Domains'], list) and 'DATASET' in row['Domains']:
+            row['Domains'] = row['Domains'][-1]
+            
+    # Get parents
+    if queries['parents']:
+        parents = getQuery(queries['parents'], driver = driver, cmid=cmid)
+    else:
+        parents = []  
+            
+    # Post-process info
+    if info:
+        info[0] = _post_process_info(info[0], parents, label)
+        
+    return info[0] if info else {}
+
 def getCategoryPage(database, cmid):
     """
     Get comprehensive category/dataset page data.
@@ -14,7 +60,7 @@ def getCategoryPage(database, cmid):
         cmid: Content Management ID
         
     Returns:
-        dict: Contains info, samples, categories, childcategories, relnames
+        dict: Contains samples, categories, childcategories, relnames
     """
     driver = getDriver(database)
     
@@ -49,14 +95,6 @@ def getCategoryPage(database, cmid):
     # Define queries based on label type
     queries = _get_queries_for_label(label, database = database)
     
-    # Get info
-    info = getQuery(queries['info'], driver = driver, cmid=cmid)
-    
-    # Process Domains field for DATASET
-    for row in info:
-        if 'Domains' in row and isinstance(row['Domains'], list) and 'DATASET' in row['Domains']:
-            row['Domains'] = row['Domains'][-1]
-    
     # Get categories
     if queries['categories']:
         categories = getQuery(queries['categories'], driver = driver, cmid=cmid)
@@ -76,21 +114,9 @@ def getCategoryPage(database, cmid):
     else:
         childCategories = []
     
-    # Get parents
-    if queries['parents']:
-        parents = getQuery(queries['parents'], driver = driver, cmid=cmid)
-    else:
-        parents = []
-    
-    # Post-process info
-    if info:
-        info[0] = _post_process_info(info[0], parents, label)
-    
-    # Sort relation names
     relnames = sorted(relnames, key=custom_sort)
     
     return {
-        "info": info[0] if info else {},
         "samples": samples,
         "categories": categories,
         "childcategories": childCategories,
@@ -108,6 +134,7 @@ def _get_queries_for_label(label, database):
     Returns:
         dict: Dictionary of query strings
     """
+    database = database.lower()
     if label == "CATEGORY":
         return {
             'info': '''
@@ -212,10 +239,9 @@ def _get_queries_for_label(label, database):
             
             'categories': """
                 UNWIND $cmid AS cmid
-                MATCH (a:ADM0 {CMID: cmid})-[:DISTRICT_OF]-(c:CATEGORY)
+                MATCH (a:ADM0 {CMID: cmid})-[r:DISTRICT_OF]-(c)
                 UNWIND labels(c) AS Domain 
-                WITH Domain, count(*) AS Count
-                RETURN DISTINCT Domain, Count 
+                RETURN Domain, size(collect(DISTINCT c)) AS Count, sum(size(r.referenceKey)) AS TotalUses
                 ORDER BY Domain
             """,
             
@@ -223,12 +249,12 @@ def _get_queries_for_label(label, database):
             
             'parents': """
                 UNWIND $cmid AS cmid
-                MATCH (n {CMID: cmid})
-                OPTIONAL MATCH (parent)-[:CONTAINS]->(n:CATEGORY)
+                MATCH (n:CATEGORY {CMID: cmid})
+                OPTIONAL MATCH (parent)-[:CONTAINS]->(n)
                 WITH n, collect(DISTINCT parent.CMID) AS directParents
-                OPTIONAL MATCH (n)-[:CONTAINS]->(child:CATEGORY)
+                OPTIONAL MATCH (n)-[:CONTAINS]->(child)
                 WITH n, directParents, collect(DISTINCT child.CMID) AS directChildren
-                OPTIONAL MATCH (n)-[:CONTAINS*1..]->(descendant:CATEGORY)
+                OPTIONAL MATCH (n)-[:CONTAINS*1..]->(descendant)
                 RETURN 
                     directParents,
                     directChildren,
@@ -271,7 +297,7 @@ def _get_queries_for_label(label, database):
             
             'categories': """
                 UNWIND $cmid AS cmid
-                MATCH (d:DATASET {CMID: cmid})-[r:USES]->(c:CATEGORY)
+                MATCH (d:DATASET {CMID: cmid})-[r:USES]->(c)
                 UNWIND r.label AS Domain
                 WITH Domain, c, r
                 WITH Domain, 
@@ -285,7 +311,7 @@ def _get_queries_for_label(label, database):
             'child_categories': """
                 UNWIND $cmid AS cmid
                 MATCH (d:DATASET {CMID: cmid})
-                OPTIONAL MATCH (d)-[:CONTAINS*..5]->(a:DATASET)-[b:USES]->(cc:CATEGORY)
+                OPTIONAL MATCH (d)-[:CONTAINS*..5]->(a)-[b:USES]->(cc)
                 UNWIND b.label AS Domain
                 RETURN
                     Domain,
@@ -296,12 +322,12 @@ def _get_queries_for_label(label, database):
             
             'parents': """
                 UNWIND $cmid AS cmid
-                MATCH (n {CMID: cmid})
-                OPTIONAL MATCH (parent)-[:CONTAINS]->(n:DATASET)
+                MATCH (n:DATASET {CMID: cmid})
+                OPTIONAL MATCH (parent)-[:CONTAINS]->(n)
                 WITH n, collect(DISTINCT parent.CMID) AS directParents
-                OPTIONAL MATCH (n)-[:CONTAINS]->(child:DATASET)
+                OPTIONAL MATCH (n)-[:CONTAINS]->(child)
                 WITH n, directParents, collect(DISTINCT child.CMID) AS directChildren
-                OPTIONAL MATCH (n)-[:CONTAINS*1..]->(descendant:DATASET)
+                OPTIONAL MATCH (n)-[:CONTAINS*1..]->(descendant)
                 RETURN 
                     directParents,
                     directChildren,
