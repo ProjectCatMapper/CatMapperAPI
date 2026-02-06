@@ -18,13 +18,7 @@ def send_test_email():
         return msg
     except Exception as e:
         return str(e), 500
-
-# def testStream():
-#     return Response(
-#         stream_with_context(runRoutinesStream()),
-#         mimetype="text/html"
-#     )
-
+    
 @dev_bp.route('/admin/graph', methods=['GET'])
 def get_graph():
     
