@@ -7,7 +7,12 @@ import re
 
 explore_bp = Blueprint('explore', __name__)
 
-# gets samples, info data, categories and map data
+@explore_bp.route("/info/<database>/<cmid>", methods=['GET'])
+def getInfo(database, cmid):
+    result = getCategoryInfo(database, cmid)
+    return jsonify(result)
+
+# gets samples and categories
 @explore_bp.route("/category/<database>/<cmid>", methods=['GET'])
 def catm(database, cmid):
     result = getCategoryPage(database, cmid)
