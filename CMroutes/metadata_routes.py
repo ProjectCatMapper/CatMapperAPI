@@ -186,4 +186,20 @@ return distinct d.CMName as DatasetName, r.Key as Key, c.CMName as CMName, c.CMI
         result = str(e)
         return result, 500
     
+@metadata_bp.route('/metadata/node/<CMID>', methods=['GET'])
+def getMetdataProperties(CMID):
+    try:
+        if not isinstance(CMID, str):
+            raise Exception("CMID must be a string")
+        driverS = getDriver("sociomap")
+        driverA = getDriver("archamap")
+        query = "MATCH (n:METADATA {CMID: $CMID}) RETURN n"
+        resultS = getQuery(query=query, driver=driverS, params={"CMID": CMID},type = "records")
+        resultA = getQuery(query=query, driver=driverA, params={"CMID": CMID},type = "records")
+        nodes = []
+        nodes.append({"SocioMap": serialize_node(resultS[0]['n'])})
+        nodes.append({"ArchaMap": serialize_node(resultA[0]['n'])})
+        return nodes
     
+    except Exception as e:
+        return str(e), 500

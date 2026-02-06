@@ -285,3 +285,63 @@ def getMergeUSESties():
     result = mergeUSESties(database, CMID, Key, datasetID)
     return result
 
+@admin_bp.route('/admin/saveMetadata', methods=['POST'])
+def saveMetadata():
+    try:
+# 1. Initialize separate lists for each database
+        updatesS = []
+        updatesA = []
+
+        for item in data:
+            node_id = item.get('id')
+            props = item.get('properties', {})
+            db_target = item.get('database') # Check which DB this item belongs to
+
+            # Clean properties
+            clean_props = props.copy()
+            clean_props.pop('CMID', None) 
+            
+            # Create the update object
+            update_packet = {
+                "id": node_id,
+                "props": clean_props
+            }
+
+            # 2. Sort into the correct list
+            if db_target == "SocioMap":
+                updatesS.append(update_packet)
+            elif db_target == "ArchaMap":
+                updatesA.append(update_packet)
+
+        # 3. Define the Query (Same for both)
+        query = """
+        UNWIND $updates AS item
+        MATCH (n:METADATA)
+        WHERE elementId(n) = item.id
+        SET n += item.props
+        RETURN count(n) as updated_count
+        """
+
+        # 4. Execute conditionally based on lists
+        total_count = 0
+        
+        # Only run SocioMap query if we have SocioMap updates
+        if updatesS:
+            driverS = getDriver("sociomap")
+            resultS = getQuery(query=query, driver=driverS, params={"updates": updatesS}, type="list")
+            # Assuming getQuery returns a list of dicts, e.g., [{'updated_count': 1}]
+            if resultS:
+                total_count += resultS[0].get('updated_count', 0)
+
+        # Only run ArchaMap query if we have ArchaMap updates
+        if updatesA:
+            driverA = getDriver("archamap")
+            resultA = getQuery(query=query, driver=driverA, params={"updates": updatesA}, type="list")
+            if resultA:
+                total_count += resultA[0].get('updated_count', 0)
+
+        return jsonify({"message": f"Updated {total_count} nodes."}), 200
+
+    except Exception as e:
+        print(f"Error saving metadata: {e}")
+        return jsonify({"error": str(e)}), 500
