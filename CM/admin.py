@@ -12,6 +12,7 @@
 ############################
 
 from .utils import *
+from .metadata import *
 from .log import createLog
 from .USES import processUSES
 from .USES import addCMNameRel,processDATASETs,waitingUSES
