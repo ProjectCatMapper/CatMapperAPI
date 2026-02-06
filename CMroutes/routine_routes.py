@@ -53,7 +53,7 @@ def get_routines(routine, database):
     except Exception as e:
         return str(e), 500
 
-@routine_bp.route('/runRoutinesStream/<databases>', methods=['GET'])
+@routine_bp.route('/runRoutines/<databases>', methods=['GET'])
 def get_runRoutinesStream(databases):
     try:
         return routines_module.runRoutinesStream(databases, mail)
