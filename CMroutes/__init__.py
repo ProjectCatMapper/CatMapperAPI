@@ -30,7 +30,7 @@ def create_app():
                     os.path.dirname(base_dir), 'templates'),
                 static_folder=os.path.join(os.path.dirname(base_dir), 'static'))
 
-    CORS(app)
+    CORS(app, resources={r"/*": {"origins": ["https://catmapper.org", "https://test.catmapper.org"]}})
     app.config['CORS_HEADERS'] = 'Content-Type'
     app.config['PERMANENT_SESSION_LIFETIME'] = 999999999
     app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
