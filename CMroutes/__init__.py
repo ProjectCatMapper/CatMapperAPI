@@ -30,7 +30,15 @@ def create_app():
                     os.path.dirname(base_dir), 'templates'),
                 static_folder=os.path.join(os.path.dirname(base_dir), 'static'))
 
-    CORS(app, resources={r"/*": {"origins": ["https://catmapper.org", "https://test.catmapper.org"]}})
+    allowed_origins = [
+    "https://catmapper.org",
+    "https://test.catmapper.org",
+    "http://localhost:3000",  # Keep this for your local PC development
+    "http://localhost:3002"   # The port I see in your logs
+    ]
+
+    CORS(app, resources={r"/*": {"origins": allowed_origins}})
+
     app.config['CORS_HEADERS'] = 'Content-Type'
     app.config['PERMANENT_SESSION_LIFETIME'] = 999999999
     app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
