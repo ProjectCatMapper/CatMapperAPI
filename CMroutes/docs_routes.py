@@ -1,5 +1,4 @@
 from flask import Blueprint, make_response, render_template, send_file
-import json
 
 root_bp = Blueprint('root', __name__)
 

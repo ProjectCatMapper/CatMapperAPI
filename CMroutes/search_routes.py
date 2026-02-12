@@ -1,4 +1,3 @@
-import pandas as pd
 from flask import request, Blueprint, jsonify
 import json
 from CM import translate, unlist, search

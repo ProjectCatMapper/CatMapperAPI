@@ -1,4 +1,3 @@
-import os
 from flask import request, Blueprint, jsonify
 from CM import proposeMerge, joinDatasets, getDriver, unlist, getQuery
 import json
