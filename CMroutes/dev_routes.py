@@ -1,5 +1,5 @@
 from CM import *
-from flask import render_template, Blueprint
+from flask import app, render_template, Blueprint
 from flask_mail import Mail
 from .extensions import mail
 import pandas as pd
@@ -41,3 +41,13 @@ def get_graph():
 @dev_bp.route('/admin/view_graph', methods=['GET'])
 def display_graph():
     return render_template("graph.html")
+
+
+@dev_bp.route('/health')
+def health():
+    import os
+    APP_VERSION = os.getenv('VERSION', 'dev-build')
+    return jsonify({
+        "status": "healthy",
+        "version": APP_VERSION
+    })
