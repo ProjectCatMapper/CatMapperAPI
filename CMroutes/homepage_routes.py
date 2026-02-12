@@ -88,10 +88,9 @@ def addFoci():
         result = str(e)
         return result, 500
     
-@homepage_bp.route('/homepagecount',methods=['GET'])
-def gethomepageCount():
+@homepage_bp.route('/homepagecount/<database>',methods=['GET'])
+def gethomepageCount(database):
     try:
-        database = request.args.get('database')
 
         driver = getDriver(database)
 
@@ -159,21 +158,20 @@ def gethomepageCount():
 
 
 
-@homepage_bp.route('/progress', methods=['GET'])
-def getProgress():
+@homepage_bp.route('/progress/<database>', methods=['GET'])
+def getProgress(database):
     try:
-        database = request.args.get('database')
 
         driver = getDriver(database)
 
-        query = """
+        query_domains = """
         match (l:LABEL)
-        where l.public = 'TRUE' and l.groupLabel = l.CMName and not l.CMName IN ["CATEGORY","GENERIC"]
+        where l.public = 'TRUE' and l.groupLabel = l.CMName and not l.CMName IN ["CATEGORY","GENERIC","ALL NODES","ANY DOMAIN","ATTRIBUTE","DATASET"]
         return l.CMName as label, l.displayName as newlabel
         """
-        domains = getQuery(query=query, driver=driver, type = "df")
+        domains = getQuery(query=query_domains, driver=driver, type = "df")
 
-        query = """
+        query_data = """
         UNWIND $labels AS label
         RETURN 
             label, 
@@ -186,9 +184,9 @@ def getProgress():
         CALL apoc.meta.stats() YIELD relTypesCount
         UNWIND keys(relTypesCount) AS relType
         WITH relType, relTypesCount[relType] AS current
-        WHERE NOT relType IN ["IS", "MERGING"]
+        WHERE NOT relType IN ["USES","IS", "MERGING","CONTAINS","HAS_LOG","EQUIVALENT"]
         RETURN 
-            relType AS label, 
+            replace(relType,"_OF","") AS label, 
             current, 
             'relations' AS type
         ORDER BY label
@@ -198,8 +196,9 @@ def getProgress():
         MATCH (:DATASET)-[:USES]->(b)
         WITH labels(b) AS lbls
         UNWIND lbls AS label
+        WITH label
+        WHERE label in $labels
         WITH label, count(*) AS current
-        WHERE label IN ["SITE", "CULTURE", "PERIOD"]
         RETURN 
             label, 
             current, 
@@ -207,37 +206,71 @@ def getProgress():
         ORDER BY label
         """
 
-        data = getQuery(query=query, driver=driver, params={
-            "labels": domains["label"]})
+        df = getQuery(query=query_data, driver=driver, params={
+            "labels": domains["label"]}, type = "df")
 
-        df = pd.DataFrame(data)
-
-        query = """
+        query_translation = """
         match (n:TRANSLATION) where n.table = "display" return n.table as table, n.from as label, n.to as newlabel order by label
         """
-        translations = getQuery(query=query, driver=driver)
-        translations = pd.DataFrame(translations)
+        translations = getQuery(query=query_translation, driver=driver, type = "df")
         translations = pd.concat(
             [translations, domains], axis=0, ignore_index=True)
         translations = translations.drop('table', axis=1)
-
+        
         df = df.merge(translations, on="label", how="inner")
         df = df.drop('label', axis=1)
         df = df.rename(columns={'newlabel': 'label'})
+        
+        def add_total_row(df, label_col='label'):
+            """
+            Sums all numeric columns in the DataFrame and appends a 'Total' row.
+            """
+            # 1. Sum all numeric columns (floats and ints)
+            # numeric_only=True prevents pandas from trying to sum strings/labels
+            totals = df.sum(numeric_only=True)
+            
+            # 2. Convert the resulting Series into a dictionary
+            total_row = totals.to_dict()
+            
+            # 3. Explicitly set the label column to "Total"
+            total_row[label_col] = 'Total'
+            
+            # 4. Append to the original DataFrame
+            df_with_total = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+            
+            return df_with_total
 
         nodes = df[df['type'] == 'nodes'].copy()
         nodes = nodes.drop('type', axis=1)
-        nodes = nodes.to_dict(orient='records')
 
         encodings = df[df['type'] == 'encodings'].copy()
         encodings = encodings.drop('type', axis=1)
-        encodings = encodings.to_dict(orient='records')
 
         relations = df[df['type'] == 'relations'].copy()
         relations = relations.drop('type', axis=1)
-        relations = relations.to_dict(orient='records')
 
-        return {"nodes": nodes, "encodings": encodings, "relations": relations}
+        table = pd.merge(nodes, encodings, on='label', how='outer', suffixes=('_nodes', '_encodings'))
+        table = table.merge(relations, on='label', how='outer')
+        table = add_total_row(table, label_col='label')
+        table['current_encodings'] = table['current_encodings'] / table['current_nodes']
+        # set decimals at one
+        table['current_encodings'] = table['current_encodings'].round(1)
+
+        # rename
+        table = table.rename(columns={
+            'label': "Type",
+            'current_nodes': 'Nodes',
+            'current_encodings': 'Datasets per node',
+            'current': 'Context ties'
+        })
+        table = table[["Type", "Nodes", "Datasets per node", "Context ties"]]
+        # replace NaN with 0
+        table = table.fillna(0)
+        # convert Nodes and Context Ties to int
+        table['Nodes'] = table['Nodes'].astype(int)
+        table['Context ties'] = table['Context ties'].astype(int)
+
+        return table.to_json(orient='records')
 
     except Exception as e:
         result = str(e)

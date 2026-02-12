@@ -203,3 +203,17 @@ def getMetdataProperties(CMID):
     
     except Exception as e:
         return str(e), 500
+    
+@metadata_bp.route('/metadata/domaincount/<database>/<domain>', methods=['GET'])
+def getDomainCount(database, domain):
+    try:
+        driver = getDriver(database)
+        query1 = f"""
+        return apoc.meta.nodes.count(["{domain}"]) AS count
+        """
+        df1 = getQuery(query=query1, driver=driver, type = "list")
+        return df1
+    except Exception as e:
+        # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500
