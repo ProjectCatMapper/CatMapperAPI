@@ -33,8 +33,7 @@ def create_app():
     allowed_origins = [
     "https://catmapper.org",
     "https://test.catmapper.org",
-    "http://localhost:3000",  # Keep this for your local PC development
-    "http://localhost:3002"   # The port I see in your logs
+    r"http://localhost:\d+"
     ]
 
     CORS(app, resources={r"/*": {"origins": allowed_origins}})
