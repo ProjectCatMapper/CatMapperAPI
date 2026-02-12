@@ -4,6 +4,15 @@ set -e  # Exit immediately if a command exits with a non-zero status
 
 # Detect current branch for push target
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+ORIGIN_URL=$(git remote get-url origin)
+
+# Force deploy pushes through the rjbischo GitHub account over HTTPS
+# to avoid SSH public key auth issues on this host.
+if [[ "$ORIGIN_URL" =~ ^git@github.com:(.+)$ ]]; then
+  PUSH_REMOTE="https://rjbischo@github.com/${BASH_REMATCH[1]}"
+else
+  PUSH_REMOTE="$ORIGIN_URL"
+fi
 
 # Pre-flight check: Ensure git directory is clean
 if [ -n "$(git status --porcelain)" ]; then 
@@ -36,7 +45,7 @@ git commit -m "Deploy version $NEW_VERSION"
 git tag -a "v$NEW_VERSION" -m "Deployment on $(date)"
 
 # Push the commit and the tag to the server
-git push origin "$CURRENT_BRANCH"
-git push origin "v$NEW_VERSION"
+git push "$PUSH_REMOTE" "$CURRENT_BRANCH"
+git push "$PUSH_REMOTE" "v$NEW_VERSION"
 
 echo "✅ Deployment complete. System is now on v$NEW_VERSION and tagged in Git."
