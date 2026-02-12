@@ -75,6 +75,13 @@ def _format_profile(row):
     }
 
 
+def _password_meets_policy(password):
+    # New policy: letters only, minimum length 6.
+    if not isinstance(password, str):
+        return False
+    return len(password) >= 6 and password.isalpha()
+
+
 def _load_user(userid):
     driver = getDriver("userdb")
     query = """
@@ -388,6 +395,8 @@ def request_password_change():
             raise Exception("Missing userId")
         if not current_password or not new_password:
             raise Exception("Current and new password are required.")
+        if not _password_meets_policy(new_password):
+            raise Exception("Password must be at least 6 letters and contain no numbers or special characters.")
 
         _verify_profile_credentials(userid, credentials)
         existing = _load_user(userid)

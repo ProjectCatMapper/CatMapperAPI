@@ -197,7 +197,7 @@ def test_password_change_request_and_confirm(client, monkeypatch):
             "userId": "100",
             "credentials": _auth_cred("100"),
             "currentPassword": "old-pass",
-            "newPassword": "NewStrong1!",
+            "newPassword": "NewStrong",
         },
     )
 
@@ -219,4 +219,133 @@ def test_password_change_request_and_confirm(client, monkeypatch):
     assert confirm_response.status_code == 200
     payload = confirm_response.get_json()
     assert payload["passwordLastChangedAt"]
-    assert users["100"]["password"] == "hashed::NewStrong1!"
+    assert users["100"]["password"] == "hashed::NewStrong"
+
+
+def test_password_change_rejects_numbers_or_symbols(client, monkeypatch):
+    users = {
+        "100": {
+            "userid": "100",
+            "first": "Ada",
+            "last": "Lovelace",
+            "username": "ada",
+            "email": "ada@example.org",
+            "database": ["SocioMap"],
+            "intendedUse": "Research",
+            "password": "old-pass",
+        }
+    }
+
+    monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
+    monkeypatch.setattr(user_routes, "verifyPassword", lambda stored_hash, candidate: stored_hash == candidate)
+    monkeypatch.setattr(user_routes, "getQuery", _fake_getquery_factory(users))
+
+    response = client.post(
+        "/profile/request-password-change",
+        json={
+            "userId": "100",
+            "credentials": _auth_cred("100"),
+            "currentPassword": "old-pass",
+            "newPassword": "abc123",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "at least 6 letters" in response.get_json()["error"]
+
+
+def test_profile_update_rejects_duplicate_username(client, monkeypatch):
+    users = {
+        "100": {
+            "userid": "100",
+            "first": "Ada",
+            "last": "Lovelace",
+            "username": "ada",
+            "email": "ada@example.org",
+            "database": ["SocioMap"],
+            "intendedUse": "Research",
+            "password": "old-pass",
+        },
+        "200": {
+            "userid": "200",
+            "first": "Grace",
+            "last": "Hopper",
+            "username": "taken_name",
+            "email": "grace@example.org",
+            "database": ["ArchaMap"],
+            "intendedUse": "Research",
+            "password": "old-pass-2",
+        },
+    }
+
+    monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
+    monkeypatch.setattr(user_routes, "getQuery", _fake_getquery_factory(users))
+
+    response = client.post(
+        "/profile/request-update",
+        json={
+            "userId": "100",
+            "credentials": _auth_cred("100"),
+            "updates": {
+                "firstName": "Ada",
+                "lastName": "Lovelace",
+                "username": "taken_name",
+                "email": "ada@example.org",
+                "database": "SocioMap",
+                "intendedUse": "Research",
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Username already exists" in response.get_json()["error"]
+
+
+def test_profile_update_rejects_duplicate_email(client, monkeypatch):
+    users = {
+        "100": {
+            "userid": "100",
+            "first": "Ada",
+            "last": "Lovelace",
+            "username": "ada",
+            "email": "ada@example.org",
+            "database": ["SocioMap"],
+            "intendedUse": "Research",
+            "password": "old-pass",
+        },
+        "200": {
+            "userid": "200",
+            "first": "Grace",
+            "last": "Hopper",
+            "username": "grace",
+            "email": "taken@example.org",
+            "database": ["ArchaMap"],
+            "intendedUse": "Research",
+            "password": "old-pass-2",
+        },
+    }
+
+    monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
+    monkeypatch.setattr(user_routes, "getQuery", _fake_getquery_factory(users))
+
+    response = client.post(
+        "/profile/request-update",
+        json={
+            "userId": "100",
+            "credentials": _auth_cred("100"),
+            "updates": {
+                "firstName": "Ada",
+                "lastName": "Lovelace",
+                "username": "ada",
+                "email": "taken@example.org",
+                "database": "SocioMap",
+                "intendedUse": "Research",
+            },
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Account with this email already exists" in response.get_json()["error"]

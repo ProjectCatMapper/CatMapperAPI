@@ -2,12 +2,8 @@
 
 set -e  # Exit immediately if a command exits with a non-zero status
 
-# Branch check: Ensure we are on main
+# Detect current branch for push target
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-if [ "$CURRENT_BRANCH" != "main" ]; then
-  echo "❌ Error: You are on branch '$CURRENT_BRANCH'. You must be on 'main' to deploy."
-  exit 1
-fi
 
 # Pre-flight check: Ensure git directory is clean
 if [ -n "$(git status --porcelain)" ]; then 
@@ -40,7 +36,7 @@ git commit -m "Deploy version $NEW_VERSION"
 git tag -a "v$NEW_VERSION" -m "Deployment on $(date)"
 
 # Push the commit and the tag to the server
-git push origin main
+git push origin "$CURRENT_BRANCH"
 git push origin "v$NEW_VERSION"
 
 echo "✅ Deployment complete. System is now on v$NEW_VERSION and tagged in Git."
