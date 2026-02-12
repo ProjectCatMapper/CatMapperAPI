@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request
 import pandas as pd
 from CM import getDriver, getQuery
 

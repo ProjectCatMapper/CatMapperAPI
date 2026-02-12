@@ -2,7 +2,6 @@
 
 # general utility functions
 
-from email import message
 import itertools
 import re
 from neo4j import GraphDatabase
@@ -12,7 +11,6 @@ import json
 from configparser import ConfigParser
 import threading
 from datetime import datetime, timedelta
-import warnings
 
 _driver_cache = {}
 _driver_lock = threading.Lock()
@@ -242,15 +240,6 @@ def isValidCMID(cmid, driver):
     
     return result
 
-def validateCols(df, required):
-    missing = [col for col in df.columns if col not in required]
-
-    if len(missing) > 0:
-        return f"Missing the following required column(s): {missing}\n"
-    else:
-        return True
-
-
 def cleanCMID(cmid):
     # Define the regex pattern for valid prefixes
     valid_prefix_pattern = re.compile(r'^(AD|SD|AM|SM)')
@@ -333,18 +322,6 @@ def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database="SocioMap"):
             newID = [f"{prefix}M{x}" for x in newID]
 
     return newID
-
-
-def list2character(col):
-    # If col is a list, join the items into a single string
-    if isinstance(col, list):
-        return ','.join(map(str, col))
-    # If col is a string, return it as is
-    elif isinstance(col, str):
-        return col
-    # Otherwise, convert it to a string
-    else:
-        return str(col)
 
 
 def flattenList(input_data):
