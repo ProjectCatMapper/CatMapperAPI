@@ -2,6 +2,7 @@
 
 # This is a module for automatic routines in CatMapper
 
+import os
 from time import time
 from neo4j import GraphDatabase
 from CM.utils import *
