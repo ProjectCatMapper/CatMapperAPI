@@ -33,7 +33,7 @@ docker restart api
 echo "Creating Git tag: v$NEW_VERSION"
 
 # Add the .env change so the version record is committed
-git add .env
+git add .env -f
 git commit -m "Deploy version $NEW_VERSION"
 
 # Create the tag
