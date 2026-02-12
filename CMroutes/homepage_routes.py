@@ -220,24 +220,42 @@ def getProgress(database):
         df = df.merge(translations, on="label", how="inner")
         df = df.drop('label', axis=1)
         df = df.rename(columns={'newlabel': 'label'})
+        
+        def add_total_row(df, label_col='label'):
+            """
+            Sums all numeric columns in the DataFrame and appends a 'Total' row.
+            """
+            # 1. Sum all numeric columns (floats and ints)
+            # numeric_only=True prevents pandas from trying to sum strings/labels
+            totals = df.sum(numeric_only=True)
+            
+            # 2. Convert the resulting Series into a dictionary
+            total_row = totals.to_dict()
+            
+            # 3. Explicitly set the label column to "Total"
+            total_row[label_col] = 'Total'
+            
+            # 4. Append to the original DataFrame
+            df_with_total = pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
+            
+            return df_with_total
 
         nodes = df[df['type'] == 'nodes'].copy()
         nodes = nodes.drop('type', axis=1)
-        # nodes = nodes.to_dict(orient='records')
 
         encodings = df[df['type'] == 'encodings'].copy()
         encodings = encodings.drop('type', axis=1)
-        # encodings = encodings.to_dict(orient='records')
 
         relations = df[df['type'] == 'relations'].copy()
         relations = relations.drop('type', axis=1)
-        # relations = relations.to_dict(orient='records')
-        
+
         table = pd.merge(nodes, encodings, on='label', how='outer', suffixes=('_nodes', '_encodings'))
+        table = table.merge(relations, on='label', how='outer')
+        table = add_total_row(table, label_col='label')
         table['current_encodings'] = table['current_encodings'] / table['current_nodes']
         # set decimals at one
         table['current_encodings'] = table['current_encodings'].round(1)
-        table = table.merge(relations, on='label', how='outer')
+
         # rename
         table = table.rename(columns={
             'label': "Type",
