@@ -10,9 +10,8 @@ from .user_routes import *
 from .admin_routes import *
 from .homepage_routes import *
 from .metadata_routes import *
-from flask import Flask, abort, send_from_directory
+from flask import Flask
 from .extensions import *
-from .metadata_routes import *
 from .search_routes import *
 
 import os

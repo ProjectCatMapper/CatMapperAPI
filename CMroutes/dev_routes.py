@@ -1,6 +1,5 @@
 from CM import *
-from flask import app, render_template, Blueprint
-from flask_mail import Mail
+from flask import Blueprint, jsonify, render_template
 from .extensions import mail
 import pandas as pd
 
