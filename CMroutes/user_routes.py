@@ -114,6 +114,76 @@ def _password_meets_policy(password):
     return len(password) >= 6
 
 
+def _serialize_entries(entries):
+    return [json.dumps(entry, separators=(",", ":"), ensure_ascii=True) for entry in entries]
+
+
+def _deserialize_entries(values):
+    rows = []
+    for value in values or []:
+        try:
+            row = json.loads(value) if isinstance(value, str) else value
+            if isinstance(row, dict):
+                rows.append(row)
+        except Exception:
+            continue
+    return rows
+
+
+def _get_user_entries(userid, field_name):
+    driver = getDriver("userdb")
+    query = f"""
+    MATCH (u:USER {{userid: toString($userid)}})
+    RETURN coalesce(u.{field_name}, []) as entries
+    """
+    rows = getQuery(query, driver=driver, params={"userid": userid})
+    if not rows:
+        raise Exception("User not found")
+    return _deserialize_entries(rows[0].get("entries", []))
+
+
+def _set_user_entries(userid, field_name, entries):
+    driver = getDriver("userdb")
+    query = f"""
+    MATCH (u:USER {{userid: toString($userid)}})
+    SET u.{field_name} = $entries
+    RETURN u.userid as userid
+    """
+    result = getQuery(
+        query,
+        driver=driver,
+        params={"userid": userid, "entries": _serialize_entries(entries)},
+    )
+    if not result:
+        raise Exception("User not found")
+
+
+def _get_cmid_type(cmid):
+    if not isinstance(cmid, str):
+        return "UNKNOWN"
+    if cmid.startswith(("SD", "AD")):
+        return "DATASET"
+    if cmid.startswith(("SM", "AM")):
+        return "CATEGORY"
+    return "UNKNOWN"
+
+
+def _lookup_cmid_name(database, cmid):
+    try:
+        driver = getDriver(database)
+        query = """
+        MATCH (n {CMID: $cmid})
+        RETURN n.CMName as CMName
+        LIMIT 1
+        """
+        rows = getQuery(query, driver=driver, params={"cmid": cmid})
+        if rows and rows[0].get("CMName"):
+            return rows[0]["CMName"]
+    except Exception:
+        return ""
+    return ""
+
+
 def _load_user(userid):
     driver = getDriver("userdb")
     query = """
@@ -519,6 +589,172 @@ def confirm_password_change():
         if not saved:
             raise Exception("User not found")
         return jsonify({"passwordLastChangedAt": saved[0].get("passwordLastChangedAt")}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@user_bp.route('/profile/activity/<userid>', methods=['GET'])
+def get_profile_activity(userid):
+    try:
+        credentials_raw = request.args.get("credentials")
+        credentials = json.loads(credentials_raw) if credentials_raw else None
+        database = request.args.get("database")
+        if not database:
+            raise Exception("Missing database")
+        _verify_profile_credentials(userid, credentials)
+
+        driver = getDriver(database)
+        query = """
+        MATCH (l:LOG)
+        WHERE toString(l.user) = toString($userid)
+        RETURN
+          coalesce(toString(l.action), '') as action,
+          coalesce(toString(l.description), '') as description
+        """
+        rows = getQuery(query, driver=driver, params={"userid": userid})
+
+        counters = {
+            "createdNodes": 0,
+            "createdRelationships": 0,
+            "updatedNodes": 0,
+            "updatedRelationships": 0,
+            "totalActions": 0,
+        }
+        for row in rows:
+            action = (row.get("action") or "").lower()
+            desc = (row.get("description") or "").lower()
+            text = f"{action} {desc}"
+            counters["totalActions"] += 1
+            if "created node" in text:
+                counters["createdNodes"] += 1
+            elif "created relationship" in text:
+                counters["createdRelationships"] += 1
+            elif "changed" in text and "relationship" in text:
+                counters["updatedRelationships"] += 1
+            elif "changed" in text:
+                counters["updatedNodes"] += 1
+
+        return jsonify(counters), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@user_bp.route('/profile/bookmarks/<userid>', methods=['GET'])
+def get_profile_bookmarks(userid):
+    try:
+        credentials_raw = request.args.get("credentials")
+        credentials = json.loads(credentials_raw) if credentials_raw else None
+        _verify_profile_credentials(userid, credentials)
+        rows = _get_user_entries(userid, "bookmarks")
+        return jsonify({"bookmarks": rows}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@user_bp.route('/profile/bookmarks/add', methods=['POST'])
+def add_profile_bookmark():
+    try:
+        data = request.get_json(silent=True) or {}
+        userid = unlist(data.get("userId"))
+        credentials = data.get("credentials")
+        database = unlist(data.get("database"))
+        cmid = str(unlist(data.get("cmid")) or "").strip()
+        cmname = str(unlist(data.get("cmname")) or "").strip()
+
+        if not userid or not database or not cmid:
+            raise Exception("Missing required fields")
+        _verify_profile_credentials(userid, credentials)
+
+        if not cmname:
+            cmname = _lookup_cmid_name(database, cmid)
+
+        bookmarks = _get_user_entries(userid, "bookmarks")
+        bookmarks = [
+            row for row in bookmarks
+            if not (str(row.get("cmid")) == cmid and str(row.get("database")) == database)
+        ]
+        bookmarks.insert(0, {
+            "cmid": cmid,
+            "cmname": cmname,
+            "database": database,
+            "cmidType": _get_cmid_type(cmid),
+            "savedAt": _now_iso(),
+        })
+        _set_user_entries(userid, "bookmarks", bookmarks[:500])
+        return jsonify({"status": "ok", "bookmarks": bookmarks[:500]}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@user_bp.route('/profile/bookmarks/remove', methods=['POST'])
+def remove_profile_bookmark():
+    try:
+        data = request.get_json(silent=True) or {}
+        userid = unlist(data.get("userId"))
+        credentials = data.get("credentials")
+        items = data.get("items") or []
+        _verify_profile_credentials(userid, credentials)
+
+        removals = {
+            (str(item.get("cmid")), str(item.get("database")))
+            for item in items
+            if item.get("cmid") and item.get("database")
+        }
+        bookmarks = _get_user_entries(userid, "bookmarks")
+        remaining = [
+            row for row in bookmarks
+            if (str(row.get("cmid")), str(row.get("database"))) not in removals
+        ]
+        _set_user_entries(userid, "bookmarks", remaining)
+        return jsonify({"status": "ok", "bookmarks": remaining}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@user_bp.route('/profile/history/<userid>', methods=['GET'])
+def get_profile_history(userid):
+    try:
+        credentials_raw = request.args.get("credentials")
+        credentials = json.loads(credentials_raw) if credentials_raw else None
+        _verify_profile_credentials(userid, credentials)
+        rows = _get_user_entries(userid, "history")
+        return jsonify({"history": rows[:50]}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@user_bp.route('/profile/history/add', methods=['POST'])
+def add_profile_history():
+    try:
+        data = request.get_json(silent=True) or {}
+        userid = unlist(data.get("userId"))
+        credentials = data.get("credentials")
+        database = unlist(data.get("database"))
+        cmid = str(unlist(data.get("cmid")) or "").strip()
+        cmname = str(unlist(data.get("cmname")) or "").strip()
+
+        if not userid or not database or not cmid:
+            raise Exception("Missing required fields")
+        _verify_profile_credentials(userid, credentials)
+
+        if not cmname:
+            cmname = _lookup_cmid_name(database, cmid)
+
+        history = _get_user_entries(userid, "history")
+        history = [
+            row for row in history
+            if not (str(row.get("cmid")) == cmid and str(row.get("database")) == database)
+        ]
+        history.insert(0, {
+            "cmid": cmid,
+            "cmname": cmname,
+            "database": database,
+            "cmidType": _get_cmid_type(cmid),
+            "accessedAt": _now_iso(),
+        })
+        history = history[:50]
+        _set_user_entries(userid, "history", history)
+        return jsonify({"status": "ok", "history": history}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 

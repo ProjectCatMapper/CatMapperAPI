@@ -1,6 +1,7 @@
 from flask import request, Blueprint, jsonify
 from CM import proposeMerge, joinDatasets, getDriver, unlist, getQuery
 import json
+import re
 
 merge_bp = Blueprint('merge', __name__)
 
@@ -38,7 +39,7 @@ def submit_merge():
     data = request.get_data()
     data = json.loads(data)
     dataset_choices = data.get("datasetChoices")
-    dataset_choices = [choice.strip() for choice in dataset_choices.split(",")]
+    dataset_choices = [choice.strip() for choice in dataset_choices.split(",") if choice.strip()]
     ncontains = data.get("mergelevel")
     category_label = unlist(data.get("categoryLabel", ""))
     intersection = unlist(data.get("intersection", False))
@@ -47,6 +48,14 @@ def submit_merge():
     resultFormat = unlist(data.get('resultFormat', 'key-to-key'))
     selectedKeyvariables = data.get('selectedKeyvariable')
     print(selectedKeyvariables)
+
+    invalid_dataset_ids = [cmid for cmid in dataset_choices if re.match(r"^(SD|AD)\d+$", cmid, re.IGNORECASE) is None]
+    if invalid_dataset_ids:
+        return jsonify({"error": f"Only DATASET CMIDs are allowed: {', '.join(invalid_dataset_ids)}"}), 400
+
+    if criteria == "extended" and len(dataset_choices) > 2:
+        return jsonify({"error": "Extended merge supports at most two dataset CMIDs."}), 400
+
     if category_label == "ANY DOMAIN":
         category_label = "CATEGORY"
     elif category_label == "AREA":
