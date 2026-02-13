@@ -93,21 +93,39 @@ def submitvalidateDatasets():
     data = request.get_data()
     data = json.loads(data)
     database = unlist(data.get("database", ""))
-    names = data.get("names").split(",")
+    names_raw = data.get("names", "")
+    names = [name.strip() for name in names_raw.split(",") if name.strip()]
 
     driver = getDriver(database)
 
-    for i in names:
-        q = """
-        MATCH (n:DATASET)
-        WHERE n.CMID = $prop
-        RETURN COUNT(n) > 0 AS nodeExists
-        """
-        result = getQuery(q, driver, params={'prop': i.strip()})
-        node_exists = result[0]["nodeExists"] if result else False
-        if not node_exists:
-            return jsonify({"success": False, "message": "Check your Dataset IDs."})
-    return jsonify({"success": True, "message": "All IDs exist."})
+    q = """
+    UNWIND $names AS cmid
+    MATCH (n:DATASET {CMID: cmid})
+    RETURN
+      n.CMID as CMID,
+      n.CMName as CMName,
+      n.shortName as shortName,
+      n.DatasetCitation as DatasetCitation
+    ORDER BY n.CMID
+    """
+    rows = getQuery(q, driver, params={'names': names}) if names else []
+
+    found = {row.get("CMID") for row in rows}
+    missing = [cmid for cmid in names if cmid not in found]
+
+    if missing:
+        return jsonify({
+            "success": False,
+            "message": "Check your Dataset IDs.",
+            "missing": missing,
+            "datasets": rows
+        })
+
+    return jsonify({
+        "success": True,
+        "message": "All IDs exist.",
+        "datasets": rows
+    })
 
 @merge_bp.route('/getKeys', methods=['POST'])
 def getvalidKeysForDataset():
