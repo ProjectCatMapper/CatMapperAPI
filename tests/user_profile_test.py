@@ -127,9 +127,11 @@ def test_profile_update_request_and_confirm(client, monkeypatch):
 
     user_routes.PROFILE_UPDATE_REQUESTS.clear()
 
+    monkeypatch.delenv("PROFILE_DEBUG_CODES", raising=False)
     monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
     monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
     monkeypatch.setattr(user_routes, "getQuery", _fake_getquery_factory(users))
+    monkeypatch.setattr(user_routes, "sendEmail", lambda **kwargs: "Email sent successfully")
 
     request_response = client.post(
         "/profile/request-update",
@@ -150,7 +152,9 @@ def test_profile_update_request_and_confirm(client, monkeypatch):
     assert request_response.status_code == 200
     request_payload = request_response.get_json()
     assert request_payload["requestId"].startswith("profile_")
-    assert len(request_payload["debugVerificationCode"]) == 6
+    assert "debugVerificationCode" not in request_payload
+    stored_code = user_routes.PROFILE_UPDATE_REQUESTS[request_payload["requestId"]]["verification_code"]
+    assert len(stored_code) == 6
 
     confirm_response = client.post(
         "/profile/confirm-update",
@@ -158,7 +162,7 @@ def test_profile_update_request_and_confirm(client, monkeypatch):
             "userId": "100",
             "credentials": _auth_cred("100"),
             "requestId": request_payload["requestId"],
-            "verificationCode": request_payload["debugVerificationCode"],
+            "verificationCode": stored_code,
         },
     )
 
@@ -185,11 +189,13 @@ def test_password_change_request_and_confirm(client, monkeypatch):
 
     user_routes.PASSWORD_CHANGE_REQUESTS.clear()
 
+    monkeypatch.delenv("PROFILE_DEBUG_CODES", raising=False)
     monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
     monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
     monkeypatch.setattr(user_routes, "verifyPassword", lambda stored_hash, candidate: stored_hash == candidate)
     monkeypatch.setattr(user_routes, "password_hash", lambda value: f"hashed::{value}")
     monkeypatch.setattr(user_routes, "getQuery", _fake_getquery_factory(users))
+    monkeypatch.setattr(user_routes, "sendEmail", lambda **kwargs: "Email sent successfully")
 
     request_response = client.post(
         "/profile/request-password-change",
@@ -204,7 +210,9 @@ def test_password_change_request_and_confirm(client, monkeypatch):
     assert request_response.status_code == 200
     request_payload = request_response.get_json()
     assert request_payload["requestId"].startswith("password_")
-    assert len(request_payload["debugVerificationCode"]) == 6
+    assert "debugVerificationCode" not in request_payload
+    stored_code = user_routes.PASSWORD_CHANGE_REQUESTS[request_payload["requestId"]]["verification_code"]
+    assert len(stored_code) == 6
 
     confirm_response = client.post(
         "/profile/confirm-password-change",
@@ -212,7 +220,7 @@ def test_password_change_request_and_confirm(client, monkeypatch):
             "userId": "100",
             "credentials": _auth_cred("100"),
             "requestId": request_payload["requestId"],
-            "verificationCode": request_payload["debugVerificationCode"],
+            "verificationCode": stored_code,
         },
     )
 
@@ -240,6 +248,7 @@ def test_password_change_rejects_numbers_or_symbols(client, monkeypatch):
     monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
     monkeypatch.setattr(user_routes, "verifyPassword", lambda stored_hash, candidate: stored_hash == candidate)
     monkeypatch.setattr(user_routes, "getQuery", _fake_getquery_factory(users))
+    monkeypatch.setattr(user_routes, "sendEmail", lambda **kwargs: "Email sent successfully")
 
     response = client.post(
         "/profile/request-password-change",
@@ -282,6 +291,7 @@ def test_profile_update_rejects_duplicate_username(client, monkeypatch):
     monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
     monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
     monkeypatch.setattr(user_routes, "getQuery", _fake_getquery_factory(users))
+    monkeypatch.setattr(user_routes, "sendEmail", lambda **kwargs: "Email sent successfully")
 
     response = client.post(
         "/profile/request-update",
@@ -330,6 +340,7 @@ def test_profile_update_rejects_duplicate_email(client, monkeypatch):
     monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
     monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
     monkeypatch.setattr(user_routes, "getQuery", _fake_getquery_factory(users))
+    monkeypatch.setattr(user_routes, "sendEmail", lambda **kwargs: "Email sent successfully")
 
     response = client.post(
         "/profile/request-update",
@@ -349,3 +360,46 @@ def test_profile_update_rejects_duplicate_email(client, monkeypatch):
 
     assert response.status_code == 400
     assert "Account with this email already exists" in response.get_json()["error"]
+
+
+def test_request_update_includes_debug_code_when_enabled(client, monkeypatch):
+    users = {
+        "100": {
+            "userid": "100",
+            "first": "Ada",
+            "last": "Lovelace",
+            "username": "ada",
+            "email": "ada@example.org",
+            "database": ["SocioMap"],
+            "intendedUse": "Research",
+            "password": "old-pass",
+        }
+    }
+
+    user_routes.PROFILE_UPDATE_REQUESTS.clear()
+
+    monkeypatch.setenv("PROFILE_DEBUG_CODES", "true")
+    monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
+    monkeypatch.setattr(user_routes, "getQuery", _fake_getquery_factory(users))
+    monkeypatch.setattr(user_routes, "sendEmail", lambda **kwargs: "Email sent successfully")
+
+    response = client.post(
+        "/profile/request-update",
+        json={
+            "userId": "100",
+            "credentials": _auth_cred("100"),
+            "updates": {
+                "firstName": "Ada",
+                "lastName": "Byron",
+                "username": "ada-byron",
+                "email": "ada.byron@example.org",
+                "database": "ArchaMap",
+                "intendedUse": "Debug test",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert len(payload["debugVerificationCode"]) == 6
