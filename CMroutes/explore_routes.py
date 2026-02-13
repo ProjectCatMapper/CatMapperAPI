@@ -273,13 +273,17 @@ def getNetworkjs():
             // (:MERGING)-[:MERGING]->(:STACK)-[:MERGING]->(:VARIABLE)
             OPTIONAL MATCH (a)-[r1:MERGING]->(s:STACK)
             OPTIONAL MATCH (s)-[r2:MERGING]->(v:VARIABLE)
+            // Include upstream path for dataset-centered view:
+            // (:STACK)-[:MERGING]->(:DATASET) and (:MERGING)-[:MERGING]->(:STACK)
+            OPTIONAL MATCH (s2:STACK)-[r5:MERGING]->(a)
+            OPTIONAL MATCH (m2:MERGING)-[r6:MERGING]->(s2)
             // Also support stack-centered view:
             // (:MERGING)-[:MERGING]->(:STACK) and (:STACK)-[:MERGING]->(:VARIABLE)
             OPTIONAL MATCH (m:MERGING)-[r3:MERGING]->(a:STACK)
             OPTIONAL MATCH (a)-[r4:MERGING]->(v2:VARIABLE)
             WITH a,
-                 [x IN collect(distinct r1) + collect(distinct r2) + collect(distinct r3) + collect(distinct r4) WHERE x IS NOT NULL][0..$limit] AS r,
-                 [x IN collect(distinct s) + collect(distinct v) + collect(distinct m) + collect(distinct v2) WHERE x IS NOT NULL][0..$limit] AS e
+                 [x IN collect(distinct r1) + collect(distinct r2) + collect(distinct r5) + collect(distinct r6) + collect(distinct r3) + collect(distinct r4) WHERE x IS NOT NULL][0..$limit] AS r,
+                 [x IN collect(distinct s) + collect(distinct v) + collect(distinct s2) + collect(distinct m2) + collect(distinct m) + collect(distinct v2) WHERE x IS NOT NULL][0..$limit] AS e
             RETURN collect(distinct a) AS a, r, e
             """
         else:
