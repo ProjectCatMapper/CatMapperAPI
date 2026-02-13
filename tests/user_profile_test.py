@@ -403,3 +403,87 @@ def test_request_update_includes_debug_code_when_enabled(client, monkeypatch):
     assert response.status_code == 200
     payload = response.get_json()
     assert len(payload["debugVerificationCode"]) == 6
+
+
+def test_get_profile_activity_returns_counts(client, monkeypatch):
+    monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
+    monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(
+        user_routes,
+        "getQuery",
+        lambda query, driver=None, params=None, **kwargs: [
+            {"action": "created node", "description": ""},
+            {"action": "created relationship", "description": ""},
+            {"action": "changed", "description": "relationship property update"},
+            {"action": "changed", "description": "node property update"},
+        ],
+    )
+
+    response = client.get(
+        "/profile/activity/100",
+        query_string={"credentials": json.dumps(_auth_cred("100")), "database": "ArchaMap"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["createdNodes"] == 1
+    assert payload["createdRelationships"] == 1
+    assert payload["updatedRelationships"] == 1
+    assert payload["updatedNodes"] == 1
+
+
+def test_add_and_remove_profile_bookmarks(client, monkeypatch):
+    store = {"bookmarks": []}
+
+    monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
+    monkeypatch.setattr(user_routes, "_lookup_cmid_name", lambda database, cmid: "Demo Name")
+    monkeypatch.setattr(user_routes, "_get_user_entries", lambda userid, field_name: list(store.get(field_name, [])))
+    monkeypatch.setattr(user_routes, "_set_user_entries", lambda userid, field_name, entries: store.__setitem__(field_name, list(entries)))
+
+    add_response = client.post(
+        "/profile/bookmarks/add",
+        json={
+            "userId": "100",
+            "credentials": _auth_cred("100"),
+            "database": "ArchaMap",
+            "cmid": "AM100",
+            "cmname": "",
+        },
+    )
+    assert add_response.status_code == 200
+    assert store["bookmarks"][0]["cmid"] == "AM100"
+
+    remove_response = client.post(
+        "/profile/bookmarks/remove",
+        json={
+            "userId": "100",
+            "credentials": _auth_cred("100"),
+            "items": [{"cmid": "AM100", "database": "ArchaMap"}],
+        },
+    )
+    assert remove_response.status_code == 200
+    assert store["bookmarks"] == []
+
+
+def test_add_profile_history_caps_at_50(client, monkeypatch):
+    store = {"history": [{"cmid": f"AM{i}", "database": "ArchaMap"} for i in range(60)]}
+
+    monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
+    monkeypatch.setattr(user_routes, "_lookup_cmid_name", lambda database, cmid: "Latest Name")
+    monkeypatch.setattr(user_routes, "_get_user_entries", lambda userid, field_name: list(store.get(field_name, [])))
+    monkeypatch.setattr(user_routes, "_set_user_entries", lambda userid, field_name, entries: store.__setitem__(field_name, list(entries)))
+
+    response = client.post(
+        "/profile/history/add",
+        json={
+            "userId": "100",
+            "credentials": _auth_cred("100"),
+            "database": "ArchaMap",
+            "cmid": "AM999",
+            "cmname": "",
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(store["history"]) == 50
+    assert store["history"][0]["cmid"] == "AM999"
