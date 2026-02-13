@@ -18,7 +18,7 @@ def _base_payload():
             "datasetID": "AD1",
             "cmNameColumn": "source_name",
             "categoryNamesColumn": "",
-            "alternateCategoryNamesColumn": "",
+            "alternateCategoryNamesColumns": [],
             "cmidColumn": "",
             "keyColumn": "source_key",
         },
@@ -56,3 +56,30 @@ def test_upload_simple_falls_back_to_domain_when_subdomain_missing(client, monke
 
     assert response.status_code == 200
     assert seen["dataset"][0]["label"] == "ADM1"
+
+
+def test_upload_simple_concatenates_multiple_altname_columns(client, monkeypatch):
+    seen = {}
+
+    def fake_input_nodes_uses(**kwargs):
+        seen["dataset"] = kwargs["dataset"]
+        return pd.DataFrame([{"CMID": "AM1"}]), ["CMID"]
+
+    monkeypatch.setattr(upload_routes, "input_Nodes_Uses", fake_input_nodes_uses)
+
+    payload = _base_payload()
+    payload["df"] = [
+        {
+            "source_name": "Alpha",
+            "source_key": "K1",
+            "alt_one": "A1",
+            "alt_two": "A2",
+            "alt_three": "",
+        }
+    ]
+    payload["formData"]["alternateCategoryNamesColumns"] = ["alt_one", "alt_two", "alt_three"]
+
+    response = client.post("/uploadInputNodes", json=payload)
+
+    assert response.status_code == 200
+    assert seen["dataset"][0]["altNames"] == "A1;A2"
