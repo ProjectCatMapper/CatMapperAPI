@@ -230,7 +230,7 @@ def test_password_change_request_and_confirm(client, monkeypatch):
     assert users["100"]["password"] == "hashed::NewStrong"
 
 
-def test_password_change_rejects_numbers_or_symbols(client, monkeypatch):
+def test_password_change_rejects_short_password(client, monkeypatch):
     users = {
         "100": {
             "userid": "100",
@@ -256,12 +256,12 @@ def test_password_change_rejects_numbers_or_symbols(client, monkeypatch):
             "userId": "100",
             "credentials": _auth_cred("100"),
             "currentPassword": "old-pass",
-            "newPassword": "abc123",
+            "newPassword": "abc12",
         },
     )
 
     assert response.status_code == 400
-    assert "at least 6 letters" in response.get_json()["error"]
+    assert "at least 6 characters" in response.get_json()["error"]
 
 
 def test_profile_update_rejects_duplicate_username(client, monkeypatch):
