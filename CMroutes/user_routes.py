@@ -8,6 +8,7 @@ import uuid
 import os
 import logging
 from .extensions import mail
+from .auth_utils import issue_auth_token, verify_request_auth, verify_bearer_auth
 
 user_bp = Blueprint('user', __name__)
 
@@ -208,6 +209,9 @@ def _load_user(userid):
 
 
 def _verify_profile_credentials(userid, credentials):
+    bearer_claims = verify_bearer_auth(required_userid=userid, req=request)
+    if bearer_claims:
+        return True
     if not credentials:
         raise Exception("Missing credentials")
     credential_userid = credentials.get("userid")
@@ -328,8 +332,14 @@ def getLogin():
         password = unlist(data.get('password'))
 
         credentials = login(user, password)
-
-        return credentials
+        token = issue_auth_token(credentials.get("userid"), credentials.get("role"))
+        response = {
+            "userid": credentials.get("userid"),
+            "username": credentials.get("username"),
+            "role": credentials.get("role", "user"),
+            "token": token,
+        }
+        return jsonify(response), 200
 
     except Exception as e:
         result = str(e)
@@ -768,13 +778,8 @@ def updateNewUsers():
         process = unlist(data.get('process'))
         userid = data.get('userid')
 
-        verified = verifyUser(credentials.get(
-            "userid"), credentials.get("key"), "admin")
-
-        if verified != "verified":
-            raise Exception("Error: User is not verified")
-
-        approver = credentials.get("userid")
+        claims = verify_request_auth(credentials=credentials, required_role="admin", req=request)
+        approver = claims.get("userid")
 
         result = enableUser(database, process=process,
                             userid=userid, approver=approver)
