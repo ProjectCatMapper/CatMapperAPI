@@ -14,10 +14,11 @@ def upload_API():
         df = data.get("df")
         database = unlist(data.get("database"))
         formData = unlist(data.get("formData"))
-        label = formData["domain"]
-        if label == "ANY DOMAIN":
+        label = formData.get("subdomain") or formData.get("domain")
+        label_upper = str(label).upper() if label is not None else ""
+        if label_upper == "ANY DOMAIN":
             label = "CATEGORY"
-        if label == "AREA":
+        if label_upper == "AREA":
             label = "DISTRICT"
         datasetID = formData["datasetID"]
         CMName = formData["cmNameColumn"]
