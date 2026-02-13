@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, render_template, make_response
 from CM import *
 import json
+from .auth_utils import verify_request_auth
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -119,6 +120,7 @@ def check_ambiguous_usesties():
     USES_property = json.loads(input.get('s1_7'))
     rel_id = USES_property[1]["id"]
     driver = getDriver(database)
+    verify_request_auth(credentials=credentials, required_role="admin", req=request)
 
     result = check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id)
     return result
@@ -171,28 +173,31 @@ def getAdminEdit():
         apikey = unlist(data.get('apikey'))
         credentials = unlist(data.get("cred"))
         input = unlist(data.get("input"))
-        if credentials:
-            verified = verifyUser(credentials.get(
-                "userid"), credentials.get("key"), "admin")
-            if verified != "verified":
-                raise Exception("Error: User is not verified")
+        acting_user = None
+        auth_header = request.headers.get("Authorization", "")
+        if credentials or auth_header.startswith("Bearer "):
+            claims = verify_request_auth(credentials=credentials, required_role="admin", req=request)
+            acting_user = claims.get("userid")
         else:
             validated = False
             if apikey == apikeyEnv:
                 validated = True
+                acting_user = user
             if not validated:
                 credentials = login(user, pwd)
                 if isinstance(credentials, dict) and credentials.get('role') == "admin":
                     validated = True
-                    user = credentials.get('userid')
+                    acting_user = credentials.get('userid')
             if not validated:
                 raise Exception("User not authorized")
+        if not acting_user:
+            acting_user = user
         
         result = "Nothing returned"
         if fun == "mergeNodes":
             keepcmid = unlist(data.get('keepcmid').strip())
             deletecmid = unlist(data.get('deletecmid').strip())
-            result = mergeNodes(keepcmid, deletecmid, user, database)
+            result = mergeNodes(keepcmid, deletecmid, acting_user, database)
         elif fun == "processUSES":
             CMID = cleanCMID(data.get('CMID'))
             result = processUSES(database=database, CMID=CMID)
@@ -204,23 +209,23 @@ def getAdminEdit():
             result = replaceProperty(cmid, property, old, new, database)
         elif fun == "add/edit/delete node property":
             result = add_edit_delete_Node(
-                database, credentials.get("userid"), input)
+                database, acting_user, input)
         elif fun == "add/edit/delete USES property":
             result = add_edit_delete_USES(
-                database, credentials.get("userid"), input)
+                database, acting_user, input)
         elif fun == "merge nodes":
             result = mergeNodes(input.get('s1_2'), input.get(
-                's1_3'), credentials.get("userid"), database)
+                's1_3'), acting_user, database)
         elif fun == "create new label":
-            result = createLabel(database, credentials.get("userid"), input)
+            result = createLabel(database, acting_user, input)
         elif fun == "delete node":
-            result = deleteNode(database, credentials.get("userid"), input)
+            result = deleteNode(database, acting_user, input)
         elif fun == "delete USES relation":
-            result = deleteUSES(database, credentials.get("userid"), input)
+            result = deleteUSES(database, acting_user, input)
         elif fun == "move USES tie":
             tabledata = data.get("tabledata")
             dataset = data.get("datasetID")
-            result = moveUSESties(database, credentials.get("userid"), input,dataset,tabledata)
+            result = moveUSESties(database, acting_user, input,dataset,tabledata)
         else:
             raise Exception("Function does not exist")
         return result

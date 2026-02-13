@@ -34,15 +34,23 @@ NEW_VERSION=$(date +%Y.%m.%d.%H%M)
 
 echo "🚀 Starting deployment for version: $NEW_VERSION"
 
-# 2. Write the version to the .env file for Flask/Docker
-# This ensures the API knows its own version
-run_as_deploy_user bash -c "echo VERSION=$NEW_VERSION > .env"
+# 2. Ensure .env exists and update VERSION without clobbering other secrets.
+run_as_deploy_user touch .env
+run_as_deploy_user sed -i '/^VERSION=/d' .env
+run_as_deploy_user bash -c "echo VERSION=$NEW_VERSION >> .env"
 
-# 3. Restart the Docker container
+# 3. Ensure auth secret exists for signed API auth tokens.
+if ! run_as_deploy_user grep -q '^CATMAPPER_AUTH_SECRET=' .env; then
+  AUTH_SECRET=$(openssl rand -hex 64)
+  run_as_deploy_user bash -c "echo CATMAPPER_AUTH_SECRET=$AUTH_SECRET >> .env"
+  echo "Generated CATMAPPER_AUTH_SECRET in .env"
+fi
+
+# 4. Restart the Docker container
 echo "Restarting API container..."
 docker restart api
 
-# 4. Git Tagging
+# 5. Git Tagging
 # This creates a local tag and pushes it to your remote (e.g., GitHub/GitLab)
 echo "Creating Git tag: v$NEW_VERSION"
 
