@@ -1,11 +1,13 @@
 from flask import Blueprint, request, jsonify
 from CM import getDriver, password_hash, sendEmail, verifyUser, login, enableUser, unlist, getQuery, verifyPassword
-from flask_mail import Mail
 import json
 from datetime import datetime, timedelta
 from threading import Lock
 import secrets
 import uuid
+import os
+import logging
+from .extensions import mail
 
 user_bp = Blueprint('user', __name__)
 
@@ -17,6 +19,7 @@ PROFILE_UPDATE_REQUESTS = {}
 PASSWORD_CHANGE_REQUESTS = {}
 REQUEST_LOCK = Lock()
 REQUEST_TTL_MINUTES = 15
+logger = logging.getLogger(__name__)
 
 
 def _now_iso():
@@ -36,6 +39,35 @@ def _mask_email(email):
     else:
         prefix = f"{name[:2]}***"
     return f"{prefix}@{domain}"
+
+
+def _include_debug_verification_code():
+    return os.getenv("PROFILE_DEBUG_CODES", "false").lower() in {"1", "true", "yes", "on"}
+
+
+def _send_verification_email(email, verification_code, action_label):
+    if not email:
+        raise Exception("User email is missing; cannot send verification code.")
+
+    sender = config['MAIL']['mail_default']
+    subject = f"CatMapper {action_label} Verification Code"
+    body = (
+        "Hello,\n\n"
+        f"We received a request for: {action_label}.\n"
+        f"Your verification code is: {verification_code}\n\n"
+        f"This code expires in {REQUEST_TTL_MINUTES} minutes.\n\n"
+        "If you did not request this change, please ignore this message.\n\n"
+        "CatMapper Team"
+    )
+    result = sendEmail(
+        mail=mail,
+        subject=subject,
+        recipients=[email],
+        body=body,
+        sender=sender,
+    )
+    if isinstance(result, str) and result.lower().startswith("error"):
+        raise Exception(result)
 
 
 def _cleanup_requests():
@@ -305,11 +337,23 @@ def request_profile_update():
                 "expires_at": datetime.utcnow() + timedelta(minutes=REQUEST_TTL_MINUTES),
             }
 
-        return jsonify({
+        target_email = updates.get("email") or existing.get("email")
+        _send_verification_email(target_email, verification_code, "Profile Update")
+        logger.info(
+            "Profile verification email sent: userid=%s request_id=%s email=%s",
+            userid,
+            request_id,
+            _mask_email(target_email),
+        )
+
+        response = {
             "requestId": request_id,
-            "maskedEmail": _mask_email(updates.get("email") or existing.get("email")),
-            "debugVerificationCode": verification_code,
-        }), 200
+            "maskedEmail": _mask_email(target_email),
+        }
+        if _include_debug_verification_code():
+            response["debugVerificationCode"] = verification_code
+
+        return jsonify(response), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
@@ -414,11 +458,23 @@ def request_password_change():
                 "expires_at": datetime.utcnow() + timedelta(minutes=REQUEST_TTL_MINUTES),
             }
 
-        return jsonify({
+        target_email = existing.get("email")
+        _send_verification_email(target_email, verification_code, "Password Change")
+        logger.info(
+            "Password verification email sent: userid=%s request_id=%s email=%s",
+            userid,
+            request_id,
+            _mask_email(target_email),
+        )
+
+        response = {
             "requestId": request_id,
-            "maskedEmail": _mask_email(existing.get("email")),
-            "debugVerificationCode": verification_code,
-        }), 200
+            "maskedEmail": _mask_email(target_email),
+        }
+        if _include_debug_verification_code():
+            response["debugVerificationCode"] = verification_code
+
+        return jsonify(response), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
@@ -491,8 +547,6 @@ def updateNewUsers():
 
             users = [user for user in result if user.get("email")]
             if len(users) > 0:
-                mail = Mail()
-
                 for user in users:
                     body = f"""
         Hello {user.get("first")} {user.get("last")},
