@@ -501,11 +501,26 @@ def getMergingTemplate(datasetID, database):
         driver = getDriver(database)
 
         query = """
-            RETURN "" as mergingID, "" as stackID, "" as datasetID, "" as datasetName, "Please enter the working directory as the first filepath" as filePath
+            RETURN
+            "" as mergingID,
+            "" as mergingCMName,
+            "" as mergingShortName,
+            "" as mergingCitation,
+            "" as stackID,
+            "" as datasetID,
+            "" as datasetName,
+            "Please enter the working directory as the first filepath" as filePath
             UNION ALL 
             MATCH (m:DATASET {CMID: $datasetID})-[:MERGING]->(s:DATASET)-[:MERGING]->(d:DATASET)
             RETURN
-            m.CMID as mergingID, s.CMID as stackID, d.CMID as datasetID, d.CMName as datasetName, "" as filePath
+            m.CMID as mergingID,
+            m.CMName as mergingCMName,
+            m.shortName as mergingShortName,
+            m.DatasetCitation as mergingCitation,
+            s.CMID as stackID,
+            d.CMID as datasetID,
+            d.CMName as datasetName,
+            "" as filePath
             """
         data = getQuery(query, driver=driver, params={
             "datasetID": datasetID})
@@ -513,8 +528,16 @@ def getMergingTemplate(datasetID, database):
         if data[0].get("error"):
             return jsonify({"message": "No data found"}), 404
 
-        desired_order = ["mergingID", "stackID",
-                         "datasetID", "datasetName", "filePath"]
+        desired_order = [
+            "mergingID",
+            "mergingCMName",
+            "mergingShortName",
+            "mergingCitation",
+            "stackID",
+            "datasetID",
+            "datasetName",
+            "filePath"
+        ]
 
         template = [
             {key: item.get(key, "") for key in desired_order}
