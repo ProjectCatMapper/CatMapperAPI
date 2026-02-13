@@ -267,7 +267,7 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
                 return jsonify({"message": "No data found"}), 404
             
             if resultFormat == "key-to-category":
-                cols = ['datasetID', 'CMName', 'CMID', 'Key', 'Name']
+                cols = ['CMID', 'CMName', 'datasetID', 'Key', 'Name']
                 result = merged[cols].copy()
                 result = result.fillna("")
                 return result.to_dict(orient='records')
@@ -297,7 +297,7 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
                 
             # reorder columns
             cols = merged_df.columns.tolist()
-            cols = ["CMName", "CMID"] + [col for col in cols if col not in ["CMName", "CMID"]]
+            cols = ["CMID", "CMName"] + [col for col in cols if col not in ["CMID", "CMName"]]
             merged_df = merged_df[cols]
 
             # filter keys if intersection is off
@@ -323,7 +323,7 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
                 return jsonify({"message": "No data found"}), 404
             
             if resultFormat == "key-to-category":
-                cols = ['datasetID', 'LCA_CMName', 'LCA_CMID', 'tie','Key', 'Name']
+                cols = ['LCA_CMID', 'LCA_CMName', 'datasetID', 'tie', 'Key', 'Name']
                 result = matches[cols].copy()
                 result["datasetCMName"] = result["datasetID"].map(dataset_name_map).fillna("")
                 result = result.fillna("")
@@ -412,7 +412,14 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
             result = result.fillna("")
 
             for col in result.filter(like="Key_").columns:
-                result[[f"variable_{col}", f"value_{col}"]] = result[col].apply(split_vars_values)
+                parsed = result[col].apply(split_vars_values)
+                var_series = parsed[0]
+                val_series = parsed[1]
+                has_var_values = var_series.fillna("").astype(str).str.strip().ne("").any()
+                has_val_values = val_series.fillna("").astype(str).str.strip().ne("").any()
+                if has_var_values or has_val_values:
+                    result[f"variable_{col}"] = var_series.fillna("")
+                    result[f"value_{col}"] = val_series.fillna("")
 
             return result.to_dict(orient='records')
 
