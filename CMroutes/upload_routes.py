@@ -23,7 +23,11 @@ def upload_API():
         datasetID = formData["datasetID"]
         CMName = formData["cmNameColumn"]
         Name = formData["categoryNamesColumn"]
-        altNames = formData["alternateCategoryNamesColumn"]
+        altNamesColumns = formData.get("alternateCategoryNamesColumns", [])
+        if not isinstance(altNamesColumns, list):
+            altNamesColumns = [altNamesColumns] if altNamesColumns else []
+        altNamesColumns = [col for col in altNamesColumns if col]
+        altNames = formData.get("alternateCategoryNamesColumn", "")
         CMID = formData["cmidColumn"]
         Key = formData["keyColumn"]
 
@@ -81,8 +85,25 @@ def upload_API():
             if not CMID in df.columns:
                 df['CMID'] = ""
                 CMID = "CMID"
-            df.rename(columns={CMName: "CMName", CMID: "CMID", Name: "Name",
-                      Key: "Key", altNames: "altNames"}, inplace=True)
+
+            if altNamesColumns:
+                existing_alt_cols = [col for col in altNamesColumns if col in df.columns]
+                if existing_alt_cols:
+                    def _combine_alt_names(row):
+                        values = []
+                        for col in existing_alt_cols:
+                            raw = row.get(col)
+                            if pd.isna(raw):
+                                continue
+                            text = str(raw).strip()
+                            if text:
+                                values.append(text)
+                        return ";".join(values)
+                    df["altNames"] = df.apply(_combine_alt_names, axis=1)
+            elif altNames and altNames in df.columns:
+                df.rename(columns={altNames: "altNames"}, inplace=True)
+
+            df.rename(columns={CMName: "CMName", CMID: "CMID", Name: "Name", Key: "Key"}, inplace=True)
             df = df.to_dict(orient='records')
             # return {"Name":Name, "CMID":CMID,"altNames":altNames,"Key":Key,"user":user,"overwriteProperties":overwriteProperties,"updateProperties":updateProperties,"addDistrict":addDistrict,"addRecordYear":addRecordYear}
             response, desired_order = input_Nodes_Uses(
