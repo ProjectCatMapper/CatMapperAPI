@@ -34,6 +34,29 @@ def split_vars_values(s):
             values.append(val.strip())
     return pd.Series(["; ".join(variables), "; ".join(values)])
 
+
+def get_dataset_name_map(driver, dataset_ids):
+    if not dataset_ids:
+        return {}
+
+    query = """
+    UNWIND $dataset_ids AS cmid
+    MATCH (d:DATASET {CMID: cmid})
+    RETURN d.CMID AS datasetID, d.CMName AS datasetName
+    """
+    rows = getQuery(query, driver=driver, params={"dataset_ids": dataset_ids})
+
+    if isinstance(rows, pd.DataFrame):
+        records = rows.to_dict(orient="records")
+    else:
+        records = rows or []
+
+    return {
+        row.get("datasetID"): row.get("datasetName", "")
+        for row in records
+        if row.get("datasetID")
+    }
+
 # joins two datasets that have previously been translated into CatMapper’s database.Each dataset must include two columns: datasetiD and the Key pointing to a category.
 # It returns a single spreadsheet with: 1) datasetIDs, 2) data columns from the original dataset (renamed with _left and _right suffixes if overlapping.  Rows with keys pointing to the same category are aligned in the output spreadsheet.
 # When keys point to a CatMapper category, standardized identifiers are also returned (CMID, CMName).
@@ -292,6 +315,7 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
                 return jsonify({"message": "Please select only two datasets"}), 400
 
             query = generate_cypher_query(unlist(category_label), ncontains)
+            dataset_name_map = get_dataset_name_map(driver, dataset_choices)
 
             matches = getQuery(query, driver, {"datasets": dataset_choices}, type="df")
 
@@ -301,6 +325,7 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
             if resultFormat == "key-to-category":
                 cols = ['datasetID', 'LCA_CMName', 'LCA_CMID', 'tie','Key', 'Name']
                 result = matches[cols].copy()
+                result["datasetCMName"] = result["datasetID"].map(dataset_name_map).fillna("")
                 result = result.fillna("")
                 return result.to_dict(orient='records')
             
@@ -381,7 +406,9 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
             cols = ["LCA_CMID", "LCA_CMName", "nTie"] + \
                 [col for col in df_filtered.columns if col not in [
                     "LCA_CMID", "LCA_CMName", "nTie"]]
-            result = df_filtered[cols]
+            result = df_filtered[cols].copy()
+            for dataset_id in dataset_choices:
+                result[f"datasetCMName_{dataset_id}"] = dataset_name_map.get(dataset_id, "")
             result = result.fillna("")
 
             for col in result.filter(like="Key_").columns:
