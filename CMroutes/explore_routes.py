@@ -2,10 +2,85 @@
 from flask import request, Blueprint, jsonify
 from CM import *
 from collections import defaultdict
+import colorsys
 import json
 import re
 
 explore_bp = Blueprint('explore', __name__)
+
+
+def _hex_to_rgb(hex_color):
+    clean = (hex_color or "").strip().lstrip("#")
+    if len(clean) != 6:
+        return None
+    try:
+        return tuple(int(clean[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return None
+
+
+def _rgb_to_hex(rgb):
+    return "#{:02x}{:02x}{:02x}".format(*rgb)
+
+
+def _average_hex(colors):
+    rgbs = [_hex_to_rgb(c) for c in colors]
+    rgbs = [rgb for rgb in rgbs if rgb is not None]
+    if not rgbs:
+        return None
+    n = len(rgbs)
+    avg = tuple(int(round(sum(ch[i] for ch in rgbs) / n)) for i in range(3))
+    return _rgb_to_hex(avg)
+
+
+def _desaturate_hex(hex_color, factor=0.88):
+    rgb = _hex_to_rgb(hex_color)
+    if rgb is None:
+        return hex_color
+
+    r, g, b = [c / 255.0 for c in rgb]
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    s = max(0.0, min(1.0, s * factor))
+    r2, g2, b2 = colorsys.hls_to_rgb(h, l, s)
+    return _rgb_to_hex((int(round(r2 * 255)), int(round(g2 * 255)), int(round(b2 * 255))))
+
+
+def _get_label_color_map(driver):
+    query = """
+    MATCH (l:LABEL)
+    WHERE l.color IS NOT NULL AND trim(toString(l.color)) <> ''
+    RETURN l.CMName AS label, l.color AS color
+    """
+    rows = getQuery(query, driver, type="dict")
+    return {row["label"]: row["color"] for row in rows if row.get("label") and row.get("color")}
+
+
+def _apply_node_colors(rows, label_color_map):
+    for row in rows:
+        labels = row.get("labels") or []
+        if not isinstance(labels, list):
+            labels = [labels]
+
+        # Exclude generic structural labels from color selection.
+        usable_labels = [lbl for lbl in labels if lbl not in ["CATEGORY", "DISTRICT"]]
+        color_pairs = [(lbl, label_color_map.get(lbl)) for lbl in usable_labels if lbl]
+        color_pairs = [(lbl, clr) for lbl, clr in color_pairs if clr]
+
+        if not color_pairs:
+            row["color"] = "#cccccc"
+            row["legendLabel"] = "UNMAPPED"
+            continue
+
+        labels_with_colors = sorted(set([lbl for lbl, _ in color_pairs]))
+        unique_colors = list(dict.fromkeys([clr for _, clr in color_pairs]))
+
+        if len(unique_colors) == 1 or len(set(c.lower() for c in unique_colors)) == 1:
+            row["color"] = unique_colors[0]
+            row["legendLabel"] = labels_with_colors[0] if len(labels_with_colors) == 1 else ":".join(labels_with_colors)
+        else:
+            avg_color = _average_hex(unique_colors) or "#cccccc"
+            row["color"] = _desaturate_hex(avg_color)
+            row["legendLabel"] = ":".join(labels_with_colors)
 
 @explore_bp.route("/info/<database>/<cmid>", methods=['GET'])
 def getInfo(database, cmid):
@@ -332,6 +407,12 @@ def getNetworkjs():
             node = [flatten_json(entry) for entry in node]
             rel = [flatten_json(entry) for entry in rel]
             end = [flatten_json(entry) for entry in end]
+
+        # Use LABEL node color metadata from Neo4j for node coloring.
+        # Multi-label nodes receive averaged colors across mapped labels.
+        label_color_map = _get_label_color_map(driver)
+        _apply_node_colors(node, label_color_map)
+        _apply_node_colors(end, label_color_map)
 
         return {"node": node, "relations": rel, "relNodes": end, "params": [{"cmid": cmid, "database": database, "domain": domain, "relation": relation}]}
     except Exception as e:
