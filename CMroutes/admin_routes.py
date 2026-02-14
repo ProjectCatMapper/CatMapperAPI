@@ -293,19 +293,47 @@ def getMergeUSESties():
 @admin_bp.route('/admin/saveMetadata', methods=['POST'])
 def saveMetadata():
     try:
-# 1. Initialize separate lists for each database
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+        auth_header = request.headers.get("Authorization", "")
+        credentials = unlist(data.get("cred")) if isinstance(data, dict) else None
+
+        if credentials or auth_header.startswith("Bearer "):
+            verify_request_auth(credentials=credentials, required_role="admin", req=request)
+        else:
+            raise Exception("Admin authorization is required")
+
+        updates = data if isinstance(data, list) else data.get("updates")
+        if not isinstance(updates, list):
+            raise Exception("Invalid payload: 'updates' must be a list")
+
+        # 1. Initialize separate lists for each database
         updatesS = []
         updatesA = []
 
-        for item in data:
+        for item in updates:
+            if not isinstance(item, dict):
+                raise Exception("Invalid update item: each update must be an object")
+
             node_id = item.get('id')
             props = item.get('properties', {})
-            db_target = item.get('database') # Check which DB this item belongs to
+            db_target = item.get('database')  # Check which DB this item belongs to
+
+            if not node_id or not isinstance(node_id, str):
+                raise Exception("Invalid update item: missing or invalid node id")
+            if db_target not in {"SocioMap", "ArchaMap"}:
+                raise Exception(f"Invalid database target '{db_target}'")
+            if not isinstance(props, dict):
+                raise Exception("Invalid update item: properties must be an object")
 
             # Clean properties
             clean_props = props.copy()
-            clean_props.pop('CMID', None) 
-            
+            clean_props.pop('CMID', None)
+            clean_props.pop('id', None)
+            clean_props.pop('labels', None)
+            clean_props.pop('database', None)
+
             # Create the update object
             update_packet = {
                 "id": node_id,
@@ -329,12 +357,11 @@ def saveMetadata():
 
         # 4. Execute conditionally based on lists
         total_count = 0
-        
+
         # Only run SocioMap query if we have SocioMap updates
         if updatesS:
             driverS = getDriver("sociomap")
             resultS = getQuery(query=query, driver=driverS, params={"updates": updatesS}, type="list")
-            # Assuming getQuery returns a list of dicts, e.g., [{'updated_count': 1}]
             if resultS:
                 total_count += resultS[0].get('updated_count', 0)
 
@@ -345,8 +372,76 @@ def saveMetadata():
             if resultA:
                 total_count += resultA[0].get('updated_count', 0)
 
-        return jsonify({"message": f"Updated {total_count} nodes."}), 200
+        return jsonify({
+            "message": f"Updated {total_count} nodes.",
+            "updatedCount": total_count,
+            "byDatabase": {
+                "SocioMap": len(updatesS),
+                "ArchaMap": len(updatesA)
+            }
+        }), 200
 
     except Exception as e:
         print(f"Error saving metadata: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@admin_bp.route('/admin/metadata/nodes', methods=['GET'])
+def list_metadata_nodes():
+    try:
+        auth_header = request.headers.get("Authorization", "")
+        credentials = request.args.get("cred")
+        if credentials or auth_header.startswith("Bearer "):
+            verify_request_auth(credentials=credentials, required_role="admin", req=request)
+        else:
+            raise Exception("Admin authorization is required")
+
+        query = """
+        MATCH (n:METADATA)
+        WITH n, [label IN labels(n) WHERE label <> 'METADATA'] AS nodeLabels
+        RETURN elementId(n) AS id,
+               n.CMID AS CMID,
+               n.CMName AS CMName,
+               n.groupLabel AS groupLabel,
+               n.color AS color,
+               nodeLabels AS labels
+        ORDER BY n.CMName
+        """
+
+        result_s = getQuery(query=query, driver=getDriver("sociomap"), type="list")
+        result_a = getQuery(query=query, driver=getDriver("archamap"), type="list")
+
+        return jsonify({
+            "SocioMap": result_s or [],
+            "ArchaMap": result_a or []
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@admin_bp.route('/admin/metadata/node/<CMID>', methods=['GET'])
+def get_metadata_node_admin(CMID):
+    try:
+        auth_header = request.headers.get("Authorization", "")
+        credentials = request.args.get("cred")
+        if credentials or auth_header.startswith("Bearer "):
+            verify_request_auth(credentials=credentials, required_role="admin", req=request)
+        else:
+            raise Exception("Admin authorization is required")
+
+        if not isinstance(CMID, str) or not CMID:
+            raise Exception("CMID must be a non-empty string")
+
+        query = "MATCH (n:METADATA {CMID: $CMID}) RETURN n"
+        resultS = getQuery(query=query, driver=getDriver("sociomap"), params={"CMID": CMID}, type="records")
+        resultA = getQuery(query=query, driver=getDriver("archamap"), params={"CMID": CMID}, type="records")
+
+        nodes = []
+        if resultS:
+            nodes.append({"SocioMap": serialize_node(resultS[0]['n'])})
+        if resultA:
+            nodes.append({"ArchaMap": serialize_node(resultA[0]['n'])})
+
+        return jsonify(nodes), 200
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
