@@ -358,19 +358,39 @@ def saveMetadata():
         # 4. Execute conditionally based on lists
         total_count = 0
 
+        def extract_updated_count(result):
+            if result is None:
+                return 0
+            # getQuery(..., type="list") may return:
+            # - [{'updated_count': N}]
+            # - [N]
+            # - N
+            if isinstance(result, list):
+                if not result:
+                    return 0
+                first = result[0]
+                if isinstance(first, dict):
+                    return int(first.get('updated_count', 0) or 0)
+                if isinstance(first, (int, float)):
+                    return int(first)
+                return 0
+            if isinstance(result, dict):
+                return int(result.get('updated_count', 0) or 0)
+            if isinstance(result, (int, float)):
+                return int(result)
+            return 0
+
         # Only run SocioMap query if we have SocioMap updates
         if updatesS:
             driverS = getDriver("sociomap")
             resultS = getQuery(query=query, driver=driverS, params={"updates": updatesS}, type="list")
-            if resultS:
-                total_count += resultS[0].get('updated_count', 0)
+            total_count += extract_updated_count(resultS)
 
         # Only run ArchaMap query if we have ArchaMap updates
         if updatesA:
             driverA = getDriver("archamap")
             resultA = getQuery(query=query, driver=driverA, params={"updates": updatesA}, type="list")
-            if resultA:
-                total_count += resultA[0].get('updated_count', 0)
+            total_count += extract_updated_count(resultA)
 
         return jsonify({
             "message": f"Updated {total_count} nodes.",
