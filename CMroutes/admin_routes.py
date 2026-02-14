@@ -399,21 +399,58 @@ def list_metadata_nodes():
         query = """
         MATCH (n:METADATA)
         WITH n, [label IN labels(n) WHERE label <> 'METADATA'] AS nodeLabels
+        WHERE n.CMID IS NOT NULL
+           OR n.CMName IS NOT NULL
+           OR n.groupLabel IS NOT NULL
+           OR size(nodeLabels) > 0
         RETURN elementId(n) AS id,
                n.CMID AS CMID,
                n.CMName AS CMName,
                n.groupLabel AS groupLabel,
                n.color AS color,
-               nodeLabels AS labels
+               nodeLabels AS labels,
+               properties(n) AS props
         ORDER BY n.CMName
         """
 
         result_s = getQuery(query=query, driver=getDriver("sociomap"), type="list")
         result_a = getQuery(query=query, driver=getDriver("archamap"), type="list")
 
+        def sanitize_rows(rows):
+            if not isinstance(rows, list):
+                return []
+            clean = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                props = row.get("props") if isinstance(row.get("props"), dict) else {}
+                cmid = row.get("CMID") or props.get("CMID") or props.get("cmid") or ""
+                cmname = row.get("CMName") or props.get("CMName") or props.get("Name") or props.get("name") or ""
+                labels = row.get("labels") if isinstance(row.get("labels"), list) else []
+                group_label = (
+                    row.get("groupLabel")
+                    or props.get("groupLabel")
+                    or props.get("groupDomain")
+                    or (labels[0] if labels else "UNMAPPED")
+                )
+                color = row.get("color") or props.get("color") or props.get("hexColor")
+
+                if not cmid and not cmname:
+                    continue
+
+                clean.append({
+                    "id": row.get("id"),
+                    "CMID": cmid,
+                    "CMName": cmname,
+                    "groupLabel": group_label,
+                    "color": color,
+                    "labels": labels
+                })
+            return clean
+
         return jsonify({
-            "SocioMap": result_s or [],
-            "ArchaMap": result_a or []
+            "SocioMap": sanitize_rows(result_s),
+            "ArchaMap": sanitize_rows(result_a)
         }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
