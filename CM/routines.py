@@ -358,7 +358,7 @@ def getBadCMID(database, mail=None, return_type="data"):
 
             query = f"""
             MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
-            with apoc.coll.toSet(apoc.coll.flatten(collect(distinct r.{property}),true)) as val
+            with apoc.coll.toSet([x in apoc.coll.flatten(collect(distinct coalesce(r.{property}, [])), true) where x is not null and not x = ""]) as val
             call {{with val match (c:CATEGORY) where c.CMID in val return collect(c.CMID) as val2}}
             with [i in val where not i in val2] as badlist
             unwind badlist as bad
@@ -1881,7 +1881,7 @@ def getBadContextual(database, mail=None, return_type="data"):
                 UNION ALL
                 MATCH (a)-[r1:CONTAINS]->(b)
                 MATCH (b)-[r2:CONTAINS]->(a) 
-                WHERE id(a) < id(b) AND (r1.eventDate IS NULL OR r2.eventDate IS NULL OR r1.eventDate = r2.eventDate)
+                WHERE elementId(a) < elementId(b) AND (r1.eventDate IS NULL OR r2.eventDate IS NULL OR r1.eventDate = r2.eventDate)
                 RETURN a.CMID AS startCMID, [b.CMID] AS relatedNodes, 'Reciprocal' AS issueType, 'CONTAINS' AS relType
                 UNION ALL
                 MATCH (n:CATEGORY)
@@ -1998,7 +1998,7 @@ def get_duplicate_empty_USES(database, mail=None, return_type="data"):
         // overwrite the property with a de-duplicated version
         SET r[prop] = apoc.coll.toSet(values)
 
-        RETURN id(r)     AS relId,
+        RETURN elementId(r) AS relId,
             prop      AS fixedProperty,
             values    AS oldValues,
             r[prop]   AS newValues;
@@ -2278,7 +2278,7 @@ def getNumeric_Checks(database, mail=None, return_type="data"):
         WHERE 
             c[0] < -180 OR c[0] > 180 OR
             c[1] < -90 OR  c[1] > 90
-        RETURN id(r) AS relationshipWithOutOfBoundsCoords, c AS invalidCoordinate;
+        RETURN elementId(r) AS relationshipWithOutOfBoundsCoords, c AS invalidCoordinate;
         """
         results = getQuery(query, driver, type="df")
 
