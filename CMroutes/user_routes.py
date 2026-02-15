@@ -167,3 +167,123 @@ def updateNewUsers():
         result = str(e)
         return result, 500
 
+
+def _read_json_payload():
+    data = request.get_json(silent=True)
+    if isinstance(data, dict):
+        return data
+    raw = request.get_data()
+    if not raw:
+        return {}
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _extract_entry(data):
+    for key in ["entry", "item", "path", "url", "location", "target", "bookmark", "history"]:
+        value = data.get(key)
+        if value is not None and str(value).strip() != "":
+            return str(value).strip()
+
+    payload = data.get("payload")
+    if isinstance(payload, dict):
+        for key in ["entry", "item", "path", "url", "location", "target", "bookmark", "history"]:
+            value = payload.get(key)
+            if value is not None and str(value).strip() != "":
+                return str(value).strip()
+
+    for key in ["entry", "item", "path", "url", "location", "target"]:
+        value = request.args.get(key)
+        if value is not None and str(value).strip() != "":
+            return str(value).strip()
+
+    return None
+
+
+def _extract_credentials(data):
+    credentials = data.get("credentials")
+    if not isinstance(credentials, dict):
+        credentials = {}
+
+    userid = (
+        credentials.get("userid")
+        or data.get("userid")
+        or data.get("userId")
+        or data.get("user")
+        or request.args.get("userid")
+        or request.args.get("userId")
+        or request.headers.get("X-Userid")
+    )
+    key = (
+        credentials.get("key")
+        or data.get("key")
+        or data.get("token")
+        or request.args.get("key")
+        or request.args.get("token")
+        or request.headers.get("X-Key")
+        or request.headers.get("Authorization")
+    )
+
+    if isinstance(key, str) and key.startswith("Bearer "):
+        key = key.replace("Bearer ", "", 1).strip()
+
+    if userid is None or key is None:
+        return None, None
+    return str(userid), str(key)
+
+
+def _append_profile_item(property_name):
+    if request.method == "OPTIONS":
+        return ("", 204)
+
+    data = _read_json_payload()
+    userid, key = _extract_credentials(data)
+    if not userid or not key:
+        return jsonify({"error": "Missing credentials.userid and credentials.key"}), 400
+
+    entry = _extract_entry(data)
+    if not entry:
+        return jsonify({"error": "Missing profile entry (entry/item/path/url)"}), 400
+
+    verified = verifyUser(userid, key)
+    if not (isinstance(verified, dict) and verified.get("verified") == "verified"):
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    driver = getDriver("userdb")
+    query = f"""
+    MATCH (u:USER {{userid: toString($userid), password: $key, access: 'enabled'}})
+    WITH u, coalesce(u.{property_name}, []) AS currentItems
+    WITH u, [x IN currentItems WHERE x IS NOT NULL AND toString(x) <> $entry] AS deduped
+    SET u.{property_name} = [$entry] + deduped
+    RETURN u.userid AS userid, u.{property_name} AS items
+    """
+    result = getQuery(query, driver=driver, params={"userid": userid, "key": key, "entry": entry})
+    if not result:
+        return jsonify({"error": "User not found or unauthorized"}), 401
+
+    return jsonify({
+        "message": "Success",
+        "userid": result[0].get("userid"),
+        property_name: result[0].get("items", []),
+    }), 200
+
+
+@user_bp.route('/profile/history/add', methods=['POST', 'OPTIONS'])
+def add_profile_history():
+    try:
+        return _append_profile_item("history")
+    except Exception as e:
+        return jsonify({"error": f"Failed to add history: {str(e)}"}), 500
+
+
+@user_bp.route('/profile/bookmarks/add', methods=['POST', 'OPTIONS'])
+def add_profile_bookmark():
+    try:
+        return _append_profile_item("bookmarks")
+    except Exception as e:
+        return jsonify({"error": f"Failed to add bookmark: {str(e)}"}), 500
