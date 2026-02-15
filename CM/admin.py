@@ -980,7 +980,7 @@ def deleteID(id_value, driver, type="node"):
 
     if type == "relationship":
         for id in id_list:
-            q = f"MATCH ()-[r]->() WHERE id(r) = '{id}' DELETE r RETURN count(*) AS count"
+            q = f"MATCH ()-[r]->() WHERE elementId(r) = '{id}' DELETE r RETURN count(*) AS count"
             queries.append(q)
     else:  # type == "node"
         for id in id_list:
@@ -1033,7 +1033,7 @@ def deleteNode(database,user,input):
                 WHERE '{input.get('s1_2')}' IN r.Dataset
                 WITH r, [i IN r.Dataset WHERE NOT i = '{input.get('s1_2')}'] AS prop
                 SET r.Dataset = prop
-                RETURN id(r) AS ids
+                RETURN elementId(r) AS ids
             """
 
             ids = getQuery(ids_query,driver=driver)
@@ -1043,7 +1043,7 @@ def deleteNode(database,user,input):
                 cleanup_query = """
                     UNWIND $ids AS id
                     MATCH (:DATASET)-[r:USES]->(:CATEGORY)
-                    WHERE id(r) = id AND size(r.Dataset) = 0
+                    WHERE elementId(r) = id AND size(r.Dataset) = 0
                     SET r.Dataset = NULL
                 """
                 getQuery(cleanup_query,driver=driver,params={"ids": [row['ids'] for row in ids]})
@@ -1055,7 +1055,7 @@ def deleteNode(database,user,input):
             datasetIDs_query = f"""
                 MATCH (d:DATASET)
                 WHERE '{input.get('s1_2')}' IN d.parent
-                RETURN id(d) AS ids
+                RETURN d.CMID AS ids
             """
             datasetIDs = getQuery(datasetIDs_query,driver=driver)
 
@@ -1066,7 +1066,7 @@ def deleteNode(database,user,input):
                         MATCH (d:DATASET) WHERE d.CMID = id
                         WITH d, [i IN d.{prop} WHERE NOT i = '{input.get('s1_2')}'] AS p
                         SET d.{prop} = p
-                        RETURN id(d) AS ids
+                        RETURN d.CMID AS ids
                     """
                     ids = getQuery(ids_query, driver=driver, params={"ids": [row['ids'] for row in datasetIDs]})
                     nullify_query = f"""
@@ -1115,14 +1115,14 @@ def deleteNode(database,user,input):
                     toString(cmid) IN r[key] OR 
                     (r.parentContext IS NOT NULL AND ANY(i IN r.parentContext WHERE i CONTAINS '\"parent\":\"' + cmid))
                 )
-                RETURN id(r) AS id, r[key] AS val, cmid, key
+                RETURN elementId(r) AS id, r[key] AS val, cmid, key
             """
             rels = getQuery(rels_query, driver = driver, params={"keys": props})
 
             datasetIDs_query = f"""
                 MATCH (d:DATASET)
                 WHERE $cmid IN d.District
-                RETURN id(d) AS ids
+                RETURN d.CMID AS ids
             """
             datasetIDs = getQuery(datasetIDs_query,driver=driver,params = {"cmid": input.get("s1_2")})
 
@@ -1134,7 +1134,7 @@ def deleteNode(database,user,input):
                         MATCH (d:DATASET) WHERE d.CMID = id
                         WITH d, [i IN d.{prop} WHERE NOT i = '{input.get('s1_2')}'] AS p
                         SET d.{prop} = p
-                        RETURN id(d) AS ids
+                        RETURN d.CMID AS ids
                     """
                     ids = getQuery(ids_query, driver=driver, params={"ids": [row['ids'] for row in datasetIDs]})
                     nullify_query = f"""
@@ -1177,12 +1177,12 @@ def deleteNode(database,user,input):
                     for (id_val, key), vals in grouped.items():
                         val_string = '; '.join(vals)
                         set_query = f"""
-                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE id(r) = {id_val}
+                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE elementId(r) = '{id_val}'
                             SET r.{key} = split('{val_string}', '; ')
                         """
                         getQuery(set_query,driver=driver)
                         nullify_empty_query = f"""
-                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE id(r) = {id_val} AND size(r.{key}) = 0
+                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE elementId(r) = '{id_val}' AND size(r.{key}) = 0
                             SET r.{key} = NULL
                         """
                         getQuery(nullify_empty_query,driver=driver)
@@ -1190,7 +1190,7 @@ def deleteNode(database,user,input):
                 else:
                     for row in rels:
                         nullify_query = f"""
-                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE id(r) = {row["id"]}
+                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE elementId(r) = '{row["id"]}'
                             SET r.{row["key"]} = NULL
                         """
                         getQuery(nullify_query,driver=driver)
