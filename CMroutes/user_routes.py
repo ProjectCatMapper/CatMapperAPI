@@ -208,6 +208,39 @@ def _load_user(userid):
     return data[0]
 
 
+def _load_user_by_identifier(identifier):
+    lookup = str(identifier or "").strip()
+    if not lookup:
+        raise Exception("Missing user identifier")
+
+    driver = getDriver("userdb")
+    query = """
+    MATCH (u:USER)
+    WHERE toString(u.userid) = toString($lookup) OR toLower(u.username) = toLower($lookup)
+    RETURN
+      u.userid as userid,
+      u.first as first,
+      u.last as last,
+      u.username as username,
+      u.email as email,
+      u.database as database,
+      u.intendedUse as intendedUse,
+      u.createdAt as createdAt,
+      u.updatedAt as updatedAt,
+      u.passwordLastChangedAt as passwordLastChangedAt,
+      u.password as password,
+      coalesce(u.access, '') as access
+    LIMIT 1
+    """
+    rows = getQuery(query, driver=driver, params={"lookup": lookup})
+    if not rows:
+        raise Exception("User not found")
+    user_row = rows[0]
+    if str(user_row.get("access", "")).lower() != "enabled":
+        raise Exception("User is not verified")
+    return user_row
+
+
 def _verify_profile_credentials(userid, credentials):
     bearer_claims = verify_bearer_auth(required_userid=userid, req=request)
     if bearer_claims:
@@ -344,6 +377,101 @@ def getLogin():
     except Exception as e:
         result = str(e)
         return result, 500
+
+
+@user_bp.route('/forgot-password/request', methods=['POST'])
+def request_forgot_password():
+    try:
+        _cleanup_requests()
+        data = request.get_json(silent=True) or {}
+        user_identifier = unlist(data.get("user"))
+        new_password = unlist(data.get("newPassword"))
+
+        if not user_identifier:
+            raise Exception("Missing username or user id")
+        if not new_password:
+            raise Exception("New password is required.")
+        if not _password_meets_policy(new_password):
+            raise Exception("Password must be at least 6 characters.")
+
+        existing = _load_user_by_identifier(user_identifier)
+        userid = str(existing.get("userid"))
+
+        request_id = f"forgot_{uuid.uuid4().hex[:12]}"
+        verification_code = f"{secrets.randbelow(900000) + 100000}"
+        with REQUEST_LOCK:
+            PASSWORD_CHANGE_REQUESTS[request_id] = {
+                "userid": userid,
+                "password_hash": password_hash(new_password),
+                "verification_code": verification_code,
+                "expires_at": datetime.utcnow() + timedelta(minutes=REQUEST_TTL_MINUTES),
+            }
+
+        target_email = existing.get("email")
+        _send_verification_email(target_email, verification_code, "Password Reset")
+        logger.info(
+            "Forgot-password verification email sent: userid=%s request_id=%s email=%s",
+            userid,
+            request_id,
+            _mask_email(target_email),
+        )
+
+        response = {
+            "requestId": request_id,
+            "userId": userid,
+            "maskedEmail": _mask_email(target_email),
+        }
+        if _include_debug_verification_code():
+            response["debugVerificationCode"] = verification_code
+
+        return jsonify(response), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@user_bp.route('/forgot-password/confirm', methods=['POST'])
+def confirm_forgot_password():
+    try:
+        _cleanup_requests()
+        data = request.get_json(silent=True) or {}
+        user_identifier = unlist(data.get("user"))
+        request_id = unlist(data.get("requestId"))
+        verification_code = str(unlist(data.get("verificationCode")) or "").strip()
+
+        if not user_identifier or not request_id or not verification_code:
+            raise Exception("Missing required confirmation fields")
+
+        existing = _load_user_by_identifier(user_identifier)
+        userid = str(existing.get("userid"))
+
+        with REQUEST_LOCK:
+            pending = PASSWORD_CHANGE_REQUESTS.get(request_id)
+            if not pending or pending.get("userid") != userid:
+                raise Exception("Password reset request not found. Please request a new verification email.")
+            if pending.get("verification_code") != verification_code:
+                raise Exception("Invalid verification code.")
+            password_hash_value = pending.get("password_hash")
+            PASSWORD_CHANGE_REQUESTS.pop(request_id, None)
+
+        driver = getDriver("userdb")
+        query = """
+        MATCH (u:USER {userid: toString($userid)})
+        SET
+          u.password = $password,
+          u.passwordLastChangedAt = $changedAt,
+          u.updatedAt = $changedAt
+        RETURN u.passwordLastChangedAt as passwordLastChangedAt
+        """
+        saved = getQuery(
+            query,
+            driver=driver,
+            params={"userid": userid, "password": password_hash_value, "changedAt": _now_iso()},
+        )
+        if not saved:
+            raise Exception("User not found")
+        return jsonify({"passwordLastChangedAt": saved[0].get("passwordLastChangedAt")}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @user_bp.route('/profile/<userid>', methods=['GET'])
