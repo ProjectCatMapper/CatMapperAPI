@@ -28,7 +28,7 @@ def export_graph(node_file="nodes.jsonl", rel_file="relationships.jsonl"):
         with open(rel_file, "w", encoding="utf-8") as rf:
             result = session.run(
                 "MATCH (a)-[r]->(b) RETURN type(r) AS type, "
-                "id(a) AS start_id, id(b) AS end_id, properties(r) AS props"
+                "elementId(a) AS start_id, elementId(b) AS end_id, properties(r) AS props"
             )
             for record in result:
                 obj = {
