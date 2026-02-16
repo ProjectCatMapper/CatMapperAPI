@@ -5,7 +5,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from CM import getDriver, getQuery, verifyUser
 
 
-AUTH_TOKEN_TTL_SECONDS = int(os.getenv("CATMAPPER_AUTH_TOKEN_TTL_SECONDS", "43200"))
+AUTH_TOKEN_TTL_SECONDS = int(os.getenv("CATMAPPER_AUTH_TOKEN_TTL_SECONDS", "2592000"))
 AUTH_TOKEN_SALT = "catmapper-auth-v1"
 
 
