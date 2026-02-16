@@ -487,3 +487,26 @@ def test_add_profile_history_caps_at_50(client, monkeypatch):
     assert response.status_code == 200
     assert len(store["history"]) == 50
     assert store["history"][0]["cmid"] == "AM999"
+
+
+def test_add_bookmark_accepts_bearer_auth_without_legacy_credentials(client, monkeypatch):
+    store = {"bookmarks": []}
+
+    monkeypatch.setattr(user_routes, "verify_bearer_auth", lambda required_userid=None, required_role=None, req=None: {"userid": "100", "role": "user"})
+    monkeypatch.setattr(user_routes, "_lookup_cmid_name", lambda database, cmid: "Demo Name")
+    monkeypatch.setattr(user_routes, "_get_user_entries", lambda userid, field_name: list(store.get(field_name, [])))
+    monkeypatch.setattr(user_routes, "_set_user_entries", lambda userid, field_name, entries: store.__setitem__(field_name, list(entries)))
+
+    response = client.post(
+        "/profile/bookmarks/add",
+        headers={"Authorization": "Bearer token"},
+        json={
+            "userId": "100",
+            "database": "ArchaMap",
+            "cmid": "AM123",
+            "cmname": "",
+        },
+    )
+
+    assert response.status_code == 200
+    assert store["bookmarks"][0]["cmid"] == "AM123"
