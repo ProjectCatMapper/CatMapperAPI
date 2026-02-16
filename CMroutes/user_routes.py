@@ -88,6 +88,21 @@ def _normalize_database(database_value):
     return str(database_value)
 
 
+def _read_json_payload():
+    data = request.get_json(silent=True)
+    if isinstance(data, dict):
+        return data
+    raw = request.get_data(as_text=True) or ""
+    if raw.strip():
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return {}
+
+
 def _format_profile(row):
     databases = row.get("database") or []
     if isinstance(databases, list):
@@ -383,7 +398,7 @@ def getLogin():
 def request_forgot_password():
     try:
         _cleanup_requests()
-        data = request.get_json(silent=True) or {}
+        data = _read_json_payload()
         user_identifier = unlist(data.get("user"))
         new_password = unlist(data.get("newPassword"))
 
@@ -433,7 +448,7 @@ def request_forgot_password():
 def confirm_forgot_password():
     try:
         _cleanup_requests()
-        data = request.get_json(silent=True) or {}
+        data = _read_json_payload()
         user_identifier = unlist(data.get("user"))
         request_id = unlist(data.get("requestId"))
         verification_code = str(unlist(data.get("verificationCode")) or "").strip()
@@ -490,7 +505,7 @@ def get_profile(userid):
 def request_profile_update():
     try:
         _cleanup_requests()
-        data = request.get_json(silent=True) or {}
+        data = _read_json_payload()
         userid = unlist(data.get("userId"))
         updates = data.get("updates") or {}
         credentials = data.get("credentials")
@@ -570,7 +585,7 @@ def request_profile_update():
 def confirm_profile_update():
     try:
         _cleanup_requests()
-        data = request.get_json(silent=True) or {}
+        data = _read_json_payload()
         userid = unlist(data.get("userId"))
         request_id = unlist(data.get("requestId"))
         verification_code = str(unlist(data.get("verificationCode")) or "").strip()
@@ -637,7 +652,7 @@ def confirm_profile_update():
 def request_password_change():
     try:
         _cleanup_requests()
-        data = request.get_json(silent=True) or {}
+        data = _read_json_payload()
         userid = unlist(data.get("userId"))
         current_password = unlist(data.get("currentPassword"))
         new_password = unlist(data.get("newPassword"))
@@ -691,7 +706,7 @@ def request_password_change():
 def confirm_password_change():
     try:
         _cleanup_requests()
-        data = request.get_json(silent=True) or {}
+        data = _read_json_payload()
         userid = unlist(data.get("userId"))
         request_id = unlist(data.get("requestId"))
         verification_code = str(unlist(data.get("verificationCode")) or "").strip()
@@ -792,7 +807,7 @@ def get_profile_bookmarks(userid):
 @user_bp.route('/profile/bookmarks/add', methods=['POST'])
 def add_profile_bookmark():
     try:
-        data = request.get_json(silent=True) or {}
+        data = _read_json_payload()
         userid = unlist(data.get("userId"))
         credentials = data.get("credentials")
         database = unlist(data.get("database"))
@@ -827,7 +842,7 @@ def add_profile_bookmark():
 @user_bp.route('/profile/bookmarks/remove', methods=['POST'])
 def remove_profile_bookmark():
     try:
-        data = request.get_json(silent=True) or {}
+        data = _read_json_payload()
         userid = unlist(data.get("userId"))
         credentials = data.get("credentials")
         items = data.get("items") or []
@@ -864,7 +879,7 @@ def get_profile_history(userid):
 @user_bp.route('/profile/history/add', methods=['POST'])
 def add_profile_history():
     try:
-        data = request.get_json(silent=True) or {}
+        data = _read_json_payload()
         userid = unlist(data.get("userId"))
         credentials = data.get("credentials")
         database = unlist(data.get("database"))

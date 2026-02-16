@@ -510,3 +510,29 @@ def test_add_bookmark_accepts_bearer_auth_without_legacy_credentials(client, mon
 
     assert response.status_code == 200
     assert store["bookmarks"][0]["cmid"] == "AM123"
+
+
+def test_add_bookmark_parses_json_body_without_content_type(client, monkeypatch):
+    store = {"bookmarks": []}
+
+    monkeypatch.setattr(user_routes, "verify_bearer_auth", lambda required_userid=None, required_role=None, req=None: {"userid": "100", "role": "user"})
+    monkeypatch.setattr(user_routes, "_lookup_cmid_name", lambda database, cmid: "Demo Name")
+    monkeypatch.setattr(user_routes, "_get_user_entries", lambda userid, field_name: list(store.get(field_name, [])))
+    monkeypatch.setattr(user_routes, "_set_user_entries", lambda userid, field_name, entries: store.__setitem__(field_name, list(entries)))
+
+    response = client.open(
+        "/profile/bookmarks/add",
+        method="POST",
+        headers={"Authorization": "Bearer token"},
+        data=json.dumps(
+            {
+                "userId": "100",
+                "database": "ArchaMap",
+                "cmid": "AM555",
+                "cmname": "",
+            }
+        ),
+    )
+
+    assert response.status_code == 200
+    assert store["bookmarks"][0]["cmid"] == "AM555"
