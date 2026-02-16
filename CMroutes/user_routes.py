@@ -46,15 +46,17 @@ def _include_debug_verification_code():
     return os.getenv("PROFILE_DEBUG_CODES", "false").lower() in {"1", "true", "yes", "on"}
 
 
-def _send_verification_email(email, verification_code, action_label):
+def _send_verification_email(email, verification_code, action_label, username=None):
     if not email:
         raise Exception("User email is missing; cannot send verification code.")
 
     sender = config['MAIL']['mail_default']
     subject = f"CatMapper {action_label} Verification Code"
+    username_line = f"Username: {username}\n\n" if username else ""
     body = (
         "Hello,\n\n"
         f"We received a request for: {action_label}.\n"
+        f"{username_line}"
         f"Your verification code is: {verification_code}\n\n"
         f"This code expires in {REQUEST_TTL_MINUTES} minutes.\n\n"
         "If you did not request this change, please ignore this message.\n\n"
@@ -231,7 +233,9 @@ def _load_user_by_identifier(identifier):
     driver = getDriver("userdb")
     query = """
     MATCH (u:USER)
-    WHERE toString(u.userid) = toString($lookup) OR toLower(u.username) = toLower($lookup)
+    WHERE toString(u.userid) = toString($lookup)
+       OR toLower(u.username) = toLower($lookup)
+       OR toLower(u.email) = toLower($lookup)
     RETURN
       u.userid as userid,
       u.first as first,
@@ -400,16 +404,25 @@ def request_forgot_password():
         _cleanup_requests()
         data = _read_json_payload()
         user_identifier = unlist(data.get("user"))
+        email_identifier = unlist(data.get("email"))
+        lookup_identifier = email_identifier or user_identifier
         new_password = unlist(data.get("newPassword"))
 
-        if not user_identifier:
-            raise Exception("Missing username or user id")
+        if not lookup_identifier:
+            raise Exception("Missing username or email")
         if not new_password:
             raise Exception("New password is required.")
         if not _password_meets_policy(new_password):
             raise Exception("Password must be at least 6 characters.")
 
-        existing = _load_user_by_identifier(user_identifier)
+        try:
+            existing = _load_user_by_identifier(lookup_identifier)
+        except Exception:
+            # Best practice: do not reveal whether an account exists.
+            return jsonify({
+                "message": "If an account exists for the provided username/email, a verification code has been sent."
+            }), 200
+
         userid = str(existing.get("userid"))
 
         request_id = f"forgot_{uuid.uuid4().hex[:12]}"
@@ -423,7 +436,12 @@ def request_forgot_password():
             }
 
         target_email = existing.get("email")
-        _send_verification_email(target_email, verification_code, "Password Reset")
+        _send_verification_email(
+            target_email,
+            verification_code,
+            "Password Reset",
+            username=existing.get("username"),
+        )
         logger.info(
             "Forgot-password verification email sent: userid=%s request_id=%s email=%s",
             userid,
@@ -435,6 +453,7 @@ def request_forgot_password():
             "requestId": request_id,
             "userId": userid,
             "maskedEmail": _mask_email(target_email),
+            "message": "If an account exists for the provided username/email, a verification code has been sent.",
         }
         if _include_debug_verification_code():
             response["debugVerificationCode"] = verification_code
@@ -450,13 +469,15 @@ def confirm_forgot_password():
         _cleanup_requests()
         data = _read_json_payload()
         user_identifier = unlist(data.get("user"))
+        email_identifier = unlist(data.get("email"))
+        lookup_identifier = email_identifier or user_identifier
         request_id = unlist(data.get("requestId"))
         verification_code = str(unlist(data.get("verificationCode")) or "").strip()
 
-        if not user_identifier or not request_id or not verification_code:
+        if not lookup_identifier or not request_id or not verification_code:
             raise Exception("Missing required confirmation fields")
 
-        existing = _load_user_by_identifier(user_identifier)
+        existing = _load_user_by_identifier(lookup_identifier)
         userid = str(existing.get("userid"))
 
         with REQUEST_LOCK:
