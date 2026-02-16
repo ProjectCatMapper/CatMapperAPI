@@ -45,33 +45,78 @@ def _desaturate_hex(hex_color, factor=0.88):
     return _rgb_to_hex((int(round(r2 * 255)), int(round(g2 * 255)), int(round(b2 * 255))))
 
 
-def _get_label_color_map(driver):
+def _get_label_metadata_map(driver):
     query = """
     MATCH (l:LABEL)
-    WHERE l.color IS NOT NULL AND trim(toString(l.color)) <> ''
-    RETURN l.CMName AS label, l.color AS color
+    RETURN l.CMName AS label, l.color AS color, l.groupLabel AS groupLabel
     """
     rows = getQuery(query, driver, type="dict")
-    return {row["label"]: row["color"] for row in rows if row.get("label") and row.get("color")}
+    return {
+        row["label"]: {"color": row.get("color"), "groupLabel": row.get("groupLabel")}
+        for row in rows
+        if row.get("label")
+    }
 
 
-def _apply_node_colors(rows, label_color_map):
+def _unique_preserve_order(values):
+    return list(dict.fromkeys(values))
+
+
+def _get_effective_labels(labels, label_metadata_map):
+    # Exclude generic structural labels from legend/color selection.
+    cleaned = _unique_preserve_order(
+        [lbl for lbl in labels if lbl and lbl not in ["CATEGORY", "DISTRICT"]]
+    )
+    if not cleaned:
+        return []
+
+    # If a node has both a top-level domain label (groupLabel == CMName)
+    # and one of that domain's subdomains, keep only the subdomain labels.
+    label_to_group = {}
+    for label in cleaned:
+        group_label = (label_metadata_map.get(label) or {}).get("groupLabel")
+        label_to_group[label] = group_label or label
+
+    groups_with_subdomains = {
+        label_to_group[label]
+        for label in cleaned
+        if label_to_group[label] and label != label_to_group[label]
+    }
+
+    effective = []
+    for label in cleaned:
+        group_label = label_to_group.get(label)
+        if label == group_label and group_label in groups_with_subdomains:
+            continue
+        effective.append(label)
+
+    return effective
+
+
+def _apply_node_colors(rows, label_metadata_map):
     for row in rows:
         labels = row.get("labels") or []
         if not isinstance(labels, list):
             labels = [labels]
 
-        # Exclude generic structural labels from color selection.
-        usable_labels = [lbl for lbl in labels if lbl not in ["CATEGORY", "DISTRICT"]]
-        color_pairs = [(lbl, label_color_map.get(lbl)) for lbl in usable_labels if lbl]
+        effective_labels = _get_effective_labels(labels, label_metadata_map)
+        color_pairs = [
+            (label, (label_metadata_map.get(label) or {}).get("color"))
+            for label in effective_labels
+        ]
         color_pairs = [(lbl, clr) for lbl, clr in color_pairs if clr]
 
-        if not color_pairs:
+        if not effective_labels:
             row["color"] = "#cccccc"
             row["legendLabel"] = "UNMAPPED"
             continue
 
-        labels_with_colors = sorted(set([lbl for lbl, _ in color_pairs]))
+        if not color_pairs:
+            row["color"] = "#cccccc"
+            row["legendLabel"] = ":".join(effective_labels)
+            continue
+
+        labels_with_colors = effective_labels
         unique_colors = list(dict.fromkeys([clr for _, clr in color_pairs]))
 
         if len(unique_colors) == 1 or len(set(c.lower() for c in unique_colors)) == 1:
@@ -410,9 +455,9 @@ def getNetworkjs():
 
         # Use LABEL node color metadata from Neo4j for node coloring.
         # Multi-label nodes receive averaged colors across mapped labels.
-        label_color_map = _get_label_color_map(driver)
-        _apply_node_colors(node, label_color_map)
-        _apply_node_colors(end, label_color_map)
+        label_metadata_map = _get_label_metadata_map(driver)
+        _apply_node_colors(node, label_metadata_map)
+        _apply_node_colors(end, label_metadata_map)
 
         return {"node": node, "relations": rel, "relNodes": end, "params": [{"cmid": cmid, "database": database, "domain": domain, "relation": relation}]}
     except Exception as e:
