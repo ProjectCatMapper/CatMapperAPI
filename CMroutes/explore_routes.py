@@ -501,12 +501,11 @@ def getDataset():
         return result, 500
 
 
-@explore_bp.route('/CMID', methods=['GET'])
-def getCMID():
+@explore_bp.route('/CMID/<database>/<cmid>', methods=['GET'])
+def getCMID(database, cmid):
     try:
-        database = request.args.get('database')
-        cmid = request.args.get('cmid')
-
+        database = database
+        cmid = cmid
         driver = getDriver(database)
 
         query1 = """
@@ -522,8 +521,8 @@ unwind keys(r) as relProperties
 return elementId(r) as relID, relProperties, r[relProperties] as relValues
 """
 
-        node = getQuery(query1, cmid=cmid)
-        relations = getQuery(query2, cmid=cmid)
+        node = getQuery(query1, driver=driver, cmid=cmid)
+        relations = getQuery(query2, driver=driver, cmid=cmid)
 
         grouped_data = defaultdict(dict)
 
