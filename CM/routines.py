@@ -2502,6 +2502,18 @@ def runRoutinesStream(databases="all", mail=None):
     def generate():
         yield emit("Routines started at " + pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S') + "<br>")
 
+        # TEMPORARY: send a quick smoke-test email each time runRoutines starts.
+        if isinstance(mail, Mail):
+            test_status = sendEmail(
+                mail,
+                subject=f"TEMP TEST runRoutines start - {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                recipients=["admin@catmapper.org"],
+                body="Temporary test email from runRoutines endpoint to verify delivery before full routine summary.",
+                sender=config['MAIL']['mail_default'],
+                html=False
+            )
+            yield emit(f"<h2>Temporary test mail status: {test_status}</h2>")
+
         if databases == "all":
             dbs = ["ArchaMap", "SocioMap"]
         elif isinstance(databases, str):
@@ -2634,8 +2646,11 @@ def runRoutinesStream(databases="all", mail=None):
                 recipients=["admin@catmapper.org"],
                 body=email_body,  # IMPORTANT: table, not full log
                 sender=config['MAIL']['mail_default'],
-                attachments=files_out or []
+                attachments=files_out or [],
+                html=True
             )
             yield emit(f'<br><h2>Mail sent with status: {status or "no status returned"}</h2>')
+        else:
+            yield emit('<br><h2>No mail sent (no Mail object provided or invalid)</h2>')
 
     return Response(stream_with_context(generate()), mimetype="text/html")
