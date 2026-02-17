@@ -1,10 +1,8 @@
 import inspect
 from flask import request, Blueprint
-from flask_mail import Mail
 import CM.routines as routines_module
 import CM.USES as uses_module
-
-mail = Mail()
+from .extensions import mail
 
 routine_bp = Blueprint('routine', __name__)
 

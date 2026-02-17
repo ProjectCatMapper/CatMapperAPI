@@ -1,3 +1,4 @@
+from turtle import up
 from CM import *
 from flask import app, render_template, Blueprint
 from flask_mail import Mail
@@ -10,11 +11,11 @@ dev_bp = Blueprint('dev', __name__)
 def testmsg(database, msg):
     return "This is a test message from the " + database + " database that says: " + msg
 
-@dev_bp.route('/send_test_email', methods=['GET'])
-def send_test_email():
+@dev_bp.route('/send_test_email/<email>', methods=['GET'])
+def send_test_email(email):
     try:
         msg = sendEmail(mail, "Test Email", [
-            "bischrob@gmail.com"], "This is a test email sent from a Flask application. Have fun.", "admin@catmapper.org")
+            email], "This is a test email sent from a Flask application. Have fun.", "admin@catmapper.org")
         return msg
     except Exception as e:
         return str(e), 500
