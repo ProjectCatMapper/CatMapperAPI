@@ -2444,8 +2444,8 @@ def getNumeric_Checks(database, mail=None, return_type="data"):
     
 def runRoutinesStream(databases="all", mail=None):
     """
-    Run a sequence of validation and processing routines for one or more 
-    Neo4j databases, stream progress logs to the client, and optionally 
+    Run a sequence of validation and processing routines for one or more
+    Neo4j databases, stream progress logs to the client, and optionally
     send an email summary table with attachments.
 
     This function executes multiple predefined routines (e.g., `reportChanges`, 
@@ -2466,7 +2466,6 @@ def runRoutinesStream(databases="all", mail=None):
         A Mail object for sending notifications (default: None).
         If provided, the final HTML table and attachments are emailed 
         to `rjbischo@asu.edu`.
-
     Returns
     -------
     flask.Response
@@ -2501,18 +2500,6 @@ def runRoutinesStream(databases="all", mail=None):
 
     def generate():
         yield emit("Routines started at " + pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S') + "<br>")
-
-        # TEMPORARY: send a quick smoke-test email each time runRoutines starts.
-        if isinstance(mail, Mail):
-            test_status = sendEmail(
-                mail,
-                subject=f"TEMP TEST runRoutines start - {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                recipients=["admin@catmapper.org"],
-                body="Temporary test email from runRoutines endpoint to verify delivery before full routine summary.",
-                sender=config['MAIL']['mail_default'],
-                html=False
-            )
-            yield emit(f"<h2>Temporary test mail status: {test_status}</h2>")
 
         if databases == "all":
             dbs = ["ArchaMap", "SocioMap"]
@@ -2640,16 +2627,28 @@ def runRoutinesStream(databases="all", mail=None):
 
         # send mail only after everything is done
         if isinstance(mail, Mail):
-            status = sendEmail(
+            send_result = sendEmail(
                 mail,
                 subject=f"Routines for {' and '.join(dbs)} - {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}",
                 recipients=["admin@catmapper.org"],
                 body=email_body,  # IMPORTANT: table, not full log
                 sender=config['MAIL']['mail_default'],
                 attachments=files_out or [],
-                html=True
+                html=True,
+                return_metadata=True,
             )
+            status = send_result.get("status", "no status returned") if isinstance(send_result, dict) else str(send_result)
             yield emit(f'<br><h2>Mail sent with status: {status or "no status returned"}</h2>')
+            if isinstance(send_result, dict):
+                recipients = ",".join(send_result.get("recipients", []))
+                yield emit(
+                    "<h3>"
+                    f"Mail audit trace_id: {send_result.get('trace_id')} | "
+                    f"message_id: {send_result.get('message_id')} | "
+                    f"recipients: {recipients} | "
+                    f"sent_at_utc: {send_result.get('sent_at_utc')}"
+                    "</h3>"
+                )
         else:
             yield emit('<br><h2>No mail sent (no Mail object provided or invalid)</h2>')
 
