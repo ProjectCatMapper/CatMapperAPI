@@ -38,13 +38,19 @@ curl_exit=$curl_cmd_status
 
 run_status="success"
 failure_reason=""
+mail_status_line=""
+mail_status=""
 
 if [[ $curl_exit -ne 0 ]]; then
     run_status="failed"
     failure_reason="curl exited with status $curl_exit"
 fi
 
-if ! grep -q "Mail sent with status:" "$tmp_output"; then
+mail_status_line="$(grep -o 'Mail sent with status:[^<]*' "$tmp_output" | tail -n 1 || true)"
+mail_status="${mail_status_line#Mail sent with status: }"
+mail_status="$(echo "$mail_status" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+if [[ -z "$mail_status_line" ]]; then
     run_status="failed"
     if [[ -n "$failure_reason" ]]; then
         failure_reason="$failure_reason; completion marker was not found"
@@ -62,6 +68,15 @@ if grep -q "Mail sent with status: Error sending email" "$tmp_output"; then
     fi
 fi
 
+if [[ -n "$mail_status_line" ]] && [[ "$mail_status" != "Email sent successfully" ]]; then
+    run_status="failed"
+    if [[ -n "$failure_reason" ]]; then
+        failure_reason="$failure_reason; endpoint mail status was '$mail_status'"
+    else
+        failure_reason="endpoint mail status was '$mail_status'"
+    fi
+fi
+
 # Treat API-reported runtime/query errors as failures, even if the stream completed.
 if grep -Eq "Query execution error|Internal Server Error|Exception:|Error in .*|\\(.*500\\)" "$tmp_output"; then
     run_status="failed"
@@ -72,17 +87,20 @@ if grep -Eq "Query execution error|Internal Server Error|Exception:|Error in .*|
     fi
 fi
 
+end_ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
 if [[ "$run_status" == "success" ]]; then
-    subject="CatMapper Nightly Routines Successful"
-else
-    subject="CatMapper Nightly Routines Failed"
+    echo "Nightly routines completed successfully. Summary table email is sent by the runRoutines endpoint."
+    echo "Mail status: $mail_status"
+    echo "routines.sh ended at: $end_ts"
+    rm -f "$tmp_output" "$tmp_error"
+    exit 0
 fi
 
-end_ts="$(date '+%Y-%m-%d %H:%M:%S %Z')"
 output_tail="$(tail -n 80 "$tmp_output" | sed 's/</\&lt;/g' | sed 's/>/\&gt;/g')"
 error_tail="$(tail -n 40 "$tmp_error" | sed 's/</\&lt;/g' | sed 's/>/\&gt;/g')"
 
-body="Nightly routines status: ${run_status}<br>\
+subject="CatMapper Nightly Routines Failed"
+body="Nightly routines wrapper detected a failure.<br>\
 Started: ${start_ts}<br>\
 Ended: ${end_ts}<br>\
 Endpoint: ${api_url}<br>\
@@ -110,7 +128,5 @@ else
 fi
 
 rm -f "$tmp_output" "$tmp_error"
-
-if [[ "$run_status" != "success" ]]; then
-    exit 1
-fi
+echo "routines.sh ended at: $end_ts"
+exit 1
