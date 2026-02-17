@@ -12,6 +12,8 @@ from CM.metadata import *
 import pandas as pd
 import json
 import tempfile
+import warnings
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Response, stream_with_context
 from flask_mail import Mail
 from configparser import ConfigParser
@@ -34,6 +36,11 @@ def validateJSON(database, property='parentContext', path="/mnt/storage/app/tmp/
     Helper function to validate JSON properties in a Neo4j database.
     """
     try:
+        if property not in {"geoCoords", "parentContext"}:
+            raise ValueError(
+                f"Unsupported JSON property '{property}'. "
+                "Only 'geoCoords' and 'parentContext' are allowed."
+            )
 
         driver = getDriver(database)
 
@@ -42,6 +49,9 @@ def validateJSON(database, property='parentContext', path="/mnt/storage/app/tmp/
         results = getQuery(query, driver)
 
         results = pd.DataFrame(results)
+        if results.empty:
+            pd.DataFrame(columns=["datasetID", "CMID", "Key", "prop", "is_valid_json"]).to_excel(path, index=False)
+            return []
 
         results = pd.DataFrame.explode(results, "prop")
 
@@ -578,6 +588,7 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
         driver = getDriver(database)
         query = """
         MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+        WHERE r.parentContext IS NOT NULL
         WITH d, c, r,
 
             CASE
@@ -608,277 +619,288 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
         """
         results3 = getQuery(query, driver, type="df")
 
-        query = """
-        MATCH (n)<-[r:CONTAINS]-(source)
-        WHERE NOT n:RELIGION AND NOT n:POLITY
-            AND r.eventType IS NOT NULL
-            AND r.eventDate IS NOT NULL
+        # Keep "Bad JSON" constrained to JSON-bearing USES relationships only.
+        # Non-JSON CONTAINS/event consistency checks are intentionally skipped here.
+        results4 = pd.DataFrame()
+        results5 = pd.DataFrame()
+        results6 = pd.DataFrame()
+        results7 = pd.DataFrame()
+        results8 = pd.DataFrame()
+        results9 = pd.DataFrame()
 
-        // Get SPLIT and SPLITMERGE dates per relationship
-        WITH n,source, [i IN range(0, size(r.eventType)-1) WHERE r.eventType[i] = 'SPLIT'] AS splitIndexes, [i IN range(0, size(r.eventType)-1) WHERE r.eventType[i] = 'SPLITMERGE'] AS splitMergeIndexes,
-        r
+        parent_context_fallback_cache = None
+        fallback_notes = []
 
-        WITH n,source, [i IN splitIndexes | r.eventDate[i]] AS splitDates, [i IN splitMergeIndexes | r.eventDate[i]] AS splitMergeDates
-
-        // Collect dates across all relationships pointing to n
-        WITH n,source,
-        REDUCE(s=[], d IN COLLECT(splitDates) |s+ [sd IN d WHERE sd IS NOT NULL AND NOT EXISTS {
-        MATCH (n3)-[r2:CONTAINS]->(source)
-        MATCH (n3)-[r3:CONTAINS]->(n)
-        WHERE n3 <> n AND n3 <> source
-        AND r3.eventType IS NOT NULL
-        AND ANY(j IN RANGE(0, SIZE(r3.eventType)-1)
-        WHERE j < SIZE(r3.eventDate)
-        AND r3.eventType[j] = 'SPLIT'
-        AND r3.eventDate[j] = sd)
-        }]) AS allSplitDates,
-        REDUCE(m=[], d IN COLLECT(splitMergeDates) | m + d) AS allSplitMergeDates
-
-        // Optional outgoing MERGED relationships
-        OPTIONAL MATCH (n)-[r_out:CONTAINS]->()
-        WHERE r_out.eventType IS NOT NULL AND r_out.eventDate IS NOT NULL
-
-        WITH n, allSplitDates, allSplitMergeDates,
-        CASE
-        WHEN r_out IS NOT NULL AND r_out.eventType IS NOT NULL THEN [i IN range(0, size(r_out.eventType)-1) WHERE r_out.eventType[i] = 'MERGED']
-        ELSE []
-        END AS mergeIndexes,
-        r_out
-
-        WITH n, allSplitDates, allSplitMergeDates, [i IN mergeIndexes | r_out.eventDate[i]] AS mergeDates
-
-        // Flatten all splitDates
-        UNWIND allSplitDates AS splitDate
-        WITH n, splitDate, allSplitDates, allSplitMergeDates, mergeDates
-        WHERE splitDate IS NOT NULL
-
-        // Check if splitDate appears in other sets
-        WITH n, splitDate,
-        CASE WHEN size([d IN allSplitDates WHERE d = splitDate]) > 1 THEN true ELSE false END AS inOtherSplit,
-        CASE WHEN splitDate IN allSplitMergeDates THEN true ELSE false END AS inSplitMerge,
-        CASE WHEN splitDate IN mergeDates THEN true ELSE false END AS inMerged`
-
-        WHERE inOtherSplit OR inSplitMerge OR inMerged
-
-        RETURN DISTINCT n.CMID AS nodeId,
-        splitDate,
-        inOtherSplit,
-        inSplitMerge,
-        inMerged
-        """
-
-        results4 = getQuery(query, driver, type="df")
-
-        query = """
-            MATCH (n)<-[r_in:CONTAINS]-()
-            WHERE NOT n:RELIGION AND NOT n:POLITY
-                AND r_in.eventType IS NOT NULL AND r_in.eventDate IS NOT NULL
-
-            WITH n, collect(r_in) AS inboundRels
-
-            WITH n, [rel IN inboundRels | [i IN range(0, size(rel.eventType)-1)
-            WHERE rel.eventType[i] = 'SPLITMERGE' | rel.eventDate[i]]
-            ] AS allSMLists
-
-            WITH n, reduce(all = [], lst IN allSMLists | all + lst) AS allSplitMergeDates
-
-            OPTIONAL MATCH (n)-[r_out:CONTAINS]->()
-            WHERE r_out.eventType IS NOT NULL AND r_out.eventDate IS NOT NULL
-
-            WITH n, allSplitMergeDates, collect(r_out) AS outboundRels
-
-            WITH n, allSplitMergeDates, [rel IN outboundRels | [i IN range(0, size(rel.eventType)-1)
-            WHERE rel.eventType[i] = 'MERGED' | rel.eventDate[i]]
-            ] AS allMergedLists
-
-            WITH n, allSplitMergeDates,
-            reduce(all = [], lst IN allMergedLists | all + lst) AS allMergedDates
-
-            WITH n,(allSplitMergeDates + allMergedDates) AS candidateDates
-
-            WITH n,candidateDates AS my_list
-            UNWIND my_list AS item
-            WITH n,item, count(item) AS count
-            WHERE count = 1
-            RETURN n.CMID,collect(item) AS singletons
+        def _load_parent_context_rows_for_fallback():
             """
-        
-        results5 = getQuery(query, driver, type="df")
-
-        query = """
-            MATCH (n)-[r_out:CONTAINS]->()
-            WHERE NOT n:RELIGION AND NOT n:POLITY
-            AND r_out.eventType IS NOT NULL
-            AND r_out.eventDate IS NOT NULL
-
-            WITH n, collect(r_out) AS outboundRels
-
-            WITH n,
-            reduce(events = [], rel IN outboundRels |
-            events +
-            reduce(inner = [], idx IN range(0, size(rel.eventType)-1) |
-            CASE
-            WHEN rel.eventType[idx] IN ['SPLIT','SPLITMERGE']
-            THEN inner + {date: rel.eventDate[idx], type: rel.eventType[idx]}
-            ELSE inner
-            END
-            )
-            ) AS allEvents
-
-            WITH n, allEvents, [ev IN allEvents |
-            {
-            date: ev.date,
-            type: ev.type,
-            count: size([x IN allEvents WHERE x.date = ev.date])
-            }
-            ] AS counted
-
-            UNWIND counted AS item
-            WITH n,item
-            WHERE item.count = 1
-
-            RETURN DISTINCT
-            n.CMID AS CMID,
-            item.date AS uniqueDate,
-            item.type AS eventType
-            ORDER BY CMID, uniqueDate;
+            Load parentContext entries once for python-side fallback checks.
             """
+            nonlocal parent_context_fallback_cache
+            if parent_context_fallback_cache is not None:
+                return parent_context_fallback_cache
 
-        results6 = getQuery(query, driver, type="df")
-
-        query = """
-            // 1. Incoming MERGED ties
-            MATCH (n)<-[r_in:CONTAINS]-(source)
-            WHERE NOT n:RELIGION AND NOT n:POLITY
-                AND r_in.eventType IS NOT NULL AND r_in.eventDate IS NOT NULL
-                AND ANY(idx IN RANGE(0, SIZE(r_in.eventType)-1) WHERE r_in.eventType[idx] = 'MERGED')
-
-            // 2. Extract each MERGED date
-            UNWIND CASE WHEN SIZE(r_in.eventType) = 0 THEN [] ELSE RANGE(0, SIZE(r_in.eventType)-1) END AS idx
-            WITH n, source, r_in, idx
-            WHERE r_in.eventType[idx] = 'MERGED' AND r_in.eventDate[idx] IS NOT NULL
-            WITH n, source, r_in.eventDate[idx] AS mDate
-
-            // 3. Exclude nested MERGED (source contained by another node to same target)
-            WHERE NOT EXISTS {
-            MATCH (n3)-[r2:CONTAINS]->(source)
-            MATCH (n3)-[r3:CONTAINS]->(n)
-            WHERE n3 <> source AND n3 <> n
-            AND r3.eventType IS NOT NULL
-            AND ANY(i IN CASE WHEN SIZE(r3.eventType) > 0 THEN RANGE(0, SIZE(r3.eventType)-1) ELSE [] END
-            WHERE i < size(r3.eventDate) AND r3.eventType[i] = 'MERGED' AND r3.eventDate[i] = mDate)
-            }
-
-            WITH n, COLLECT(mDate) AS mergedDates
-
-            // Optional outgoing SPLIT/SPLITMERGE relationships
-            OPTIONAL MATCH (n)-[r_out:CONTAINS]->(source2)
-            WHERE r_out.eventType IS NOT NULL AND r_out.eventDate IS NOT NULL
-
-            UNWIND CASE WHEN r_out.eventType IS NULL OR SIZE(r_out.eventType) IS NULL OR SIZE(r_out.eventType) = 0 THEN [] ELSE RANGE(0, size(r_out.eventType)-1) END AS idx
-            WITH n,mergedDates, r_out, source2, idx
-            WHERE idx < size(r_out.eventDate) AND r_out.eventType[idx] IN ['SPLIT','SPLITMERGE']
-            AND r_out.eventDate[idx] IS NOT NULL
-
-            WITH n,mergedDates, r_out, source2, r_out.eventDate[idx] AS outDate
-            WHERE NOT EXISTS {
-            MATCH (n3)-[r2:CONTAINS]->(source2)
-            MATCH (n3)-[r3:CONTAINS]->(n)
-            WHERE n3 <> source2 AND n3 <> n
-            AND r3.eventType IS NOT NULL
-            AND ANY(j IN CASE WHEN SIZE(r3.eventType) > 0 THEN RANGE(0, SIZE(r3.eventType)-1) ELSE [] END
-            WHERE j < size(r3.eventDate) AND r3.eventType[j] IN ['MERGED']
-            AND r3.eventDate[j] = outDate)
-            }
-
-            // 3. Collect cleaned dates per node
-            WITH n,mergedDates, COLLECT(DISTINCT outDate) AS allSplitOutDates
-
-            // 7. Unwind mergedDates to count duplicates
-            UNWIND mergedDates AS mDate
-            WITH n, mDate, mergedDates, allSplitOutDates
-
-            WITH n, mDate,
-            size([d IN mergedDates WHERE d = mDate]) AS mergedCount,
-            allSplitOutDates
-
-            // 8. Apply conditions
-            WHERE mergedCount > 1 // duplicate MERGED date from multiple sources
-            OR mDate IN allSplitOutDates // or matching outgoing SPLIT/SPLITMERGE
-
-            RETURN DISTINCT
-            n.CMID AS nodeId,
-            mDate AS eventDate,
-            mergedCount AS numMergedOccurrences,
-            (mDate IN allSplitOutDates) AS hasOutgoingSplitOrSplitMerge
-            ORDER BY nodeId, eventDate;
-            """
-
-        results7 = getQuery(query, driver, type="df")
-
-        query = """
-                MATCH ()-[r:CONTAINS]->()
-                WHERE r.eventType IS NOT NULL
-                AND ANY(et IN r.eventType WHERE NOT et IN [
-                    "SPLIT",
-                    "HIERARCHY",
-                    "SPLITMERGE",
-                    "MERGED",
-                    "FOLLOWS"
-                ])
-                RETURN r, r.eventType
-                 """
-        results8 = getQuery(query, driver, type="df")
-
-        query = """
-                MATCH ()-[r:CONTAINS]->()
-                WHERE r.eventDate IS NOT NULL
-                AND size(r.eventDate) > 0
-                AND ALL(d IN r.eventDate
-                    WHERE d =~ '^[0-9]{4}$'
-                        AND toInteger(d) >= 1000
-                        AND toInteger(d) <= date().year
-                )
-                RETURN r
-                 """
-        results9 = getQuery(query, driver, type="df")
-
-        query = """
-                MATCH ()-[r:USES]->()
+            fallback_source_query = """
+                MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
                 WHERE r.parentContext IS NOT NULL
-                UNWIND r.parentContext AS pc
-                WITH r, pc, apoc.convert.fromJsonMap(pc) AS m
+                RETURN
+                    d.CMID AS datasetID,
+                    c.CMID AS CMID,
+                    r.Key AS Key,
+                    r.parentContext AS parentContext
+            """
+            raw_rows = getQuery(fallback_source_query, driver, type="dict")
+            parsed_rows = []
+
+            for row in raw_rows:
+                raw_context = row.get("parentContext")
+
+                if isinstance(raw_context, list):
+                    context_entries = raw_context
+                else:
+                    context_entries = [raw_context]
+
+                for entry in context_entries:
+                    parsed_obj = None
+                    entry_text = None
+
+                    if isinstance(entry, dict):
+                        parsed_obj = entry
+                        entry_text = json.dumps(entry)
+                    elif isinstance(entry, str):
+                        candidate = entry.strip()
+                        if not candidate:
+                            continue
+                        entry_text = candidate
+                        try:
+                            parsed_obj = json.loads(candidate)
+                        except Exception:
+                            continue
+                    else:
+                        continue
+
+                    if not isinstance(parsed_obj, dict):
+                        continue
+
+                    parsed_rows.append({
+                        "datasetID": row.get("datasetID"),
+                        "CMID": row.get("CMID"),
+                        "Key": row.get("Key"),
+                        "parentContextEntry": entry_text,
+                        "parentContextMap": parsed_obj,
+                    })
+
+            parent_context_fallback_cache = parsed_rows
+            return parent_context_fallback_cache
+
+        def _fallback_parent_context_schema_check():
+            """
+            Fallback for results10 if APOC map conversion fails in Cypher.
+            """
+            rows = _load_parent_context_rows_for_fallback()
+            current_year = pd.Timestamp.now().year
+            fallback_results = []
+
+            for row in rows:
+                ctx = row["parentContextMap"]
+                parent_val = ctx.get("parent")
+                event_type_val = ctx.get("eventType")
+                event_date_val = ctx.get("eventDate")
+
+                parent_str = None if parent_val is None else str(parent_val).strip()
+                event_type_str = None if event_type_val is None else str(event_type_val).strip()
+                event_date_str = None if event_date_val is None else str(event_date_val).strip()
+
+                invalid_event_date = False
+                if event_date_str not in (None, ""):
+                    invalid_event_date = (
+                        len(event_date_str) != 4
+                        or not event_date_str.isdigit()
+                        or int(event_date_str) < 1000
+                        or int(event_date_str) > current_year
+                    )
+
+                if (
+                    parent_str is None
+                    or event_type_str is None
+                    or (parent_str is not None and "," in parent_str)
+                    or (event_type_str is not None and "," in event_type_str)
+                    or invalid_event_date
+                ):
+                    fallback_results.append({
+                        "datasetID": row["datasetID"],
+                        "CMID": row["CMID"],
+                        "Key": row["Key"],
+                        "parentContextEntry": row["parentContextEntry"],
+                    })
+
+            return pd.DataFrame(fallback_results)
+
+        def _fallback_parent_cmid_check():
+            """
+            Fallback for results11 using indexed CMID lookups on known labels.
+            """
+            rows = _load_parent_context_rows_for_fallback()
+            parents = set()
+
+            for row in rows:
+                parent_val = row["parentContextMap"].get("parent")
+                if parent_val is None:
+                    continue
+                parent_cmid = str(parent_val).strip()
+                if parent_cmid:
+                    parents.add(parent_cmid)
+
+            if not parents:
+                return pd.DataFrame(columns=["datasetID", "CMID", "Key", "missingParent"])
+
+            parent_list = sorted(parents)
+            existing = set()
+
+            existing.update(getQuery(
+                "MATCH (p:CATEGORY) WHERE p.CMID IN $cmids RETURN p.CMID AS CMID",
+                driver,
+                type="list",
+                cmids=parent_list,
+            ))
+            existing.update(getQuery(
+                "MATCH (p:DATASET) WHERE p.CMID IN $cmids RETURN p.CMID AS CMID",
+                driver,
+                type="list",
+                cmids=parent_list,
+            ))
+            existing.update(getQuery(
+                "MATCH (p:DELETED) WHERE p.CMID IN $cmids RETURN p.CMID AS CMID",
+                driver,
+                type="list",
+                cmids=parent_list,
+            ))
+
+            fallback_results = []
+            for row in rows:
+                parent_val = row["parentContextMap"].get("parent")
+                if parent_val is None:
+                    continue
+                parent_cmid = str(parent_val).strip()
+                if parent_cmid and parent_cmid not in existing:
+                    fallback_results.append({
+                        "datasetID": row["datasetID"],
+                        "CMID": row["CMID"],
+                        "Key": row["Key"],
+                        "missingParent": parent_cmid,
+                    })
+
+            return pd.DataFrame(fallback_results)
+
+        def _run_df_query_with_fallback(primary_query, fallback_fn, check_name):
+            """
+            Execute a query; if it fails, run a python fallback and continue.
+            """
+            try:
+                return getQuery(primary_query, driver, type="df")
+            except Exception as primary_error:
+                warnings.warn(
+                    f"{check_name} primary query failed for {database}. "
+                    f"Using fallback. Error: {primary_error}",
+                    RuntimeWarning,
+                )
+                fallback_notes.append(f"{check_name}: fallback used")
+                try:
+                    return fallback_fn()
+                except Exception as fallback_error:
+                    warnings.warn(
+                        f"{check_name} fallback failed for {database}. "
+                        f"Error: {fallback_error}",
+                        RuntimeWarning,
+                    )
+                    fallback_notes.append(f"{check_name}: fallback failed")
+                    return pd.DataFrame()
+
+        query = """
+                MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+                WHERE r.parentContext IS NOT NULL
+                WITH d, c, r,
+                    CASE
+                        WHEN apoc.meta.cypher.type(r.parentContext) = 'LIST OF STRING'
+                            THEN r.parentContext
+                        WHEN apoc.meta.cypher.type(r.parentContext) = 'STRING'
+                            THEN [r.parentContext]
+                        WHEN apoc.meta.cypher.type(r.parentContext) = 'LIST OF MAP'
+                            THEN [pc IN r.parentContext | apoc.convert.toJson(pc)]
+                        WHEN apoc.meta.cypher.type(r.parentContext) = 'MAP'
+                            THEN [apoc.convert.toJson(r.parentContext)]
+                        ELSE []
+                    END AS parentContexts
+                UNWIND parentContexts AS pc
+                WITH d, c, r, trim(toString(pc)) AS pc
+                WHERE pc <> ""
+                WITH d, c, r, pc, apoc.convert.fromJsonMap(pc) AS m
+                WITH d, c, r, pc, m,
+                    CASE WHEN m.parent IS NULL THEN NULL ELSE trim(toString(m.parent)) END AS parentValue,
+                    CASE WHEN m.eventType IS NULL THEN NULL ELSE trim(toString(m.eventType)) END AS eventTypeValue,
+                    CASE WHEN m.eventDate IS NULL THEN NULL ELSE trim(toString(m.eventDate)) END AS eventDateValue
                 WHERE
-                m.parent IS NULL
-                OR m.eventType IS NULL
-                OR m.parent CONTAINS ","
-                OR m.eventType CONTAINS ","
+                parentValue IS NULL
+                OR eventTypeValue IS NULL
+                OR parentValue CONTAINS ","
+                OR eventTypeValue CONTAINS ","
                 OR (
-                    m.eventDate IS NOT NULL
-                    AND m.eventDate <> ""
+                    eventDateValue IS NOT NULL
+                    AND eventDateValue <> ""
                     AND (
-                    NOT m.eventDate =~ '^[0-9]{4}$'
-                    OR toInteger(m.eventDate) < 1000
-                    OR toInteger(m.eventDate) > date().year
+                    NOT eventDateValue =~ '^[0-9]{4}$'
+                    OR toInteger(eventDateValue) < 1000
+                    OR toInteger(eventDateValue) > date().year
                     )
                 )
-                RETURN r, pc
+                RETURN
+                    d.CMID AS datasetID,
+                    c.CMID AS CMID,
+                    r.Key AS Key,
+                    pc AS parentContextEntry
                 """
-        results10 = getQuery(query, driver, type="df")
+        results10 = _run_df_query_with_fallback(
+            query,
+            _fallback_parent_context_schema_check,
+            "parentContext schema validation",
+        )
 
-        query = """MATCH ()-[r:USES]->()
+        query = """MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
                 WHERE r.parentContext IS NOT NULL
-                UNWIND r.parentContext AS pc
-                WITH r, pc, apoc.convert.fromJsonMap(pc) AS m
-                WHERE m.parent IS NOT NULL
-                AND NOT EXISTS {
-                    MATCH (p)
-                    WHERE p.CMID = m.parent
-                }
-                RETURN r, m.parent AS missingParent
+                WITH d, c, r,
+                    CASE
+                        WHEN apoc.meta.cypher.type(r.parentContext) = 'LIST OF STRING'
+                            THEN r.parentContext
+                        WHEN apoc.meta.cypher.type(r.parentContext) = 'STRING'
+                            THEN [r.parentContext]
+                        WHEN apoc.meta.cypher.type(r.parentContext) = 'LIST OF MAP'
+                            THEN [pc IN r.parentContext | apoc.convert.toJson(pc)]
+                        WHEN apoc.meta.cypher.type(r.parentContext) = 'MAP'
+                            THEN [apoc.convert.toJson(r.parentContext)]
+                        ELSE []
+                    END AS parentContexts
+                UNWIND parentContexts AS pc
+                WITH d, c, r, trim(toString(pc)) AS pc
+                WHERE pc <> ""
+                WITH d, c, r, apoc.convert.fromJsonMap(pc) AS m
+                WITH d, c, r,
+                    CASE WHEN m.parent IS NULL THEN NULL ELSE trim(toString(m.parent)) END AS parentCMID
+                WHERE parentCMID IS NOT NULL
+                    AND parentCMID <> ""
+                    AND NOT EXISTS { MATCH (:CATEGORY {CMID: parentCMID}) }
+                    AND NOT EXISTS { MATCH (:DATASET {CMID: parentCMID}) }
+                    AND NOT EXISTS { MATCH (:DELETED {CMID: parentCMID}) }
+                RETURN
+                    d.CMID AS datasetID,
+                    c.CMID AS CMID,
+                    r.Key AS Key,
+                    parentCMID AS missingParent
                 """
 
-        results11 = getQuery(query, driver, type="df")
+        results11 = _run_df_query_with_fallback(
+            query,
+            _fallback_parent_cmid_check,
+            "parentContext parent CMID validation",
+        )
 
         mailSent = "False"
 
@@ -966,13 +988,38 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                         "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp11])
                 mailSent = "True"
         if return_type == "data":
-            return {"geoCoords": len(results1), "parentContext": len(results2), "CMID in parentContext but not in parent": len(results3), "geoCoords": results1, "parentContext": results2, "CMID in parentContext but not in parent": results3, "emailSent": mailSent}
+            return {
+                "invalid_geoCoords_count": len(results1),
+                "invalid_parentContext_count": len(results2),
+                "parentContext_parent_not_in_parent_count": len(results3),
+                "invalid_parentContext_json_shape_count": len(results10),
+                "invalid_parentContext_parent_cmid_count": len(results11),
+                "invalid_geoCoords": results1,
+                "invalid_parentContext": results2,
+                "parentContext_parent_not_in_parent": results3.to_dict(orient="records"),
+                "invalid_parentContext_json_shape": results10.to_dict(orient="records"),
+                "invalid_parentContext_parent_cmid": results11.to_dict(orient="records"),
+                "emailSent": mailSent,
+            }
         elif return_type == "info":
             if len(results1) == 0:
                 fp1 = None
             if len(results2) == 0:
-                fp2 = None            
-            return {"info": f"Invalid geoCoords: {len(results1)}; Invalid parentContext: {len(results2)}; CMID in parentContext but not in parent: {len(results3)}; Clean split constraint: {len(results4)}; Non-singular merge constraint: {len(results5)}; Non-singular split constraint: {len(results6)}; Can't split merging entity constraint: {len(results7)}; Valid eventType: {len(results8)}; Valid evnetDate: {len(results9)}; Valid parenContext Json: {len(results10)}; Valid parent CMID: {len(results11)}", "filepath": [fp1, fp2, fp3, fp4, fp5, fp6, fp7, fp8, fp9, fp10, fp11]}
+                fp2 = None
+            fallback_info = ""
+            if fallback_notes:
+                fallback_info = "; Fallback notes: " + " | ".join(fallback_notes)
+            return {
+                "info": (
+                    f"Invalid geoCoords: {len(results1)}; "
+                    f"Invalid parentContext: {len(results2)}; "
+                    f"CMID in parentContext but not in parent: {len(results3)}; "
+                    f"Invalid parentContext JSON shape: {len(results10)}; "
+                    f"Invalid parentContext parent CMID: {len(results11)}"
+                    f"{fallback_info}"
+                ),
+                "filepath": [fp1, fp2, fp3, fp10, fp11],
+            }
     except Exception as e:
         result = str(e)
         return result, 500
@@ -1340,9 +1387,11 @@ def fixMetaTypes(database, return_type="data"):
 
     Specifically:
       - Node properties and relationship properties are validated separately.
-      - Each property is checked against its expected metaType:
-          * "STRING" → Neo4j type "STRING"
-          * other types → Neo4j type "LIST OF STRING"
+      - Each property is checked against its expected stored Neo4j type:
+          * "LIST" → Neo4j type "LIST OF STRING"
+          * all other metaTypes → Neo4j type "STRING"
+      - Before formatting, values are coerced into string tokens so
+        `custom.formatProperties` can safely process non-string values.
       - Properties with mismatched types are reformatted and updated in place.
 
     Parameters
@@ -1361,9 +1410,9 @@ def fixMetaTypes(database, return_type="data"):
     -------
     dict or tuple
         If return_type == "data":
-            {"status": "success", "message": "Meta types updated successfully"}
+            {"status": "success" or "partial", "message": "...", "errors": [...]}
         If return_type == "info":
-            {"info": "Completed updating metatypes"}
+            {"info": "Completed updating metatypes ..."}
         If an error occurs:
             A tuple of (error_message, 500).
 
@@ -1388,33 +1437,68 @@ def fixMetaTypes(database, return_type="data"):
         relationship_properties = properties[properties['type']
                                              == 'relationship']
 
+        errors = []
+
         for property, metaType in zip(node_properties['property'], node_properties['metaType']):
-            metaType = metaType.upper()
-            metaType_neo4j = "STRING" if metaType == "STRING" else "LIST OF STRING"
+            metaType = str(metaType).upper().strip()
+            prop = str(property).replace("`", "")
+            metaType_neo4j = "LIST OF STRING" if metaType == "LIST" else "STRING"
             query = f"""
             MATCH (n)
-            WHERE n.{property} IS NOT NULL AND apoc.meta.cypher.type(n.{property}) <> "{metaType_neo4j}"
-            SET n.{property} = custom.formatProperties([n.{property}],'{metaType}',';')[0].prop
-            return count(*) as count
+            WHERE n.`{prop}` IS NOT NULL
+              AND apoc.meta.cypher.type(n.`{prop}`) <> "{metaType_neo4j}"
+            SET n.`{prop}` = custom.formatProperties(
+              [v IN apoc.coll.flatten([n.`{prop}`], true) WHERE v IS NOT NULL | toString(v)],
+              '{metaType}',
+              ';'
+            )[0].prop
+            RETURN count(*) as count
             """
-            result = getQuery(query, driver)
-            print(f"Updated {property} to {metaType}: {result}")
+            try:
+                result = getQuery(query, driver, type="list")
+                updated = result[0] if isinstance(result, list) and len(result) > 0 else 0
+                print(f"Updated node property {prop} to {metaType}: {updated}")
+            except Exception as e:
+                msg = f"Failed node property {prop} ({metaType}): {e}"
+                print(msg)
+                errors.append(msg)
 
         for property, metaType in zip(relationship_properties['property'], relationship_properties['metaType']):
-            metaType = metaType.upper()
-            metaType_neo4j = "STRING" if metaType == "STRING" else "LIST OF STRING"
+            metaType = str(metaType).upper().strip()
+            prop = str(property).replace("`", "")
+            metaType_neo4j = "LIST OF STRING" if metaType == "LIST" else "STRING"
             query = f"""
             MATCH (n)-[rel]->(m)
-            WHERE rel.{property} IS NOT NULL AND apoc.meta.cypher.type(rel.{property}) <> "{metaType_neo4j}"
-            SET rel.{property} = custom.formatProperties([rel.{property}],'{metaType}',';')[0].prop
-            return count(*) as count
+            WHERE rel.`{prop}` IS NOT NULL
+              AND apoc.meta.cypher.type(rel.`{prop}`) <> "{metaType_neo4j}"
+            SET rel.`{prop}` = custom.formatProperties(
+              [v IN apoc.coll.flatten([rel.`{prop}`], true) WHERE v IS NOT NULL | toString(v)],
+              '{metaType}',
+              ';'
+            )[0].prop
+            RETURN count(*) as count
             """
-            result = getQuery(query, driver)
-            print(f"Updated {property} to {metaType}: {result}")
+            try:
+                result = getQuery(query, driver, type="list")
+                updated = result[0] if isinstance(result, list) and len(result) > 0 else 0
+                print(f"Updated relationship property {prop} to {metaType}: {updated}")
+            except Exception as e:
+                msg = f"Failed relationship property {prop} ({metaType}): {e}"
+                print(msg)
+                errors.append(msg)
+
         if return_type == "data":
-            return {"status": "success", "message": "Meta types updated successfully"}
+            status = "success" if len(errors) == 0 else "partial"
+            message = (
+                "Meta types updated successfully"
+                if len(errors) == 0
+                else f"Meta types update completed with {len(errors)} error(s)"
+            )
+            return {"status": status, "message": message, "errors": errors}
         elif return_type == "info":
-            return {"info": "Completed updating metatypes"}
+            if len(errors) == 0:
+                return {"info": "Completed updating metatypes"}
+            return {"info": f"Completed updating metatypes with {len(errors)} error(s)"}
     except Exception as e:
         result = str(e)
         return result, 500
@@ -2208,9 +2292,15 @@ def get_label_check(database, mail=None, return_type="data"):
                 sendEmail(mail, subject=f"Non-generic parent to generic node for {database}", recipients=[
                           "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
         query = """
-        MATCH ()-[r:USES]-()
+        MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
         WHERE r.label IS NOT NULL
-        AND size(split(r.label, ",")) > 1
+        WITH r,
+        CASE
+            WHEN apoc.meta.cypher.type(r.label) = 'LIST OF STRING' THEN size(r.label)
+            WHEN apoc.meta.cypher.type(r.label) = 'STRING' THEN size(split(r.label, ","))
+            ELSE 0
+        END AS labelCount
+        WHERE labelCount > 1
         RETURN r, r.label;
         """
         results2 = getQuery(query, driver, type="df")
@@ -2258,7 +2348,7 @@ def getNumeric_Checks(database, mail=None, return_type="data"):
     try:
         driver = getDriver(database)
         query = """
-        MATCH ()<-[r:USES]-()
+        MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
         WHERE r.geoCoords IS NOT NULL
         WITH r,
             CASE
@@ -2292,7 +2382,7 @@ def getNumeric_Checks(database, mail=None, return_type="data"):
                           "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
 
         query = """
-        MATCH (a)<-[r:USES]-(b)
+        MATCH (a:CATEGORY)<-[r:USES]-(b:DATASET)
         WHERE 
             (r.yearEnd IS NOT NULL AND toInteger(r.yearEnd) IS NULL) OR
             (r.yearStart IS NOT NULL AND toInteger(r.yearStart) IS NULL) OR
@@ -2420,52 +2510,70 @@ def runRoutinesStream(databases="all", mail=None):
             dbs = databases
 
         routines = [
-            ("Modifications", lambda db: reportChanges(db, return_type="info")),
-            ("Check Domains", lambda db: checkDomains(db, mail=None, return_type="info")),
-            ("Bad Domains", lambda db: getBadDomains(db, mail=None, return_type="info")),
-            ("Bad CMID", lambda db: getBadCMID(db, mail=None, return_type="info")),
-            ("Multiple Labels", lambda db: getMultipleLabels(db, mail=None, return_type="info")),
-            ("Bad JSON", lambda db: getBadComplexProperties(db, mail=None, return_type="info")),
-            ("Bad Relations", lambda db: getBadRelations(db, mail=None, return_type="info")),
-            ("CMName Not In Name", lambda db: CMNameNotInName(db, mail=None, return_type="info")),
-            ("Missing CMName", lambda db: missingCMName(db, mail=None, return_type="info")),
-            ("Invalid shortname", lambda db: getBadContextual(db, mail=None, return_type="info")),
-            ("No USES", lambda db: noUSES(db, save=True, mail=None, return_type="info")),
-            ("Check USES", lambda db: checkUSES(db, save=True, mail=None, return_type="info")),
-            ("Check USES for empty and duplicates", lambda db: get_duplicate_empty_USES(db, mail=None, return_type="info")),
-            ("Check USES for duplicate triplets", lambda db: get_duplicate_triplets(db, mail=None, return_type="info")),
-            ("Process USES", lambda db: processUSES(db, detailed=False)),
-            ("Invalid Node and USES properties", lambda db: getInappropriateprops_Nodes_Rels(db, mail=None, return_type="info")),
-            ("Empty Node properties", lambda db: get_empty_nodeprops(db, mail=None, return_type="info")),
-            ("Label Checks", lambda db: get_label_check(db, mail=None, return_type="info")),
-            ("Numeric Checks", lambda db: getNumeric_Checks(db, mail=None, return_type="info")),
-            ("Process DATASETs", lambda db: processDATASETs(db)),
-            ("Fix MetaTypes", lambda db: fixMetaTypes(db, return_type="info")),
+            ("Modifications", lambda db: reportChanges(db, return_type="info"), True),
+            ("Check Domains", lambda db: checkDomains(db, mail=None, return_type="info"), True),
+            ("Bad Domains", lambda db: getBadDomains(db, mail=None, return_type="info"), True),
+            ("Bad CMID", lambda db: getBadCMID(db, mail=None, return_type="info"), True),
+            ("Multiple Labels", lambda db: getMultipleLabels(db, mail=None, return_type="info"), True),
+            ("Bad JSON", lambda db: getBadComplexProperties(db, mail=None, return_type="info"), True),
+            ("Bad Relations", lambda db: getBadRelations(db, mail=None, return_type="info"), True),
+            ("CMName Not In Name", lambda db: CMNameNotInName(db, mail=None, return_type="info"), False),
+            ("Missing CMName", lambda db: missingCMName(db, mail=None, return_type="info"), True),
+            ("Invalid shortname", lambda db: getBadContextual(db, mail=None, return_type="info"), True),
+            ("No USES", lambda db: noUSES(db, save=True, mail=None, return_type="info"), True),
+            ("Check USES", lambda db: checkUSES(db, save=True, mail=None, return_type="info"), True),
+            ("Check USES for empty and duplicates", lambda db: get_duplicate_empty_USES(db, mail=None, return_type="info"), True),
+            ("Check USES for duplicate triplets", lambda db: get_duplicate_triplets(db, mail=None, return_type="info"), True),
+            ("Process USES", lambda db: processUSES(db, detailed=False), False),
+            ("Invalid Node and USES properties", lambda db: getInappropriateprops_Nodes_Rels(db, mail=None, return_type="info"), True),
+            ("Empty Node properties", lambda db: get_empty_nodeprops(db, mail=None, return_type="info"), True),
+            ("Label Checks", lambda db: get_label_check(db, mail=None, return_type="info"), True),
+            ("Numeric Checks", lambda db: getNumeric_Checks(db, mail=None, return_type="info"), True),
+            ("Process DATASETs", lambda db: processDATASETs(db), False),
+            ("Fix MetaTypes", lambda db: fixMetaTypes(db, return_type="info"), False),
         ]
 
         # initialize results dict
-        results.update({name: {db: "" for db in dbs} for name, _ in routines})
+        results.update({name: {db: "" for db in dbs} for name, _, _ in routines})
 
         for db in dbs:
             yield emit(f"<h1>Running routines for {db}</h1>")
 
-            for name, func in routines:
+        for name, func, can_parallel in routines:
+            routine_outputs = {}
+
+            if can_parallel and len(dbs) > 1:
+                with ThreadPoolExecutor(max_workers=len(dbs)) as executor:
+                    future_to_db = {executor.submit(func, db): db for db in dbs}
+                    for future in as_completed(future_to_db):
+                        db = future_to_db[future]
+                        try:
+                            routine_outputs[db] = future.result()
+                        except Exception as e:
+                            routine_outputs[db] = e
+            else:
+                for db in dbs:
+                    try:
+                        routine_outputs[db] = func(db)
+                    except Exception as e:
+                        routine_outputs[db] = e
+
+            for db in dbs:
                 yield emit(f"<h2>{name} for {db}:</h2>")
-                try:
-                    res = func(db)
-                    if isinstance(res, str):
-                        results[name][db] = res
-                        yield emit(results[name][db])
-                    elif isinstance(res, dict) and "info" in res:
-                        results[name][db] = res["info"]
-                        yield emit(results[name][db])
-                        if res.get("filepath"):
-                            files.append(res["filepath"])
-                    else:
-                        results[name][db] = str(res)
-                        yield emit(results[name][db])
-                except Exception as e:
-                    results[name][db] = f"Exception: {e}"
+                res = routine_outputs.get(db)
+                if isinstance(res, Exception):
+                    results[name][db] = f"Exception: {res}"
+                    yield emit(results[name][db])
+                elif isinstance(res, str):
+                    results[name][db] = res
+                    yield emit(results[name][db])
+                elif isinstance(res, dict) and "info" in res:
+                    results[name][db] = res["info"]
+                    yield emit(results[name][db])
+                    if res.get("filepath"):
+                        files.append(res["filepath"])
+                else:
+                    results[name][db] = str(res)
                     yield emit(results[name][db])
 
         # flatten file list
