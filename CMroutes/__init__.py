@@ -61,19 +61,37 @@ def create_app():
     app.config['PERMANENT_SESSION_LIFETIME'] = 999999999
     app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 
-    mail_server = _env_or_config("MAIL_SERVER", "MAIL", "mail_server", "smtp-relay.sendinblue.com")
-    mail_port_raw = _env_or_config("MAIL_PORT", "MAIL", "mail_port", "587")
+    mail_server = _env_or_config("MAIL_SERVER", "MAIL", "mail_server", "")
+    mail_port_raw = _env_or_config("MAIL_PORT", "MAIL", "mail_port", "25")
     try:
         mail_port = int(mail_port_raw)
     except (TypeError, ValueError):
-        mail_port = 587
+        mail_port = 25
 
-    # Default transport behavior remains TLS/587 unless overridden via env.
-    mail_use_tls = _as_bool(_env_or_config("MAIL_USE_TLS", "MAIL", "mail_use_tls", "true"), default=True)
+    # Keep TLS disabled by default for smtp.asu.edu:25 unless explicitly enabled.
+    mail_use_tls = _as_bool(_env_or_config("MAIL_USE_TLS", "MAIL", "mail_use_tls", "false"), default=False)
     mail_use_ssl = _as_bool(_env_or_config("MAIL_USE_SSL", "MAIL", "mail_use_ssl", "false"), default=False)
     mail_username = _env_or_config("MAIL_USERNAME", "MAIL", "mail_address", "")
     mail_password = _env_or_config("MAIL_PASSWORD", "MAIL", "mail_pwd", "")
-    mail_default_sender = _env_or_config("MAIL_DEFAULT_SENDER", "MAIL", "mail_default", "admin@catmapper.org")
+    mail_default_sender = _env_or_config("MAIL_DEFAULT_SENDER", "MAIL", "mail_default", "")
+    mail_domain = _env_or_config("MAIL_DOMAIN", "MAIL", "mail_domain", "")
+    mail_open_timeout_raw = _env_or_config("MAIL_OPEN_TIMEOUT", "MAIL", "mail_open_timeout", "15")
+    mail_read_timeout_raw = _env_or_config("MAIL_READ_TIMEOUT", "MAIL", "mail_read_timeout", "15")
+    try:
+        mail_open_timeout = int(mail_open_timeout_raw)
+    except (TypeError, ValueError):
+        mail_open_timeout = 15
+    try:
+        mail_read_timeout = int(mail_read_timeout_raw)
+    except (TypeError, ValueError):
+        mail_read_timeout = 15
+    mail_timeout = max(mail_open_timeout, mail_read_timeout)
+
+    if not mail_default_sender or "@" not in str(mail_default_sender):
+        print(
+            "ALERT: MAIL_DEFAULT_SENDER is not configured. "
+            "Set MAIL_DEFAULT_SENDER env var or MAIL.mail_default in config.ini."
+        )
 
     app.config['MAIL_SERVER'] = mail_server
     app.config['MAIL_PORT'] = mail_port
@@ -82,6 +100,8 @@ def create_app():
     app.config['MAIL_USERNAME'] = mail_username or None
     app.config['MAIL_PASSWORD'] = mail_password or None
     app.config['MAIL_DEFAULT_SENDER'] = mail_default_sender
+    app.config['MAIL_DOMAIN'] = mail_domain or None
+    app.config['MAIL_TIMEOUT'] = mail_timeout
     mail.init_app(app)
 
     return app

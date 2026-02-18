@@ -1,5 +1,18 @@
 from flask import Blueprint, request, jsonify
-from CM import getDriver, password_hash, sendEmail, verifyUser, login, enableUser, unlist, getQuery, verifyPassword
+from CM import (
+    getDriver,
+    password_hash,
+    sendEmail,
+    verifyUser,
+    login,
+    enableUser,
+    unlist,
+    getQuery,
+    verifyPassword,
+    get_default_sender,
+    get_alert_recipients,
+    get_support_email,
+)
 import json
 from datetime import datetime, timedelta, timezone
 from threading import Lock
@@ -11,10 +24,6 @@ from .extensions import mail
 from .auth_utils import issue_auth_token, verify_request_auth, verify_bearer_auth
 
 user_bp = Blueprint('user', __name__)
-
-from configparser import ConfigParser
-config = ConfigParser()
-config.read('config.ini')
 
 PROFILE_UPDATE_REQUESTS = {}
 PASSWORD_CHANGE_REQUESTS = {}
@@ -51,7 +60,7 @@ def _send_verification_email(email, verification_code, action_label, username=No
     if not email:
         raise Exception("User email is missing; cannot send verification code.")
 
-    sender = _mail_default_sender()
+    sender = get_default_sender()
     subject = f"CatMapper {action_label} Verification Code"
     username_line = f"Username: {username}\n\n" if username else ""
     body = (
@@ -81,14 +90,6 @@ def _cleanup_requests():
             expired = [key for key, value in store.items() if value["expires_at"] < now]
             for key in expired:
                 store.pop(key, None)
-
-
-def _mail_default_sender():
-    if "MAIL_DEFAULT_SENDER" in os.environ:
-        return os.environ.get("MAIL_DEFAULT_SENDER") or "admin@catmapper.org"
-    if config.has_option("MAIL", "mail_default"):
-        return config.get("MAIL", "mail_default")
-    return "admin@catmapper.org"
 
 
 def _normalize_database(database_value):
@@ -325,7 +326,9 @@ def _verify_profile_credentials(userid, credentials):
 def getnewuser():
     try:
 
-        mail_default = _mail_default_sender()
+        mail_default = get_default_sender()
+        alert_recipients = get_alert_recipients()
+        support_email = get_support_email() or "the configured support email"
         data = request.get_data()
         data = json.loads(data)
         database = data.get("database")
@@ -366,7 +369,7 @@ def getnewuser():
 
         if isinstance(data, list) and data and data[0].get("exists") is not None:
             raise Exception(
-                "Account with this email already exists. Please contact admin@catmapper.org to reset password.")
+                f"Account with this email already exists. Please contact {support_email} to reset password.")
 
         query = """
                 match (p:USER) with toInteger(p.userid) + 1 as id order by id desc limit 1
@@ -398,8 +401,13 @@ def getnewuser():
                 description: {intendedUse}
                 """
 
-        sendEmail(mail, subject="New registered user", recipients=[
-            "admin@catmapper.org"], body=body, sender=mail_default)
+        sendEmail(
+            mail,
+            subject="New registered user",
+            recipients=alert_recipients,
+            body=body,
+            sender=mail_default,
+        )
 
         return jsonify({"message": "Success"}), 200
 
@@ -417,7 +425,8 @@ def getnewuser():
 
         else:
             # Default error message
-            return jsonify({"error": "please contact admin@catmapper.org. Error:" + error_message}), 500
+            support_email = get_support_email() or "the configured support email"
+            return jsonify({"error": "please contact " + support_email + ". Error:" + error_message}), 500
 
 @user_bp.route('/login', methods=['POST'])
 def getLogin():
@@ -1107,18 +1116,29 @@ def updateNewUsers():
         if isinstance(result, list) and process == "approve":
 
             users = [user for user in result if user.get("email")]
+            alert_recipients = get_alert_recipients()
+            default_sender = get_default_sender()
+            support_email = get_support_email() or "the configured support email"
             if len(users) > 0:
                 for user in users:
                     body = f"""
         Hello {user.get("first")} {user.get("last")},
 
-        Your registration has been approved. You can now access the CatMapper applications. Please see catmapper.org/help or email support@catmapper.org for any questions.
+        Your registration has been approved. You can now access the CatMapper applications. Please see catmapper.org/help or email {support_email} for any questions.
 
         Best,
         CatMapper Team
                     """
-                    sendEmail(mail, subject="CatMapper Registration Approved", recipients=[user.get(
-                        "email"), 'admin@catmapper.org'], body=body, sender="admin@catmapper.org")
+                    recipients = [user.get("email")] + alert_recipients
+                    # Preserve order while removing duplicates/empties.
+                    recipients = list(dict.fromkeys([r for r in recipients if r]))
+                    sendEmail(
+                        mail,
+                        subject="CatMapper Registration Approved",
+                        recipients=recipients,
+                        body=body,
+                        sender=default_sender,
+                    )
 
         return result
     except Exception as e:
