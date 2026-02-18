@@ -18,6 +18,7 @@ config.read('config.ini')
 
 PROFILE_UPDATE_REQUESTS = {}
 PASSWORD_CHANGE_REQUESTS = {}
+API_KEY_CREATE_REQUESTS = {}
 REQUEST_LOCK = Lock()
 REQUEST_TTL_MINUTES = 15
 logger = logging.getLogger(__name__)
@@ -76,7 +77,7 @@ def _send_verification_email(email, verification_code, action_label, username=No
 def _cleanup_requests():
     now = datetime.utcnow()
     with REQUEST_LOCK:
-        for store in (PROFILE_UPDATE_REQUESTS, PASSWORD_CHANGE_REQUESTS):
+        for store in (PROFILE_UPDATE_REQUESTS, PASSWORD_CHANGE_REQUESTS, API_KEY_CREATE_REQUESTS):
             expired = [key for key, value in store.items() if value["expires_at"] < now]
             for key in expired:
                 store.pop(key, None)
@@ -130,6 +131,8 @@ def _format_profile(row):
         "createdAt": row.get("createdAt") or _now_iso(),
         "updatedAt": row.get("updatedAt") or _now_iso(),
         "passwordLastChangedAt": row.get("passwordLastChangedAt") or _now_iso(),
+        "hasApiKey": bool(row.get("apiKeyHash")),
+        "apiKeyCreatedAt": row.get("apiKeyCreatedAt") or "",
     }
 
 
@@ -225,7 +228,9 @@ def _load_user(userid):
       u.createdAt as createdAt,
       u.updatedAt as updatedAt,
       u.passwordLastChangedAt as passwordLastChangedAt,
-      u.password as password
+      u.password as password,
+      coalesce(u.apiKeyHash, '') as apiKeyHash,
+      u.apiKeyCreatedAt as apiKeyCreatedAt
     """
     data = getQuery(query, driver=driver, params={"userid": userid})
     if not data:
@@ -281,9 +286,40 @@ def _verify_profile_credentials(userid, credentials):
     if str(credential_userid) != str(userid):
         raise Exception("Credentials do not match requested user")
     verified = verifyUser(str(credential_userid), credential_key)
-    if verified != "verified":
+    if verified == "verified":
+        return True
+
+    driver = getDriver("userdb")
+    query = """
+    MATCH (u:USER {userid: toString($userid)})
+    RETURN
+      coalesce(u.access, '') as access,
+      coalesce(u.apiKeyHash, '') as apiKeyHash,
+      coalesce(u.apiKeyHashes, []) as apiKeyHashes
+    """
+    rows = getQuery(query, driver=driver, params={"userid": str(userid)})
+    if not rows:
         raise Exception("User is not verified")
-    return True
+
+    row = rows[0] or {}
+    if str(row.get("access", "")).lower() != "enabled":
+        raise Exception("User is not verified")
+
+    key_hashes = []
+    single_hash = row.get("apiKeyHash")
+    if isinstance(single_hash, str) and single_hash.strip():
+        key_hashes.append(single_hash.strip())
+    hash_list = row.get("apiKeyHashes")
+    if isinstance(hash_list, list):
+        for item in hash_list:
+            if isinstance(item, str) and item.strip():
+                key_hashes.append(item.strip())
+
+    for key_hash in key_hashes:
+        if verifyPassword(key_hash, str(credential_key)):
+            return True
+
+    raise Exception("User is not verified")
 
 @user_bp.route('/newuser', methods=['POST'])
 def getnewuser():
@@ -771,6 +807,118 @@ def confirm_password_change():
         if not saved:
             raise Exception("User not found")
         return jsonify({"passwordLastChangedAt": saved[0].get("passwordLastChangedAt")}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@user_bp.route('/profile/request-api-key', methods=['POST'])
+def request_api_key_creation():
+    try:
+        _cleanup_requests()
+        data = _read_json_payload()
+        userid = unlist(data.get("userId"))
+        credentials = data.get("credentials")
+
+        if not userid:
+            raise Exception("Missing userId")
+        _verify_profile_credentials(userid, credentials)
+
+        existing = _load_user(userid)
+        target_email = existing.get("email")
+        if not target_email:
+            raise Exception("User email is missing; cannot create API key.")
+
+        request_id = f"apikey_{uuid.uuid4().hex[:12]}"
+        verification_code = f"{secrets.randbelow(900000) + 100000}"
+        api_key = f"cmk_{secrets.token_urlsafe(32)}"
+        api_key_hash = password_hash(api_key)
+        if not isinstance(api_key_hash, str) or api_key_hash.startswith("password hash failed"):
+            raise Exception("Unable to generate API key.")
+
+        with REQUEST_LOCK:
+            API_KEY_CREATE_REQUESTS[request_id] = {
+                "userid": str(userid),
+                "api_key": api_key,
+                "api_key_hash": api_key_hash,
+                "verification_code": verification_code,
+                "expires_at": datetime.utcnow() + timedelta(minutes=REQUEST_TTL_MINUTES),
+            }
+
+        _send_verification_email(
+            target_email,
+            verification_code,
+            "API Key Creation",
+            username=existing.get("username"),
+        )
+        logger.info(
+            "API key verification email sent: userid=%s request_id=%s email=%s",
+            userid,
+            request_id,
+            _mask_email(target_email),
+        )
+
+        response = {
+            "requestId": request_id,
+            "maskedEmail": _mask_email(target_email),
+        }
+        if _include_debug_verification_code():
+            response["debugVerificationCode"] = verification_code
+
+        return jsonify(response), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@user_bp.route('/profile/confirm-api-key', methods=['POST'])
+def confirm_api_key_creation():
+    try:
+        _cleanup_requests()
+        data = _read_json_payload()
+        userid = unlist(data.get("userId"))
+        request_id = unlist(data.get("requestId"))
+        verification_code = str(unlist(data.get("verificationCode")) or "").strip()
+        credentials = data.get("credentials")
+
+        if not userid or not request_id or not verification_code:
+            raise Exception("Missing required confirmation fields")
+        _verify_profile_credentials(userid, credentials)
+
+        with REQUEST_LOCK:
+            pending = API_KEY_CREATE_REQUESTS.get(request_id)
+            if not pending or pending.get("userid") != str(userid):
+                raise Exception("API key request not found. Please request a new verification email.")
+            if pending.get("verification_code") != verification_code:
+                raise Exception("Invalid verification code.")
+            api_key = pending.get("api_key")
+            api_key_hash = pending.get("api_key_hash")
+            API_KEY_CREATE_REQUESTS.pop(request_id, None)
+
+        updated_at = _now_iso()
+        driver = getDriver("userdb")
+        query = """
+        MATCH (u:USER {userid: toString($userid)})
+        SET
+          u.apiKeyHash = $apiKeyHash,
+          u.apiKeyCreatedAt = $updatedAt,
+          u.updatedAt = $updatedAt
+        RETURN u.apiKeyCreatedAt as apiKeyCreatedAt
+        """
+        saved = getQuery(
+            query,
+            driver=driver,
+            params={
+                "userid": userid,
+                "apiKeyHash": api_key_hash,
+                "updatedAt": updated_at,
+            },
+        )
+        if not saved:
+            raise Exception("User not found")
+
+        return jsonify({
+            "apiKey": api_key,
+            "apiKeyCreatedAt": saved[0].get("apiKeyCreatedAt") or updated_at,
+        }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 

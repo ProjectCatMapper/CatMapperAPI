@@ -244,18 +244,16 @@ def createNodesapi():
         database = unlist(data.get('database'))
         user = unlist(data.get('user'))
         pwd = unlist(data.get('password'))
-
-        verify = verifyUser(user, pwd)
-
-        if not verify == "verified":
-            raise Exception("User is not verified.")
+        credentials = {"userid": user, "key": pwd}
+        claims = verify_request_auth(credentials=credentials, req=request)
+        acting_user = claims.get("userid")
 
         if not df or len(df) == 0:
             return jsonify({"error": "Data is empty"}), 400
 
         df = pd.DataFrame(df)
 
-        results = createNodes(df, database, user)
+        results = createNodes(df, database, acting_user)
 
         return results
 
