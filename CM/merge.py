@@ -78,6 +78,7 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
             raise ValueError(
                 "The 'datasetID' column is missing from the second DataFrame.")
         driver = getDriver(database)
+        domain = validate_domain_label(domain, driver=driver)
 
         # Drop 'CMID' and 'CMName' only if they exist in the columns
         joinLeft.drop(
@@ -246,6 +247,7 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
     try:
         #return resultFormat
         driver = getDriver(database)
+        category_label = validate_domain_label(category_label, driver=driver)
 
         if len(dataset_choices) < 1:
             return jsonify({"message": "Please select more options"}), 400
@@ -436,6 +438,7 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
 def generate_cypher_query(domain, nContains):
     if not isinstance(domain, str):
         raise ValueError("domain must be a string")
+    domain = sanitize_cypher_identifier(domain, "domain")
     if nContains < 1:
         raise ValueError("nContains must be at least 1")
     elif nContains > 4:

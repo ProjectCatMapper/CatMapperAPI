@@ -156,11 +156,14 @@ def net():
     if not database:
         database = "sociomap"
     driver_neo4j = getDriver(database)
-    session = driver_neo4j.session()
-    q = "MATCH (n:"+p0+" {CMID:'"+p1+"'})-[r:" + \
-        p2+"]-(OtherNodes) RETURN n,r,OtherNodes"
-    r = session.run(q)
-    resultnet = r.data()
+    label = validate_domain_label(p0, driver=driver_neo4j)
+    rel_type = sanitize_cypher_identifier(p2, "relationship")
+    cmid = str(p1).strip()
+
+    with driver_neo4j.session() as session:
+        q = f"MATCH (n:{label} {{CMID: $cmid}})-[r:{rel_type}]-(OtherNodes) RETURN n,r,OtherNodes"
+        r = session.run(q, cmid=cmid)
+        resultnet = r.data()
     return resultnet
 
 
@@ -373,6 +376,7 @@ def getNetworkjs():
         relation = unlist(request.args.get('relation'))
         if relation is None:
             relation = "USES"
+        relation = sanitize_cypher_identifier(relation, "relationship")
         database = request.args.get('database')
 
         driver = getDriver(database)
