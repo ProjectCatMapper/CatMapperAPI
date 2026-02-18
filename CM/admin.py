@@ -15,16 +15,14 @@ from .utils import *
 from .metadata import *
 from .log import createLog
 from .USES import processUSES
-from .USES import addCMNameRel,processDATASETs,waitingUSES
-from .upload import updateProperty,createUSES
+from .USES import addCMNameRel, processDATASETs
+from .upload import updateProperty
 from flask import jsonify
-from itertools import groupby
 from collections import Counter
 
 # This is a module for admin functions in CatMapper
 
 import re
-from neo4j import GraphDatabase
 
 ############################
 #section for general use helper functions

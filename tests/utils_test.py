@@ -1,16 +1,48 @@
-import pytest
-from CM import getNodeProperties
+import CM.utils as utils
 
-@pytest.fixture
-def database():
-    return "ArchaMap"
-@pytest.fixture
-def domain():
-    return "CATEGORY"
-@pytest.fixture
-def CMID():
-    return ["AM1001","AM1002","AM1003","AM1004","AM1005","AM1006","AM1007","AM1008","AM1009","AM1010"]
 
-def test_getNodeProperties(database, domain, CMID):
-    response = getNodeProperties(database, domain, CMID)
-    assert response == ['Name', 'Key', 'label', 'yearPublished']
+class FakeDriver:
+    def __init__(self):
+        self.closed = False
+        self.verify_calls = 0
+
+    def verify_connectivity(self):
+        self.verify_calls += 1
+
+    def close(self):
+        self.closed = True
+
+
+def test_getDriver_uses_cache(monkeypatch):
+    utils._driver_cache.clear()
+    utils._last_verified.clear()
+
+    created = []
+
+    def fake_create_driver(database):
+        driver = FakeDriver()
+        created.append((database, driver))
+        return driver
+
+    monkeypatch.setattr(utils, "_create_driver", fake_create_driver)
+
+    first = utils.getDriver("ArchaMap")
+    second = utils.getDriver("archamap")
+
+    assert first is second
+    assert len(created) == 1
+
+
+def test_closeAllDrivers_closes_and_clears_cache():
+    utils._driver_cache.clear()
+    utils._last_verified.clear()
+
+    driver = FakeDriver()
+    utils._driver_cache["archamap"] = driver
+    utils._last_verified["archamap"] = utils.datetime.now()
+
+    utils.closeAllDrivers()
+
+    assert driver.closed is True
+    assert utils._driver_cache == {}
+    assert utils._last_verified == {}
