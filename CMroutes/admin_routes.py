@@ -153,7 +153,7 @@ def getAdminEdit():
     from configparser import ConfigParser
     config = ConfigParser()
     config.read('config.ini')
-    apikeyEnv = config['DB']['apikey']
+    apikeyEnv = config.get('DB', 'apikey', fallback=None)
     # will not be documented in swagger at this point
     try:
         if request.method == 'GET':
@@ -166,7 +166,6 @@ def getAdminEdit():
         database = unlist(data.get('database'))
         if database is None:
             raise Exception("Database not specified")
-        driver = getDriver(database)
         fun = unlist(data.get('fun'))
         user = unlist(data.get('user'))
         pwd = unlist(data.get('pwd'))
@@ -180,7 +179,7 @@ def getAdminEdit():
             acting_user = claims.get("userid")
         else:
             validated = False
-            if apikey == apikeyEnv:
+            if apikeyEnv and apikey and apikey == apikeyEnv:
                 validated = True
                 acting_user = user
             if not validated:
