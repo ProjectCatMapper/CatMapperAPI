@@ -34,6 +34,29 @@ def split_vars_values(s):
             values.append(val.strip())
     return pd.Series(["; ".join(variables), "; ".join(values)])
 
+
+def get_dataset_name_map(driver, dataset_ids):
+    if not dataset_ids:
+        return {}
+
+    query = """
+    UNWIND $dataset_ids AS cmid
+    MATCH (d:DATASET {CMID: cmid})
+    RETURN d.CMID AS datasetID, d.CMName AS datasetName
+    """
+    rows = getQuery(query, driver=driver, params={"dataset_ids": dataset_ids})
+
+    if isinstance(rows, pd.DataFrame):
+        records = rows.to_dict(orient="records")
+    else:
+        records = rows or []
+
+    return {
+        row.get("datasetID"): row.get("datasetName", "")
+        for row in records
+        if row.get("datasetID")
+    }
+
 # joins two datasets that have previously been translated into CatMapper’s database.Each dataset must include two columns: datasetiD and the Key pointing to a category.
 # It returns a single spreadsheet with: 1) datasetIDs, 2) data columns from the original dataset (renamed with _left and _right suffixes if overlapping.  Rows with keys pointing to the same category are aligned in the output spreadsheet.
 # When keys point to a CatMapper category, standardized identifiers are also returned (CMID, CMName).
@@ -244,7 +267,7 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
                 return jsonify({"message": "No data found"}), 404
             
             if resultFormat == "key-to-category":
-                cols = ['datasetID', 'CMName', 'CMID', 'Key', 'Name']
+                cols = ['CMID', 'CMName', 'datasetID', 'Key', 'Name']
                 result = merged[cols].copy()
                 result = result.fillna("")
                 return result.to_dict(orient='records')
@@ -274,7 +297,7 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
                 
             # reorder columns
             cols = merged_df.columns.tolist()
-            cols = ["CMName", "CMID"] + [col for col in cols if col not in ["CMName", "CMID"]]
+            cols = ["CMID", "CMName"] + [col for col in cols if col not in ["CMID", "CMName"]]
             merged_df = merged_df[cols]
 
             # filter keys if intersection is off
@@ -292,6 +315,7 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
                 return jsonify({"message": "Please select only two datasets"}), 400
 
             query = generate_cypher_query(unlist(category_label), ncontains)
+            dataset_name_map = get_dataset_name_map(driver, dataset_choices)
 
             matches = getQuery(query, driver, {"datasets": dataset_choices}, type="df")
 
@@ -299,8 +323,9 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
                 return jsonify({"message": "No data found"}), 404
             
             if resultFormat == "key-to-category":
-                cols = ['datasetID', 'LCA_CMName', 'LCA_CMID', 'tie','Key', 'Name']
+                cols = ['LCA_CMID', 'LCA_CMName', 'datasetID', 'tie', 'Key', 'Name']
                 result = matches[cols].copy()
+                result["datasetCMName"] = result["datasetID"].map(dataset_name_map).fillna("")
                 result = result.fillna("")
                 return result.to_dict(orient='records')
             
@@ -381,11 +406,20 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
             cols = ["LCA_CMID", "LCA_CMName", "nTie"] + \
                 [col for col in df_filtered.columns if col not in [
                     "LCA_CMID", "LCA_CMName", "nTie"]]
-            result = df_filtered[cols]
+            result = df_filtered[cols].copy()
+            for dataset_id in dataset_choices:
+                result[f"datasetCMName_{dataset_id}"] = dataset_name_map.get(dataset_id, "")
             result = result.fillna("")
 
             for col in result.filter(like="Key_").columns:
-                result[[f"variable_{col}", f"value_{col}"]] = result[col].apply(split_vars_values)
+                parsed = result[col].apply(split_vars_values)
+                var_series = parsed[0]
+                val_series = parsed[1]
+                has_var_values = var_series.fillna("").astype(str).str.strip().ne("").any()
+                has_val_values = val_series.fillna("").astype(str).str.strip().ne("").any()
+                if has_var_values or has_val_values:
+                    result[f"variable_{col}"] = var_series.fillna("")
+                    result[f"value_{col}"] = val_series.fillna("")
 
             return result.to_dict(orient='records')
 
@@ -467,11 +501,26 @@ def getMergingTemplate(datasetID, database):
         driver = getDriver(database)
 
         query = """
-            RETURN "" as mergingID, "" as stackID, "" as datasetID, "" as datasetName, "Please enter the working directory as the first filepath" as filePath
+            RETURN
+            "" as mergingID,
+            "" as mergingCMName,
+            "" as mergingShortName,
+            "" as mergingCitation,
+            "" as stackID,
+            "" as datasetID,
+            "" as datasetName,
+            "Please enter the working directory as the first filepath" as filePath
             UNION ALL 
             MATCH (m:DATASET {CMID: $datasetID})-[:MERGING]->(s:DATASET)-[:MERGING]->(d:DATASET)
             RETURN
-            m.CMID as mergingID, s.CMID as stackID, d.CMID as datasetID, d.CMName as datasetName, "" as filePath
+            m.CMID as mergingID,
+            m.CMName as mergingCMName,
+            m.shortName as mergingShortName,
+            m.DatasetCitation as mergingCitation,
+            s.CMID as stackID,
+            d.CMID as datasetID,
+            d.CMName as datasetName,
+            "" as filePath
             """
         data = getQuery(query, driver=driver, params={
             "datasetID": datasetID})
@@ -479,8 +528,16 @@ def getMergingTemplate(datasetID, database):
         if data[0].get("error"):
             return jsonify({"message": "No data found"}), 404
 
-        desired_order = ["mergingID", "stackID",
-                         "datasetID", "datasetName", "filePath"]
+        desired_order = [
+            "mergingID",
+            "mergingCMName",
+            "mergingShortName",
+            "mergingCitation",
+            "stackID",
+            "datasetID",
+            "datasetName",
+            "filePath"
+        ]
 
         template = [
             {key: item.get(key, "") for key in desired_order}

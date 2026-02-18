@@ -10,9 +10,8 @@ from .user_routes import *
 from .admin_routes import *
 from .homepage_routes import *
 from .metadata_routes import *
-from flask import Flask, abort, send_from_directory
+from flask import Flask
 from .extensions import mail
-from .metadata_routes import *
 from .search_routes import *
 
 import os
@@ -48,9 +47,17 @@ def create_app():
     r"http://localhost:\d+"
     ]
 
-    CORS(app, resources={r"/*": {"origins": allowed_origins}})
+    CORS(
+        app,
+        resources={
+            r"/*": {
+                "origins": allowed_origins,
+                "allow_headers": ["Content-Type", "Authorization"],
+            }
+        },
+    )
 
-    app.config['CORS_HEADERS'] = 'Content-Type'
+    app.config['CORS_HEADERS'] = 'Content-Type, Authorization'
     app.config['PERMANENT_SESSION_LIFETIME'] = 999999999
     app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024
 

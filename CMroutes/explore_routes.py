@@ -2,10 +2,130 @@
 from flask import request, Blueprint, jsonify
 from CM import *
 from collections import defaultdict
+import colorsys
 import json
 import re
 
 explore_bp = Blueprint('explore', __name__)
+
+
+def _hex_to_rgb(hex_color):
+    clean = (hex_color or "").strip().lstrip("#")
+    if len(clean) != 6:
+        return None
+    try:
+        return tuple(int(clean[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return None
+
+
+def _rgb_to_hex(rgb):
+    return "#{:02x}{:02x}{:02x}".format(*rgb)
+
+
+def _average_hex(colors):
+    rgbs = [_hex_to_rgb(c) for c in colors]
+    rgbs = [rgb for rgb in rgbs if rgb is not None]
+    if not rgbs:
+        return None
+    n = len(rgbs)
+    avg = tuple(int(round(sum(ch[i] for ch in rgbs) / n)) for i in range(3))
+    return _rgb_to_hex(avg)
+
+
+def _desaturate_hex(hex_color, factor=0.88):
+    rgb = _hex_to_rgb(hex_color)
+    if rgb is None:
+        return hex_color
+
+    r, g, b = [c / 255.0 for c in rgb]
+    h, l, s = colorsys.rgb_to_hls(r, g, b)
+    s = max(0.0, min(1.0, s * factor))
+    r2, g2, b2 = colorsys.hls_to_rgb(h, l, s)
+    return _rgb_to_hex((int(round(r2 * 255)), int(round(g2 * 255)), int(round(b2 * 255))))
+
+
+def _get_label_metadata_map(driver):
+    query = """
+    MATCH (l:LABEL)
+    RETURN l.CMName AS label, l.color AS color, l.groupLabel AS groupLabel
+    """
+    rows = getQuery(query, driver, type="dict")
+    return {
+        row["label"]: {"color": row.get("color"), "groupLabel": row.get("groupLabel")}
+        for row in rows
+        if row.get("label")
+    }
+
+
+def _unique_preserve_order(values):
+    return list(dict.fromkeys(values))
+
+
+def _get_effective_labels(labels, label_metadata_map):
+    # Exclude generic structural labels from legend/color selection.
+    cleaned = _unique_preserve_order(
+        [lbl for lbl in labels if lbl and lbl not in ["CATEGORY", "DISTRICT"]]
+    )
+    if not cleaned:
+        return []
+
+    # If a node has both a top-level domain label (groupLabel == CMName)
+    # and one of that domain's subdomains, keep only the subdomain labels.
+    label_to_group = {}
+    for label in cleaned:
+        group_label = (label_metadata_map.get(label) or {}).get("groupLabel")
+        label_to_group[label] = group_label or label
+
+    groups_with_subdomains = {
+        label_to_group[label]
+        for label in cleaned
+        if label_to_group[label] and label != label_to_group[label]
+    }
+
+    effective = []
+    for label in cleaned:
+        group_label = label_to_group.get(label)
+        if label == group_label and group_label in groups_with_subdomains:
+            continue
+        effective.append(label)
+
+    return effective
+
+
+def _apply_node_colors(rows, label_metadata_map):
+    for row in rows:
+        labels = row.get("labels") or []
+        if not isinstance(labels, list):
+            labels = [labels]
+
+        effective_labels = _get_effective_labels(labels, label_metadata_map)
+        color_pairs = [
+            (label, (label_metadata_map.get(label) or {}).get("color"))
+            for label in effective_labels
+        ]
+        color_pairs = [(lbl, clr) for lbl, clr in color_pairs if clr]
+
+        if not effective_labels:
+            row["color"] = "#cccccc"
+            row["legendLabel"] = "UNMAPPED"
+            continue
+
+        if not color_pairs:
+            row["color"] = "#cccccc"
+            row["legendLabel"] = ":".join(effective_labels)
+            continue
+
+        labels_with_colors = effective_labels
+        unique_colors = list(dict.fromkeys([clr for _, clr in color_pairs]))
+
+        if len(unique_colors) == 1 or len(set(c.lower() for c in unique_colors)) == 1:
+            row["color"] = unique_colors[0]
+            row["legendLabel"] = labels_with_colors[0] if len(labels_with_colors) == 1 else ":".join(labels_with_colors)
+        else:
+            avg_color = _average_hex(unique_colors) or "#cccccc"
+            row["color"] = _desaturate_hex(avg_color)
+            row["legendLabel"] = ":".join(labels_with_colors)
 
 @explore_bp.route("/info/<database>/<cmid>", methods=['GET'])
 def getInfo(database, cmid):
@@ -265,6 +385,27 @@ def getNetworkjs():
             with a, r, e limit $limit
             return collect(distinct a) as a, collect(distinct r) as r, collect(distinct e) as e
             """
+        elif relation == "MERGING":
+            cypher_query = """
+            unwind $cmid as cmid
+            MATCH (a {CMID: cmid})
+            // For MERGING templates, include the expected chain:
+            // (:MERGING)-[:MERGING]->(:STACK)-[:MERGING]->(:VARIABLE)
+            OPTIONAL MATCH (a)-[r1:MERGING]->(s:STACK)
+            OPTIONAL MATCH (s)-[r2:MERGING]->(v:VARIABLE)
+            // Include upstream path for dataset-centered view:
+            // (:STACK)-[:MERGING]->(:DATASET) and (:MERGING)-[:MERGING]->(:STACK)
+            OPTIONAL MATCH (s2:STACK)-[r5:MERGING]->(a)
+            OPTIONAL MATCH (m2:MERGING)-[r6:MERGING]->(s2)
+            // Also support stack-centered view:
+            // (:MERGING)-[:MERGING]->(:STACK) and (:STACK)-[:MERGING]->(:VARIABLE)
+            OPTIONAL MATCH (m:MERGING)-[r3:MERGING]->(a:STACK)
+            OPTIONAL MATCH (a)-[r4:MERGING]->(v2:VARIABLE)
+            WITH a,
+                 [x IN collect(distinct r1) + collect(distinct r2) + collect(distinct r5) + collect(distinct r6) + collect(distinct r3) + collect(distinct r4) WHERE x IS NOT NULL][0..$limit] AS r,
+                 [x IN collect(distinct s) + collect(distinct v) + collect(distinct s2) + collect(distinct m2) + collect(distinct m) + collect(distinct v2) WHERE x IS NOT NULL][0..$limit] AS e
+            RETURN collect(distinct a) AS a, r, e
+            """
         else:
             cypher_query = f"""
             unwind $cmid as cmid
@@ -312,6 +453,12 @@ def getNetworkjs():
             rel = [flatten_json(entry) for entry in rel]
             end = [flatten_json(entry) for entry in end]
 
+        # Use LABEL node color metadata from Neo4j for node coloring.
+        # Multi-label nodes receive averaged colors across mapped labels.
+        label_metadata_map = _get_label_metadata_map(driver)
+        _apply_node_colors(node, label_metadata_map)
+        _apply_node_colors(end, label_metadata_map)
+
         return {"node": node, "relations": rel, "relNodes": end, "params": [{"cmid": cmid, "database": database, "domain": domain, "relation": relation}]}
     except Exception as e:
         return str(e), 500
@@ -354,12 +501,11 @@ def getDataset():
         return result, 500
 
 
-@explore_bp.route('/CMID', methods=['GET'])
-def getCMID():
+@explore_bp.route('/CMID/<database>/<cmid>', methods=['GET'])
+def getCMID(database, cmid):
     try:
-        database = request.args.get('database')
-        cmid = request.args.get('cmid')
-
+        database = database
+        cmid = cmid
         driver = getDriver(database)
 
         query1 = """
@@ -375,8 +521,8 @@ unwind keys(r) as relProperties
 return elementId(r) as relID, relProperties, r[relProperties] as relValues
 """
 
-        node = getQuery(query1, cmid=cmid)
-        relations = getQuery(query2, cmid=cmid)
+        node = getQuery(query1, driver=driver, cmid=cmid)
+        relations = getQuery(query2, driver=driver, cmid=cmid)
 
         grouped_data = defaultdict(dict)
 
@@ -436,5 +582,3 @@ def getnetworknodes():
         # In case of an error, return an error response with an appropriate HTTP status code
         result = str(e)
         return result, 500
-
-

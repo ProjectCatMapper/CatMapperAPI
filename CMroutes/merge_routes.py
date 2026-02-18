@@ -1,7 +1,7 @@
-import os
 from flask import request, Blueprint, jsonify
 from CM import proposeMerge, joinDatasets, getDriver, unlist, getQuery
 import json
+import re
 
 merge_bp = Blueprint('merge', __name__)
 
@@ -39,7 +39,7 @@ def submit_merge():
     data = request.get_data()
     data = json.loads(data)
     dataset_choices = data.get("datasetChoices")
-    dataset_choices = [choice.strip() for choice in dataset_choices.split(",")]
+    dataset_choices = [choice.strip() for choice in dataset_choices.split(",") if choice.strip()]
     ncontains = data.get("mergelevel")
     category_label = unlist(data.get("categoryLabel", ""))
     intersection = unlist(data.get("intersection", False))
@@ -48,6 +48,14 @@ def submit_merge():
     resultFormat = unlist(data.get('resultFormat', 'key-to-key'))
     selectedKeyvariables = data.get('selectedKeyvariable')
     print(selectedKeyvariables)
+
+    invalid_dataset_ids = [cmid for cmid in dataset_choices if re.match(r"^(SD|AD)\d+$", cmid, re.IGNORECASE) is None]
+    if invalid_dataset_ids:
+        return jsonify({"error": f"Only DATASET CMIDs are allowed: {', '.join(invalid_dataset_ids)}"}), 400
+
+    if criteria == "extended" and len(dataset_choices) > 2:
+        return jsonify({"error": "Extended merge supports at most two dataset CMIDs."}), 400
+
     if category_label == "ANY DOMAIN":
         category_label = "CATEGORY"
     elif category_label == "AREA":
@@ -85,21 +93,39 @@ def submitvalidateDatasets():
     data = request.get_data()
     data = json.loads(data)
     database = unlist(data.get("database", ""))
-    names = data.get("names").split(",")
+    names_raw = data.get("names", "")
+    names = [name.strip() for name in names_raw.split(",") if name.strip()]
 
     driver = getDriver(database)
 
-    for i in names:
-        q = """
-        MATCH (n:DATASET)
-        WHERE n.CMID = $prop
-        RETURN COUNT(n) > 0 AS nodeExists
-        """
-        result = getQuery(q, driver, params={'prop': i.strip()})
-        node_exists = result[0]["nodeExists"] if result else False
-        if not node_exists:
-            return jsonify({"success": False, "message": "Check your Dataset IDs."})
-    return jsonify({"success": True, "message": "All IDs exist."})
+    q = """
+    UNWIND $names AS cmid
+    MATCH (n:DATASET {CMID: cmid})
+    RETURN
+      n.CMID as CMID,
+      n.CMName as CMName,
+      n.shortName as shortName,
+      n.DatasetCitation as DatasetCitation
+    ORDER BY n.CMID
+    """
+    rows = getQuery(q, driver, params={'names': names}) if names else []
+
+    found = {row.get("CMID") for row in rows}
+    missing = [cmid for cmid in names if cmid not in found]
+
+    if missing:
+        return jsonify({
+            "success": False,
+            "message": "Check your Dataset IDs.",
+            "missing": missing,
+            "datasets": rows
+        })
+
+    return jsonify({
+        "success": True,
+        "message": "All IDs exist.",
+        "datasets": rows
+    })
 
 @merge_bp.route('/getKeys', methods=['POST'])
 def getvalidKeysForDataset():
@@ -193,3 +219,145 @@ def getMergeDatasets():
     data = getQuery(query, driver)
 
     return data
+
+
+@merge_bp.route('/merge/template/summary/<database>/<cmid>', methods=['GET'])
+def get_merge_template_summary(database, cmid):
+    driver = getDriver(database)
+
+    labels_query = """
+    MATCH (n {CMID: $cmid})
+    RETURN labels(n) AS labels
+    LIMIT 1
+    """
+    label_rows = getQuery(labels_query, driver, params={"cmid": cmid}) or []
+    if not label_rows:
+        return jsonify({"error": "Node not found"}), 404
+
+    labels = label_rows[0].get("labels", [])
+    node_type = "OTHER"
+    if "MERGING" in labels:
+        node_type = "MERGING"
+    elif "STACK" in labels:
+        node_type = "STACK"
+
+    stack_ids = []
+    stack_summary = []
+    dataset_summary = []
+    merging_template_count = 0
+
+    if node_type == "MERGING":
+        stack_summary_query = """
+        MATCH (m:MERGING {CMID: $cmid})-[:MERGING]->(s:STACK)
+        OPTIONAL MATCH (s)-[:MERGING]->(d:DATASET)
+        WHERE NOT d:STACK AND NOT d:MERGING
+        WITH s, collect(DISTINCT d) AS datasets
+        OPTIONAL MATCH (s)-[:MERGING]->(v:VARIABLE)
+        WITH s, size(datasets) AS datasetCount, count(DISTINCT v) AS variableCount
+        OPTIONAL MATCH (c1:CATEGORY)-[e:EQUIVALENT {stack: s.CMID}]->(c2:CATEGORY)
+        WITH
+          s,
+          datasetCount,
+          variableCount,
+          count(DISTINCT CASE WHEN c1.CMID = c2.CMID THEN e END) AS equivalenceTieCount,
+          count(DISTINCT CASE WHEN c1.CMID <> c2.CMID THEN e END) AS keyReassignmentCount
+        RETURN
+          s.CMID AS stackID,
+          s.CMName AS stackCMName,
+          datasetCount,
+          equivalenceTieCount,
+          keyReassignmentCount,
+          variableCount
+        ORDER BY s.CMID
+        """
+        stack_summary = getQuery(stack_summary_query, driver, params={"cmid": cmid}) or []
+        stack_ids = [row.get("stackID") for row in stack_summary if row.get("stackID")]
+
+    elif node_type == "STACK":
+        stack_ids = [cmid]
+
+        merging_count_query = """
+        MATCH (m:MERGING)-[:MERGING]->(:STACK {CMID: $cmid})
+        RETURN count(DISTINCT m) AS mergingTemplateCount
+        """
+        count_rows = getQuery(merging_count_query, driver, params={"cmid": cmid}) or []
+        if count_rows:
+            merging_template_count = count_rows[0].get("mergingTemplateCount", 0) or 0
+
+        dataset_summary_query = """
+        MATCH (:STACK {CMID: $cmid})-[:MERGING]->(d:DATASET)
+        WHERE NOT d:STACK AND NOT d:MERGING
+        OPTIONAL MATCH (d)-[:MERGING {stack: $cmid}]->(v:VARIABLE)
+        WITH d, count(DISTINCT v) AS variableCount
+        OPTIONAL MATCH (c1:CATEGORY)-[e:EQUIVALENT {stack: $cmid, dataset: d.CMID}]->(c2:CATEGORY)
+        WITH
+          d,
+          variableCount,
+          count(DISTINCT CASE WHEN c1.CMID = c2.CMID THEN e END) AS equivalenceTieCount,
+          count(DISTINCT CASE WHEN c1.CMID <> c2.CMID THEN e END) AS keyReassignmentCount
+        RETURN
+          d.CMID AS datasetID,
+          d.CMName AS datasetCMName,
+          equivalenceTieCount,
+          keyReassignmentCount,
+          variableCount
+        ORDER BY d.CMID
+        """
+        dataset_summary = getQuery(dataset_summary_query, driver, params={"cmid": cmid}) or []
+
+    merging_ties = []
+    equivalence_ties = []
+
+    if stack_ids:
+        merging_ties_query = """
+        UNWIND $stack_ids AS stackID
+        MATCH (s:STACK {CMID: stackID})-[r:MERGING]->(target)
+        OPTIONAL MATCH (m:MERGING)-[:MERGING]->(s)
+        RETURN
+          m.CMID AS mergingID,
+          m.CMName AS mergingCMName,
+          s.CMID AS stackID,
+          s.CMName AS stackCMName,
+          type(r) AS relationship,
+          labels(target) AS targetLabels,
+          target.CMID AS targetCMID,
+          target.CMName AS targetCMName,
+          r.stack AS tieStackID,
+          r.varName AS varName,
+          r.summaryStatistic AS summaryStatistic
+        ORDER BY stackID, targetCMID
+        """
+        merging_ties = getQuery(merging_ties_query, driver, params={"stack_ids": stack_ids}) or []
+
+        equivalence_ties_query = """
+        UNWIND $stack_ids AS stackID
+        MATCH (c1:CATEGORY)-[e:EQUIVALENT {stack: stackID}]->(c2:CATEGORY)
+        RETURN
+          stackID AS stackID,
+          e.dataset AS datasetID,
+          e.Key AS `Key`,
+          c1.CMID AS originalCMID,
+          c1.CMName AS originalCMName,
+          c2.CMID AS equivalentCMID,
+          c2.CMName AS equivalentCMName,
+          CASE WHEN c1.CMID = c2.CMID THEN true ELSE false END AS selfReference
+        ORDER BY stackID, datasetID, originalCMID
+        """
+        equivalence_ties = getQuery(equivalence_ties_query, driver, params={"stack_ids": stack_ids}) or []
+
+    totals = {
+        "datasetCount": sum((row.get("datasetCount", 0) or 0) for row in stack_summary),
+        "equivalenceTieCount": sum((row.get("equivalenceTieCount", 0) or 0) for row in stack_summary),
+        "keyReassignmentCount": sum((row.get("keyReassignmentCount", 0) or 0) for row in stack_summary),
+        "variableCount": sum((row.get("variableCount", 0) or 0) for row in stack_summary),
+    }
+
+    return jsonify({
+        "nodeType": node_type,
+        "stackSummary": stack_summary,
+        "stackSummaryTotals": totals,
+        "datasetSummary": dataset_summary,
+        "mergingTemplateCount": merging_template_count,
+        "mergingTies": merging_ties,
+        "equivalenceTies": equivalence_ties,
+    })
