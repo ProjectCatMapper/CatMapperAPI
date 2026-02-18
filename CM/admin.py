@@ -45,6 +45,8 @@ def getID(id_value, property, driver):
     else:
         id_list = [str(x).strip() for x in id_value]
 
+    property = sanitize_cypher_identifier(property, "property")
+
     # Construct and execute Cypher query
     query = f"""
         UNWIND $id AS id
@@ -561,6 +563,7 @@ def mergeNodes(keepcmid,deletecmid,user,database):
             domain = "DATASET"
         else: 
             domain = "CATEGORY"
+        domain = sanitize_cypher_identifier(domain, "domain")
         
         if domain == "CATEGORY":
             query = f"""
@@ -890,15 +893,20 @@ def moveUSESties(database,user,input,dataset,tabledata):
         
         log_msg = f"moved relationship {logtext} from {CMID_from} to {CMID_to}"
 
-        query_move_rel = f"""
+        safe_rel_id = sanitize_cypher_element_id(rel_id, "relationship elementId")
+        query_move_rel = """
         MATCH ()-[r:USES]->(from)
-        WHERE from.CMID = '{CMID_from}' AND elementId(r) = '{rel_id}'
+        WHERE from.CMID = $CMID_from AND elementId(r) = $rel_id
         MATCH (to)
-        WHERE to.CMID = '{CMID_to}'
+        WHERE to.CMID = $CMID_to
         CALL apoc.refactor.to(r, to) YIELD input, output
         RETURN elementId(output) AS relID
         """
-        rel_id_df = getQuery(query_move_rel,driver)
+        rel_id_df = getQuery(
+            query_move_rel,
+            driver,
+            params={"CMID_from": CMID_from, "rel_id": safe_rel_id, "CMID_to": CMID_to},
+        )
         new_rel_id = rel_id_df[0]['relID'] if rel_id_df else None
 
         #Logging
@@ -978,15 +986,21 @@ def deleteID(id_value, driver, type="node"):
 
     if type == "relationship":
         for id in id_list:
-            q = f"MATCH ()-[r]->() WHERE elementId(r) = '{id}' DELETE r RETURN count(*) AS count"
-            queries.append(q)
+            safe_id = sanitize_cypher_element_id(id, "relationship elementId")
+            queries.append((
+                "MATCH ()-[r]->() WHERE elementId(r) = $id DELETE r RETURN count(*) AS count",
+                {"id": safe_id},
+            ))
     else:  # type == "node"
         for id in id_list:
-            q = f"MATCH (a) WHERE elementId(a) = '{id}' DETACH DELETE a RETURN count(*) AS count"
-            queries.append(q)
+            safe_id = sanitize_cypher_element_id(id, "node elementId")
+            queries.append((
+                "MATCH (a) WHERE elementId(a) = $id DETACH DELETE a RETURN count(*) AS count",
+                {"id": safe_id},
+            ))
 
-    for query in queries:
-        result = getQuery(query, driver=driver)
+    for query, params in queries:
+        result = getQuery(query, driver=driver, params=params)
         if result and "count" in result[0]:
             count_deleted += result[0]["count"]
 
@@ -1026,15 +1040,15 @@ def deleteNode(database,user,input):
 
                 getQuery(query, driver=driver, params={"cmid": input.get('s1_2')})
 
-            ids_query = f"""
+            ids_query = """
                 MATCH (:DATASET)-[r:USES]->(:CATEGORY)
-                WHERE '{input.get('s1_2')}' IN r.Dataset
-                WITH r, [i IN r.Dataset WHERE NOT i = '{input.get('s1_2')}'] AS prop
+                WHERE $cmid IN r.Dataset
+                WITH r, [i IN r.Dataset WHERE NOT i = $cmid] AS prop
                 SET r.Dataset = prop
                 RETURN elementId(r) AS ids
             """
 
-            ids = getQuery(ids_query,driver=driver)
+            ids = getQuery(ids_query,driver=driver, params={"cmid": input.get('s1_2')})
 
             if len(ids) > 0:
 
@@ -1050,27 +1064,28 @@ def deleteNode(database,user,input):
                       user=user, driver=driver)
             
             # removing CMID for deleted node from parent property in dataset nodes
-            datasetIDs_query = f"""
+            datasetIDs_query = """
                 MATCH (d:DATASET)
-                WHERE '{input.get('s1_2')}' IN d.parent
+                WHERE $cmid IN d.parent
                 RETURN d.CMID AS ids
             """
-            datasetIDs = getQuery(datasetIDs_query,driver=driver)
+            datasetIDs = getQuery(datasetIDs_query,driver=driver, params={"cmid": input.get('s1_2')})
 
             if len(datasetIDs) > 0:
                 for prop in ["parent"]:
+                    safe_prop = sanitize_cypher_identifier(prop, "property")
                     ids_query = f"""
                         UNWIND $ids AS id
                         MATCH (d:DATASET) WHERE d.CMID = id
-                        WITH d, [i IN d.{prop} WHERE NOT i = '{input.get('s1_2')}'] AS p
-                        SET d.{prop} = p
+                        WITH d, [i IN d.{safe_prop} WHERE NOT i = $cmid] AS p
+                        SET d.{safe_prop} = p
                         RETURN d.CMID AS ids
                     """
-                    ids = getQuery(ids_query, driver=driver, params={"ids": [row['ids'] for row in datasetIDs]})
+                    ids = getQuery(ids_query, driver=driver, params={"ids": [row['ids'] for row in datasetIDs], "cmid": input.get('s1_2')})
                     nullify_query = f"""
                         UNWIND $ids AS id
-                        MATCH (d:DATASET) WHERE d.CMID = id AND size(d.{prop}) = 0
-                        SET d.{prop} = NULL
+                        MATCH (d:DATASET) WHERE d.CMID = id AND size(d.{safe_prop}) = 0
+                        SET d.{safe_prop} = NULL
                     """
                     getQuery(nullify_query, driver=driver, params={"ids": [row['ids'] for row in datasetIDs]})
                     createLog(id=[row['ids'] for row in ids], type="node",
@@ -1105,17 +1120,17 @@ def deleteNode(database,user,input):
 
             print("1")
 
-            rels_query = f"""
+            rels_query = """
                 UNWIND $keys AS key
                 MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
-                WITH key, d, c, '{input.get('s1_2')}' AS cmid, r
+                WITH key, d, c, $cmid AS cmid, r
                 WHERE r[key] IS NOT NULL AND (
                     toString(cmid) IN r[key] OR 
                     (r.parentContext IS NOT NULL AND ANY(i IN r.parentContext WHERE i CONTAINS '\"parent\":\"' + cmid))
                 )
                 RETURN elementId(r) AS id, r[key] AS val, cmid, key
             """
-            rels = getQuery(rels_query, driver = driver, params={"keys": props})
+            rels = getQuery(rels_query, driver = driver, params={"keys": props, "cmid": input.get('s1_2')})
 
             datasetIDs_query = f"""
                 MATCH (d:DATASET)
@@ -1127,18 +1142,19 @@ def deleteNode(database,user,input):
             # removing CMID for deleted node from District property in dataset nodes
             if len(datasetIDs) > 0:
                 for prop in ["District"]:
+                    safe_prop = sanitize_cypher_identifier(prop, "property")
                     ids_query = f"""
                         UNWIND $ids AS id
                         MATCH (d:DATASET) WHERE d.CMID = id
-                        WITH d, [i IN d.{prop} WHERE NOT i = '{input.get('s1_2')}'] AS p
-                        SET d.{prop} = p
+                        WITH d, [i IN d.{safe_prop} WHERE NOT i = $cmid] AS p
+                        SET d.{safe_prop} = p
                         RETURN d.CMID AS ids
                     """
-                    ids = getQuery(ids_query, driver=driver, params={"ids": [row['ids'] for row in datasetIDs]})
+                    ids = getQuery(ids_query, driver=driver, params={"ids": [row['ids'] for row in datasetIDs], "cmid": input.get('s1_2')})
                     nullify_query = f"""
                         UNWIND $ids AS id
-                        MATCH (d:DATASET) WHERE d.CMID = id AND size(d.{prop}) = 0
-                        SET d.{prop} = NULL
+                        MATCH (d:DATASET) WHERE d.CMID = id AND size(d.{safe_prop}) = 0
+                        SET d.{safe_prop} = NULL
                     """
                     getQuery(nullify_query, driver=driver, params={"ids": [row['ids'] for row in datasetIDs]})
                     createLog(id=[row['ids'] for row in ids], type="node",
@@ -1173,38 +1189,42 @@ def deleteNode(database,user,input):
                         grouped.setdefault((r['id'], r['key']), []).append(r['val'])
 
                     for (id_val, key), vals in grouped.items():
-                        val_string = '; '.join(vals)
+                        safe_id_val = sanitize_cypher_element_id(id_val, "relationship elementId")
+                        safe_key = sanitize_cypher_identifier(key, "property")
                         set_query = f"""
-                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE elementId(r) = '{id_val}'
-                            SET r.{key} = split('{val_string}', '; ')
+                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE elementId(r) = $id
+                            SET r.{safe_key} = $vals
                         """
-                        getQuery(set_query,driver=driver)
+                        getQuery(set_query,driver=driver, params={"id": safe_id_val, "vals": vals})
                         nullify_empty_query = f"""
-                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE elementId(r) = '{id_val}' AND size(r.{key}) = 0
-                            SET r.{key} = NULL
+                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE elementId(r) = $id AND size(r.{safe_key}) = 0
+                            SET r.{safe_key} = NULL
                         """
-                        getQuery(nullify_empty_query,driver=driver)
+                        getQuery(nullify_empty_query,driver=driver, params={"id": safe_id_val})
                 # removing the purely unsaved data
                 else:
                     for row in rels:
+                        safe_row_id = sanitize_cypher_element_id(row["id"], "relationship elementId")
+                        safe_row_key = sanitize_cypher_identifier(row["key"], "property")
                         nullify_query = f"""
-                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE elementId(r) = '{row["id"]}'
-                            SET r.{row["key"]} = NULL
+                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE elementId(r) = $id
+                            SET r.{safe_row_key} = NULL
                         """
-                        getQuery(nullify_query,driver=driver)
+                        getQuery(nullify_query,driver=driver, params={"id": safe_row_id})
 
                 createLog(id=[row["id"] for row in rels], type="relation",
                       log=f"removed reference to deleted node {input.get('s1_2')}",
                       user=user, driver=driver)
                 
         nodeID = getID(input.get('s1_2'), "CMID", driver)
-        create_deleted_query = f"""
-            MATCH (n) WHERE elementId(n) = '{nodeID}'
+        safe_node_id = sanitize_cypher_element_id(nodeID, "node elementId")
+        create_deleted_query = """
+            MATCH (n) WHERE elementId(n) = $nodeID
             CREATE (n2:DELETED)
             SET n2.CMID = n.CMID, n2.CMName = n.CMName, n2.log = n.log
             RETURN elementId(n2) AS nodeID
         """
-        deletedID = getQuery(create_deleted_query,driver=driver)
+        deletedID = getQuery(create_deleted_query,driver=driver, params={"nodeID": safe_node_id})
         print(deletedID)
         print("Stgae 3")
         createLog(id=[deletedID[0]['nodeID']], type="node",
@@ -1224,10 +1244,10 @@ def deleteUSES(database,user,input):
     driver = getDriver(database)
     CMID = input.get('s1_2')
     USES_property = json.loads(input.get('s1_7'))
-    id = USES_property[1]["id"]
+    rel_id = sanitize_cypher_element_id(USES_property[1]["id"], "relationship elementId")
 
-    q = f"""MATCH (a)-[r:USES]->(d:DATASET)
-            WHERE elementId(r) = '{id}'
+    q = """MATCH (a)-[r:USES]->(d:DATASET)
+            WHERE elementId(r) = $id
 
             WITH d.CMID as datasetID,a.CMID as CMID, r.Key as Key
             OPTIONAL MATCH (a)-[e:EQUIVALENT]->(target)
@@ -1243,13 +1263,13 @@ def deleteUSES(database,user,input):
             stackID
             """
     
-    result = getQuery(q, driver=driver)
+    result = getQuery(q, driver=driver, params={"id": rel_id})
 
     if result:
         raise ValueError(f"There is a stack that uses this USES tie for a merging template. It is not possible to delete this USES tie using admin functions.(stackID = {result})")
 
-    q = f"MATCH ()-[r]->() WHERE elementId(r) = '{id}' DELETE r RETURN count(*) AS count"
-    result = getQuery(q, driver=driver)
+    q = "MATCH ()-[r]->() WHERE elementId(r) = $id DELETE r RETURN count(*) AS count"
+    result = getQuery(q, driver=driver, params={"id": rel_id})
 
     processUSES(database,CMID)
 
@@ -1260,9 +1280,16 @@ def deleteUSES(database,user,input):
 def createLabel(database,user,input):
     driver = getDriver(database)
 
-    q = f"""MATCH (n:LABEL) WHERE n.CMName='{input.get('s1_2')}' RETURN n.CMName as CMName"""
+    label_name = str(input.get('s1_2', "")).strip()
+    group_label_input = str(input.get('s1_7', "")).strip()
+    relationship_value = str(input.get('s1_3', "")).strip()
+    description = str(input.get('s1_4', "")).strip()
+    display_name = str(input.get('s1_5', "")).strip()
+    color = str(input.get('s1_6', "")).strip() or "#404040"
 
-    result = getQuery(q,driver=driver)
+    q = "MATCH (n:LABEL) WHERE n.CMName = $label_name RETURN n.CMName as CMName"
+
+    result = getQuery(q,driver=driver, params={"label_name": label_name})
 
     #returns error if label name already exists
     if result != []:
@@ -1274,25 +1301,56 @@ def createLabel(database,user,input):
 
     CMID = "CL" + str(result[0]['numericID']+1)
 
-    if input.get('s1_7') == "NA":
-        grouplabel = input.get('s1_2').strip()
+    if group_label_input == "NA":
+        grouplabel = label_name
         displayOrder = 4
     else:
-        grouplabel = input.get('s1_7').strip()
+        grouplabel = group_label_input
         displayOrder = 100
-    
-    if input.get('s1_6') == "":
-        color = "#404040"
-    else:
-        color = input.get('s1_6')
-    
-    if input.get('s1_3').strip() != "":       
-        q = f"""CREATE (n:METADATA:LABEL {{CMID:'{CMID}',CMName:'{input.get('s1_2')}',groupLabel:'{grouplabel}',relationship:'{input.get('s1_3')}',description:'{input.get('s1_4')}',displayName:'{input.get('s1_5')}',color:'{color}',label:'{input.get('s1_5')}',displayOrder:'{displayOrder}',public:"TRUE"}})"""
-    else:
-        q = f"""CREATE (n:METADATA:LABEL {{CMID:'{CMID}',CMName:'{input.get('s1_2')}',groupLabel:'{grouplabel}',description:'{input.get('s1_4')}',displayName:'{input.get('s1_5')}',color:'{color}',label:'{input.get('s1_5')}',displayOrder:'{displayOrder}',public:"TRUE"}})"""
 
+    create_params = {
+        "CMID": CMID,
+        "CMName": label_name,
+        "groupLabel": grouplabel,
+        "description": description,
+        "displayName": display_name,
+        "color": color,
+        "label": display_name,
+        "displayOrder": str(displayOrder),
+    }
 
-    result = getQuery(q,driver=driver)
+    if relationship_value != "":
+        create_params["relationship"] = relationship_value
+        q = """
+        CREATE (n:METADATA:LABEL {
+            CMID: $CMID,
+            CMName: $CMName,
+            groupLabel: $groupLabel,
+            relationship: $relationship,
+            description: $description,
+            displayName: $displayName,
+            color: $color,
+            label: $label,
+            displayOrder: $displayOrder,
+            public: "TRUE"
+        })
+        """
+    else:
+        q = """
+        CREATE (n:METADATA:LABEL {
+            CMID: $CMID,
+            CMName: $CMName,
+            groupLabel: $groupLabel,
+            description: $description,
+            displayName: $displayName,
+            color: $color,
+            label: $label,
+            displayOrder: $displayOrder,
+            public: "TRUE"
+        })
+        """
+
+    result = getQuery(q,driver=driver, params=create_params)
 
     # create index after creation
 
@@ -1302,7 +1360,7 @@ def createLabel(database,user,input):
             with d.label as l
             call apoc.cypher.runSchema('CREATE FULLTEXT INDEX ' + l + ' IF NOT EXISTS FOR (n:' + l + ') ON EACH [n.names]',{}) yield value return count(*)"""
 
-    result = getQuery(q,driver=driver,params={"label_name":input.get('s1_5')})
+    result = getQuery(q,driver=driver,params={"label_name": display_name})
 
     return "done"
 

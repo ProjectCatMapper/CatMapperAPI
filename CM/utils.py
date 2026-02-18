@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 _driver_cache = {}
 _driver_lock = threading.Lock()
 _last_verified = {}
+_CYPHER_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_CYPHER_ELEMENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9:_-]+$")
 
 config = ConfigParser()
 config.read('config.ini')
@@ -225,6 +227,80 @@ def getQuery(query, driver, params=None, type="dict", max_retries=3, **kwargs):
     
     # Should not reach here, but just in case
     raise RuntimeError(f"Query failed after {max_retries} attempts")
+
+
+def sanitize_cypher_identifier(value, field_name="identifier"):
+    """
+    Allow only simple Cypher identifiers (labels, relationship types, properties).
+    Prevents Cypher injection when interpolation is unavoidable for identifiers.
+    """
+    if value is None:
+        raise ValueError(f"{field_name} is required")
+    cleaned = str(value).strip()
+    if not cleaned:
+        raise ValueError(f"{field_name} cannot be empty")
+    if not _CYPHER_IDENTIFIER_PATTERN.fullmatch(cleaned):
+        raise ValueError(f"Invalid {field_name}: {value}")
+    return cleaned
+
+
+def sanitize_cypher_element_id(value, field_name="elementId"):
+    """
+    Validate Neo4j elementId tokens before passing to queries.
+    """
+    if value is None:
+        raise ValueError(f"{field_name} is required")
+    cleaned = str(value).strip()
+    if not cleaned:
+        raise ValueError(f"{field_name} cannot be empty")
+    if not _CYPHER_ELEMENT_ID_PATTERN.fullmatch(cleaned):
+        raise ValueError(f"Invalid {field_name}: {value}")
+    return cleaned
+
+
+def get_valid_domain_labels(driver):
+    """
+    Return known node-label domains valid for API domain filtering.
+    Includes metadata labels plus built-in structural labels used in the app.
+    """
+    base_labels = {
+        "CATEGORY",
+        "DATASET",
+        "DISTRICT",
+        "ADM0",
+        "METADATA",
+        "LABEL",
+        "PROPERTY",
+        "VARIABLE",
+        "STACK",
+        "DELETED",
+        "VECTOR",
+    }
+    rows = getQuery(
+        "MATCH (l:LABEL) RETURN DISTINCT l.CMName AS label",
+        driver=driver,
+        type="list",
+    )
+    dynamic_labels = {label for label in rows if isinstance(label, str) and label.strip()}
+    return base_labels | dynamic_labels
+
+
+def validate_domain_label(domain, driver=None, aliases=None, extra_allowed=None):
+    """
+    Normalize and validate a domain label for safe use in Cypher label slots.
+    """
+    aliases = aliases or {}
+    extra_allowed = set(extra_allowed or [])
+    normalized = aliases.get(domain, domain)
+    normalized = sanitize_cypher_identifier(normalized, "domain")
+
+    if driver is None:
+        return normalized
+
+    allowed = get_valid_domain_labels(driver) | extra_allowed
+    if normalized not in allowed:
+        raise ValueError(f"Unknown domain label: {normalized}")
+    return normalized
 
 def unlist(l):
     if isinstance(l, list):
