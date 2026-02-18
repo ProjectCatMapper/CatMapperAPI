@@ -3,8 +3,22 @@ import pandas as pd
 import CM.merge as merge_mod
 
 
+def _setup_merge_domain_validation(monkeypatch):
+    fake_driver = object()
+    seen = {}
+    monkeypatch.setattr(merge_mod, "getDriver", lambda _database: fake_driver)
+
+    def fake_validate_domain_label(domain, driver=None, aliases=None, extra_allowed=None):
+        seen["domain"] = domain
+        seen["driver"] = driver
+        return str(domain).upper()
+
+    monkeypatch.setattr(merge_mod, "validate_domain_label", fake_validate_domain_label)
+    return seen, fake_driver
+
+
 def test_extended_key_to_key_includes_dataset_cmnames(monkeypatch):
-    monkeypatch.setattr(merge_mod, "getDriver", lambda _database: object())
+    seen, fake_driver = _setup_merge_domain_validation(monkeypatch)
 
     def fake_get_query(query, driver=None, params=None, type=None):
         if "RETURN d.CMID AS datasetID, d.CMName AS datasetName" in query:
@@ -50,12 +64,14 @@ def test_extended_key_to_key_includes_dataset_cmnames(monkeypatch):
 
     assert isinstance(result, list)
     assert len(result) == 1
+    assert seen["domain"] == "CATEGORY"
+    assert seen["driver"] is fake_driver
     assert result[0]["datasetCMName_SD1"] == "Dataset One"
     assert result[0]["datasetCMName_AD2"] == "Dataset Two"
 
 
 def test_extended_key_to_category_includes_dataset_cmname(monkeypatch):
-    monkeypatch.setattr(merge_mod, "getDriver", lambda _database: object())
+    seen, fake_driver = _setup_merge_domain_validation(monkeypatch)
 
     def fake_get_query(query, driver=None, params=None, type=None):
         if "RETURN d.CMID AS datasetID, d.CMName AS datasetName" in query:
@@ -101,12 +117,14 @@ def test_extended_key_to_category_includes_dataset_cmname(monkeypatch):
 
     assert isinstance(result, list)
     assert len(result) == 2
+    assert seen["domain"] == "CATEGORY"
+    assert seen["driver"] is fake_driver
     assert result[0]["datasetCMName"] == "Dataset One"
     assert result[1]["datasetCMName"] == "Dataset Two"
 
 
 def test_extended_key_to_key_omits_empty_variable_value_columns(monkeypatch):
-    monkeypatch.setattr(merge_mod, "getDriver", lambda _database: object())
+    seen, fake_driver = _setup_merge_domain_validation(monkeypatch)
 
     def fake_get_query(query, driver=None, params=None, type=None):
         if "RETURN d.CMID AS datasetID, d.CMName AS datasetName" in query:
@@ -152,6 +170,8 @@ def test_extended_key_to_key_omits_empty_variable_value_columns(monkeypatch):
 
     assert isinstance(result, list)
     assert len(result) == 1
+    assert seen["domain"] == "CATEGORY"
+    assert seen["driver"] is fake_driver
     row = result[0]
     assert "variable_Key_SD1" not in row
     assert "value_Key_SD1" not in row
@@ -160,7 +180,7 @@ def test_extended_key_to_key_omits_empty_variable_value_columns(monkeypatch):
 
 
 def test_standard_key_to_category_id_name_order(monkeypatch):
-    monkeypatch.setattr(merge_mod, "getDriver", lambda _database: object())
+    seen, fake_driver = _setup_merge_domain_validation(monkeypatch)
 
     def fake_get_query(_query, driver=None, params=None, type=None):
         if type == "df":
@@ -192,11 +212,13 @@ def test_standard_key_to_category_id_name_order(monkeypatch):
 
     assert isinstance(result, list)
     assert len(result) == 1
+    assert seen["domain"] == "CATEGORY"
+    assert seen["driver"] is fake_driver
     assert list(result[0].keys())[:2] == ["CMID", "CMName"]
 
 
 def test_standard_category_to_category_id_name_order(monkeypatch):
-    monkeypatch.setattr(merge_mod, "getDriver", lambda _database: object())
+    seen, fake_driver = _setup_merge_domain_validation(monkeypatch)
 
     def fake_get_query(_query, driver=None, params=None, type=None):
         if type == "df":
@@ -235,4 +257,6 @@ def test_standard_category_to_category_id_name_order(monkeypatch):
 
     assert isinstance(result, list)
     assert len(result) == 1
+    assert seen["domain"] == "CATEGORY"
+    assert seen["driver"] is fake_driver
     assert list(result[0].keys())[:2] == ["CMID", "CMName"]
