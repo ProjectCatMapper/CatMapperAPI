@@ -88,7 +88,7 @@ def checkDomains(database, mail=None, return_type="data"):
         The database name used to obtain a Neo4j driver instance.
     mail : Mail, optional
         A Mail object for sending notifications (default: None).
-        If provided, an email with the results file attached is sent to `admin@catmapper.org`.
+        If provided, an email with the results file attached is sent to `MAIL.mail_alert_recipients`.
     return_type : {"data", "info"}, default="data"
         Determines the format of the return value:
         - "data" : return results as a list of dictionaries (records).
@@ -159,8 +159,7 @@ def checkDomains(database, mail=None, return_type="data"):
                 fp1 = tmpfile.name
                 results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Missing Domains for {database}", recipients=[
-                            "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Missing Domains for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
         if return_type == "data":        
             return results.to_dict(orient="records")
         elif return_type == "info":
@@ -196,7 +195,7 @@ def backup2CSV(database, mail=None):
         The name of the database to back up.
     mail : Mail, optional
         A Mail object for sending notifications (default: None).
-        If provided, a completion email is sent to `rjbischo@catmapper.org` 
+        If provided, a completion email is sent to `MAIL.mail_weekly_recipients` 
         after the exports are generated.
 
     Returns
@@ -285,8 +284,7 @@ def backup2CSV(database, mail=None):
         # print(LOGS)
 
         if isinstance(mail, Mail):
-            sendEmail(mail, subject=f"Weekly CSV Backup {database}", recipients=[
-                      "rjbischo@catmapper.org"], body="Weekly CSV backup completed.", sender=config['MAIL']['mail_default'])
+            sendEmail(mail, subject=f"Weekly CSV Backup {database}", recipients=get_weekly_recipients(), body="Weekly CSV backup completed.", sender=get_default_sender())
 
         return f"backup2CSV completed for {database}"
 
@@ -313,7 +311,7 @@ def getBadCMID(database, mail=None, return_type="data"):
         The database name used to obtain a Neo4j driver instance.
     mail : Mail, optional
         A Mail object for sending notifications (default: None).
-        If provided, an email with the results file attached is sent to `admin@catmapper.org`.
+        If provided, an email with the results file attached is sent to `MAIL.mail_alert_recipients`.
     return_type : {"data", "info"}, default="data"
         Determines the format of the return value:
         - "data" : return results as a list of dictionaries (records).
@@ -401,8 +399,7 @@ def getBadCMID(database, mail=None, return_type="data"):
                                         fp1 = tmpfile.name
                                         results.to_excel(fp1, index=False)
                 if isinstance(mail, Mail):
-                    sendEmail(mail, subject=f"Bad CMIDs for {database}", recipients=[
-                              "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                    sendEmail(mail, subject=f"Bad CMIDs for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
 
             if return_type == "data":
                 return results.to_dict(orient="records")
@@ -440,7 +437,7 @@ def getMultipleLabels(database, mail=None, return_type="data"):
     mail : Mail, optional
         A Mail object for sending notifications (default: None).
         If provided, an email with the results file attached is sent 
-        to `admin@catmapper.org`.
+        to `MAIL.mail_alert_recipients`.
     return_type : {"data", "info"}, default="data"
         Determines the format of the return value:
         - "data" : return results as a list of dictionaries (records).
@@ -494,8 +491,7 @@ def getMultipleLabels(database, mail=None, return_type="data"):
                     fp1 = tmpfile.name
             results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Multiple Labels for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Multiple Labels for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
 
             if return_type == "data":        
                 return results.to_dict(orient="records")
@@ -904,13 +900,11 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
 
         if isinstance(mail, Mail):
             if len(results1) > 1:
-                sendEmail(mail, subject=f"Invalid geoCoords properties for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Invalid geoCoords properties for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
                 mailSent = "True"
 
             if len(results2) > 1:
-                sendEmail(mail, subject=f"Invalid parentContext properties for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
+                sendEmail(mail, subject=f"Invalid parentContext properties for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp2])
                 mailSent = "True"
         fp3, fp4, fp5, fp6, fp7, fp8, fp9, fp10, fp11 = None, None, None, None, None, None, None, None, None
         if isinstance(results3, pd.DataFrame) and not results3.empty:
@@ -918,72 +912,63 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                 fp3 = tmpfile.name
                 results3.to_excel(fp3, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"CMID in parentContext but not in parent {database}", recipients=[
-                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp3])
+                sendEmail(mail, subject=f"CMID in parentContext but not in parent {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp3])
                 mailSent = "True"
         if isinstance(results4, pd.DataFrame) and not results4.empty:
             with tempfile.NamedTemporaryFile(delete=False, prefix=f"CMID_in_parentContext_not_in_parent_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
                 fp4 = tmpfile.name
                 results4.to_excel(fp4, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Clean split constraint in {database}", recipients=[
-                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp4])
+                sendEmail(mail, subject=f"Clean split constraint in {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp4])
                 mailSent = "True"
         if isinstance(results5, pd.DataFrame) and not results5.empty:
             with tempfile.NamedTemporaryFile(delete=False, prefix=f"CMID_in_parentContext_not_in_parent_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
                 fp5 = tmpfile.name
                 results5.to_excel(fp5, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Non-singular merge constraint in  {database}", recipients=[
-                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp5])
+                sendEmail(mail, subject=f"Non-singular merge constraint in  {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp5])
                 mailSent = "True"
         if isinstance(results6, pd.DataFrame) and not results6.empty:
             with tempfile.NamedTemporaryFile(delete=False, prefix=f"CMID_in_parentContext_not_in_parent_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
                 fp6 = tmpfile.name
                 results6.to_excel(fp6, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Non-singular split constraint in  {database}", recipients=[
-                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp6])
+                sendEmail(mail, subject=f"Non-singular split constraint in  {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp6])
                 mailSent = "True"
         if isinstance(results7, pd.DataFrame) and not results7.empty:
             with tempfile.NamedTemporaryFile(delete=False, prefix=f"CMID_in_parentContext_not_in_parent_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
                 fp7 = tmpfile.name
                 results7.to_excel(fp7, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Can't split merging entity constraint in  {database}", recipients=[
-                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp7])
+                sendEmail(mail, subject=f"Can't split merging entity constraint in  {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp7])
                 mailSent = "True"
         if isinstance(results8, pd.DataFrame) and not results8.empty:
             with tempfile.NamedTemporaryFile(delete=False, prefix=f"Improper_eventTypes_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
                 fp8 = tmpfile.name
                 results8.to_excel(fp8, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Improper eventTypes in  {database}", recipients=[
-                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp8])
+                sendEmail(mail, subject=f"Improper eventTypes in  {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp8])
                 mailSent = "True"
         if isinstance(results9, pd.DataFrame) and not results9.empty:
             with tempfile.NamedTemporaryFile(delete=False, prefix=f"Valid_eventDate_{database}", suffix=".xlsx", dir="/tmp") as tmpfile:
                 fp9 = tmpfile.name
                 results9.to_excel(fp9, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Valid eventDate in {database}", recipients=[
-                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp9])
+                sendEmail(mail, subject=f"Valid eventDate in {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp9])
                 mailSent = "True"
         if isinstance(results10, pd.DataFrame) and not results10.empty:
             with tempfile.NamedTemporaryFile(delete=False, prefix=f"Single_parentContext_json_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
                 fp10 = tmpfile.name
                 results10.to_excel(fp10, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Not more than one parent, eventDate and eventType are in a single json in {database}", recipients=[
-                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp10])
+                sendEmail(mail, subject=f"Not more than one parent, eventDate and eventType are in a single json in {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp10])
                 mailSent = "True"
         if isinstance(results11, pd.DataFrame) and not results11.empty:
             with tempfile.NamedTemporaryFile(delete=False, prefix=f"Valid_parent_CMID_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
                 fp11 = tmpfile.name
                 results11.to_excel(fp11, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Parent is valid CMID in  {database}", recipients=[
-                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp11])
+                sendEmail(mail, subject=f"Parent is valid CMID in  {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp11])
                 mailSent = "True"
         if return_type == "data":
             return {
@@ -1123,8 +1108,7 @@ def getBadDomains(database, mail=None, return_type="data"):
                 fp1 = tmpfile.name
             bad_labels.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Bad Labels for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Bad Labels for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
 
         missing_category = getQuery(
             "match (c)<-[:USES]-(d:DATASET) where not 'CATEGORY' in labels(c) return c.CMID as CMID, c.CMName as CMName", driver, type="df")
@@ -1135,8 +1119,7 @@ def getBadDomains(database, mail=None, return_type="data"):
                     fp2 = tmpfile.name
                     missing_category.to_excel(fp2, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Missing CATEGORY Label for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
+                sendEmail(mail, subject=f"Missing CATEGORY Label for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp2])
 
         missing_dataset = getQuery(
             "match (c:CATEGORY)<-[:USES]-(d) where not 'DATASET' in labels(d) return d.CMID as CMID, d.CMName as CMName", driver, type="df")
@@ -1147,8 +1130,7 @@ def getBadDomains(database, mail=None, return_type="data"):
                     fp3 = tmpfile.name
                     missing_dataset.to_excel(fp3, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Missing DATASET Label for {database}", recipients=[
-                    "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp3])
+                sendEmail(mail, subject=f"Missing DATASET Label for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp3])
 
         if return_type == "data":
             return {"bad_labels_count": len(bad_labels), "missing_category_count": len(missing_category), "missing_dataset_count": len(missing_dataset), "bad_labels": bad_labels.to_dict(orient="records"), "missing_category": missing_category.to_dict(orient="records"), "missing_dataset": missing_dataset.to_dict(orient="records")}
@@ -1184,7 +1166,7 @@ def getBadRelations(database, mail=None, return_type="data"):
     mail : Mail, optional
         A Mail object for sending notifications (default: None).
         If provided, an email with the results file attached is sent 
-        to `admin@catmapper.org`.
+        to `MAIL.mail_alert_recipients`.
     return_type : {"data", "info"}, default="data"
         Determines the format of the return value:
         - "data" : return detailed results as a dictionary.
@@ -1260,8 +1242,7 @@ def getBadRelations(database, mail=None, return_type="data"):
                     fp1 = tmpfile.name
             results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Bad Relationship Label for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Bad Relationship Label for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
 
         if return_type == "data":
             return {"bad_relationship_labels_count": len(results), "bad_relationship_labels": results.to_dict(orient="records")}
@@ -1296,7 +1277,7 @@ def CMNameNotInName(database, mail=None, return_type="data"):
         The database name used to obtain a Neo4j driver instance.
     mail : Mail, optional
         A Mail object for sending notifications (default: None).
-        If provided, the Excel file is sent to `admin@catmapper.org`.
+        If provided, the Excel file is sent to `MAIL.mail_alert_recipients`.
     return_type : {"data", "info"}, default="data"
         Determines the format of the return value:
         - "data" : return results as a dictionary with details.
@@ -1361,8 +1342,7 @@ def CMNameNotInName(database, mail=None, return_type="data"):
                 cmids.columns = ["CMID"]
                 cmids.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Bad Relationship Label for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Bad Relationship Label for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
         if return_type == "data":
             return {"Total": len(cmids), "Name not in CMName": cmids}
         elif return_type == "info":
@@ -1520,7 +1500,7 @@ def noUSES(database, save=True, mail=None, return_type="data"):
     mail : Mail, optional
         A Mail object for sending notifications (default: None).
         If provided and results exist, the Excel file is attached 
-        and sent via email to `admin@catmapper.org`.
+        and sent via email to `MAIL.mail_alert_recipients`.
     return_type : {"data", "info"}, default="data"
         Determines the format of the return value:
         - "data" : return detailed results as a dictionary.
@@ -1568,8 +1548,7 @@ def noUSES(database, save=True, mail=None, return_type="data"):
                     fp1 = tmpfile.name
                     results.to_excel(fp1, index=False)
                 if isinstance(mail, Mail):
-                    sendEmail(mail, subject=f"No USES for {database}", recipients=[
-                            "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                    sendEmail(mail, subject=f"No USES for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
         if return_type == "data":
             return {"Total": len(results), "No USES": results.to_dict(orient="records")}
         elif return_type == "info":
@@ -1604,7 +1583,7 @@ def checkUSES(database, save=True, mail=None, return_type="data"):
     mail : Mail, optional
         A Mail object for sending notifications (default: None).
         If provided and results exist, the Excel file is attached 
-        and sent via email to `admin@catmapper.org`.
+        and sent via email to `MAIL.mail_alert_recipients`.
     return_type : {"data", "info"}, default="data"
         Determines the format of the return value:
         - "data" : return detailed results as a dictionary.
@@ -1689,8 +1668,7 @@ def checkUSES(database, save=True, mail=None, return_type="data"):
                     fp1 = tmpfile.name
                     result.to_excel(fp1, index=False)
                 if isinstance(mail, Mail):
-                    sendEmail(mail, subject=f"Check USES for {database}", recipients=[
-                            "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                    sendEmail(mail, subject=f"Check USES for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
 
         if return_type == "data":
             return {"Total": len(result), "Check USES": result.to_dict(orient="records")}
@@ -1738,7 +1716,7 @@ def reportChanges(database, dateStart=None, dateEnd=None, action="default", user
     mail : Mail, optional
         A Mail object for sending notifications (default: None).
         If provided, the Excel file with results is emailed to 
-        `admin@catmapper.org`.
+        `MAIL.mail_alert_recipients`.
     return_type : {"data", "info"}, default="data"
         Determines the format of the return value:
         - "data" : return full results as a list of dictionaries.
@@ -1842,8 +1820,7 @@ def reportChanges(database, dateStart=None, dateEnd=None, action="default", user
                     fp1 = tmpfile.name
             results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Database Changes for {database} and {action} from {params['dateStart']} to {params['dateEnd']}", recipients=[
-                        "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Database Changes for {database} and {action} from {params['dateStart']} to {params['dateEnd']}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
 
         if return_type == "data":
             return results.to_dict(orient="records")
@@ -1904,8 +1881,7 @@ def missingCMName(database, mail=None, return_type="data"):
                 fp1 = tmpfile.name
                 results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Missing CMName for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Missing CMName for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
         if return_type == "data":
             return {"Total": len(results), "Missing CMName": results.to_dict(orient="records")}
         elif return_type == "info":
@@ -1931,8 +1907,7 @@ def getBadContextual(database, mail=None, return_type="data"):
                 fp1 = tmpfile.name
                 results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Invalid short names for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Invalid short names for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
         query = """
         MATCH (n)-[r]->(m)
         WHERE type(r) IN ["CONTAINS", "LANGUOID_OF", "RELIGION_OF", "DISTRICT_OF"]
@@ -1951,8 +1926,7 @@ def getBadContextual(database, mail=None, return_type="data"):
                 fp2 = tmpfile.name
                 results2.to_excel(fp2, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Duplicate contextual ties for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
+                sendEmail(mail, subject=f"Duplicate contextual ties for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp2])
         
         query = """
                 MATCH (n)-[r:CONTAINS]->(n)
@@ -1979,8 +1953,7 @@ def getBadContextual(database, mail=None, return_type="data"):
                 fp3 = tmpfile.name
                 results3.to_excel(fp3, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Cyclic contextual ties for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp3])
+                sendEmail(mail, subject=f"Cyclic contextual ties for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp3])
 
         if return_type == "data":
             return {"Invalid short names": len(results), "Invalid short names": results.to_dict(orient="records"),"Duplicate contextual ties": len(results2), "Duplicate contextual ties": results2.to_dict(orient="records"),"Cyclical contextual ties": len(results3), "Cyclical contextual ties": results3.to_dict(orient="records")}
@@ -2015,8 +1988,7 @@ def get_duplicate_empty_USES(database, mail=None, return_type="data"):
                 fp1 = tmpfile.name
                 results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Empty USES properties for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Empty USES properties for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
         query = """
         MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
         WHERE r.Name IS NOT NULL AND size(r.Name) > 1
@@ -2050,8 +2022,7 @@ def get_duplicate_empty_USES(database, mail=None, return_type="data"):
                 fp2 = tmpfile.name
                 results2.to_excel(fp2, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Duplicate USES names for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
+                sendEmail(mail, subject=f"Duplicate USES names for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp2])
         
         query = """
                 MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
@@ -2094,8 +2065,7 @@ def get_duplicate_empty_USES(database, mail=None, return_type="data"):
                 fp3 = tmpfile.name
                 results3.to_excel(fp3, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Duplicate uses properties for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp3])
+                sendEmail(mail, subject=f"Duplicate uses properties for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp3])
 
         query = """
                 MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
@@ -2120,8 +2090,7 @@ def get_duplicate_empty_USES(database, mail=None, return_type="data"):
                 fp4 = tmpfile.name
                 results4.to_excel(fp4, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Supposed to be singular value USES property for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp4])
+                sendEmail(mail, subject=f"Supposed to be singular value USES property for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp4])
 
         if return_type == "data":
             return {"Empty USES properties": len(results), "Empty USES properties": results.to_dict(orient="records"),"Duplicate USES Names": len(results2), "Duplicate USES Names": results2.to_dict(orient="records"),"Duplicate USES ties properties": len(results3), "Duplicate USES ties properties": results3.to_dict(orient="records"),"Supposed to be Singular USES ties properties": len(results4), "Supposed to be Singular USES ties properties": results4.to_dict(orient="records")}
@@ -2174,8 +2143,7 @@ def get_empty_nodeprops(database, mail=None, return_type="data"):
                 fp1 = tmpfile.name
                 results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Empty Node props for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Empty Node props for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
         if return_type == "data":
             return {"Total": len(results), "Empty Node props": results.to_dict(orient="records")}
         elif return_type == "info":
@@ -2206,8 +2174,7 @@ def get_duplicate_triplets(database, mail=None, return_type="data"):
                 fp1 = tmpfile.name
                 results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Duplicate Triplets for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Duplicate Triplets for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
         if return_type == "data":
             return {"Total": len(results), "Duplicate Triplets": results.to_dict(orient="records")}
         elif return_type == "info":
@@ -2238,8 +2205,7 @@ def getInappropriateprops_Nodes_Rels(database, mail=None, return_type="data"):
                 fp1 = tmpfile.name
                 results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Nodes with invalid props for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Nodes with invalid props for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
 
         query = """
         MATCH (p:PROPERTY)
@@ -2259,8 +2225,7 @@ def getInappropriateprops_Nodes_Rels(database, mail=None, return_type="data"):
                 fp2 = tmpfile.name
                 results2.to_excel(fp2, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"USES with invalid props for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
+                sendEmail(mail, subject=f"USES with invalid props for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp2])
 
         if return_type == "data":
             return {"Nodes with invalid props": len(results), "Nodes with invalid props": results.to_dict(orient="records"),"USES with invalid props": len(results2), "USES with invalid props": results2.to_dict(orient="records")}
@@ -2287,8 +2252,7 @@ def get_label_check(database, mail=None, return_type="data"):
                 fp1 = tmpfile.name
                 results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Non-generic parent to generic node for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Non-generic parent to generic node for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
         query = """
         MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
         WHERE r.label IS NOT NULL
@@ -2309,8 +2273,7 @@ def get_label_check(database, mail=None, return_type="data"):
                 fp2 = tmpfile.name
                 results2.to_excel(fp2, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Mutliple USES ties labels for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
+                sendEmail(mail, subject=f"Mutliple USES ties labels for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp2])
         
         query = """
                 MATCH (l:LABEL)
@@ -2331,8 +2294,7 @@ def get_label_check(database, mail=None, return_type="data"):
                 fp3 = tmpfile.name
                 results3.to_excel(fp3, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Nodes with multiple group labels for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp3])
+                sendEmail(mail, subject=f"Nodes with multiple group labels for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp3])
 
         if return_type == "data":
             return {"Non-generic parent to generic node": len(results), "Non-generic parent to generic node": results.to_dict(orient="records"),"Mutliple USES ties labels": len(results2), "Mutliple USES ties labels": results2.to_dict(orient="records"),"Nodes with multiple group labels": len(results3), "Nodes with multiple group labels": results3.to_dict(orient="records")}
@@ -2376,8 +2338,7 @@ def getNumeric_Checks(database, mail=None, return_type="data"):
                 fp1 = tmpfile.name
                 results.to_excel(fp1, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Uses ties with invalid geoCoords for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp1])
+                sendEmail(mail, subject=f"Uses ties with invalid geoCoords for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
 
         query = """
         MATCH (a:CATEGORY)<-[r:USES]-(b:DATASET)
@@ -2406,8 +2367,7 @@ def getNumeric_Checks(database, mail=None, return_type="data"):
                 fp2 = tmpfile.name
                 results2.to_excel(fp2, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"USES with invalid integer or float values for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp2])
+                sendEmail(mail, subject=f"USES with invalid integer or float values for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp2])
         
         query = """
                 MATCH (n)
@@ -2428,8 +2388,7 @@ def getNumeric_Checks(database, mail=None, return_type="data"):
                 fp3 = tmpfile.name
                 results3.to_excel(fp3, index=False)
             if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Nodes with invalid integer values for {database}", recipients=[
-                          "admin@catmapper.org"], body="See attached", sender=config['MAIL']['mail_default'], attachments=[fp3])
+                sendEmail(mail, subject=f"Nodes with invalid integer values for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp3])
 
         if return_type == "data":
             return {"Uses ties with invalid geoCoords": len(results), "Uses ties with invalid geoCoords": results.to_dict(orient="records"),"USES with invalid integer or float values": len(results2), "USES with invalid integer or float values": results2.to_dict(orient="records"), "Nodes with invalid integer values": len(results2), "Nodes with invalid integer values": results2.to_dict(orient="records")}
@@ -2463,7 +2422,7 @@ def runRoutinesStream(databases="all", mail=None):
     mail : Mail, optional
         A Mail object for sending notifications (default: None).
         If provided, the final HTML table and attachments are emailed 
-        to `rjbischo@asu.edu`.
+        to `MAIL.mail_weekly_recipients`.
     Returns
     -------
     flask.Response
@@ -2628,9 +2587,9 @@ def runRoutinesStream(databases="all", mail=None):
             send_result = sendEmail(
                 mail,
                 subject=f"Routines for {' and '.join(dbs)} - {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                recipients=["admin@catmapper.org"],
+                recipients=get_alert_recipients(),
                 body=email_body,  # IMPORTANT: table, not full log
-                sender=config['MAIL']['mail_default'],
+                sender=get_default_sender(),
                 attachments=files_out or [],
                 html=True,
                 return_metadata=True,
