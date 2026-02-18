@@ -16,6 +16,8 @@ def _row_from_user(user):
         "updatedAt": user.get("updatedAt", "2026-01-01T00:00:00Z"),
         "passwordLastChangedAt": user.get("passwordLastChangedAt", "2026-01-01T00:00:00Z"),
         "password": user.get("password", ""),
+        "apiKeyHash": user.get("apiKeyHash", ""),
+        "apiKeyCreatedAt": user.get("apiKeyCreatedAt", ""),
     }
 
 
@@ -71,6 +73,25 @@ def _fake_getquery_factory(users):
             user["passwordLastChangedAt"] = payload["changedAt"]
             user["updatedAt"] = payload["changedAt"]
             return [{"passwordLastChangedAt": payload["changedAt"]}]
+
+        if "coalesce(u.apiKeyHash, '') as apiKeyHash" in query:
+            user = users.get(str(payload["userid"]))
+            if not user:
+                return []
+            return [{
+                "access": user.get("access", "enabled"),
+                "apiKeyHash": user.get("apiKeyHash", ""),
+                "apiKeyHashes": user.get("apiKeyHashes", []),
+            }]
+
+        if "SET" in query and "u.apiKeyHash = $apiKeyHash" in query:
+            user = users.get(str(payload["userid"]))
+            if not user:
+                return []
+            user["apiKeyHash"] = payload["apiKeyHash"]
+            user["apiKeyCreatedAt"] = payload["updatedAt"]
+            user["updatedAt"] = payload["updatedAt"]
+            return [{"apiKeyCreatedAt": payload["updatedAt"]}]
 
         raise AssertionError(f"Unexpected query in test: {query}")
 
@@ -536,3 +557,85 @@ def test_add_bookmark_parses_json_body_without_content_type(client, monkeypatch)
 
     assert response.status_code == 200
     assert store["bookmarks"][0]["cmid"] == "AM555"
+
+
+def test_request_and_confirm_api_key_creation(client, monkeypatch):
+    users = {
+        "100": {
+            "userid": "100",
+            "first": "Ada",
+            "last": "Lovelace",
+            "username": "ada",
+            "email": "ada@example.org",
+            "database": ["SocioMap"],
+            "intendedUse": "Research",
+            "password": "old-pass",
+        }
+    }
+
+    user_routes.API_KEY_CREATE_REQUESTS.clear()
+
+    monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
+    monkeypatch.setattr(user_routes, "getQuery", _fake_getquery_factory(users))
+    monkeypatch.setattr(user_routes, "sendEmail", lambda **kwargs: "Email sent successfully")
+    monkeypatch.setattr(user_routes, "password_hash", lambda value: f"hashed::{value}")
+
+    request_response = client.post(
+        "/profile/request-api-key",
+        json={
+            "userId": "100",
+            "credentials": _auth_cred("100"),
+        },
+    )
+    assert request_response.status_code == 200
+    request_payload = request_response.get_json()
+    assert request_payload["requestId"].startswith("apikey_")
+
+    stored_request = user_routes.API_KEY_CREATE_REQUESTS[request_payload["requestId"]]
+    confirm_response = client.post(
+        "/profile/confirm-api-key",
+        json={
+            "userId": "100",
+            "credentials": _auth_cred("100"),
+            "requestId": request_payload["requestId"],
+            "verificationCode": stored_request["verification_code"],
+        },
+    )
+
+    assert confirm_response.status_code == 200
+    confirm_payload = confirm_response.get_json()
+    assert confirm_payload["apiKey"].startswith("cmk_")
+    assert confirm_payload["apiKeyCreatedAt"]
+    assert users["100"]["apiKeyHash"] == f"hashed::{confirm_payload['apiKey']}"
+
+
+def test_get_profile_accepts_api_key_credentials(client, monkeypatch):
+    users = {
+        "100": {
+            "userid": "100",
+            "first": "Ada",
+            "last": "Lovelace",
+            "username": "ada",
+            "email": "ada@example.org",
+            "database": ["SocioMap"],
+            "intendedUse": "Research",
+            "password": "old-pass",
+            "access": "enabled",
+            "apiKeyHash": "hashed::cmk_test_key",
+        }
+    }
+
+    monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verification failed")
+    monkeypatch.setattr(user_routes, "verifyPassword", lambda stored_hash, candidate: stored_hash == f"hashed::{candidate}")
+    monkeypatch.setattr(user_routes, "getQuery", _fake_getquery_factory(users))
+
+    response = client.get(
+        "/profile/100",
+        query_string={"credentials": json.dumps({"userid": "100", "key": "cmk_test_key"})},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["userId"] == "100"

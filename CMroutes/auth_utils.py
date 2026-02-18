@@ -2,7 +2,7 @@ import os
 from flask import request
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
-from CM import getDriver, getQuery, verifyUser
+from CM import getDriver, getQuery, verifyUser, verifyPassword
 
 
 AUTH_TOKEN_TTL_SECONDS = int(os.getenv("CATMAPPER_AUTH_TOKEN_TTL_SECONDS", "2592000"))
@@ -63,6 +63,45 @@ def _is_active_user(userid, required_role=None):
     return True
 
 
+def _verify_api_key_credentials(userid, credential_key, required_role=None):
+    driver = getDriver("userdb")
+    query = """
+    MATCH (u:USER {userid: toString($userid)})
+    RETURN
+      coalesce(u.access, '') as access,
+      coalesce(u.role, '') as role,
+      coalesce(u.apiKeyHash, '') as apiKeyHash,
+      coalesce(u.apiKeyHashes, []) as apiKeyHashes
+    """
+    rows = getQuery(query, driver=driver, params={"userid": str(userid)})
+    if not rows:
+        return None
+
+    row = rows[0] or {}
+    access = str(row.get("access", "")).lower()
+    role = str(row.get("role", "")).lower()
+    if access != "enabled":
+        return None
+    if required_role and role != str(required_role).lower():
+        return None
+
+    hashes = []
+    single_hash = row.get("apiKeyHash")
+    if isinstance(single_hash, str) and single_hash.strip():
+        hashes.append(single_hash.strip())
+    hash_list = row.get("apiKeyHashes")
+    if isinstance(hash_list, list):
+        for item in hash_list:
+            if isinstance(item, str) and item.strip():
+                hashes.append(item.strip())
+
+    for stored_hash in hashes:
+        if verifyPassword(stored_hash, str(credential_key)):
+            return {"userid": str(userid), "role": role or "user"}
+
+    return None
+
+
 def verify_request_auth(required_userid=None, credentials=None, required_role=None, req=None):
     # Preferred path: signed bearer token in Authorization header.
     claims = parse_bearer_token(req=req)
@@ -88,12 +127,21 @@ def verify_request_auth(required_userid=None, credentials=None, required_role=No
     if required_userid is not None and str(credential_userid) != str(required_userid):
         raise Exception("Credentials do not match requested user")
     verified = verifyUser(str(credential_userid), credential_key, required_role)
-    if verified != "verified":
-        raise Exception("User is not verified")
-    return {
-        "userid": str(credential_userid),
-        "role": str(required_role or credentials.get("role", "user")).lower(),
-    }
+    if verified == "verified":
+        return {
+            "userid": str(credential_userid),
+            "role": str(required_role or credentials.get("role", "user")).lower(),
+        }
+
+    api_key_claims = _verify_api_key_credentials(
+        userid=str(credential_userid),
+        credential_key=credential_key,
+        required_role=required_role,
+    )
+    if api_key_claims:
+        return api_key_claims
+
+    raise Exception("User is not verified")
 
 
 def verify_bearer_auth(required_userid=None, required_role=None, req=None):
