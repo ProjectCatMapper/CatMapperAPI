@@ -14,7 +14,7 @@ def testmsg(database, msg):
 def send_test_email(email):
     try:
         msg = sendEmail(mail, "Test Email", [
-            email], "This is a test email sent from a Flask application. Have fun.", "admin@catmapper.org")
+            email], "This is a test email sent from a Flask application. Have fun.", get_default_sender())
         return msg
     except Exception as e:
         return str(e), 500
