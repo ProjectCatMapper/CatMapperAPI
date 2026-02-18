@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 from CM import getDriver, password_hash, sendEmail, verifyUser, login, enableUser, unlist, getQuery, verifyPassword
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from threading import Lock
 import secrets
 import uuid
@@ -50,7 +50,7 @@ def _send_verification_email(email, verification_code, action_label, username=No
     if not email:
         raise Exception("User email is missing; cannot send verification code.")
 
-    sender = config['MAIL']['mail_default']
+    sender = _mail_default_sender()
     subject = f"CatMapper {action_label} Verification Code"
     username_line = f"Username: {username}\n\n" if username else ""
     body = (
@@ -80,6 +80,14 @@ def _cleanup_requests():
             expired = [key for key, value in store.items() if value["expires_at"] < now]
             for key in expired:
                 store.pop(key, None)
+
+
+def _mail_default_sender():
+    if "MAIL_DEFAULT_SENDER" in os.environ:
+        return os.environ.get("MAIL_DEFAULT_SENDER") or "admin@catmapper.org"
+    if config.has_option("MAIL", "mail_default"):
+        return config.get("MAIL", "mail_default")
+    return "admin@catmapper.org"
 
 
 def _normalize_database(database_value):
@@ -281,7 +289,7 @@ def _verify_profile_credentials(userid, credentials):
 def getnewuser():
     try:
 
-        mail_default = config['MAIL']['mail_default']
+        mail_default = _mail_default_sender()
         data = request.get_data()
         data = json.loads(data)
         database = data.get("database")
