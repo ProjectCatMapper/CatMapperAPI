@@ -263,11 +263,26 @@ def createNodesapi():
     
 @admin_bp.route('/updateWaitingUSES', methods=['POST'])
 def getUpdateWaitingUSES():
-    data = request.get_data()
-    data = json.loads(data)
-    database = data.get("database")
-    result = waitingUSES(database)
-    return result
+    try:
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+        credentials = unlist(data.get("cred")) if isinstance(data, dict) else None
+        claims = verify_request_auth(credentials=credentials, req=request)
+        acting_user = claims.get("userid")
+
+        requested_user = unlist(data.get("user")) if isinstance(data, dict) else None
+        if requested_user and str(requested_user).strip() != str(acting_user):
+            raise Exception("User does not match authenticated API key/token owner")
+
+        database = unlist(data.get("database")) if isinstance(data, dict) else None
+        if not database:
+            raise Exception("Database not specified")
+
+        result = waitingUSES(database)
+        return result
+    except Exception as e:
+        return str(e), 500
 
 @admin_bp.route('/mergeUSESties', methods=['GET','POST'])
 def getMergeUSESties():

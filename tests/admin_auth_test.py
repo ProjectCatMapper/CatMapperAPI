@@ -35,3 +35,20 @@ def test_admin_edit_rejects_non_admin_bearer(client, monkeypatch):
 
     assert response.status_code == 500
     assert "not authorized" in response.get_data(as_text=True).lower()
+
+
+def test_update_waiting_uses_rejects_user_mismatch(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "200", "role": "user"})
+    monkeypatch.setattr(
+        admin_routes,
+        "waitingUSES",
+        lambda database: (_ for _ in ()).throw(AssertionError("waitingUSES should not execute on mismatch")),
+    )
+
+    response = client.post(
+        "/updateWaitingUSES",
+        json={"database": "ArchaMap", "user": "201"},
+    )
+
+    assert response.status_code == 500
+    assert "does not match authenticated api key/token owner" in response.get_data(as_text=True).lower()
