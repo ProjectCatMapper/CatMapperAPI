@@ -36,8 +36,13 @@ def search(
     if domain is None:
         domain = "ALL NODES"
 
-    if domain == "ALL NODES":
+    if domain in {"ALL NODES", "ALLNODES"}:
         domain = "ALLNODES"
+    else:
+        domain = validate_domain_label(domain, driver=driver, extra_allowed={"ALLNODES"})
+
+    if property is not None and property not in {"Name", "CMID", "Key"}:
+        property = sanitize_cypher_identifier(property, "property")
 
     # need to add check to make sure property is valid and domain is valid
 
@@ -144,7 +149,7 @@ def search(
 
     else:
         qStart = f"""
-    match (a) where tolower(a.{property}) = tolower($term)
+    match (a) where tolower(toString(a.{property})) = tolower(toString($term))
     with a, a.{property} as matching, 0 as score
     """
 
@@ -321,6 +326,13 @@ def translate(
         raise Exception("must specify yearStart property")
     
     driver = getDriver(database)
+    domain = validate_domain_label(domain, driver=driver)
+
+    if property is None or str(property).strip() == "":
+        raise ValueError("property is required")
+
+    if property not in {"Key", "Name", "glottocode", "ISO", "CMID"}:
+        property = sanitize_cypher_identifier(property, "property")
 
     # format data
     # add rowid,
@@ -424,10 +436,10 @@ def translate(
    
     else:
         qStart = f""" 
-    with row call apoc.cypher.run('match (a:{domain}) 
-    where not a.{property} is null and tolower(a.{property}) = tolower(\"' + row.term + '\") 
-    return a, a.{property} as matching',{{}}) yield value 
-    with row, value.a as a, value.matching as matching, 0 as score
+    with row
+    match (a:{domain})
+    where a.{property} is not null and tolower(toString(a.{property})) = tolower(toString(row.term))
+    with row, a, a.{property} as matching, 0 as score
     """
 
     # filter by domain

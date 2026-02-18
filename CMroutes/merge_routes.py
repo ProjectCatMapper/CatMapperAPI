@@ -1,5 +1,5 @@
 from flask import request, Blueprint, jsonify
-from CM import proposeMerge, joinDatasets, getDriver, unlist, getQuery
+from CM import proposeMerge, joinDatasets, getDriver, unlist, getQuery, validate_domain_label
 import json
 import re
 
@@ -60,6 +60,8 @@ def submit_merge():
         category_label = "CATEGORY"
     elif category_label == "AREA":
         category_label = "DISTRICT"
+
+    category_label = validate_domain_label(category_label, driver=getDriver(database))
 
     result = proposeMerge(dataset_choices=dataset_choices, category_label=category_label,
                           criteria=criteria, database=database, intersection=intersection, selectedKeyvariables=selectedKeyvariables, ncontains=ncontains,resultFormat = resultFormat)
@@ -141,6 +143,10 @@ def getvalidKeysForDataset():
     
     if subdomain == "ANY DOMAIN":
         subdomain = "CATEGORY"
+    elif subdomain == "AREA":
+        subdomain = "DISTRICT"
+
+    subdomain = validate_domain_label(subdomain, driver=driver)
         
     for i in names:
         q = f"""
@@ -182,16 +188,24 @@ def getLinkFile():
         intersection = request.args.get('intersection')
         domain = request.args.get('domain')
 
+        if isinstance(datasets, str):
+            if datasets.strip().startswith("["):
+                datasets = json.loads(datasets)
+            else:
+                datasets = [d.strip() for d in datasets.split(",") if d.strip()]
         if not isinstance(datasets, list):
             raise Exception("datasets must be a list")
 
         if not isinstance(domain, str):
             raise Exception("domain must be a string")
 
+        if isinstance(intersection, str):
+            intersection = intersection.strip().lower() == "true"
         if not isinstance(intersection, bool):
             raise Exception("intersection must be a boolean")
 
         driver = getDriver(database)
+        domain = validate_domain_label(domain, driver=driver)
 
         query = f"""
         match (c:{domain})<-[r:USES]-(d:DATASET) where d.CMID in $datasets
