@@ -161,16 +161,24 @@ def getLinkFile():
         intersection = request.args.get('intersection')
         domain = request.args.get('domain')
 
+        if isinstance(datasets, str):
+            if datasets.strip().startswith("["):
+                datasets = json.loads(datasets)
+            else:
+                datasets = [d.strip() for d in datasets.split(",") if d.strip()]
         if not isinstance(datasets, list):
             raise Exception("datasets must be a list")
 
         if not isinstance(domain, str):
             raise Exception("domain must be a string")
 
+        if isinstance(intersection, str):
+            intersection = intersection.strip().lower() == "true"
         if not isinstance(intersection, bool):
             raise Exception("intersection must be a boolean")
 
         driver = getDriver(database)
+        domain = validate_domain_label(domain, driver=driver)
 
         query = f"""
 match (c:{domain})<-[r:USES]-(d:DATASET) where d.CMID in $datasets
@@ -203,3 +211,18 @@ def getMetdataProperties(CMID):
     
     except Exception as e:
         return str(e), 500
+    
+@metadata_bp.route('/metadata/domaincount/<database>/<domain>', methods=['GET'])
+def getDomainCount(database, domain):
+    try:
+        driver = getDriver(database)
+        domain = validate_domain_label(domain, driver=driver)
+        query1 = f"""
+        return apoc.meta.nodes.count(["{domain}"]) AS count
+        """
+        df1 = getQuery(query=query1, driver=driver, type = "list")
+        return df1
+    except Exception as e:
+        # In case of an error, return an error response with an appropriate HTTP status code
+        result = str(e)
+        return result, 500

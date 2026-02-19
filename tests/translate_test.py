@@ -1,22 +1,14 @@
-import pytest
-import sys
-import os
+import pandas as pd
+import CMroutes.search_routes as search_routes
 
-# Make sure the top-level directory is in the path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from app import app as flask_app
+def test_translate_endpoint_returns_file_and_order(client, monkeypatch):
+    def fake_translate(**kwargs):
+        df = pd.DataFrame([{"period": "Archaic", "CMID": "AM1"}])
+        return df, ["period", "CMID"]
 
-@pytest.fixture
-def client():
-    with flask_app.test_client() as client:
-        yield client
-        
-def test_translate_endpoint(client):
-    # Example payload for the /translate endpoint
-    
-    example_table = [{"period": "Archaic", "country":"AM22269"}, {"period": "Classical"}, {"period": "Hellenistic"}, {"period": "Roman"},{"period": "Archaic"}]
-    
+    monkeypatch.setattr(search_routes, "translate", fake_translate)
+
     payload = {
         "database": "ArchaMap",
         "property": "Name",
@@ -29,13 +21,13 @@ def test_translate_endpoint(client):
         "yearStart": None,
         "yearEnd": None,
         "query": "false",
-        "table": example_table,
-        "uniqueRows": "true"
+        "table": [{"period": "Archaic"}],
+        "uniqueRows": "true",
     }
-    
-    response = client.post('/translate', json=payload)
-    
+
+    response = client.post("/translate", json=payload)
+
     assert response.status_code == 200
-    data = response.get_json()
-    assert 'file' in data
-    assert 'order' in data
+    body = response.get_json()
+    assert body["file"] == [{"CMID": "AM1", "period": "Archaic"}]
+    assert body["order"] == ["period", "CMID"]

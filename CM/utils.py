@@ -2,7 +2,6 @@
 
 # general utility functions
 
-from email import message
 import itertools
 import re
 from neo4j import GraphDatabase
@@ -12,11 +11,12 @@ import json
 from configparser import ConfigParser
 import threading
 from datetime import datetime, timedelta
-import warnings
 
 _driver_cache = {}
 _driver_lock = threading.Lock()
 _last_verified = {}
+_CYPHER_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_CYPHER_ELEMENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9:_-]+$")
 
 config = ConfigParser()
 config.read('config.ini')
@@ -228,6 +228,80 @@ def getQuery(query, driver, params=None, type="dict", max_retries=3, **kwargs):
     # Should not reach here, but just in case
     raise RuntimeError(f"Query failed after {max_retries} attempts")
 
+
+def sanitize_cypher_identifier(value, field_name="identifier"):
+    """
+    Allow only simple Cypher identifiers (labels, relationship types, properties).
+    Prevents Cypher injection when interpolation is unavoidable for identifiers.
+    """
+    if value is None:
+        raise ValueError(f"{field_name} is required")
+    cleaned = str(value).strip()
+    if not cleaned:
+        raise ValueError(f"{field_name} cannot be empty")
+    if not _CYPHER_IDENTIFIER_PATTERN.fullmatch(cleaned):
+        raise ValueError(f"Invalid {field_name}: {value}")
+    return cleaned
+
+
+def sanitize_cypher_element_id(value, field_name="elementId"):
+    """
+    Validate Neo4j elementId tokens before passing to queries.
+    """
+    if value is None:
+        raise ValueError(f"{field_name} is required")
+    cleaned = str(value).strip()
+    if not cleaned:
+        raise ValueError(f"{field_name} cannot be empty")
+    if not _CYPHER_ELEMENT_ID_PATTERN.fullmatch(cleaned):
+        raise ValueError(f"Invalid {field_name}: {value}")
+    return cleaned
+
+
+def get_valid_domain_labels(driver):
+    """
+    Return known node-label domains valid for API domain filtering.
+    Includes metadata labels plus built-in structural labels used in the app.
+    """
+    base_labels = {
+        "CATEGORY",
+        "DATASET",
+        "DISTRICT",
+        "ADM0",
+        "METADATA",
+        "LABEL",
+        "PROPERTY",
+        "VARIABLE",
+        "STACK",
+        "DELETED",
+        "VECTOR",
+    }
+    rows = getQuery(
+        "MATCH (l:LABEL) RETURN DISTINCT l.CMName AS label",
+        driver=driver,
+        type="list",
+    )
+    dynamic_labels = {label for label in rows if isinstance(label, str) and label.strip()}
+    return base_labels | dynamic_labels
+
+
+def validate_domain_label(domain, driver=None, aliases=None, extra_allowed=None):
+    """
+    Normalize and validate a domain label for safe use in Cypher label slots.
+    """
+    aliases = aliases or {}
+    extra_allowed = set(extra_allowed or [])
+    normalized = aliases.get(domain, domain)
+    normalized = sanitize_cypher_identifier(normalized, "domain")
+
+    if driver is None:
+        return normalized
+
+    allowed = get_valid_domain_labels(driver) | extra_allowed
+    if normalized not in allowed:
+        raise ValueError(f"Unknown domain label: {normalized}")
+    return normalized
+
 def unlist(l):
     if isinstance(l, list):
         l = l[0]
@@ -241,15 +315,6 @@ def isValidCMID(cmid, driver):
     result = getQuery(query, driver, params={"cmid": cmid}, type="dict")
     
     return result
-
-def validateCols(df, required):
-    missing = [col for col in df.columns if col not in required]
-
-    if len(missing) > 0:
-        return f"Missing the following required column(s): {missing}\n"
-    else:
-        return True
-
 
 def cleanCMID(cmid):
     # Define the regex pattern for valid prefixes
@@ -333,18 +398,6 @@ def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database="SocioMap"):
             newID = [f"{prefix}M{x}" for x in newID]
 
     return newID
-
-
-def list2character(col):
-    # If col is a list, join the items into a single string
-    if isinstance(col, list):
-        return ','.join(map(str, col))
-    # If col is a string, return it as is
-    elif isinstance(col, str):
-        return col
-    # Otherwise, convert it to a string
-    else:
-        return str(col)
 
 
 def flattenList(input_data):
