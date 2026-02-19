@@ -1,10 +1,55 @@
 # email.py
 
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
+from configparser import ConfigParser
 from flask_mail import Mail, Message
+
+_config = ConfigParser()
+_config.read("config.ini")
+
+
+def _env_or_config(env_name: str, section: str, option: str, fallback: str = "") -> str:
+    if env_name in os.environ:
+        return str(os.environ.get(env_name) or fallback).strip()
+    if _config.has_option(section, option):
+        return str(_config.get(section, option) or fallback).strip()
+    return fallback
+
+
+def _parse_recipients(value: str) -> List[str]:
+    if not value:
+        return []
+    return [item.strip() for item in str(value).split(",") if item and item.strip()]
+
+
+def get_default_sender() -> str:
+    return _env_or_config("MAIL_DEFAULT_SENDER", "MAIL", "mail_default", "")
+
+
+def get_alert_recipients() -> List[str]:
+    value = _env_or_config("MAIL_ALERT_RECIPIENTS", "MAIL", "mail_alert_recipients", "")
+    if value:
+        return _parse_recipients(value)
+    default_sender = get_default_sender()
+    return [default_sender] if default_sender else []
+
+
+def get_weekly_recipients() -> List[str]:
+    value = _env_or_config("MAIL_WEEKLY_RECIPIENTS", "MAIL", "mail_weekly_recipients", "")
+    if value:
+        return _parse_recipients(value)
+    return get_alert_recipients()
+
+
+def get_support_email() -> str:
+    support = _env_or_config("MAIL_SUPPORT_EMAIL", "MAIL", "mail_support_email", "")
+    if support:
+        return support
+    return get_default_sender()
 
 
 def _build_mail_audit(sender: str, recipients: List[str]) -> Dict[str, Any]:

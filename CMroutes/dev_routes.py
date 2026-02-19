@@ -1,7 +1,6 @@
 from turtle import up
 from CM import *
-from flask import app, render_template, Blueprint
-from flask_mail import Mail
+from flask import Blueprint, jsonify, render_template
 from .extensions import mail
 import pandas as pd
 
@@ -15,7 +14,7 @@ def testmsg(database, msg):
 def send_test_email(email):
     try:
         msg = sendEmail(mail, "Test Email", [
-            email], "This is a test email sent from a Flask application. Have fun.", "admin@catmapper.org")
+            email], "This is a test email sent from a Flask application. Have fun.", get_default_sender())
         return msg
     except Exception as e:
         return str(e), 500

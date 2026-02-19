@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, render_template, make_response
 from CM import *
 import json
+from .auth_utils import verify_request_auth
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -119,6 +120,7 @@ def check_ambiguous_usesties():
     USES_property = json.loads(input.get('s1_7'))
     rel_id = USES_property[1]["id"]
     driver = getDriver(database)
+    verify_request_auth(credentials=credentials, required_role="admin", req=request)
 
     result = check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id)
     return result
@@ -151,7 +153,7 @@ def getAdminEdit():
     from configparser import ConfigParser
     config = ConfigParser()
     config.read('config.ini')
-    apikeyEnv = config['DB']['apikey']
+    apikeyEnv = config.get('DB', 'apikey', fallback=None)
     # will not be documented in swagger at this point
     try:
         if request.method == 'GET':
@@ -164,35 +166,37 @@ def getAdminEdit():
         database = unlist(data.get('database'))
         if database is None:
             raise Exception("Database not specified")
-        driver = getDriver(database)
         fun = unlist(data.get('fun'))
         user = unlist(data.get('user'))
         pwd = unlist(data.get('pwd'))
         apikey = unlist(data.get('apikey'))
         credentials = unlist(data.get("cred"))
         input = unlist(data.get("input"))
-        if credentials:
-            verified = verifyUser(credentials.get(
-                "userid"), credentials.get("key"), "admin")
-            if verified != "verified":
-                raise Exception("Error: User is not verified")
+        acting_user = None
+        auth_header = request.headers.get("Authorization", "")
+        if credentials or auth_header.startswith("Bearer "):
+            claims = verify_request_auth(credentials=credentials, required_role="admin", req=request)
+            acting_user = claims.get("userid")
         else:
             validated = False
-            if apikey == apikeyEnv:
+            if apikeyEnv and apikey and apikey == apikeyEnv:
                 validated = True
+                acting_user = user
             if not validated:
                 credentials = login(user, pwd)
                 if isinstance(credentials, dict) and credentials.get('role') == "admin":
                     validated = True
-                    user = credentials.get('userid')
+                    acting_user = credentials.get('userid')
             if not validated:
                 raise Exception("User not authorized")
+        if not acting_user:
+            acting_user = user
         
         result = "Nothing returned"
         if fun == "mergeNodes":
             keepcmid = unlist(data.get('keepcmid').strip())
             deletecmid = unlist(data.get('deletecmid').strip())
-            result = mergeNodes(keepcmid, deletecmid, user, database)
+            result = mergeNodes(keepcmid, deletecmid, acting_user, database)
         elif fun == "processUSES":
             CMID = cleanCMID(data.get('CMID'))
             result = processUSES(database=database, CMID=CMID)
@@ -204,23 +208,23 @@ def getAdminEdit():
             result = replaceProperty(cmid, property, old, new, database)
         elif fun == "add/edit/delete node property":
             result = add_edit_delete_Node(
-                database, credentials.get("userid"), input)
+                database, acting_user, input)
         elif fun == "add/edit/delete USES property":
             result = add_edit_delete_USES(
-                database, credentials.get("userid"), input)
+                database, acting_user, input)
         elif fun == "merge nodes":
             result = mergeNodes(input.get('s1_2'), input.get(
-                's1_3'), credentials.get("userid"), database)
+                's1_3'), acting_user, database)
         elif fun == "create new label":
-            result = createLabel(database, credentials.get("userid"), input)
+            result = createLabel(database, acting_user, input)
         elif fun == "delete node":
-            result = deleteNode(database, credentials.get("userid"), input)
+            result = deleteNode(database, acting_user, input)
         elif fun == "delete USES relation":
-            result = deleteUSES(database, credentials.get("userid"), input)
+            result = deleteUSES(database, acting_user, input)
         elif fun == "move USES tie":
             tabledata = data.get("tabledata")
             dataset = data.get("datasetID")
-            result = moveUSESties(database, credentials.get("userid"), input,dataset,tabledata)
+            result = moveUSESties(database, acting_user, input,dataset,tabledata)
         else:
             raise Exception("Function does not exist")
         return result
@@ -240,18 +244,16 @@ def createNodesapi():
         database = unlist(data.get('database'))
         user = unlist(data.get('user'))
         pwd = unlist(data.get('password'))
-
-        verify = verifyUser(user, pwd)
-
-        if not verify == "verified":
-            raise Exception("User is not verified.")
+        credentials = {"userid": user, "key": pwd}
+        claims = verify_request_auth(credentials=credentials, req=request)
+        acting_user = claims.get("userid")
 
         if not df or len(df) == 0:
             return jsonify({"error": "Data is empty"}), 400
 
         df = pd.DataFrame(df)
 
-        results = createNodes(df, database, user)
+        results = createNodes(df, database, acting_user)
 
         return results
 
@@ -261,11 +263,26 @@ def createNodesapi():
     
 @admin_bp.route('/updateWaitingUSES', methods=['POST'])
 def getUpdateWaitingUSES():
-    data = request.get_data()
-    data = json.loads(data)
-    database = data.get("database")
-    result = waitingUSES(database)
-    return result
+    try:
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+        credentials = unlist(data.get("cred")) if isinstance(data, dict) else None
+        claims = verify_request_auth(credentials=credentials, req=request)
+        acting_user = claims.get("userid")
+
+        requested_user = unlist(data.get("user")) if isinstance(data, dict) else None
+        if requested_user and str(requested_user).strip() != str(acting_user):
+            raise Exception("User does not match authenticated API key/token owner")
+
+        database = unlist(data.get("database")) if isinstance(data, dict) else None
+        if not database:
+            raise Exception("Database not specified")
+
+        result = waitingUSES(database)
+        return result
+    except Exception as e:
+        return str(e), 500
 
 @admin_bp.route('/mergeUSESties', methods=['GET','POST'])
 def getMergeUSESties():
@@ -288,19 +305,47 @@ def getMergeUSESties():
 @admin_bp.route('/admin/saveMetadata', methods=['POST'])
 def saveMetadata():
     try:
-# 1. Initialize separate lists for each database
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+        auth_header = request.headers.get("Authorization", "")
+        credentials = unlist(data.get("cred")) if isinstance(data, dict) else None
+
+        if credentials or auth_header.startswith("Bearer "):
+            verify_request_auth(credentials=credentials, required_role="admin", req=request)
+        else:
+            raise Exception("Admin authorization is required")
+
+        updates = data if isinstance(data, list) else data.get("updates")
+        if not isinstance(updates, list):
+            raise Exception("Invalid payload: 'updates' must be a list")
+
+        # 1. Initialize separate lists for each database
         updatesS = []
         updatesA = []
 
-        for item in data:
+        for item in updates:
+            if not isinstance(item, dict):
+                raise Exception("Invalid update item: each update must be an object")
+
             node_id = item.get('id')
             props = item.get('properties', {})
-            db_target = item.get('database') # Check which DB this item belongs to
+            db_target = item.get('database')  # Check which DB this item belongs to
+
+            if not node_id or not isinstance(node_id, str):
+                raise Exception("Invalid update item: missing or invalid node id")
+            if db_target not in {"SocioMap", "ArchaMap"}:
+                raise Exception(f"Invalid database target '{db_target}'")
+            if not isinstance(props, dict):
+                raise Exception("Invalid update item: properties must be an object")
 
             # Clean properties
             clean_props = props.copy()
-            clean_props.pop('CMID', None) 
-            
+            clean_props.pop('CMID', None)
+            clean_props.pop('id', None)
+            clean_props.pop('labels', None)
+            clean_props.pop('database', None)
+
             # Create the update object
             update_packet = {
                 "id": node_id,
@@ -324,24 +369,148 @@ def saveMetadata():
 
         # 4. Execute conditionally based on lists
         total_count = 0
-        
+
+        def extract_updated_count(result):
+            if result is None:
+                return 0
+            # getQuery(..., type="list") may return:
+            # - [{'updated_count': N}]
+            # - [N]
+            # - N
+            if isinstance(result, list):
+                if not result:
+                    return 0
+                first = result[0]
+                if isinstance(first, dict):
+                    return int(first.get('updated_count', 0) or 0)
+                if isinstance(first, (int, float)):
+                    return int(first)
+                return 0
+            if isinstance(result, dict):
+                return int(result.get('updated_count', 0) or 0)
+            if isinstance(result, (int, float)):
+                return int(result)
+            return 0
+
         # Only run SocioMap query if we have SocioMap updates
         if updatesS:
             driverS = getDriver("sociomap")
             resultS = getQuery(query=query, driver=driverS, params={"updates": updatesS}, type="list")
-            # Assuming getQuery returns a list of dicts, e.g., [{'updated_count': 1}]
-            if resultS:
-                total_count += resultS[0].get('updated_count', 0)
+            total_count += extract_updated_count(resultS)
 
         # Only run ArchaMap query if we have ArchaMap updates
         if updatesA:
             driverA = getDriver("archamap")
             resultA = getQuery(query=query, driver=driverA, params={"updates": updatesA}, type="list")
-            if resultA:
-                total_count += resultA[0].get('updated_count', 0)
+            total_count += extract_updated_count(resultA)
 
-        return jsonify({"message": f"Updated {total_count} nodes."}), 200
+        return jsonify({
+            "message": f"Updated {total_count} nodes.",
+            "updatedCount": total_count,
+            "byDatabase": {
+                "SocioMap": len(updatesS),
+                "ArchaMap": len(updatesA)
+            }
+        }), 200
 
     except Exception as e:
         print(f"Error saving metadata: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+@admin_bp.route('/admin/metadata/nodes', methods=['GET'])
+def list_metadata_nodes():
+    try:
+        auth_header = request.headers.get("Authorization", "")
+        credentials = request.args.get("cred")
+        if credentials or auth_header.startswith("Bearer "):
+            verify_request_auth(credentials=credentials, required_role="admin", req=request)
+        else:
+            raise Exception("Admin authorization is required")
+
+        query = """
+        MATCH (n:METADATA)
+        WITH n, [label IN labels(n) WHERE label <> 'METADATA'] AS nodeLabels
+        WHERE n.CMID IS NOT NULL
+           OR n.CMName IS NOT NULL
+           OR n.groupLabel IS NOT NULL
+           OR size(nodeLabels) > 0
+        RETURN elementId(n) AS id,
+               n.CMID AS CMID,
+               n.CMName AS CMName,
+               n.groupLabel AS groupLabel,
+               n.color AS color,
+               nodeLabels AS labels,
+               properties(n) AS props
+        ORDER BY n.CMName
+        """
+
+        result_s = getQuery(query=query, driver=getDriver("sociomap"), type="list")
+        result_a = getQuery(query=query, driver=getDriver("archamap"), type="list")
+
+        def sanitize_rows(rows):
+            if not isinstance(rows, list):
+                return []
+            clean = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                props = row.get("props") if isinstance(row.get("props"), dict) else {}
+                cmid = row.get("CMID") or props.get("CMID") or props.get("cmid") or ""
+                cmname = row.get("CMName") or props.get("CMName") or props.get("Name") or props.get("name") or ""
+                labels = row.get("labels") if isinstance(row.get("labels"), list) else []
+                group_label = (
+                    row.get("groupLabel")
+                    or props.get("groupLabel")
+                    or props.get("groupDomain")
+                    or (labels[0] if labels else "UNMAPPED")
+                )
+                color = row.get("color") or props.get("color") or props.get("hexColor")
+
+                if not cmid and not cmname:
+                    continue
+
+                clean.append({
+                    "id": row.get("id"),
+                    "CMID": cmid,
+                    "CMName": cmname,
+                    "groupLabel": group_label,
+                    "color": color,
+                    "labels": labels
+                })
+            return clean
+
+        return jsonify({
+            "SocioMap": sanitize_rows(result_s),
+            "ArchaMap": sanitize_rows(result_a)
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@admin_bp.route('/admin/metadata/node/<CMID>', methods=['GET'])
+def get_metadata_node_admin(CMID):
+    try:
+        auth_header = request.headers.get("Authorization", "")
+        credentials = request.args.get("cred")
+        if credentials or auth_header.startswith("Bearer "):
+            verify_request_auth(credentials=credentials, required_role="admin", req=request)
+        else:
+            raise Exception("Admin authorization is required")
+
+        if not isinstance(CMID, str) or not CMID:
+            raise Exception("CMID must be a non-empty string")
+
+        query = "MATCH (n:METADATA {CMID: $CMID}) RETURN n"
+        resultS = getQuery(query=query, driver=getDriver("sociomap"), params={"CMID": CMID}, type="records")
+        resultA = getQuery(query=query, driver=getDriver("archamap"), params={"CMID": CMID}, type="records")
+
+        nodes = []
+        if resultS:
+            nodes.append({"SocioMap": serialize_node(resultS[0]['n'])})
+        if resultA:
+            nodes.append({"ArchaMap": serialize_node(resultA[0]['n'])})
+
+        return jsonify(nodes), 200
+    except Exception as e:
         return jsonify({"error": str(e)}), 500
