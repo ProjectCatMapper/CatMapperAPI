@@ -9,13 +9,11 @@ from .metadata import getPropertiesMetadata
 
 import json
 import pandas as pd
-from flask import jsonify
 import numpy as np
 import time
 import re
 import warnings
 import math
-import warnings
 
 warnings.simplefilter("error", UserWarning)
 

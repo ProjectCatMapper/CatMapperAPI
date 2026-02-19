@@ -65,7 +65,7 @@ def getCategoryPage(database, cmid):
     driver = getDriver(database)
     
     # Define bad relations to filter out
-    bad_relations = ["HAS_LOG", "IS", "MERGING", "HAS_VECTOR"]
+    bad_relations = ["HAS_LOG", "IS", "HAS_VECTOR"]
     
     # Get node metadata
     q_metadata = """

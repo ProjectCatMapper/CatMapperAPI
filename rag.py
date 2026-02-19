@@ -1,12 +1,9 @@
 # rag_neo4j.py
 
-from neo4j import GraphDatabase
 from sentence_transformers import SentenceTransformer
 import chromadb
 import openai
 from openai import OpenAI
-import os
-from CM.utils import getDriver
 
 
 # ------------------- CONFIG -------------------

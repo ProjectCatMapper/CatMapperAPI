@@ -2,7 +2,6 @@
 
 from .utils import *
 from .metadata import getPropertiesMetadata
-from datetime import datetime
 from .log import createLog
 
 def mergeUSES(database, CMID, Key, datasetID, properties = None):
@@ -58,22 +57,21 @@ def mergeUSES(database, CMID, Key, datasetID, properties = None):
 def mergeDupRelations(database, CMID=None):
     try:
         driver = getDriver(database)
-        if CMID is not None:
-            qFiltera = "unwind $cmid as cmid"
-            qFilterb = "a.CMID = cmid and"
-        else:
-            qFiltera = ""
-            qFilterb = ""
+        if isinstance(CMID, str):
+            CMID = [CMID]
+        if isinstance(CMID, list) and len(CMID) == 0:
+            CMID = None
 
-        query = qFiltera + """
-match (a)-[r]-(b) 
-where 
-""" + qFilterb + """
-not type(r) = 'USES' 
-with a, b,type(r) AS relType, collect(r) as rels 
-call apoc.refactor.mergeRelationships(rels,{properties: {`.*`: 'combine'}}) yield rel 
-return count(*) as count
-"""
+        query = """
+        MATCH ()-[r]->()
+        WHERE type(r) <> 'USES'
+        WITH r, startNode(r) AS a, endNode(r) AS b
+        WHERE $cmid IS NULL OR a.CMID IN $cmid OR b.CMID IN $cmid
+        WITH a, b, type(r) AS relType, collect(r) AS rels
+        WHERE size(rels) > 1
+        CALL apoc.refactor.mergeRelationships(rels, {properties: {`.*`: 'combine'}}) YIELD rel
+        RETURN count(*) AS count
+        """
         result = getQuery(query, driver=driver, params={"cmid": CMID})
 
         return result
@@ -87,9 +85,9 @@ def fixUsesRels(database, property, relationship, CMID=None):
     try:
         driver = getDriver(database)
         if property in ["country", "district"]:
-            qProp = "collect(distinct r.country) + collect(distinct r.district)"
+            qProp = "collect(distinct coalesce(r.country, [])) + collect(distinct coalesce(r.district, []))"
         else:
-            qProp = f"collect(distinct r.{property})"
+            qProp = f"collect(distinct coalesce(r.{property}, []))"
 
         if CMID is not None:
             qFiltera = "unwind $cmid as cmid"
@@ -102,7 +100,8 @@ def fixUsesRels(database, property, relationship, CMID=None):
         {qFiltera}
 match (a:CATEGORY)<-[r:USES]-(:DATASET)
 {qFilterb}
-with a, apoc.coll.toSet(apoc.coll.flatten({qProp},true)) as cmids 
+with a, [x in apoc.coll.flatten({qProp}, true) where x is not null and not x = ""] as rawCMIDs
+with a, apoc.coll.toSet(rawCMIDs) as cmids
 match (n:CATEGORY) where n.CMID in cmids
 merge (a)<-[:{relationship}]-(n)
 return count(*) as count
@@ -112,10 +111,10 @@ return count(*) as count
         {qFiltera}
       match (n)-[rel:{relationship}]->(a:CATEGORY)<-[r:USES]-(:DATASET)
       {qFilterb}
-      with a, apoc.coll.toSet(apoc.coll.flatten({qProp},true)) as current, 
+      with a, apoc.coll.toSet([x in apoc.coll.flatten({qProp}, true) where x is not null and not x = ""]) as current, 
       apoc.coll.toSet(apoc.coll.flatten(collect(distinct n.CMID),true)) as exists, collect(distinct rel) as rels, collect(n) as nodes
       with a, rels, nodes, [i in exists where not i in current] as extra
-      unwind nodes as n unwind rels as rel with n,  rel, extra where n.CMID in extra and id(startNode(rel)) = id(n)
+      unwind nodes as n unwind rels as rel with n,  rel, extra where n.CMID in extra and elementId(startNode(rel)) = elementId(n)
       delete rel
 """
 
@@ -302,8 +301,8 @@ def updateContains(database, CMID=None):
         query2 = qFiltera + """
         match (d:DATASET)-[rU:USES]->(a:CATEGORY)<-[rC:CONTAINS]-(p:CATEGORY) 
         """ + qFilterb + """
-        with a,p, apoc.coll.flatten(collect(rU.parentContext),true) as pProps, apoc.coll.flatten(collect(rC.eventDate),true)  as eds, apoc.coll.flatten(collect(rC.eventType),true)  as ets
-        with a,p, [i in pProps where not i = ""] as pProps, [i in eds where not i = ""] as eds, [i in ets where not i = ""] as ets
+        with a,p, apoc.coll.flatten(collect(coalesce(rU.parentContext, [])),true) as pProps, apoc.coll.flatten(collect(coalesce(rC.eventDate, [])),true) as eds, apoc.coll.flatten(collect(coalesce(rC.eventType, [])),true) as ets
+        with a,p, [i in pProps where i is not null and not i = ""] as pProps, [i in eds where i is not null and not i = ""] as eds, [i in ets where i is not null and not i = ""] as ets
         where isEmpty(pProps) and (not isEmpty(eds) or not isEmpty(ets))
         match (a)<-[r:CONTAINS]-(p) set r.eventDate = NULL, r.eventType = NULL
         return count(*) as count
@@ -390,50 +389,90 @@ def updateAltNames(database, CMID=None, domain = "CATEGORY"):
 def processUSES(database, CMID=None, user="0", detailed = True):
     try:
         driver = getDriver(database)
+        mergeDupRelationsResults = None
+        propertiesResults = []
+        updateContainsResults = None
+        updateLabelsResults = None
+        updateAltNamesResults = None
+
+        # Normalize CMID values so all downstream functions consistently receive
+        # either None or a list.
+        cmid_list = CMID
+        if CMID is not None and not isinstance(CMID, list):
+            cmid_list = [CMID]
+
+        def unwrap_step(result, step_name):
+            if isinstance(result, tuple) and len(result) == 2 and result[1] == 500:
+                raise RuntimeError(f"{step_name} failed: {result[0]}")
+            return result
+
         # Update alternative names
         print("updating alternate names")
-        updateAltNamesResults = updateAltNames(CMID=CMID, database=database)
+        updateAltNamesResults = unwrap_step(
+            updateAltNames(CMID=cmid_list, database=database),
+            "updateAltNames"
+        )
 
         # Update labels
         print("updating labels")
-        updateLabelsResults = "Not ran"
-        updateLabelsResults = updateLabels(CMID=CMID, database=database)
+        updateLabelsResults = unwrap_step(
+            updateLabels(CMID=cmid_list, database=database),
+            "updateLabels"
+        )
 
         # Fix duplicate relationships
-        if CMID is not None:
+        if cmid_list is not None:
             print("running merge duplicate relations")
-            mergeDupRelationsResults = mergeDupRelations(CMID=CMID, database = database)
+            mergeDupRelationsResults = unwrap_step(
+                mergeDupRelations(CMID=cmid_list, database=database),
+                "mergeDupRelations"
+            )
         else:
-            mergeDupRelationsResults = mergeDupRelations(CMID=None, database = database)
+            mergeDupRelationsResults = unwrap_step(
+                mergeDupRelations(CMID=None, database=database),
+                "mergeDupRelations"
+            )
 
         # Update structural properties and referenceKeys
         properties = getPropertiesMetadata(driver=driver)
         properties = [item for item in properties if item.get(
             'relationship') is not None]
-        propertiesResults = []
         for property, relationship in zip([item['property'] for item in properties if 'property' in item], [item['relationship'] for item in properties if 'relationship' in item]):
-            print(f"{property} {relationship} {CMID}")
+            print(f"{property} {relationship} {cmid_list}")
 
-            r = fixUsesRels(CMID=CMID, property=property,
-                            relationship=relationship, database=database)
+            r = unwrap_step(
+                fixUsesRels(CMID=cmid_list, property=property, relationship=relationship, database=database),
+                f"fixUsesRels({property},{relationship})"
+            )
             propertiesResults.append(r)
 
         # Update contains relationships
         print("updating contains")
-        updateContainsResults = updateContains(CMID=CMID, database=database)
+        updateContainsResults = unwrap_step(
+            updateContains(CMID=cmid_list, database=database),
+            "updateContains"
+        )
 
         #for singular CMID coming from admin functions
-        if not isinstance(CMID,list):
-            CMID = [CMID]
-        q = f'''Match (c:CATEGORY)<-[r:USES]-(d:DATASET) where c.CMID IN $CMID_list and r.status is not null and r.status = 'update' set r.status = NULL'''
-        getQuery(q,driver=driver,params={"CMID_list": CMID})
+        if cmid_list:
+            q = """Match (c:CATEGORY)<-[r:USES]-(d:DATASET)
+                   where c.CMID IN $CMID_list and r.status is not null and r.status = 'update'
+                   set r.status = NULL"""
+            getQuery(q, driver=driver, params={"CMID_list": cmid_list})
 
         if detailed:
-            return {"CMID": CMID, "mergeDupRelations": mergeDupRelationsResults, "properties": propertiesResults, "updateLabels": updateLabelsResults, "updateContains": updateContainsResults, "updateAltNames": updateAltNamesResults}
+            return {
+                "CMID": cmid_list,
+                "mergeDupRelations": mergeDupRelationsResults,
+                "properties": propertiesResults,
+                "updateLabels": updateLabelsResults,
+                "updateContains": updateContainsResults,
+                "updateAltNames": updateAltNamesResults
+            }
         else:
             return (
-                f"Completed processing USES for {CMID}"
-                if CMID and CMID != [None]
+                f"Completed processing USES for {cmid_list}"
+                if cmid_list and cmid_list != [None]
                 else "Completed processing USES for all CATEGORY nodes."
             )
     except Exception as e:
