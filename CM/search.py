@@ -289,6 +289,8 @@ def translate(
     uniqueRows: Boolean flag that determines whether identical input rows should be grouped together or processed individually.
     """
 
+    overwrite_warnings = []
+
     if isinstance(uniqueRows, str):
         if uniqueRows.lower() == 'true' or uniqueRows == True:
             uniqueRows = True
@@ -548,9 +550,14 @@ def translate(
 
     if not data:
         data = df
+        match_type_col = f'matchType_{term}'
+        if match_type_col in data.columns:
+            overwrite_warnings.append(
+                f"Overwrote existing uploaded column: {match_type_col}"
+            )
         data[f'matchType_{term}'] = "None"
         desired_order = [col for col in data.columns.tolist()]
-        return data,desired_order
+        return data, desired_order, overwrite_warnings
 
     data = pd.DataFrame(data)
     data = data.replace("", pd.NA)
@@ -568,6 +575,15 @@ def translate(
     df = df.explode('CMuniqueRowID')
     data['CMuniqueRowID'] = data['CMuniqueRowID'].astype(int)
     df['CMuniqueRowID'] = df['CMuniqueRowID'].astype(int)
+
+    translated_columns = {col for col in data.columns if col != 'CMuniqueRowID'}
+    conflicting_columns = sorted(translated_columns.intersection(set(df.columns)))
+    if conflicting_columns:
+        df = df.drop(columns=conflicting_columns)
+        overwrite_warnings.append(
+            "Overwrote existing uploaded columns with translated values: "
+            + ", ".join(conflicting_columns)
+        )
 
     # rejoins matches with original dataset
     data = pd.merge(df, data, on="CMuniqueRowID", how='outer')
@@ -645,7 +661,7 @@ def translate(
 
     desired_order = [col for col in data.columns.tolist()]
 
-    return data,desired_order
+    return data, desired_order, overwrite_warnings
 
 # this determines what type of match each matched row is and returns the df with matchtype column
 # each row of the input spreadsheet is assigned a unique CMuniqueRowID

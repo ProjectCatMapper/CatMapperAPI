@@ -154,7 +154,7 @@ def getTranslate2():
         countsamename = data.get("countsamename")
         uniqueRows = data.get("uniqueRows")
 
-        data, desired_order = translate(
+        translate_result = translate(
             database=database,
             property=property,
             domain=domain,
@@ -170,11 +170,22 @@ def getTranslate2():
             countsamename=countsamename,
             uniqueRows=uniqueRows)
 
+        warnings = []
+        if isinstance(translate_result, tuple):
+            if len(translate_result) == 3:
+                data, desired_order, warnings = translate_result
+            elif len(translate_result) == 2:
+                data, desired_order = translate_result
+            else:
+                raise Exception("translate returned unexpected tuple shape")
+        else:
+            raise Exception("translate returned unexpected response type")
+
         data_dict = data.to_dict(orient='records')
 
         print(data_dict)
 
-        return jsonify({"file": data_dict, "order": desired_order})
+        return jsonify({"file": data_dict, "order": desired_order, "warnings": warnings})
 
     except Exception as e:
         return str(e), 500
