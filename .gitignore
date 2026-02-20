@@ -3,6 +3,10 @@ __pycache__/app.cpython-38.pyc
 log/*
 .env
 .env1
+CM/.env
+CM/.env23
+aws_credentials
+aws_credentials.*
 *.geojson
 api_env/*
 lib/*
@@ -16,3 +20,7 @@ data.json
 new.json
 poly.json
 config.ini
+*.pem
+*.key
+id_rsa
+id_ed25519
