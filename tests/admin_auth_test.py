@@ -50,5 +50,26 @@ def test_update_waiting_uses_rejects_user_mismatch(client, monkeypatch):
         json={"database": "ArchaMap", "user": "201"},
     )
 
-    assert response.status_code == 500
+    assert response.status_code == 403
     assert "does not match authenticated api key/token owner" in response.get_data(as_text=True).lower()
+
+
+def test_update_waiting_uses_returns_401_when_credentials_missing(client, monkeypatch):
+    monkeypatch.setattr(
+        admin_routes,
+        "verify_request_auth",
+        lambda **kwargs: (_ for _ in ()).throw(Exception("Missing credentials")),
+    )
+    monkeypatch.setattr(
+        admin_routes,
+        "waitingUSES",
+        lambda database: (_ for _ in ()).throw(AssertionError("waitingUSES should not execute without auth")),
+    )
+
+    response = client.post(
+        "/updateWaitingUSES",
+        json={"database": "ArchaMap"},
+    )
+
+    assert response.status_code == 401
+    assert "missing credentials" in response.get_data(as_text=True).lower()

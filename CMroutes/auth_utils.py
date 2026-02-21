@@ -254,3 +254,30 @@ def verify_bearer_auth(required_userid=None, required_role=None, req=None):
     if not _is_active_user(token_userid, required_role=required_role):
         raise Exception("User is not verified")
     return {"userid": token_userid, "role": token_role}
+
+
+def classify_auth_error_status(error):
+    text = str(error or "").lower()
+    if not text:
+        return None
+
+    forbidden_markers = (
+        "user is not authorized",
+        "credentials do not match requested user",
+        "does not match authenticated api key/token owner",
+    )
+    if any(marker in text for marker in forbidden_markers):
+        return 403
+
+    unauthorized_markers = (
+        "missing credentials",
+        "missing credential fields",
+        "user is not verified",
+        "api key matched multiple users",
+        "invalid credentials",
+        "authentication failed",
+    )
+    if any(marker in text for marker in unauthorized_markers):
+        return 401
+
+    return None

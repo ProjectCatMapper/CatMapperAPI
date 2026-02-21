@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify, render_template, make_response
 from CM import *
 import json
-from .auth_utils import verify_request_auth
+from .auth_utils import verify_request_auth, classify_auth_error_status
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -282,7 +282,9 @@ def getUpdateWaitingUSES():
         result = waitingUSES(database)
         return result
     except Exception as e:
-        return str(e), 500
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 500
+        return jsonify({"error": error_message}), status_code
 
 @admin_bp.route('/mergeUSESties', methods=['GET','POST'])
 def getMergeUSESties():

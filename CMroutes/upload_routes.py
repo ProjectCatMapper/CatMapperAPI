@@ -3,7 +3,7 @@ import pandas as pd
 import json
 import os
 from CM import input_Nodes_Uses, unlist
-from .auth_utils import verify_request_auth
+from .auth_utils import verify_request_auth, classify_auth_error_status
 
 upload_bp = Blueprint('upload', __name__)
 
@@ -136,6 +136,7 @@ def upload_API():
         #     return "Error!! Check your file."
 
     except Exception as e:
+        error_message = str(e)
         log_file = f'log/{acting_user}uploadProgress.txt'
         full_log = []
         if os.path.exists(log_file):
@@ -145,8 +146,9 @@ def upload_API():
             full_log.append("Log file not found.")
 
         response_data = {
-            "error": f"Upload error - {str(e)}",
+            "error": f"Upload error - {error_message}",
             "full_log": full_log
         }
 
-        return json.dumps(response_data), 500
+        status_code = classify_auth_error_status(error_message) or 500
+        return jsonify(response_data), status_code

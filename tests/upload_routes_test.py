@@ -107,6 +107,25 @@ def test_upload_rejects_user_mismatch_with_authenticated_identity(client, monkey
 
     response = client.post("/uploadInputNodes", json=payload)
 
-    assert response.status_code == 500
+    assert response.status_code == 403
     body = response.get_data(as_text=True).lower()
     assert "does not match authenticated api key/token owner" in body
+
+
+def test_upload_returns_401_for_missing_credentials(client, monkeypatch):
+    monkeypatch.setattr(
+        upload_routes,
+        "verify_request_auth",
+        lambda **kwargs: (_ for _ in ()).throw(Exception("Missing credentials")),
+    )
+    monkeypatch.setattr(
+        upload_routes,
+        "input_Nodes_Uses",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("upload should not execute without auth")),
+    )
+
+    response = client.post("/uploadInputNodes", json=_base_payload())
+
+    assert response.status_code == 401
+    body = response.get_json() or {}
+    assert "missing credentials" in str(body.get("error", "")).lower()
