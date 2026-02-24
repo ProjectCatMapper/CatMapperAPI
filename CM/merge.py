@@ -57,6 +57,110 @@ def get_dataset_name_map(driver, dataset_ids):
         if row.get("datasetID")
     }
 
+
+def _build_extended_wide_frame(matches, dataset_choices, intersection):
+    merge_how = "inner" if intersection else "outer"
+    wide = None
+
+    for dataset_id in dataset_choices:
+        dataset_rows = matches[matches["datasetID"] == dataset_id].copy()
+        dataset_cols = ["LCA_CMID", "LCA_CMName"]
+        rename_map = {}
+
+        if "Key" in dataset_rows.columns:
+            rename_map["Key"] = f"Key_{dataset_id}"
+            dataset_cols.append(f"Key_{dataset_id}")
+        if "Name" in dataset_rows.columns:
+            rename_map["Name"] = f"Name_{dataset_id}"
+            dataset_cols.append(f"Name_{dataset_id}")
+        if "tie" in dataset_rows.columns:
+            rename_map["tie"] = f"tie_{dataset_id}"
+            dataset_cols.append(f"tie_{dataset_id}")
+
+        if dataset_rows.empty:
+            dataset_frame = pd.DataFrame(columns=dataset_cols)
+        else:
+            dataset_frame = dataset_rows.rename(columns=rename_map)[dataset_cols].drop_duplicates()
+
+        if wide is None:
+            wide = dataset_frame
+        else:
+            wide = pd.merge(
+                wide,
+                dataset_frame,
+                on=["LCA_CMID", "LCA_CMName"],
+                how=merge_how,
+            )
+
+    if wide is None:
+        return pd.DataFrame()
+
+    return wide.drop_duplicates()
+
+
+def _select_best_extended_rows(result, dataset_choices, ncontains, intersection):
+    if result.empty:
+        return result
+
+    total_datasets = len(dataset_choices)
+    key_cols = [f"Key_{dataset_id}" for dataset_id in dataset_choices if f"Key_{dataset_id}" in result.columns]
+    tie_cols = [f"tie_{dataset_id}" for dataset_id in dataset_choices if f"tie_{dataset_id}" in result.columns]
+
+    result = result.copy()
+
+    if key_cols:
+        present_keys = result[key_cols].notna()
+        for key_col in key_cols:
+            present_keys[key_col] = present_keys[key_col] & result[key_col].astype(str).str.strip().ne("")
+        matched_count = present_keys.sum(axis=1)
+    else:
+        matched_count = pd.Series(0, index=result.index)
+
+    if tie_cols:
+        tie_values = result[tie_cols].apply(pd.to_numeric, errors="coerce")
+        tie_sum = tie_values.sum(axis=1, skipna=True)
+        max_tie = tie_values.max(axis=1, skipna=True).fillna(0)
+    else:
+        tie_sum = pd.Series(0, index=result.index)
+        max_tie = pd.Series(0, index=result.index)
+
+    infinity = 1000
+    result["_matchedDatasetCount"] = matched_count
+    result["nTie"] = tie_sum + (total_datasets - matched_count) * infinity
+
+    # Keep unmatched rows for key coverage, but enforce tie radius when all datasets are matched.
+    result = result[(result["_matchedDatasetCount"] < total_datasets) | (max_tie <= ncontains)]
+
+    if intersection:
+        result = result[result["_matchedDatasetCount"] == total_datasets]
+
+    if result.empty:
+        return result
+
+    rows_to_keep = np.zeros(len(result), dtype=int)
+    for key_col in key_cols:
+        key_series = result[key_col].fillna("").astype(str).str.strip()
+        has_key = key_series.ne("")
+        if not has_key.any():
+            continue
+
+        candidates = result[has_key].copy()
+        candidates["_row_idx"] = candidates.index
+        best_rows = (
+            candidates.sort_values(
+                by=[key_col, "_matchedDatasetCount", "nTie", "LCA_CMID"],
+                ascending=[True, False, True, True],
+                kind="mergesort",
+            )
+            .drop_duplicates(subset=[key_col], keep="first")
+        )
+        rows_to_keep[result.index.isin(best_rows["_row_idx"])] = 1
+
+    if rows_to_keep.any():
+        result = result[rows_to_keep == 1]
+
+    return result.drop(columns=["_matchedDatasetCount"], errors="ignore")
+
 # joins two datasets that have previously been translated into CatMapper’s database.Each dataset must include two columns: datasetiD and the Key pointing to a category.
 # It returns a single spreadsheet with: 1) datasetIDs, 2) data columns from the original dataset (renamed with _left and _right suffixes if overlapping.  Rows with keys pointing to the same category are aligned in the output spreadsheet.
 # When keys point to a CatMapper category, standardized identifiers are also returned (CMID, CMName).
@@ -313,9 +417,6 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
             return merged
 
         elif criteria == "extended":
-            if len(dataset_choices) > 2:
-                return jsonify({"message": "Please select only two datasets"}), 400
-
             query = generate_cypher_query(unlist(category_label), ncontains)
             dataset_name_map = get_dataset_name_map(driver, dataset_choices)
 
@@ -334,81 +435,45 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
             if resultFormat == "category-to-category":
                 matches = matches.groupby(['datasetID', 'LCA_CMName', 'LCA_CMID']).agg({
                     'Key': lambda x: list(x),
-                    'Name': lambda x: list(x)
+                    'Name': lambda x: list(x),
+                    'tie': 'min',
                 }).reset_index()
                 for col in matches.columns:
                     if matches[col].apply(lambda x: isinstance(x, list)).any():
                         matches[col] = matches[col].apply(lambda x: ' || '.join(map(str, x)) if isinstance(x, list) else x)
 
-            # Split into groups by 'datasetID'
-            matches_grp = [group for _, group in matches.groupby("datasetID")]
-
-            # Perform inner join on the first two groups
-            merge_how = "inner" if intersection else "outer"
-            result = pd.merge(
-                matches_grp[0].drop(columns=["datasetID"]),
-                matches_grp[1].drop(columns=["datasetID"]),
-                on=["LCA_CMID", "LCA_CMName"],
-                how=merge_how,
-                suffixes=(f"_{dataset_choices[0]}", f"_{dataset_choices[1]}")
-            ).drop_duplicates()
+            result = _build_extended_wide_frame(matches, dataset_choices, intersection)
 
             if result.empty:
                 return jsonify({"message": "No common ancestors found"}), 404
 
-            selectedKeyvariables = {f"Key_{k.strip()}": v for k, v in selectedKeyvariables.items()}
+            selectedKeyvariables = selectedKeyvariables or {}
+            selectedKeyvariables = {
+                f"Key_{k.strip()}": str(v).strip()
+                for k, v in selectedKeyvariables.items()
+                if str(v).strip()
+            }
 
             for col, prefix in selectedKeyvariables.items():
                 if col in result.columns:
-                    result = result[result[col].str.startswith(prefix,na=False)]
-                   
-            # Select all columns with "tie" in the name, sum across the columns (there should be one tie column per dataset)
-            # if any row value is NaN, then penalize by adding infinity
-            infinity = 1000
-            tie_cols = result.filter(like="tie").columns
-            nTie = result[tie_cols].sum(axis=1, skipna=True)
-            nTie += result[tie_cols].isna().any(axis=1) * infinity
-            result["nTie"] = nTie
+                    result = result[result[col].fillna("").astype(str).str.startswith(prefix, na=False)]
 
-            # only consider rows within search radius and non-matches rows
-            result = result[(result["nTie"] <= ncontains) | (result["nTie"] >= infinity)]
+            result = _select_best_extended_rows(
+                result=result,
+                dataset_choices=dataset_choices,
+                ncontains=ncontains,
+                intersection=intersection,
+            )
 
-            # for each key in each dataset, keeps the rows with the best match
-            # best match is defined as lowest nTie
-            # if there are multiple non-matches for a key, it keeps the tie row with 0
-            rows_to_keep = np.zeros(len(result), dtype=int)
+            if result.empty:
+                return jsonify({"message": "No common ancestors found"}), 404
 
-            for i in range(0,len(dataset_choices)):
-                key = f"Key_{dataset_choices[i]}"
-                minTie = result.groupby(key)["nTie"].transform("min")
-                minTie = minTie.fillna(infinity)
-                rows_to_keep[(result["nTie"] == minTie) & (result[key].notna())] = 1
-            
-            df_filtered = result[rows_to_keep == 1]
+            result["nTie"] = pd.to_numeric(result["nTie"], errors="coerce").fillna(0).astype(int)
 
-            # result["nTie"] = result.filter(like="tie").sum(axis=1, skipna=True)
-
-            # key1 = f"Key_{dataset_choices[0]}"
-            # key2 = f"Key_{dataset_choices[1]}"
-
-            # min_nTie_1 = result.groupby(key1)["nTie"].transform("min")
-            # min_nTie_2 = result.groupby(key2)["nTie"].transform("min")
-           
-            # for every key from every dataset, choose the best match that exists
-            # df_filtered = result[(result["nTie"] == min_nTie_1) | (
-            #     result["nTie"] == min_nTie_2)]
-            
-            # df_filtered = df_filtered.drop_duplicates(
-            #     subset=[key1, key2], keep="first")
-
-            # # filter df nTie to exclude values greater than ncontains
-            # df_filtered = df_filtered[df_filtered["nTie"] <= ncontains]
-
-           # Reorder columns
             cols = ["LCA_CMID", "LCA_CMName", "nTie"] + \
-                [col for col in df_filtered.columns if col not in [
+                [col for col in result.columns if col not in [
                     "LCA_CMID", "LCA_CMName", "nTie"]]
-            result = df_filtered[cols].copy()
+            result = result[cols].copy()
             for dataset_id in dataset_choices:
                 result[f"datasetCMName_{dataset_id}"] = dataset_name_map.get(dataset_id, "")
             result = result.fillna("")

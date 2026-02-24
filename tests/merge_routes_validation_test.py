@@ -20,7 +20,11 @@ def test_submit_merge_rejects_category_cmids(client):
     assert "Only DATASET CMIDs are allowed" in response.get_json()["error"]
 
 
-def test_submit_merge_rejects_more_than_two_for_extended(client):
+def test_submit_merge_allows_more_than_two_for_extended(client, monkeypatch):
+    monkeypatch.setattr(merge_routes, "getDriver", lambda _database: object())
+    monkeypatch.setattr(merge_routes, "validate_domain_label", lambda label, driver=None: label)
+    monkeypatch.setattr(merge_routes, "proposeMerge", lambda **kwargs: {"ok": True, "datasets": kwargs["dataset_choices"]})
+
     response = client.post(
         "/proposeMergeSubmit",
         json={
@@ -35,11 +39,15 @@ def test_submit_merge_rejects_more_than_two_for_extended(client):
         },
     )
 
-    assert response.status_code == 400
-    assert "at most two dataset CMIDs" in response.get_json()["error"]
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["datasets"] == ["SD1", "SD2", "AD3"]
 
 
 def test_submit_merge_allows_two_datasets_for_extended(client, monkeypatch):
+    monkeypatch.setattr(merge_routes, "getDriver", lambda _database: object())
+    monkeypatch.setattr(merge_routes, "validate_domain_label", lambda label, driver=None: label)
     monkeypatch.setattr(merge_routes, "proposeMerge", lambda **kwargs: {"ok": True, "datasets": kwargs["dataset_choices"]})
 
     response = client.post(

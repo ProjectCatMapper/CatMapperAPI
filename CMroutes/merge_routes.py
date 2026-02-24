@@ -53,9 +53,6 @@ def submit_merge():
     if invalid_dataset_ids:
         return jsonify({"error": f"Only DATASET CMIDs are allowed: {', '.join(invalid_dataset_ids)}"}), 400
 
-    if criteria == "extended" and len(dataset_choices) > 2:
-        return jsonify({"error": "Extended merge supports at most two dataset CMIDs."}), 400
-
     if category_label == "ANY DOMAIN":
         category_label = "CATEGORY"
     elif category_label == "AREA":
