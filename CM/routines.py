@@ -18,14 +18,27 @@ from configparser import ConfigParser
 config = ConfigParser()
 config.read('config.ini')
 
-def is_valid_json(json_string):
+def is_valid_json(value):
     """
-    Helper function to check if a string is valid JSON.
+    Check whether a value can be represented as valid JSON.
+
+    Supports both raw JSON strings and already-parsed Python objects.
     """
     try:
-        json.loads(json_string)
+        if value is None:
+            return False
+
+        if isinstance(value, str):
+            candidate = value.strip()
+            if not candidate:
+                return False
+            json.loads(candidate)
+            return True
+
+        # Neo4j can return MAP/LIST values already parsed as Python objects.
+        json.dumps(value, allow_nan=False)
         return True
-    except json.JSONDecodeError:
+    except (TypeError, ValueError, json.JSONDecodeError):
         return False
 
 
@@ -51,13 +64,17 @@ def validateJSON(database, property='parentContext', path="/mnt/storage/app/tmp/
             pd.DataFrame(columns=["datasetID", "CMID", "Key", "prop", "is_valid_json"]).to_excel(path, index=False)
             return []
 
+        # Only explode list-like containers. Dict values should stay as one JSON object.
+        results["prop"] = results["prop"].apply(
+            lambda value: value if isinstance(value, (list, tuple, set)) else [value]
+        )
         results = pd.DataFrame.explode(results, "prop")
 
         results["is_valid_json"] = results["prop"].apply(is_valid_json)
 
         invalid = results[results["is_valid_json"] == False]
 
-        invalid.to_excel(path)
+        invalid.to_excel(path, index=False)
 
         invalid = invalid.to_dict(orient="records")
 
@@ -691,34 +708,21 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
             Fallback for results10 if APOC map conversion fails in Cypher.
             """
             rows = _load_parent_context_rows_for_fallback()
-            current_year = pd.Timestamp.now().year
             fallback_results = []
 
             for row in rows:
                 ctx = row["parentContextMap"]
                 parent_val = ctx.get("parent")
                 event_type_val = ctx.get("eventType")
-                event_date_val = ctx.get("eventDate")
 
                 parent_str = None if parent_val is None else str(parent_val).strip()
                 event_type_str = None if event_type_val is None else str(event_type_val).strip()
-                event_date_str = None if event_date_val is None else str(event_date_val).strip()
-
-                invalid_event_date = False
-                if event_date_str not in (None, ""):
-                    invalid_event_date = (
-                        len(event_date_str) != 4
-                        or not event_date_str.isdigit()
-                        or int(event_date_str) < 1000
-                        or int(event_date_str) > current_year
-                    )
 
                 if (
                     parent_str is None
                     or event_type_str is None
                     or (parent_str is not None and "," in parent_str)
                     or (event_type_str is not None and "," in event_type_str)
-                    or invalid_event_date
                 ):
                     fallback_results.append({
                         "datasetID": row["datasetID"],
@@ -830,22 +834,12 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                 WITH d, c, r, pc, apoc.convert.fromJsonMap(pc) AS m
                 WITH d, c, r, pc, m,
                     CASE WHEN m.parent IS NULL THEN NULL ELSE trim(toString(m.parent)) END AS parentValue,
-                    CASE WHEN m.eventType IS NULL THEN NULL ELSE trim(toString(m.eventType)) END AS eventTypeValue,
-                    CASE WHEN m.eventDate IS NULL THEN NULL ELSE trim(toString(m.eventDate)) END AS eventDateValue
+                    CASE WHEN m.eventType IS NULL THEN NULL ELSE trim(toString(m.eventType)) END AS eventTypeValue
                 WHERE
                 parentValue IS NULL
                 OR eventTypeValue IS NULL
                 OR parentValue CONTAINS ","
                 OR eventTypeValue CONTAINS ","
-                OR (
-                    eventDateValue IS NOT NULL
-                    AND eventDateValue <> ""
-                    AND (
-                    NOT eventDateValue =~ '^[0-9]{4}$'
-                    OR toInteger(eventDateValue) < 1000
-                    OR toInteger(eventDateValue) > date().year
-                    )
-                )
                 RETURN
                     d.CMID AS datasetID,
                     c.CMID AS CMID,
