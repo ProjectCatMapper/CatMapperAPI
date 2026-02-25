@@ -385,9 +385,17 @@ def getNetworkjs():
             cypher_query = """
             unwind $cmid as cmid
             MATCH (a:DATASET {CMID: cmid})
-            optional match (a)-[r:USES]->(e:CATEGORY)
-            with a, r, e limit $limit
-            return collect(distinct a) as a, collect(distinct r) as r, collect(distinct e) as e
+            CALL {
+                WITH a, $limit AS limit
+                OPTIONAL MATCH (a)-[r:USES]->(e:CATEGORY)
+                WITH e, collect(r) AS rels
+                WHERE e IS NOT NULL
+                RETURN collect({e: e, r: rels[0]})[0..limit] AS pairs
+            }
+            RETURN
+                collect(distinct a) AS a,
+                [p IN pairs WHERE p.r IS NOT NULL | p.r] AS r,
+                [p IN pairs WHERE p.e IS NOT NULL | p.e] AS e
             """
         elif relation == "MERGING":
             cypher_query = """
