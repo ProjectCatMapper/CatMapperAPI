@@ -385,13 +385,10 @@ def getNetworkjs():
             cypher_query = """
             unwind $cmid as cmid
             MATCH (a:DATASET {CMID: cmid})
-            CALL {
-                WITH a, $limit AS limit
-                OPTIONAL MATCH (a)-[r:USES]->(e:CATEGORY)
-                WITH e, collect(r) AS rels
-                WHERE e IS NOT NULL
-                RETURN collect({e: e, r: rels[0]})[0..limit] AS pairs
-            }
+            OPTIONAL MATCH (a)-[r:USES]->(e:CATEGORY)
+            WITH a, e, collect(r) AS rels
+            WHERE e IS NOT NULL
+            WITH a, collect({e: e, r: rels[0]})[0..$limit] AS pairs
             RETURN
                 collect(distinct a) AS a,
                 [p IN pairs WHERE p.r IS NOT NULL | p.r] AS r,
