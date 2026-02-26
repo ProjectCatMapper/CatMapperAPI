@@ -89,6 +89,82 @@ def getGroupLabels(CMID,driver):
 
     return result
 
+
+def _resolve_primary_domain_from_labels(labels, driver):
+    """
+    Resolve a node's primary domain from its labels.
+
+    For CATEGORY-style nodes this uses LABEL.groupLabel mapping.
+    For DATASET nodes, primary domain is DATASET.
+    """
+    labels = [lbl for lbl in (labels or []) if lbl]
+    labels_no_structural = [
+        lbl for lbl in labels
+        if lbl not in {"CATEGORY", "DELETED", "MERGING", "STACK", "VARIABLE"}
+    ]
+
+    if "DATASET" in labels_no_structural:
+        return "DATASET"
+
+    candidate_labels = [lbl for lbl in labels_no_structural if lbl != "DATASET"]
+    if not candidate_labels:
+        raise Exception("Unable to determine a primary domain from node labels.")
+
+    query = """
+    UNWIND $labels AS label
+    OPTIONAL MATCH (m:LABEL {CMName: label})
+    RETURN label, m.groupLabel AS groupLabel
+    """
+    mapped = getQuery(query=query, driver=driver, params={"labels": candidate_labels}, type="dict")
+
+    primary_domains = set()
+    for row in mapped:
+        label = row.get("label")
+        group_label = row.get("groupLabel")
+        if isinstance(group_label, str) and group_label.strip():
+            primary_domains.add(group_label.strip())
+        elif isinstance(label, str) and label.strip():
+            primary_domains.add(label.strip())
+
+    if len(primary_domains) != 1:
+        domains = ", ".join(sorted(primary_domains)) if primary_domains else "none"
+        raise Exception(f"Unable to determine a unique primary domain (found: {domains}).")
+
+    return list(primary_domains)[0]
+
+
+def getNodeMergeSummary(cmid, driver):
+    """
+    Return merge-summary details for a CMID:
+    - CMID
+    - CMName
+    - labels
+    - primaryDomain
+    """
+    cmid = str(cmid or "").strip()
+    if not cmid:
+        raise Exception("CMID cannot be empty.")
+
+    query = """
+    UNWIND $cmid AS cmid
+    MATCH (n {CMID: cmid})
+    RETURN n.CMID AS CMID, n.CMName AS CMName, labels(n) AS labels
+    """
+    rows = getQuery(query=query, driver=driver, params={"cmid": [cmid]}, type="dict")
+    if not rows:
+        raise Exception(f"{cmid} is invalid")
+
+    row = rows[0]
+    labels = row.get("labels") or []
+    primary_domain = _resolve_primary_domain_from_labels(labels, driver)
+
+    return {
+        "CMID": row.get("CMID") or cmid,
+        "CMName": row.get("CMName"),
+        "labels": labels,
+        "primaryDomain": primary_domain,
+    }
+
 def validatePropertyCMID(value,proptoChange,validgroupLabel,driver):
     if "||" in value:
             value = value.split("||")
@@ -521,12 +597,18 @@ def mergeNodes(keepcmid,deletecmid,user,database):
 
         if len(deleteKeep) == 0:
             raise Exception(f"{deletecmid} is invalid")
-        
-        keep_label = getGroupLabels(keepcmid,driver)
-        delete_label = getGroupLabels(deletecmid,driver)
 
+        keep_summary = getNodeMergeSummary(keepcmid, driver)
+        delete_summary = getNodeMergeSummary(deletecmid, driver)
+
+        keep_label = keep_summary["primaryDomain"]
+        delete_label = delete_summary["primaryDomain"]
         if keep_label != delete_label:
-            raise Exception(f"The CMIDs are not of the same group label.")
+            raise Exception(
+                f"Primary domain mismatch. "
+                f"Keep {keepcmid} ({keep_summary.get('CMName')}) is {keep_label}; "
+                f"Delete {deletecmid} ({delete_summary.get('CMName')}) is {delete_label}."
+            )
         
         results = results + [addCMNameRel(database, keepcmid)]
         results = results + [addCMNameRel(database, deletecmid)]

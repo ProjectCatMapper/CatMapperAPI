@@ -108,6 +108,23 @@ def create_label():
 
     return {"res": final_values}
 
+
+@admin_bp.route('/admin/nodeSummary', methods=['GET'])
+def admin_node_summary():
+    try:
+        cmid = request.args.get('CMID')
+        database = request.args.get('database')
+        if not cmid:
+            return jsonify({"error": "CMID is required"}), 400
+        if not database:
+            return jsonify({"error": "Database is required"}), 400
+
+        driver = getDriver(database)
+        summary = getNodeMergeSummary(cmid, driver)
+        return jsonify(summary), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
 @admin_bp.route('/check_ambiguous_usesties', methods=['POST'])
 def check_ambiguous_usesties():
     data = request.get_data()
