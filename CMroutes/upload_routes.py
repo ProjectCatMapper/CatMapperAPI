@@ -2,10 +2,150 @@ from flask import Blueprint, request, jsonify
 import pandas as pd
 import json
 import os
-from CM import input_Nodes_Uses, unlist
+import threading
+import time
+import uuid
+from datetime import datetime, timezone
+from CM import input_Nodes_Uses, unlist, waitingUSES
 from .auth_utils import verify_request_auth, classify_auth_error_status
 
 upload_bp = Blueprint('upload', __name__)
+WAITING_USES_TASKS = {}
+WAITING_USES_TASKS_LOCK = threading.Lock()
+WAITING_USES_TASK_RETENTION_SECONDS = int(
+    os.getenv("CATMAPPER_WAITING_USES_TASK_RETENTION_SECONDS", "86400")
+)
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _prune_waiting_uses_tasks(now_ts=None):
+    now_ts = now_ts if now_ts is not None else time.time()
+    stale_task_ids = []
+
+    for task_id, task in WAITING_USES_TASKS.items():
+        finished_at_ts = task.get("finishedAtTs")
+        if finished_at_ts is None:
+            continue
+        if now_ts - finished_at_ts > WAITING_USES_TASK_RETENTION_SECONDS:
+            stale_task_ids.append(task_id)
+
+    for task_id in stale_task_ids:
+        WAITING_USES_TASKS.pop(task_id, None)
+
+
+def _start_waiting_uses_task(database, user):
+    task_id = uuid.uuid4().hex
+    created_at = _utc_now_iso()
+    created_ts = time.time()
+
+    with WAITING_USES_TASKS_LOCK:
+        _prune_waiting_uses_tasks(now_ts=created_ts)
+        WAITING_USES_TASKS[task_id] = {
+            "taskId": task_id,
+            "status": "queued",
+            "user": str(user),
+            "database": str(database),
+            "createdAt": created_at,
+            "startedAt": None,
+            "finishedAt": None,
+            "message": None,
+            "error": None,
+            "finishedAtTs": None,
+        }
+
+    def _run_waiting_uses():
+        started_at = _utc_now_iso()
+        with WAITING_USES_TASKS_LOCK:
+            task = WAITING_USES_TASKS.get(task_id)
+            if task is None:
+                return
+            task["status"] = "running"
+            task["startedAt"] = started_at
+
+        try:
+            result = waitingUSES(database)
+            if isinstance(result, tuple) and len(result) == 2 and result[1] == 500:
+                raise RuntimeError(str(result[0]))
+
+            finished_at = _utc_now_iso()
+            finished_ts = time.time()
+            with WAITING_USES_TASKS_LOCK:
+                task = WAITING_USES_TASKS.get(task_id)
+                if task is None:
+                    return
+                task["status"] = "completed"
+                task["finishedAt"] = finished_at
+                task["finishedAtTs"] = finished_ts
+                task["message"] = str(result)
+                task["error"] = None
+        except Exception as err:
+            finished_at = _utc_now_iso()
+            finished_ts = time.time()
+            with WAITING_USES_TASKS_LOCK:
+                task = WAITING_USES_TASKS.get(task_id)
+                if task is None:
+                    return
+                task["status"] = "failed"
+                task["finishedAt"] = finished_at
+                task["finishedAtTs"] = finished_ts
+                task["message"] = None
+                task["error"] = str(err)
+
+    thread = threading.Thread(
+        target=_run_waiting_uses,
+        daemon=True,
+        name=f"waitingUSES-{task_id[:8]}",
+    )
+    thread.start()
+    return task_id
+
+
+def _get_waiting_uses_task(task_id):
+    with WAITING_USES_TASKS_LOCK:
+        _prune_waiting_uses_tasks()
+        task = WAITING_USES_TASKS.get(task_id)
+        if task is None:
+            return None
+        response_task = dict(task)
+        response_task.pop("finishedAtTs", None)
+        return response_task
+
+
+@upload_bp.route("/uploadWaitingUSESStatus", methods=["POST"])
+def upload_waiting_uses_status():
+    try:
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            raise Exception("Invalid payload")
+
+        credentials = unlist(data.get("cred"))
+        claims = verify_request_auth(credentials=credentials, req=request)
+        acting_user = claims.get("userid") or "unknown"
+
+        requested_user = unlist(data.get("user"))
+        if requested_user and str(requested_user).strip() != str(acting_user):
+            raise Exception("User does not match authenticated API key/token owner")
+
+        task_id = unlist(data.get("taskId"))
+        if not task_id:
+            raise Exception("taskId not specified")
+
+        task = _get_waiting_uses_task(str(task_id))
+        if task is None:
+            return jsonify({"error": "Task not found"}), 404
+        if str(task.get("user")) != str(acting_user):
+            raise Exception("User does not match authenticated API key/token owner")
+
+        return jsonify(task)
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 500
+        return jsonify({"error": error_message}), status_code
 
 @upload_bp.route("/uploadInputNodes", methods=['GET', 'POST'])
 def upload_API():
@@ -131,7 +271,19 @@ def upload_API():
         if isinstance(response, pd.DataFrame):
             n = len(response)
             response_dict = response.to_dict(orient='records')
-            return jsonify({"message": f"Upload completed for {n} row(s)", "file": response_dict, "order": desired_order})
+            waiting_uses_task_id = _start_waiting_uses_task(
+                database=database,
+                user=acting_user,
+            )
+            return jsonify(
+                {
+                    "message": f"Upload completed for {n} row(s)",
+                    "file": response_dict,
+                    "order": desired_order,
+                    "waitingUsesTask": waiting_uses_task_id,
+                    "waitingUsesStatus": "queued",
+                }
+            )
         # else:
         #     return "Error!! Check your file."
 
