@@ -12,16 +12,30 @@ def getLogs(database, CMID):
         return "Database connection failed."
 
     query = """
-    MATCH (a:CATEGORY|DATASET {CMID: $CMID})-[:HAS_LOG]->(log:LOG)
-    return "node" as log_type, elementId(log) as ID, log.user as user, log.action as action, log.timestamp as timestamp
-    order by timestamp desc
-    UNION ALL
-    MATCH (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET)
-    where not r.logID is null
-    with r.logID as logID, r.Key as Key, d.CMID as datasetID
-    match (log:LOG) where elementId(log) in logID
-    return "relationship: (Key) " + Key + " (datasetID) " + datasetID as log_type, elementId(log) as ID, log.user as user, log.action as action, log.timestamp as timestamp 
-    order by timestamp desc
+    CALL {
+        MATCH (a:CATEGORY|DATASET {CMID: $CMID})-[:HAS_LOG]->(log:LOG)
+        RETURN
+            "node" AS log_type,
+            elementId(log) AS ID,
+            log.user AS user,
+            log.action AS action,
+            log.timestamp AS timestamp
+        UNION ALL
+        MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+        WHERE (c.CMID = $CMID OR d.CMID = $CMID)
+          AND r.logID IS NOT NULL
+        UNWIND apoc.coll.flatten([r.logID], true) AS relLogID
+        MATCH (log:LOG)
+        WHERE elementId(log) = relLogID
+        RETURN
+            "relationship: (Key) " + r.Key + " (datasetID) " + d.CMID AS log_type,
+            elementId(log) AS ID,
+            log.user AS user,
+            log.action AS action,
+            log.timestamp AS timestamp
+    }
+    RETURN log_type, ID, user, action, timestamp
+    ORDER BY timestamp DESC
     """
     logs = getQuery(query=query, driver=driver, CMID=CMID)
 
