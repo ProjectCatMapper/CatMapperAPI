@@ -102,6 +102,12 @@ def test_create_metadata_node_creates_in_both_databases(client, monkeypatch):
     created_by_driver = []
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "WHERE n.CMID STARTS WITH $prefix RETURN n.CMID AS CMID" in query:
+            if driver == "driver-sociomap":
+                return [{"CMID": "CL200"}]
+            if driver == "driver-archamap":
+                return [{"CMID": "CL250"}]
+            return []
         if "RETURN count(n) AS count" in query:
             return [{"count": 0}]
         if "CREATE (n:METADATA:LABEL)" in query:
@@ -120,44 +126,35 @@ def test_create_metadata_node_creates_in_both_databases(client, monkeypatch):
         "/admin/metadata/create",
         headers={"Authorization": "Bearer test-token"},
         json={
-            "CMID": "CL999999",
             "CMName": "New Test Label",
             "groupLabel": "FAMILY",
-            "labels": ["LABEL"],
+            "nodeLabel": "LABEL",
             "databaseTarget": "both",
         },
     )
 
     assert response.status_code == 200
     payload = response.get_json()
+    assert payload["generatedCMID"] == "CL251"
     assert payload["createdIn"] == ["SocioMap", "ArchaMap"]
     assert set(created_by_driver) == {"driver-sociomap", "driver-archamap"}
+    assert payload["node"]["SocioMap"]["props"]["CMID"] == "CL251"
 
 
-def test_create_metadata_node_rejects_duplicate_cmid(client, monkeypatch):
+def test_create_metadata_node_rejects_invalid_node_label(client, monkeypatch):
     monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "200", "role": "admin"})
     monkeypatch.setattr(admin_routes, "getDriver", lambda database: f"driver-{database}")
-
-    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
-        if "RETURN count(n) AS count" in query:
-            if driver == "driver-sociomap":
-                return [{"count": 1}]
-            return [{"count": 0}]
-        raise AssertionError("Create query should not execute when duplicate exists")
-
-    monkeypatch.setattr(admin_routes, "getQuery", fake_get_query)
 
     response = client.post(
         "/admin/metadata/create",
         headers={"Authorization": "Bearer test-token"},
         json={
-            "CMID": "CL100000",
             "CMName": "Duplicate Label",
-            "labels": ["LABEL"],
+            "nodeLabel": "DOMAIN",
             "databaseTarget": "both",
         },
     )
 
-    assert response.status_code == 409
+    assert response.status_code == 400
     payload = response.get_json()
-    assert "already exists" in payload["error"]
+    assert "nodelabel must be one of" in payload["error"].lower()

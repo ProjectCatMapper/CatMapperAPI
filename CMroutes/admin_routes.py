@@ -451,25 +451,34 @@ def create_metadata_node():
         else:
             raise Exception("Admin authorization is required")
 
-        cmid = str(data.get("CMID", "")).strip()
         cmname = str(data.get("CMName", "")).strip()
         group_label = str(data.get("groupLabel", "")).strip()
         description = str(data.get("description", "")).strip()
         color = str(data.get("color", "")).strip()
         database_target = str(data.get("databaseTarget", "both")).strip().lower()
+        node_label = str(data.get("nodeLabel", "")).strip().upper()
 
-        if not cmid:
-            raise ValueError("CMID is required")
         if not cmname:
             raise ValueError("CMName is required")
+        if not node_label:
+            raw_labels = data.get("labels", [])
+            if isinstance(raw_labels, str):
+                raw_labels = [x.strip() for x in raw_labels.split(",") if str(x).strip()]
+            if isinstance(raw_labels, list) and raw_labels:
+                node_label = str(raw_labels[0]).strip().upper()
+        if not node_label:
+            raise ValueError("nodeLabel is required")
 
-        raw_labels = data.get("labels", [])
-        if isinstance(raw_labels, str):
-            raw_labels = [x.strip() for x in raw_labels.split(",") if str(x).strip()]
-        if not isinstance(raw_labels, list):
-            raise ValueError("labels must be a list or comma-separated string")
+        prefix_map = {
+            "PROPERTY": "CP",
+            "LABEL": "CL",
+            "TRANSLATION": "CT",
+        }
+        cmid_prefix = prefix_map.get(node_label)
+        if not cmid_prefix:
+            raise ValueError("nodeLabel must be one of: PROPERTY, LABEL, TRANSLATION")
 
-        labels = ["METADATA"] + [str(label).strip() for label in raw_labels if str(label).strip()]
+        labels = ["METADATA", node_label]
         deduped_labels = []
         for label in labels:
             if label not in deduped_labels:
@@ -483,8 +492,35 @@ def create_metadata_node():
         else:
             raise ValueError("databaseTarget must be one of: sociomap, archamap, both")
 
+        cmids_by_db = {}
+        for db_name in ("sociomap", "archamap"):
+            driver = getDriver(db_name)
+            rows = getQuery(
+                "MATCH (n:METADATA) WHERE n.CMID STARTS WITH $prefix RETURN n.CMID AS CMID",
+                driver=driver,
+                params={"prefix": cmid_prefix},
+                type="list",
+            )
+            cmids_by_db[db_name] = rows if isinstance(rows, list) else []
+
+        max_number = 0
+        for rows in cmids_by_db.values():
+            for row in rows:
+                candidate = ""
+                if isinstance(row, dict):
+                    candidate = str(row.get("CMID") or "")
+                elif isinstance(row, str):
+                    candidate = row
+                if not candidate.startswith(cmid_prefix):
+                    continue
+                suffix = candidate[len(cmid_prefix):]
+                if suffix.isdigit():
+                    max_number = max(max_number, int(suffix))
+
+        generated_cmid = f"{cmid_prefix}{max_number + 1}"
+
         props = {
-            "CMID": cmid,
+            "CMID": generated_cmid,
             "CMName": cmname,
         }
         if group_label:
@@ -525,9 +561,9 @@ def create_metadata_node():
 
         for target in targets:
             driver = getDriver(target)
-            existing = getQuery(check_query, driver=driver, params={"CMID": cmid}, type="list")
+            existing = getQuery(check_query, driver=driver, params={"CMID": generated_cmid}, type="list")
             if extract_count(existing) > 0:
-                raise ValueError(f"Metadata node with CMID {cmid} already exists in {target}")
+                raise ValueError(f"Metadata node with CMID {generated_cmid} already exists in {target}")
 
             created = getQuery(create_query, driver=driver, params={"props": props}, type="list")
             created_row = created[0] if isinstance(created, list) and created else {}
@@ -536,7 +572,8 @@ def create_metadata_node():
             created_in.append(db_name)
 
         return jsonify({
-            "message": f"Created metadata node {cmid} in {', '.join(created_in)}.",
+            "message": f"Created metadata node {generated_cmid} in {', '.join(created_in)}.",
+            "generatedCMID": generated_cmid,
             "createdIn": created_in,
             "node": node_results,
         }), 200
