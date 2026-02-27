@@ -455,11 +455,16 @@ def create_metadata_node():
         group_label = str(data.get("groupLabel", "")).strip()
         description = str(data.get("description", "")).strip()
         color = str(data.get("color", "")).strip()
+        dynamic_props = data.get("properties", {})
         database_target = str(data.get("databaseTarget", "both")).strip().lower()
         node_label = str(data.get("nodeLabel", "")).strip().upper()
 
         if not cmname:
             raise ValueError("CMName is required")
+        if dynamic_props is None:
+            dynamic_props = {}
+        if not isinstance(dynamic_props, dict):
+            raise ValueError("properties must be an object")
         if not node_label:
             raw_labels = data.get("labels", [])
             if isinstance(raw_labels, str):
@@ -530,6 +535,23 @@ def create_metadata_node():
         if color:
             props["color"] = color
 
+        blocked_prop_keys = {
+            "cmid",
+            "cmname",
+            "id",
+            "labels",
+            "database",
+            "databaseTarget".lower(),
+            "nodeLabel".lower(),
+        }
+        for key, value in dynamic_props.items():
+            cleaned_key = str(key or "").strip()
+            if not cleaned_key:
+                continue
+            if cleaned_key.lower() in blocked_prop_keys:
+                continue
+            props[cleaned_key] = value
+
         check_query = "MATCH (n:METADATA {CMID: $CMID}) RETURN count(n) AS count"
         labels_clause = ":" + ":".join(safe_labels)
         create_query = f"""
@@ -583,6 +605,55 @@ def create_metadata_node():
         if "already exists" in err.lower():
             status = 409
         return jsonify({"error": err}), status
+
+
+@admin_bp.route('/admin/metadata/properties/<node_label>', methods=['GET'])
+def metadata_properties_by_label(node_label):
+    try:
+        auth_header = request.headers.get("Authorization", "")
+        credentials = request.args.get("cred")
+        if credentials or auth_header.startswith("Bearer "):
+            verify_request_auth(credentials=credentials, required_role="admin", req=request)
+        else:
+            raise Exception("Admin authorization is required")
+
+        safe_label = sanitize_cypher_identifier(str(node_label or "").strip().upper(), "nodeLabel")
+        if safe_label not in {"PROPERTY", "LABEL", "TRANSLATION"}:
+            raise ValueError("nodeLabel must be one of: PROPERTY, LABEL, TRANSLATION")
+
+        database_target = str(request.args.get("databaseTarget", "both")).strip().lower()
+        if database_target == "both":
+            targets = ["sociomap", "archamap"]
+        elif database_target in {"sociomap", "archamap"}:
+            targets = [database_target]
+        else:
+            raise ValueError("databaseTarget must be one of: sociomap, archamap, both")
+
+        query = f"""
+        MATCH (n:METADATA:{safe_label})
+        UNWIND keys(n) AS prop
+        RETURN DISTINCT prop
+        ORDER BY prop
+        """
+
+        all_props = set()
+        for target in targets:
+            result = getQuery(query=query, driver=getDriver(target), type="list")
+            rows = result if isinstance(result, list) else []
+            for row in rows:
+                if isinstance(row, dict):
+                    prop = row.get("prop")
+                    if prop:
+                        all_props.add(str(prop))
+                elif isinstance(row, str):
+                    all_props.add(row)
+
+        return jsonify({
+            "nodeLabel": safe_label,
+            "properties": sorted(all_props),
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 
 @admin_bp.route('/admin/metadata/nodes', methods=['GET'])
