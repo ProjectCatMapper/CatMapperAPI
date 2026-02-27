@@ -93,3 +93,71 @@ def test_create_label_helper_excludes_internal_labels(client, monkeypatch):
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["res"] == ["DISTRICT", "LANGUOID"]
+
+
+def test_create_metadata_node_creates_in_both_databases(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "200", "role": "admin"})
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: f"driver-{database}")
+
+    created_by_driver = []
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "RETURN count(n) AS count" in query:
+            return [{"count": 0}]
+        if "CREATE (n:METADATA:LABEL)" in query:
+            created_by_driver.append(driver)
+            props = (params or {}).get("props", {})
+            return [{
+                "id": f"id-{driver}",
+                "labels": ["METADATA", "LABEL"],
+                "props": props,
+            }]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin_routes, "getQuery", fake_get_query)
+
+    response = client.post(
+        "/admin/metadata/create",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "CMID": "CL999999",
+            "CMName": "New Test Label",
+            "groupLabel": "FAMILY",
+            "labels": ["LABEL"],
+            "databaseTarget": "both",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["createdIn"] == ["SocioMap", "ArchaMap"]
+    assert set(created_by_driver) == {"driver-sociomap", "driver-archamap"}
+
+
+def test_create_metadata_node_rejects_duplicate_cmid(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "200", "role": "admin"})
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: f"driver-{database}")
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "RETURN count(n) AS count" in query:
+            if driver == "driver-sociomap":
+                return [{"count": 1}]
+            return [{"count": 0}]
+        raise AssertionError("Create query should not execute when duplicate exists")
+
+    monkeypatch.setattr(admin_routes, "getQuery", fake_get_query)
+
+    response = client.post(
+        "/admin/metadata/create",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "CMID": "CL100000",
+            "CMName": "Duplicate Label",
+            "labels": ["LABEL"],
+            "databaseTarget": "both",
+        },
+    )
+
+    assert response.status_code == 409
+    payload = response.get_json()
+    assert "already exists" in payload["error"]

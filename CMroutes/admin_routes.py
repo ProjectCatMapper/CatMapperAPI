@@ -437,6 +437,117 @@ def saveMetadata():
         return jsonify({"error": str(e)}), 500
 
 
+@admin_bp.route('/admin/metadata/create', methods=['POST'])
+def create_metadata_node():
+    try:
+        data = request.get_json(silent=True)
+        if data is None:
+            data = {}
+
+        auth_header = request.headers.get("Authorization", "")
+        credentials = unlist(data.get("cred")) if isinstance(data, dict) else None
+        if credentials or auth_header.startswith("Bearer "):
+            verify_request_auth(credentials=credentials, required_role="admin", req=request)
+        else:
+            raise Exception("Admin authorization is required")
+
+        cmid = str(data.get("CMID", "")).strip()
+        cmname = str(data.get("CMName", "")).strip()
+        group_label = str(data.get("groupLabel", "")).strip()
+        description = str(data.get("description", "")).strip()
+        color = str(data.get("color", "")).strip()
+        database_target = str(data.get("databaseTarget", "both")).strip().lower()
+
+        if not cmid:
+            raise ValueError("CMID is required")
+        if not cmname:
+            raise ValueError("CMName is required")
+
+        raw_labels = data.get("labels", [])
+        if isinstance(raw_labels, str):
+            raw_labels = [x.strip() for x in raw_labels.split(",") if str(x).strip()]
+        if not isinstance(raw_labels, list):
+            raise ValueError("labels must be a list or comma-separated string")
+
+        labels = ["METADATA"] + [str(label).strip() for label in raw_labels if str(label).strip()]
+        deduped_labels = []
+        for label in labels:
+            if label not in deduped_labels:
+                deduped_labels.append(label)
+        safe_labels = [sanitize_cypher_identifier(label, "label") for label in deduped_labels]
+
+        if database_target == "both":
+            targets = ["sociomap", "archamap"]
+        elif database_target in {"sociomap", "archamap"}:
+            targets = [database_target]
+        else:
+            raise ValueError("databaseTarget must be one of: sociomap, archamap, both")
+
+        props = {
+            "CMID": cmid,
+            "CMName": cmname,
+        }
+        if group_label:
+            props["groupLabel"] = group_label
+        if description:
+            props["description"] = description
+        if color:
+            props["color"] = color
+
+        check_query = "MATCH (n:METADATA {CMID: $CMID}) RETURN count(n) AS count"
+        labels_clause = ":" + ":".join(safe_labels)
+        create_query = f"""
+        CREATE (n{labels_clause})
+        SET n = $props
+        RETURN elementId(n) AS id, labels(n) AS labels, properties(n) AS props
+        """
+
+        def extract_count(result):
+            if result is None:
+                return 0
+            if isinstance(result, list):
+                if not result:
+                    return 0
+                first = result[0]
+                if isinstance(first, dict):
+                    return int(first.get("count", 0) or 0)
+                if isinstance(first, (int, float)):
+                    return int(first)
+                return 0
+            if isinstance(result, dict):
+                return int(result.get("count", 0) or 0)
+            if isinstance(result, (int, float)):
+                return int(result)
+            return 0
+
+        created_in = []
+        node_results = {}
+
+        for target in targets:
+            driver = getDriver(target)
+            existing = getQuery(check_query, driver=driver, params={"CMID": cmid}, type="list")
+            if extract_count(existing) > 0:
+                raise ValueError(f"Metadata node with CMID {cmid} already exists in {target}")
+
+            created = getQuery(create_query, driver=driver, params={"props": props}, type="list")
+            created_row = created[0] if isinstance(created, list) and created else {}
+            db_name = "SocioMap" if target == "sociomap" else "ArchaMap"
+            node_results[db_name] = created_row
+            created_in.append(db_name)
+
+        return jsonify({
+            "message": f"Created metadata node {cmid} in {', '.join(created_in)}.",
+            "createdIn": created_in,
+            "node": node_results,
+        }), 200
+    except Exception as e:
+        err = str(e)
+        status = 400
+        if "already exists" in err.lower():
+            status = 409
+        return jsonify({"error": err}), status
+
+
 @admin_bp.route('/admin/metadata/nodes', methods=['GET'])
 def list_metadata_nodes():
     try:
