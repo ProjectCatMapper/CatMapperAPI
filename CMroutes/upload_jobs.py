@@ -58,7 +58,8 @@ def run_upload_task(task_id):
 
     def _upload_log_listener(message):
         store.append_upload_event(task_id, message)
-        if str(message).strip().lower() == "end of batch":
+        normalized_message = str(message).strip().lower()
+        if normalized_message.endswith("end of batch"):
             store.increment_upload_batch(task_id)
         _raise_if_cancelled()
 

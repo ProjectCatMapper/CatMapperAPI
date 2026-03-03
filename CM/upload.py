@@ -19,6 +19,7 @@ import threading
 warnings.simplefilter("error", UserWarning)
 
 _UPLOAD_LOG_LISTENER = threading.local()
+_UPLOAD_LOG_TIMING = threading.local()
 
 data = [
     {
@@ -62,15 +63,54 @@ def get_invalid_ranges(df, col1, col2):
 #writes the log text to console and also saves logs to text file.
 def set_upload_log_listener(listener):
     _UPLOAD_LOG_LISTENER.callback = listener
+    now = time.monotonic()
+    _UPLOAD_LOG_TIMING.start_time = now
+    _UPLOAD_LOG_TIMING.last_time = now
 
 
 def clear_upload_log_listener():
     if hasattr(_UPLOAD_LOG_LISTENER, "callback"):
         delattr(_UPLOAD_LOG_LISTENER, "callback")
+    if hasattr(_UPLOAD_LOG_TIMING, "start_time"):
+        delattr(_UPLOAD_LOG_TIMING, "start_time")
+    if hasattr(_UPLOAD_LOG_TIMING, "last_time"):
+        delattr(_UPLOAD_LOG_TIMING, "last_time")
+
+
+def _format_upload_log_timing(message):
+    start_time = getattr(_UPLOAD_LOG_TIMING, "start_time", None)
+    last_time = getattr(_UPLOAD_LOG_TIMING, "last_time", None)
+    if start_time is None or last_time is None:
+        return str(message)
+
+    now = time.monotonic()
+    step_elapsed = now - last_time
+    total_elapsed = now - start_time
+    _UPLOAD_LOG_TIMING.last_time = now
+    return f"[+{step_elapsed:.2f}s | {total_elapsed:.2f}s] {message}"
+
+
+def _summarize_upload_log_payload(payload):
+    if isinstance(payload, pd.DataFrame):
+        return f"<dataframe rows={len(payload)} cols={len(payload.columns)}>"
+    if isinstance(payload, pd.Series):
+        return f"<series len={len(payload)}>"
+    if isinstance(payload, dict):
+        keys = list(payload.keys())
+        preview = ", ".join(map(str, keys[:8]))
+        suffix = "..." if len(keys) > 8 else ""
+        return f"<dict keys=[{preview}{suffix}]>"
+    if isinstance(payload, (list, tuple, set)):
+        return f"<{type(payload).__name__.lower()} len={len(payload)}>"
+
+    message = str(payload)
+    if len(message) > 1600:
+        return f"{message[:1600]}... [truncated]"
+    return message
 
 
 def updateLog(f, txt, write="a"):
-    message = str(txt)
+    message = _format_upload_log_timing(_summarize_upload_log_payload(txt))
     print(message)
     try:
         with open(f, write) as file:
@@ -301,10 +341,14 @@ def createUSES(links, database, user):
         links_dict = links.to_dict(orient="records")
         result = getQuery(q, driver, params={"rows": links_dict})
 
-        if isinstance(result, dict):
-            updateLog(f"log/{user}uploadProgress.txt", "Query successful", write="a")
+        if isinstance(result, list):
+            updateLog(
+                f"log/{user}uploadProgress.txt",
+                f"Query successful; returned {len(result)} relationship row(s)",
+                write="a",
+            )
         else:
-            updateLog(f"log/{user}uploadProgress.txt", str(result), write="a")
+            updateLog(f"log/{user}uploadProgress.txt", "Query successful", write="a")
 
         # Update alternate names
         CMIDs = [item["CMID"] for item in result]
@@ -869,6 +913,21 @@ def _collect_multi_value_column_map(dataset, multi_value_columns):
     return value_map
 
 
+def _collect_cmid_metadata_targets(dataset, multi_value_column_map):
+    targets = {
+        cmid
+        for values in multi_value_column_map.values()
+        for cmid in values
+    }
+
+    # Parent compatibility checks compare parent values against child CMID labels.
+    # Child CMIDs must always be resolvable in the same metadata map.
+    if "parent" in multi_value_column_map and "CMID" in dataset.columns:
+        targets.update(_collect_unique_column_values(dataset, "CMID", set()))
+
+    return sorted(targets)
+
+
 def _chunk_list(values, chunk_size):
     for start in range(0, len(values), chunk_size):
         yield values[start : start + chunk_size]
@@ -880,7 +939,7 @@ def _fetch_cmid_metadata(driver, cmids, chunk_size=1500):
 
     query = """
     UNWIND $cmids AS cmid
-    OPTIONAL MATCH (n {CMID: cmid})
+    OPTIONAL MATCH (n:DATASET|CATEGORY {CMID: cmid})
     WITH cmid, collect(DISTINCT n) AS nodes
     WITH cmid, reduce(labels_flat = [], node IN nodes | labels_flat + labels(node)) AS labels_flat
     WITH cmid, [label IN labels_flat WHERE label IS NOT NULL] AS nodeLabels
@@ -916,19 +975,72 @@ def _required_label_for_column(column_name):
     return column_name.upper()
 
 
-def _validate_non_parent_multi_value_columns(column_value_map, cmid_metadata):
+def _resolve_group_labels(metadata_entry):
+    if not metadata_entry:
+        return set()
+    mapped_group_labels = set(metadata_entry.get("groupLabels", set()))
+    if mapped_group_labels:
+        return mapped_group_labels
+    fallback_labels = {
+        label
+        for label in metadata_entry.get("labels", set())
+        if label and label != "CATEGORY"
+    }
+    return fallback_labels
+
+
+def _build_multi_value_error_context(dataset, column_name):
+    value_context = {}
+    column_values = dataset[column_name].fillna("").astype(str).tolist()
+    child_cmids = (
+        dataset["CMID"].fillna("").astype(str).str.strip().tolist()
+        if "CMID" in dataset.columns
+        else [""] * len(column_values)
+    )
+
+    for row_number, (raw_value, child_cmid) in enumerate(
+        zip(column_values, child_cmids),
+        start=1,
+    ):
+        for value in _split_multi_value_cell(raw_value):
+            value_context.setdefault(value, []).append(
+                {
+                    "row": row_number,
+                    "child_cmid": child_cmid,
+                }
+            )
+
+    return value_context
+
+
+def _validate_non_parent_multi_value_columns(dataset, column_value_map, cmid_metadata):
     for column_name, values in column_value_map.items():
         if column_name == "parent":
             continue
         required_label = _required_label_for_column(column_name)
+        value_context = _build_multi_value_error_context(dataset, column_name)
         wrong_labels = [
             value
             for value in values
             if required_label not in cmid_metadata.get(value, {}).get("labels", set())
         ]
         if wrong_labels:
+            detail_parts = []
+            for wrong_value in wrong_labels[:20]:
+                contexts = value_context.get(wrong_value, [])
+                if contexts:
+                    first_context = contexts[0]
+                    child_cmid = first_context.get("child_cmid") or "<missing CMID>"
+                    detail_parts.append(
+                        f"{wrong_value} (row {first_context['row']}, CMID {child_cmid})"
+                    )
+                else:
+                    detail_parts.append(wrong_value)
+            suffix = " ..." if len(wrong_labels) > 20 else ""
             raise ValueError(
-                f"Error: Wrong labels in database for column '{column_name}': {wrong_labels}"
+                f"Error: Wrong labels in database for column '{column_name}': "
+                + ", ".join(detail_parts)
+                + suffix
             )
 
 
@@ -976,7 +1088,7 @@ def _validate_parent_label_compatibility(dataset, cmid_metadata, driver, user):
     ):
         if cmid_value:
             child_group_sets.append(
-                set(cmid_metadata.get(cmid_value, {}).get("groupLabels", set()))
+                _resolve_group_labels(cmid_metadata.get(cmid_value))
             )
         elif group_label_value:
             child_group_sets.append({group_label_value})
@@ -1000,9 +1112,7 @@ def _validate_parent_label_compatibility(dataset, cmid_metadata, driver, user):
             if parent_value is None:
                 parent_groups = child_groups
             else:
-                parent_groups = set(
-                    cmid_metadata.get(parent_value, {}).get("groupLabels", set())
-                )
+                parent_groups = _resolve_group_labels(cmid_metadata.get(parent_value))
 
             if processed_pairs % 250 == 0:
                 check_query_cancellation()
@@ -1023,8 +1133,12 @@ def _validate_parent_label_compatibility(dataset, cmid_metadata, driver, user):
             if "GENERIC" in parent_group_match:
                 continue
             if parent_group_match != child_group_match:
+                child_cmid = child_cmid_values[row_number - 1] or "<missing CMID>"
+                parent_cmid = parent_value or "<self>"
                 raise ValueError(
                     f"Mismatch at row {row_number}: Parent node labels dont match that of the child node.\n"
+                    f"Child CMID: {child_cmid}\n"
+                    f"Parent CMID: {parent_cmid}\n"
                     f"Parent Labels: {sorted(parent_groups)}\n"
                     f"Child Labels: {sorted(child_groups)}"
                 )
@@ -2029,12 +2143,9 @@ def input_Nodes_Uses(
     # 2) Grouplabel for CMID in property matches property
     # 3) Grouplabel for CMID for parent matches Grouplabel of child.
     multi_value_column_map = _collect_multi_value_column_map(dataset, multi_value_columns)
-    unique_multi_value_cmids = sorted(
-        {
-            cmid
-            for values in multi_value_column_map.values()
-            for cmid in values
-        }
+    unique_multi_value_cmids = _collect_cmid_metadata_targets(
+        dataset,
+        multi_value_column_map,
     )
     cmid_metadata = {}
     if unique_multi_value_cmids:
@@ -2050,7 +2161,7 @@ def input_Nodes_Uses(
             write="a",
         )
 
-    _validate_non_parent_multi_value_columns(multi_value_column_map, cmid_metadata)
+    _validate_non_parent_multi_value_columns(dataset, multi_value_column_map, cmid_metadata)
     check_query_cancellation()
     if "parent" in multi_value_column_map:
         _validate_parent_label_compatibility(dataset, cmid_metadata, driver, user)
