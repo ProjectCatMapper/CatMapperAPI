@@ -7,6 +7,9 @@ from CM import (
     waitingUSES,
     set_upload_log_listener,
     clear_upload_log_listener,
+    set_query_cancel_checker,
+    clear_query_cancel_checker,
+    QueryCancelledError,
 )
 
 from .task_queue import enqueue_waiting_uses_task, is_rq_enabled
@@ -38,6 +41,9 @@ def run_upload_task(task_id):
     task = store.get_upload_task(task_id, cursor=0)
     if task is None:
         return
+    if str(task.get("status", "")).lower() in {"completed", "failed", "canceled"}:
+        store.delete_upload_job_payload(task_id)
+        return
 
     user = _task_user(task)
     database = task.get("database")
@@ -46,16 +52,25 @@ def run_upload_task(task_id):
         store.fail_upload_task(task_id, "Upload job payload is missing.")
         return
 
+    def _raise_if_cancelled():
+        if store.is_upload_cancel_requested(task_id):
+            raise QueryCancelledError("Upload cancelled by user request.")
+
     def _upload_log_listener(message):
         store.append_upload_event(task_id, message)
         if str(message).strip().lower() == "end of batch":
             store.increment_upload_batch(task_id)
-        if store.is_upload_cancel_requested(task_id):
-            raise UploadCancelledError("Upload cancelled by user request.")
+        _raise_if_cancelled()
 
+    if store.is_upload_cancel_requested(task_id):
+        store.cancel_upload_task(task_id, "Upload cancelled before starting.")
+        store.delete_upload_job_payload(task_id)
+        return
     store.mark_upload_running(task_id)
     set_upload_log_listener(_upload_log_listener)
+    set_query_cancel_checker(_raise_if_cancelled)
     try:
+        _raise_if_cancelled()
         response, desired_order = input_Nodes_Uses(**job_args)
         if not isinstance(response, pd.DataFrame):
             raise RuntimeError("Upload did not return a table result.")
@@ -79,12 +94,13 @@ def run_upload_task(task_id):
             enqueue_waiting_uses_task(waiting_task_id, database)
         else:
             _run_waiting_uses_inline(waiting_task_id, database)
-    except UploadCancelledError as err:
+    except (UploadCancelledError, QueryCancelledError) as err:
         store.cancel_upload_task(task_id, str(err))
     except Exception as err:
         store.fail_upload_task(task_id, str(err))
     finally:
         clear_upload_log_listener()
+        clear_query_cancel_checker()
         store.delete_upload_job_payload(task_id)
 
 

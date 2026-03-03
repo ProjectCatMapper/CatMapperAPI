@@ -4,12 +4,18 @@ import json
 import os
 import threading
 import math
+from datetime import datetime, timezone
 
 from CM import unlist
 from .auth_utils import verify_request_auth, classify_auth_error_status
 from .task_store import get_task_store, DEFAULT_UPLOAD_BATCH_SIZE
 from .task_queue import enqueue_upload_task, is_rq_enabled
 from .upload_jobs import run_upload_task
+
+try:
+    from rq.command import send_stop_job_command
+except Exception:  # pragma: no cover
+    send_stop_job_command = None
 
 upload_bp = Blueprint('upload', __name__)
 
@@ -165,7 +171,9 @@ def _start_upload_task(job_args, user, database, total_rows):
 
     try:
         if is_rq_enabled():
-            enqueue_upload_task(task_id)
+            job = enqueue_upload_task(task_id)
+            if job is not None and getattr(job, "id", None):
+                store.set_upload_rq_job_id(task_id, job.id)
         else:
             thread = threading.Thread(
                 target=run_upload_task,
@@ -194,6 +202,66 @@ def _get_waiting_uses_task(task_id):
 def _request_upload_cancel(task_id):
     store = get_task_store()
     return store.request_upload_cancel(task_id)
+
+
+def _send_cancel_to_rq(task_id, task):
+    if not is_rq_enabled():
+        return False, "rq-disabled"
+
+    store = get_task_store()
+    connection = getattr(store, "redis", None)
+    if connection is None:
+        return False, "no-redis-connection"
+
+    rq_job_id = store.get_upload_rq_job_id(task_id)
+    if not rq_job_id:
+        return False, "missing-rq-job-id"
+
+    status = str(task.get("status") or "").strip().lower()
+    queue_name = os.getenv("CATMAPPER_UPLOAD_QUEUE", "catmapper-upload")
+    rq_job_key = f"rq:job:{rq_job_id}"
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    try:
+        if status == "queued":
+            connection.lrem(f"rq:queue:{queue_name}", 0, rq_job_id)
+            connection.zrem(f"rq:wip:{queue_name}", rq_job_id)
+            connection.hset(
+                rq_job_key,
+                mapping={
+                    "status": "canceled",
+                    "ended_at": now_iso,
+                },
+            )
+            return True, "removed-queued-job"
+
+        if status == "running":
+            if send_stop_job_command is None:
+                return False, "rq-stop-not-available"
+            send_stop_job_command(connection, rq_job_id)
+            return True, "sent-stop-signal"
+    except Exception as err:
+        return False, str(err)
+
+    return False, "no-op"
+
+
+def _cancel_upload_task(task_id, task):
+    store = get_task_store()
+    _request_upload_cancel(task_id)
+
+    status = str(task.get("status") or "").strip().lower()
+    stopped, action = _send_cancel_to_rq(task_id, task)
+
+    if status == "queued":
+        store.cancel_upload_task(task_id, "Upload cancelled before starting.")
+        store.delete_upload_job_payload(task_id)
+        if stopped:
+            store.append_upload_event(task_id, "Queued job removed from queue.")
+        return
+
+    if status == "running" and stopped and action == "sent-stop-signal":
+        store.append_upload_event(task_id, "Stop signal sent to worker.")
 
 
 @upload_bp.route("/uploadWaitingUSESStatus", methods=["POST"])
@@ -266,7 +334,7 @@ def upload_input_nodes_cancel():
         if str(task.get("user")) != str(acting_user):
             raise Exception("User does not match authenticated API key/token owner")
 
-        _request_upload_cancel(str(task_id))
+        _cancel_upload_task(str(task_id), task)
         task = _get_upload_task(str(task_id), cursor=cursor)
         return jsonify(task), 202
     except Exception as e:

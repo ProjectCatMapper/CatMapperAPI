@@ -237,14 +237,13 @@ def test_upload_cancel_sets_cancel_requested(client, monkeypatch):
     def fake_get_upload_task(task_id, cursor=0):
         return dict(task_state)
 
-    def fake_request_upload_cancel(task_id):
+    def fake_cancel_upload_task(task_id, task):
         task_state["cancelRequested"] = True
         task_state["events"] = task_state["events"] + ["Cancellation requested by user."]
         task_state["nextCursor"] += 1
-        return True
 
     monkeypatch.setattr(upload_routes, "_get_upload_task", fake_get_upload_task)
-    monkeypatch.setattr(upload_routes, "_request_upload_cancel", fake_request_upload_cancel)
+    monkeypatch.setattr(upload_routes, "_cancel_upload_task", fake_cancel_upload_task)
 
     response = client.post(
         "/uploadInputNodesCancel",
@@ -256,6 +255,50 @@ def test_upload_cancel_sets_cancel_requested(client, monkeypatch):
     assert body.get("taskId") == "task-123"
     assert task_state["cancelRequested"] is True
     assert "Cancellation requested by user." in task_state["events"]
+
+
+def test_cancel_upload_task_marks_queued_task_canceled_and_clears_payload(monkeypatch):
+    store = get_task_store()
+    task_id = store.create_upload_task(
+        user="api-user",
+        database="ArchaMap",
+        total_rows=100,
+        batch_size=500,
+    )
+    store.set_upload_job_payload(task_id, {"example": True})
+
+    task = store.get_upload_task(task_id, cursor=0)
+    assert task["status"] == "queued"
+
+    monkeypatch.setattr(upload_routes, "_send_cancel_to_rq", lambda task_id, task: (True, "removed-queued-job"))
+    upload_routes._cancel_upload_task(task_id, task)
+
+    updated = store.get_upload_task(task_id, cursor=0)
+    assert updated["status"] == "canceled"
+    assert store.get_upload_job_payload(task_id) is None
+    assert "Queued job removed from queue." in updated["events"]
+
+
+def test_cancel_upload_task_running_adds_stop_signal_event(monkeypatch):
+    store = get_task_store()
+    task_id = store.create_upload_task(
+        user="api-user",
+        database="ArchaMap",
+        total_rows=100,
+        batch_size=500,
+    )
+    store.mark_upload_running(task_id)
+
+    task = store.get_upload_task(task_id, cursor=0)
+    assert task["status"] == "running"
+
+    monkeypatch.setattr(upload_routes, "_send_cancel_to_rq", lambda task_id, task: (True, "sent-stop-signal"))
+    upload_routes._cancel_upload_task(task_id, task)
+
+    updated = store.get_upload_task(task_id, cursor=0)
+    assert updated["status"] == "running"
+    assert updated["cancelRequested"] is True
+    assert "Stop signal sent to worker." in updated["events"]
 
 
 def test_upload_waiting_uses_status_returns_task_for_authenticated_user(client, monkeypatch):

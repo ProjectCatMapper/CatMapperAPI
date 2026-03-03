@@ -58,13 +58,14 @@ def _new_upload_task(task_id, user, database, total_rows, batch_size):
         "totalBatches": total_batches,
         "completedBatches": 0,
         "percent": 0,
-        "events": [],
+        "events": ["Task queued. Waiting for available worker."],
         "cancelRequested": False,
         "resultFile": None,
         "resultOrder": None,
         "waitingUsesTask": None,
         "waitingUsesStatus": None,
         "jobPayload": None,
+        "rqJobId": None,
     }
 
 
@@ -88,6 +89,7 @@ def _serialize_upload_task(task, cursor=0):
     response_task = dict(task)
     response_task.pop("finishedAtTs", None)
     response_task.pop("jobPayload", None)
+    response_task.pop("rqJobId", None)
 
     all_events = response_task.pop("events", [])
     cursor = min(max(_safe_int(cursor, 0), 0), len(all_events))
@@ -159,6 +161,20 @@ class InMemoryTaskStore:
             if task is None:
                 return
             task["jobPayload"] = None
+
+    def set_upload_rq_job_id(self, task_id, job_id):
+        with self.lock:
+            task = self.upload_tasks.get(task_id)
+            if task is None:
+                return
+            task["rqJobId"] = str(job_id) if job_id else None
+
+    def get_upload_rq_job_id(self, task_id):
+        with self.lock:
+            task = self.upload_tasks.get(task_id)
+            if task is None:
+                return None
+            return task.get("rqJobId")
 
     def mark_upload_running(self, task_id):
         with self.lock:
@@ -347,6 +363,25 @@ class RedisTaskStore:
     def _upload_job_key(self, task_id):
         return f"cm:upload:job:{task_id}"
 
+    def _rq_job_key(self, job_id):
+        return f"rq:job:{job_id}"
+
+    def _find_rq_job_id_for_task(self, task_id):
+        needle = f"run_upload_task('{task_id}')"
+        cursor = 0
+        while True:
+            cursor, keys = self.redis.scan(cursor=cursor, match="rq:job:*", count=200)
+            for raw_key in keys:
+                key = raw_key.decode() if isinstance(raw_key, bytes) else str(raw_key)
+                description = self.redis.hget(key, "description")
+                if isinstance(description, bytes):
+                    description = description.decode()
+                if description and needle in str(description):
+                    return key.split("rq:job:", 1)[-1]
+            if cursor == 0:
+                break
+        return None
+
     def _waiting_task_key(self, task_id):
         return f"cm:waiting_uses:task:{task_id}"
 
@@ -357,7 +392,10 @@ class RedisTaskStore:
         for key, value in raw.items():
             decoded_key = key.decode() if isinstance(key, bytes) else str(key)
             if isinstance(value, bytes):
-                decoded_value = value.decode()
+                try:
+                    decoded_value = value.decode()
+                except UnicodeDecodeError:
+                    decoded_value = value
             else:
                 decoded_value = value
             decoded[decoded_key] = decoded_value
@@ -403,8 +441,13 @@ class RedisTaskStore:
             "waitingUsesStatus": "",
             "resultFile": "",
             "resultOrder": "",
+            "rqJobId": "",
         }
         self.redis.hset(self._upload_task_key(task_id), mapping=task_mapping)
+        self.redis.rpush(
+            self._upload_events_key(task_id),
+            "Task queued. Waiting for available worker.",
+        )
         self._expire_upload_keys(task_id)
         return task_id
 
@@ -424,6 +467,22 @@ class RedisTaskStore:
 
     def delete_upload_job_payload(self, task_id):
         self.redis.delete(self._upload_job_key(task_id))
+
+    def set_upload_rq_job_id(self, task_id, job_id):
+        self.redis.hset(
+            self._upload_task_key(task_id),
+            mapping={"rqJobId": str(job_id) if job_id else ""},
+        )
+        self._expire_upload_keys(task_id)
+
+    def get_upload_rq_job_id(self, task_id):
+        value = self.redis.hget(self._upload_task_key(task_id), "rqJobId")
+        if value is None:
+            return None
+        if isinstance(value, bytes):
+            value = value.decode()
+        value = str(value).strip()
+        return value or None
 
     def mark_upload_running(self, task_id):
         self.redis.hset(
@@ -518,8 +577,54 @@ class RedisTaskStore:
         )
         self._expire_upload_keys(upload_task_id)
 
+    def _reconcile_upload_task_with_rq(self, task_id, task_raw):
+        status = str(task_raw.get("status") or "").strip().lower()
+        if status in {"completed", "failed", "canceled"}:
+            return task_raw
+
+        rq_job_id = str(task_raw.get("rqJobId") or "").strip()
+        if not rq_job_id:
+            discovered_job_id = self._find_rq_job_id_for_task(task_id)
+            if not discovered_job_id:
+                return task_raw
+            rq_job_id = discovered_job_id
+            self.set_upload_rq_job_id(task_id, rq_job_id)
+            task_raw["rqJobId"] = rq_job_id
+
+        rq_raw = self._decode_hash(self.redis.hgetall(self._rq_job_key(rq_job_id)))
+        task_key = self._upload_task_key(task_id)
+        cancel_requested = str(task_raw.get("cancelRequested", "0")).strip() == "1"
+
+        if rq_raw is None:
+            if cancel_requested:
+                self.cancel_upload_task(task_id, "Upload cancelled by user request.")
+            else:
+                self.fail_upload_task(
+                    task_id,
+                    "Upload job missing from queue backend. Worker may have stopped unexpectedly.",
+                )
+            return self._decode_hash(self.redis.hgetall(task_key))
+
+        rq_status = str(rq_raw.get("status") or "").strip().lower()
+        if rq_status == "queued" and status == "running":
+            self.redis.hset(task_key, mapping={"status": "queued", "startedAt": ""})
+        elif rq_status == "started" and status == "queued":
+            started_at = str(rq_raw.get("started_at") or _utc_now_iso())
+            self.redis.hset(task_key, mapping={"status": "running", "startedAt": started_at})
+        elif rq_status == "failed" and status not in {"completed", "failed", "canceled"}:
+            if cancel_requested:
+                self.cancel_upload_task(task_id, "Upload cancelled by user request.")
+            else:
+                self.fail_upload_task(task_id, "Upload job failed in queue backend.")
+
+        return self._decode_hash(self.redis.hgetall(task_key))
+
     def get_upload_task(self, task_id, cursor=0):
         task_raw = self._decode_hash(self.redis.hgetall(self._upload_task_key(task_id)))
+        if task_raw is None:
+            return None
+
+        task_raw = self._reconcile_upload_task_with_rq(task_id, task_raw)
         if task_raw is None:
             return None
 

@@ -437,6 +437,14 @@ def getLogin():
         password = unlist(data.get('password'))
 
         credentials = login(user, password)
+        if isinstance(credentials, tuple):
+            payload, status = credentials
+            if isinstance(payload, dict):
+                return jsonify(payload), int(status)
+            return jsonify({"error": str(payload)}), int(status)
+        if not isinstance(credentials, dict):
+            return jsonify({"error": "verification failed"}), 500
+
         token = issue_auth_token(credentials.get("userid"), credentials.get("role"))
         response = {
             "userid": credentials.get("userid"),
@@ -448,7 +456,7 @@ def getLogin():
 
     except Exception as e:
         result = str(e)
-        return result, 500
+        return jsonify({"error": result}), 500
 
 
 @user_bp.route('/forgot-password/request', methods=['POST'])

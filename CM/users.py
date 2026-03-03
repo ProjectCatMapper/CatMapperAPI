@@ -56,7 +56,7 @@ def login(user, password):
                           'username': user})
 
         if len(result) == 0:
-            raise Exception("User not found")
+            return {"error": "User not found"}, 401
 
         pwd = result[0].get("key")
         valid = verifyPassword(pwd, password)
@@ -64,12 +64,12 @@ def login(user, password):
         if valid:
             result = result[0]
         else:
-            raise Exception("invalid password")
+            return {"error": "invalid password"}, 401
 
         return result
 
     except Exception as e:
-        return f"verification failed: {str(e)}", 500
+        return {"error": f"verification failed: {str(e)}"}, 500
 
 
 def verifyUser(user, pwd, role=None):

@@ -1367,17 +1367,18 @@ def input_Nodes_Uses(
         
     # defining node and link properties based on METADATA types
     
+    updateLog(
+        f"log/{user}uploadProgress.txt",
+        "loading node and relationship property metadata",
+        write="a",
+    )
     node_query = "MATCH (p:PROPERTY) WHERE p.type='node' RETURN p.CMName as property"
-    
-    with driver.session() as session:
-                results = session.run(node_query)
-                nodeProperties = [record["property"] for record in results.data() if record["property"] in optionalProperties]
+    node_values = getQuery(node_query, driver, type="list")
+    nodeProperties = [value for value in node_values if value in optionalProperties]
     
     link_query = "MATCH (p:PROPERTY) WHERE p.type='relationship' RETURN p.CMName as property"
-    
-    with driver.session() as session:
-                results = session.run(link_query)
-                linkProperties = [record["property"] for record in results.data() if record["property"] in optionalProperties]
+    link_values = getQuery(link_query, driver, type="list")
+    linkProperties = [value for value in link_values if value in optionalProperties]
     
     # If we are editing Key and NewKey is in optional Columns, add that to linkProperties since the database doesnt have a NewKey
     if "NewKey" in optionalProperties:
@@ -1683,6 +1684,7 @@ def input_Nodes_Uses(
     error_columns = ["CMID", "datasetID", "mergingID", "stackID", "variableID", "categoryID", "categoryID1", "categoryID2"] + multi_value_columns
 
     for i in error_columns:
+        check_query_cancellation()
         if i in dataset.columns:
             updateLog(
                 f"log/{user}uploadProgress.txt", f"validating column {i}", write="a"
@@ -1727,9 +1729,8 @@ def input_Nodes_Uses(
             if not rows_to_check:
                 continue
 
-            with driver.session() as session:
-                results = session.run(query, rows=rows_to_check)
-                missing_values = [r["value"] for r in results.data() if r["count"] == 0]
+            results = getQuery(query, driver, params={"rows": rows_to_check})
+            missing_values = [r["value"] for r in results if r["count"] == 0]
             
             if missing_values:
                 if i == "datasetID":
@@ -1773,12 +1774,9 @@ def input_Nodes_Uses(
         RETURN labelValue, n.groupLabel AS groupLabel
         """
 
-        with driver.session() as session:
-            result = session.run(query, labels=distinct_labels)
-        
-            label_to_grouplabel = {record['labelValue']: record['groupLabel'] for record in result}
-
-            dataset['groupLabel'] = dataset['label'].map(label_to_grouplabel)
+        result = getQuery(query, driver, params={"labels": distinct_labels})
+        label_to_grouplabel = {record['labelValue']: record['groupLabel'] for record in result}
+        dataset['groupLabel'] = dataset['label'].map(label_to_grouplabel)
                         
     # checking if Grouplabel of CMID in spreadsheet matches Grouplabel in database
     # 1) Grouplabel for CMID in CMID column matches Grouplabel
@@ -1790,20 +1788,42 @@ def input_Nodes_Uses(
                 write="a",
             )
             if uploadOption == "add_node" and "parent" in dataset.columns:
-                combine = dict(zip(dataset["parent"], dataset["groupLabel"]))
+                pair_frame = dataset[["parent", "groupLabel"]].rename(columns={"parent": "cmid", "groupLabel": "expectedLabel"})
             else:
-                combine = dict(zip(dataset["CMID"], dataset["groupLabel"]))
-                    
-            query = """
-            UNWIND keys($rows) AS cmid
-            MATCH (n:CATEGORY {CMID: cmid})
-            where not $rows[cmid] in labels(n)
-            RETURN n.CMID AS CMID
-            LIMIT 1
-            """
-            with driver.session() as session:
-                term_mismatch = session.run(query, rows=combine)
-                mismatch = term_mismatch.single()
+                pair_frame = dataset[["CMID", "groupLabel"]].rename(columns={"CMID": "cmid", "groupLabel": "expectedLabel"})
+
+            pair_frame = pair_frame.dropna(subset=["cmid", "expectedLabel"]).copy()
+            pair_frame["cmid"] = pair_frame["cmid"].astype(str).str.strip()
+            pair_frame["expectedLabel"] = pair_frame["expectedLabel"].astype(str).str.strip()
+            pair_frame = pair_frame[
+                (pair_frame["cmid"] != "") & (pair_frame["expectedLabel"] != "")
+            ]
+
+            # Validate the input file itself: each CMID should map to a single label.
+            conflicts = pair_frame.groupby("cmid")["expectedLabel"].nunique()
+            conflicting_cmids = conflicts[conflicts > 1].index.tolist()
+            if conflicting_cmids:
+                sample = ", ".join(conflicting_cmids[:10])
+                suffix = "..." if len(conflicting_cmids) > 10 else ""
+                raise ValueError(
+                    f"Input contains conflicting labels for CMID(s): {sample}{suffix}"
+                )
+
+            combine = dict(
+                zip(pair_frame["cmid"], pair_frame["expectedLabel"])
+            )
+
+            mismatch = None
+            if combine:
+                query = """
+                UNWIND keys($rows) AS cmid
+                MATCH (n:CATEGORY {CMID: cmid})
+                WHERE NOT $rows[cmid] IN labels(n)
+                RETURN n.CMID AS CMID
+                LIMIT 1
+                """
+                term_mismatch = getQuery(query, driver, params={"rows": combine})
+                mismatch = term_mismatch[0] if term_mismatch else None
 
             if mismatch:
                 raise ValueError(
@@ -1839,9 +1859,12 @@ def input_Nodes_Uses(
                         RETURN row.value AS value
                         """
 
-                with driver.session() as session:
-                    results = session.run(query, rows=rows_to_check, label=check_label)
-                    wrong_labels = [r["value"] for r in results.data()]
+                wrong_labels = getQuery(
+                    query,
+                    driver,
+                    params={"rows": rows_to_check, "label": check_label},
+                    type="list",
+                )
 
                 if wrong_labels:
                     raise ValueError(
@@ -1849,32 +1872,73 @@ def input_Nodes_Uses(
                     )
 
             elif i == "parent":
+                updateLog(
+                    f"log/{user}uploadProgress.txt",
+                    "validating parent column label compatibility",
+                    write="a",
+                )
                 # if uploadOption == "add_node":
                 #     child_column = "label"
                 # else:
                 #     child_column = "CMID"
 
                 query = """
-                        MATCH (n {CMID: $cmid})
-                        WITH head([lbl IN labels(n) WHERE lbl <> 'CATEGORY']) AS otherLabel
-                        MATCH (m:LABEL {CMName: otherLabel})
-                        RETURN m.groupLabel AS groupLabel
+                        UNWIND $cmids AS cmid
+                        OPTIONAL MATCH (n {CMID: cmid})
+                        WITH cmid, head([lbl IN labels(n) WHERE lbl <> 'CATEGORY']) AS otherLabel
+                        OPTIONAL MATCH (m:LABEL {CMName: otherLabel})
+                        RETURN cmid, collect(m.groupLabel) AS groupLabels
                         """
 
                 # combined is a list of tuples
                 combined = []
 
+                child_cmids = set()
+                parent_cmids = set()
+                for _, row in dataset.iterrows():
+                    if "CMID" in dataset.columns and row["CMID"]:
+                        child_cmids.add(str(row["CMID"]).strip())
+                    if row["parent"] != "":
+                        for parent_value in str(row["parent"]).split(";"):
+                            parent_value = parent_value.strip()
+                            if parent_value:
+                                parent_cmids.add(parent_value)
+
+                all_cmids = sorted([cmid for cmid in (child_cmids | parent_cmids) if cmid])
+                cmid_to_labels = {}
+                if all_cmids:
+                    updateLog(
+                        f"log/{user}uploadProgress.txt",
+                        f"resolving labels for {len(all_cmids)} CMIDs in parent validation",
+                        write="a",
+                    )
+                    query_result = getQuery(
+                        query,
+                        driver,
+                        params={"cmids": all_cmids},
+                    )
+                    for record in query_result:
+                        labels = [label for label in (record.get("groupLabels") or []) if label]
+                        cmid_to_labels[record.get("cmid")] = labels
+                    updateLog(
+                        f"log/{user}uploadProgress.txt",
+                        f"resolved labels for {len(cmid_to_labels)} CMIDs in parent validation",
+                        write="a",
+                    )
+
                 # Builds dictionary of labels for parents and children
                 # dictionary can have more elements than the original number of rows if there are multiple parents in a row
-                for i, row in dataset.iterrows():
+                row_count = len(dataset)
+                progress_interval = 25
+                for row_index, row in dataset.iterrows():
                     if "CMID" in dataset.columns and row["CMID"]:
-                        child_value = getQuery(query,driver,params={"cmid":row["CMID"]},type="list")
+                        child_value = cmid_to_labels.get(str(row["CMID"]).strip(), [])
                     elif "groupLabel" in dataset.columns and row["groupLabel"]:
                         child_value = row['groupLabel']
                     else:
                         raise ValueError(
                            
-                            f"Both CMID and labels are missing for row {i} "
+                            f"Both CMID and labels are missing for row {row_index} "
                         )
                     
                     if row['parent'] != "":
@@ -1884,9 +1948,7 @@ def input_Nodes_Uses(
                         # iterating through parents in a single row
                         for j in parent_values:
                             j = j.strip()
-                            print(j)
-                            j = getQuery(query,driver,params={"cmid":j},type="list")
-                            print(j)
+                            j = cmid_to_labels.get(j, [])
                             if isinstance(child_value,list):
                                 combined.append((child_value, j))
                             else:
@@ -1896,6 +1958,14 @@ def input_Nodes_Uses(
                                 combined.append((child_value, child_value))
                         else:
                             combined.append(([child_value],[child_value]))
+
+                    if row_count > progress_interval and (row_index + 1) % progress_interval == 0:
+                        check_query_cancellation()
+                        updateLog(
+                            f"log/{user}uploadProgress.txt",
+                            f"parent label validation progress: {row_index + 1}/{row_count}",
+                            write="a",
+                        )
                                        
 
                 parent_labels = []
@@ -1904,12 +1974,24 @@ def input_Nodes_Uses(
                 for a, b in combined:
                     parent_labels.append(b)
                     child_labels.append(a)
-                                               
+                
+                updateLog(
+                    f"log/{user}uploadProgress.txt",
+                    "completed parent label validation checks",
+                    write="a",
+                )
+                check_query_cancellation()
                 validate_labels(uploadOption,driver,parent_labels, child_labels)
+                check_query_cancellation()
             
     # checks if the eventType value is valid
 
     if "eventType" in dataset.columns:
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "validating eventType values",
+            write="a",
+        )
 
         valid_event_types = {
             "SPLIT",
@@ -1942,27 +2024,36 @@ def input_Nodes_Uses(
     
     # checks for the existence of CMID, key and datasetID triplets in the database for function 3 and 4
     if uploadOption == "update_add" or uploadOption == "update_replace":
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking existing USES triplets for update upload",
+            write="a",
+        )
         error_query = """
     UNWIND $rows AS row
     OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
     RETURN row.CMID AS CMID, row.datasetID AS datasetID, row.Key AS Key, COUNT(r) AS rel_count
     """
 
-        with driver.session() as session:
-            results = session.run(error_query, rows=data_dict)
-            missing = [
-                (r["CMID"], r["datasetID"], r["Key"])
-                for r in results.data()
-                if r["rel_count"] == 0
-            ]
+        results = getQuery(error_query, driver, params={"rows": data_dict})
+        missing = [
+            (r["CMID"], r["datasetID"], r["Key"])
+            for r in results
+            if r["rel_count"] == 0
+        ]
 
-            if missing:
-                raise ValueError(
-                    f"Error: Invalid CMID or Key or datasetID for {missing}"
-                )
+        if missing:
+            raise ValueError(
+                f"Error: Invalid CMID or Key or datasetID for {missing}"
+            )
 
     # checks for the existence of Key and datasetID in the database for mergingType equivalence_ties
     if uploadOption == "add_merging" and mergingType == "equivalence_ties":
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking datasetID and Key existence for equivalence ties",
+            write="a",
+        )
         error_query = """
             UNWIND $rows AS row
             OPTIONAL MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
@@ -1970,21 +2061,25 @@ def input_Nodes_Uses(
             RETURN row.datasetID AS datasetID, row.Key AS Key, count(r) AS rel_count
                 """
 
-        with driver.session() as session:
-            results = session.run(error_query, rows=data_dict)
-            missing = [
-                (r["datasetID"], r["Key"])
-                for r in results.data()
-                if r["rel_count"] == 0
-            ]
+        results = getQuery(error_query, driver, params={"rows": data_dict})
+        missing = [
+            (r["datasetID"], r["Key"])
+            for r in results
+            if r["rel_count"] == 0
+        ]
 
-            if missing:
-                raise ValueError(
-                    f"Error: Invalid categoryID or Key or datasetID for {missing}"
-                )
+        if missing:
+            raise ValueError(
+                f"Error: Invalid categoryID or Key or datasetID for {missing}"
+            )
         
     # check for merging ties b/w stackID and mergingID when they exist in input
     if "mergingID" in dataset.columns and "stackID" in dataset.columns:
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking existing MERGING ties between stackID and mergingID",
+            write="a",
+        )
         query_stack_merging = """
                 UNWIND $rows AS row
                 OPTIONAL MATCH (s:STACK {CMID: row.stackID})<-[r:MERGING]-(m:MERGING {CMID: row.mergingID})
@@ -1994,14 +2089,13 @@ def input_Nodes_Uses(
                 count(r) AS rel_count
                 """
 
-        with driver.session() as session:
-            res = session.run(query_stack_merging, rows=data_dict)
+        res = getQuery(query_stack_merging, driver, params={"rows": data_dict})
 
-            missing_stack_merging = [
-                (r["stackID"], r["mergingID"])
-                for r in res.data()
-                if r["rel_count"] == 0
-            ]
+        missing_stack_merging = [
+            (r["stackID"], r["mergingID"])
+            for r in res
+            if r["rel_count"] == 0
+        ]
         
         if missing_stack_merging:
             raise ValueError(
@@ -2011,6 +2105,11 @@ def input_Nodes_Uses(
     # check for non-existence of stackID that bridges datasetID and mergingID when they exist in input
     # this only applies if the stack already exists, i.e, creating merging ties to datasets
     if ("mergingID" in dataset.columns and "datasetID" in dataset.columns) and mergingType == "merging_ties_to_datasets":
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking for pre-existing stack bridge between datasetID and mergingID",
+            write="a",
+        )
         query_stack_merging = """
                 UNWIND $rows AS row
                 WITH DISTINCT row.datasetID AS datasetID, row.mergingID AS mergingID
@@ -2022,19 +2121,18 @@ def input_Nodes_Uses(
                 count(s) AS stack_count
                 """
 
-        with driver.session() as session:
-            res = session.run(query_stack_merging, rows=data_dict)
+        res = getQuery(query_stack_merging, driver, params={"rows": data_dict})
 
-            missing_stack_merging = [
-                {
-                    "datasetID": r["datasetID"], 
-                    "mergingID": r["mergingID"], 
-                    "stackID": r["stackID"], 
-                    "count": r["stack_count"]
-                }
-                for r in res.data()
-                if r["stack_count"] > 0
-            ]
+        missing_stack_merging = [
+            {
+                "datasetID": r["datasetID"], 
+                "mergingID": r["mergingID"], 
+                "stackID": r["stackID"], 
+                "count": r["stack_count"]
+            }
+            for r in res
+            if r["stack_count"] > 0
+        ]
         
         if missing_stack_merging:
             raise ValueError(
@@ -2044,6 +2142,11 @@ def input_Nodes_Uses(
     # check for existence of stackID that bridges datasetID and mergingID when they exist in input
     # this only applies if the stack already exists, i.e, creating merging ties to variables and equivalence ties
     if ("mergingID" in dataset.columns and "datasetID" in dataset.columns) and mergingType != "merging_ties_to_datasets":
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking unique stack bridge between datasetID and mergingID",
+            write="a",
+        )
         query_stack_merging = """
                 UNWIND $rows AS row
                 WITH DISTINCT row.datasetID AS datasetID, row.mergingID AS mergingID
@@ -2055,19 +2158,18 @@ def input_Nodes_Uses(
                 count(s) AS stack_count
                 """
 
-        with driver.session() as session:
-            res = session.run(query_stack_merging, rows=data_dict)
+        res = getQuery(query_stack_merging, driver, params={"rows": data_dict})
 
-            missing_stack_merging = [
-                {
-                    "datasetID": r["datasetID"], 
-                    "mergingID": r["mergingID"], 
-                    "stackID": r["stackID"], 
-                    "count": r["stack_count"]
-                }
-                for r in res.data()
-                if r["stack_count"] != 1
-            ]
+        missing_stack_merging = [
+            {
+                "datasetID": r["datasetID"], 
+                "mergingID": r["mergingID"], 
+                "stackID": r["stackID"], 
+                "count": r["stack_count"]
+            }
+            for r in res
+            if r["stack_count"] != 1
+        ]
         
         if missing_stack_merging:
             raise ValueError(
@@ -2076,6 +2178,11 @@ def input_Nodes_Uses(
 
     # # check for merging ties b/w stackID and datasetID when they exist in input
     if "datasetID" in dataset.columns and "stackID" in dataset.columns:
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking MERGING ties between stackID and datasetID",
+            write="a",
+        )
         query_stack_dataset = """
                 UNWIND $rows AS row
                 OPTIONAL MATCH (s:STACK {CMID: row.stackID})-[r:MERGING]->(d:DATASET {CMID: row.datasetID})
@@ -2085,14 +2192,13 @@ def input_Nodes_Uses(
                 count(r) AS rel_count
                 """
 
-        with driver.session() as session:
-            res = session.run(query_stack_dataset, rows=data_dict)
+        res = getQuery(query_stack_dataset, driver, params={"rows": data_dict})
 
-            missing_stack_dataset = [
-                (r["stackID"], r["datasetID"])
-                for r in res.data()
-                if r["rel_count"] == 0
-            ]
+        missing_stack_dataset = [
+            (r["stackID"], r["datasetID"])
+            for r in res
+            if r["rel_count"] == 0
+        ]
         
         if missing_stack_dataset:
             raise ValueError(
@@ -2100,6 +2206,11 @@ def input_Nodes_Uses(
             )
     
     if mergingType == "equivalence_ties":
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "validating equivalence_ties datasetID/mergingID/Key uniqueness",
+            write="a",
+        )
 
         grouped = dataset.groupby(["datasetID", "mergingID", "Key"])["categoryID"].nunique()
 
@@ -2138,6 +2249,11 @@ def input_Nodes_Uses(
 
     # for functions 8 and 9, for type equivalence_ties, we need to make sure equivalent tie exists
     if (uploadOption == "merging_add" or uploadOption == "merging_replace") and mergingType == "equivalence_ties":
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking required EQUIVALENT ties for merging upload",
+            write="a",
+        )
         query_equivalence_check = """
                 UNWIND $rows AS row
                 OPTIONAL MATCH (a:CATEGORY {CMID: row.categoryID1})-[r:EQUIVALENT]->(b:CATEGORY {CMID: row.categoryID2})
@@ -2147,14 +2263,13 @@ def input_Nodes_Uses(
                 count(r) AS rel_count
                 """
 
-        with driver.session() as session:
-            res = session.run(query_equivalence_check, rows=data_dict)
+        res = getQuery(query_equivalence_check, driver, params={"rows": data_dict})
 
-            missing_equivalence = [
-                (r["categoryID1"], r["categoryID2"])
-                for r in res.data()
-                if r["rel_count"] == 0
-            ]
+        missing_equivalence = [
+            (r["categoryID1"], r["categoryID2"])
+            for r in res
+            if r["rel_count"] == 0
+        ]
         
         if missing_equivalence:
             raise ValueError(
@@ -2187,6 +2302,11 @@ def input_Nodes_Uses(
     # if using add to existing node function (function 5)
     # prevents adding shortName if the node has the shortname property
     if isDataset and uploadOption == "node_add":
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking DATASET shortName collisions",
+            write="a",
+        )
         if "shortName" in dataset.columns:
             query = "unwind $rows as row match (d:DATASET {shortName: row.shortName}) return d.shortName as shortName"
             shortNames = getQuery(
@@ -2204,6 +2324,11 @@ def input_Nodes_Uses(
     # 1) Creating new uses tie for existing node (function 2)
     # 2) Replacing Key in function 4
     if uploadOption == "add_uses" or (uploadOption == "update_replace" and optionalProperties[0] == "NewKey"):
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking duplicate CMID/Key/datasetID triplets in database",
+            write="a",
+        )
         # only check rows with non-empty CMID value
         if uploadOption == "add_uses":
             CMID_df = dataset[dataset["CMID"].notna() & (dataset["CMID"] != "")]
@@ -2219,19 +2344,17 @@ def input_Nodes_Uses(
         query = """UNWIND $rows AS row
                 OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
                 RETURN row.CMID AS CMID, row.datasetID AS datasetID, row.Key AS Key, COUNT(r) AS rel_count"""
-        
-        with driver.session() as session:
-            results = session.run(query, rows=CMID_dict)
-            keyExists = [
-                (r["CMID"], r["datasetID"], r["Key"])
-                for r in results.data()
-                if r["rel_count"] >= 1
-            ]
+        results = getQuery(query, driver, params={"rows": CMID_dict})
+        keyExists = [
+            (r["CMID"], r["datasetID"], r["Key"])
+            for r in results
+            if r["rel_count"] >= 1
+        ]
 
-            if keyExists:
-                raise ValueError(
-                    f"Error:CMID, Key and datasetID triplet already exists for {keyExists}"
-                )
+        if keyExists:
+            raise ValueError(
+                f"Error:CMID, Key and datasetID triplet already exists for {keyExists}"
+            )
     
         
     # For function 2, if two rows have the same uses tie(CMID,Key,datasetID) triplet and they both contain different values for
@@ -2246,6 +2369,11 @@ def input_Nodes_Uses(
         )
 
     if uploadOption == "add_uses":
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking duplicate string values within upload rows for identical USES triplets",
+            write="a",
+        )
 
         group_cols = ["CMID", "Key", "datasetID"]
 
@@ -2305,6 +2433,11 @@ def input_Nodes_Uses(
     node_string_cols = [col for col in node_string_cols if col not in ["CMID","label"]]
     
     if uploadOption == "node_add":
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking for existing values in node string properties",
+            write="a",
+        )
     
         for i in node_string_cols:
             if i in dataset.columns:

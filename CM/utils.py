@@ -15,11 +15,31 @@ from datetime import datetime, timedelta
 _driver_cache = {}
 _driver_lock = threading.Lock()
 _last_verified = {}
+_QUERY_CANCEL_CHECKER = threading.local()
 _CYPHER_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _CYPHER_ELEMENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9:_-]+$")
 
 config = ConfigParser()
 config.read('config.ini')
+
+
+class QueryCancelledError(Exception):
+    """Raised when an operation should stop due to user cancellation."""
+
+
+def set_query_cancel_checker(checker):
+    _QUERY_CANCEL_CHECKER.callback = checker
+
+
+def clear_query_cancel_checker():
+    if hasattr(_QUERY_CANCEL_CHECKER, "callback"):
+        delattr(_QUERY_CANCEL_CHECKER, "callback")
+
+
+def check_query_cancellation():
+    checker = getattr(_QUERY_CANCEL_CHECKER, "callback", None)
+    if checker:
+        checker()
     
 def getDriver(database):
     """
@@ -166,6 +186,7 @@ def getQuery(query, driver, params=None, type="dict", max_retries=3, **kwargs):
     
     for attempt in range(max_retries):
         try:
+            check_query_cancellation()
             with driver.session() as session:
                 result = session.run(query, params)
                 
@@ -174,16 +195,19 @@ def getQuery(query, driver, params=None, type="dict", max_retries=3, **kwargs):
                 if type == "dict":
                     # For queries returning key-value pairs
                     result = [dict(record) for record in result]
+                    check_query_cancellation()
                     return result
                 
                 elif type == "df" or type == "dataframe":
                     result = [dict(record) for record in result]
                     df = pd.DataFrame(result)
+                    check_query_cancellation()
                     return df
                 elif type == "list":
                     # For queries returning single column
                     result = list(itertools.chain.from_iterable(
                     record.values() for record in result))
+                    check_query_cancellation()
                     return result
                 
                 elif type == "records":
@@ -191,12 +215,15 @@ def getQuery(query, driver, params=None, type="dict", max_retries=3, **kwargs):
                     data = []
                     for record in result:
                         data.append(dict(record))
+                    check_query_cancellation()
                     return data
                 
                 else:
                     raise ValueError(f"Invalid type parameter: '{type}'. Must be 'records', 'dict', or 'list'")
                     
         except Exception as e:
+            if isinstance(e, QueryCancelledError):
+                raise
             error_msg = str(e).lower()
             
             # Check for connection/session errors
