@@ -14,8 +14,11 @@ import time
 import re
 import warnings
 import math
+import threading
 
 warnings.simplefilter("error", UserWarning)
+
+_UPLOAD_LOG_LISTENER = threading.local()
 
 data = [
     {
@@ -57,13 +60,26 @@ def get_invalid_ranges(df, col1, col2):
     return df[invalid_mask][[col1, col2]]
 
 #writes the log text to console and also saves logs to text file.
+def set_upload_log_listener(listener):
+    _UPLOAD_LOG_LISTENER.callback = listener
+
+
+def clear_upload_log_listener():
+    if hasattr(_UPLOAD_LOG_LISTENER, "callback"):
+        delattr(_UPLOAD_LOG_LISTENER, "callback")
+
+
 def updateLog(f, txt, write="a"):
-    print(txt)
+    message = str(txt)
+    print(message)
     try:
         with open(f, write) as file:
-            file.write(txt + "\n")
+            file.write(message + "\n")
     except Exception as e:
         print(e)
+    callback = getattr(_UPLOAD_LOG_LISTENER, "callback", None)
+    if callback:
+        callback(message)
 
 #Creates new nodes for functions 1 and 2
 def createNodes(df, database,isDataset, user, uniqueID=None):
