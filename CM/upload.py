@@ -830,6 +830,211 @@ def filter_dict(d):
 def is_non_empty(x):
     return pd.notna(x) and str(x).strip() != ''
 
+
+def _split_multi_value_cell(value):
+    if value is None:
+        return []
+    raw_value = str(value).strip()
+    if not raw_value:
+        return []
+    return [item.strip() for item in raw_value.split(";") if item.strip()]
+
+
+def _collect_unique_column_values(dataset, column_name, multi_value_columns):
+    if column_name not in dataset.columns:
+        return []
+
+    values = dataset[column_name].fillna("").astype(str)
+    if column_name in multi_value_columns:
+        values = values.str.split(";").explode()
+
+    values = values.astype(str).str.strip()
+    values = values[values != ""]
+    if values.empty:
+        return []
+    return values.drop_duplicates().tolist()
+
+
+def _collect_multi_value_column_map(dataset, multi_value_columns):
+    value_map = {}
+    multi_value_set = set(multi_value_columns)
+    for column_name in multi_value_columns:
+        unique_values = _collect_unique_column_values(
+            dataset,
+            column_name,
+            multi_value_set,
+        )
+        if unique_values:
+            value_map[column_name] = unique_values
+    return value_map
+
+
+def _chunk_list(values, chunk_size):
+    for start in range(0, len(values), chunk_size):
+        yield values[start : start + chunk_size]
+
+
+def _fetch_cmid_metadata(driver, cmids, chunk_size=1500):
+    if not cmids:
+        return {}
+
+    query = """
+    UNWIND $cmids AS cmid
+    OPTIONAL MATCH (n {CMID: cmid})
+    WITH cmid, collect(DISTINCT n) AS nodes
+    WITH cmid, reduce(labels_flat = [], node IN nodes | labels_flat + labels(node)) AS labels_flat
+    WITH cmid, [label IN labels_flat WHERE label IS NOT NULL] AS nodeLabels
+    WITH cmid, nodeLabels, [label IN nodeLabels WHERE label <> 'CATEGORY'] AS nonCategoryLabels
+    OPTIONAL MATCH (m:LABEL)
+    WHERE m.CMName IN nonCategoryLabels
+    RETURN cmid, nodeLabels AS labels, collect(DISTINCT m.groupLabel) AS groupLabels
+    """
+
+    metadata = {}
+    for chunk in _chunk_list(cmids, chunk_size):
+        check_query_cancellation()
+        records = getQuery(query, driver, params={"cmids": chunk})
+        for record in records:
+            cmid = str(record.get("cmid") or "").strip()
+            if not cmid:
+                continue
+            metadata[cmid] = {
+                "labels": {label for label in (record.get("labels") or []) if label},
+                "groupLabels": {label for label in (record.get("groupLabels") or []) if label},
+            }
+        for cmid in chunk:
+            metadata.setdefault(cmid, {"labels": set(), "groupLabels": set()})
+
+    return metadata
+
+
+def _required_label_for_column(column_name):
+    if column_name == "country":
+        return "DISTRICT"
+    if column_name == "language":
+        return "LANGUOID"
+    return column_name.upper()
+
+
+def _validate_non_parent_multi_value_columns(column_value_map, cmid_metadata):
+    for column_name, values in column_value_map.items():
+        if column_name == "parent":
+            continue
+        required_label = _required_label_for_column(column_name)
+        wrong_labels = [
+            value
+            for value in values
+            if required_label not in cmid_metadata.get(value, {}).get("labels", set())
+        ]
+        if wrong_labels:
+            raise ValueError(
+                f"Error: Wrong labels in database for column '{column_name}': {wrong_labels}"
+            )
+
+
+def _validate_parent_label_compatibility(dataset, cmid_metadata, driver, user):
+    if "parent" not in dataset.columns:
+        return
+
+    updateLog(
+        f"log/{user}uploadProgress.txt",
+        "validating parent column label compatibility",
+        write="a",
+    )
+
+    all_group_labels = getQuery(
+        "MATCH (n:LABEL) RETURN DISTINCT n.groupLabel AS groupLabel",
+        driver,
+        type="dict",
+    )
+    valid_group_labels = {
+        item["groupLabel"]
+        for item in all_group_labels
+        if item.get("groupLabel") and item["groupLabel"] != "CATEGORY"
+    }
+
+    has_cmid = "CMID" in dataset.columns
+    has_group_label = "groupLabel" in dataset.columns
+    child_cmid_values = (
+        dataset["CMID"].fillna("").astype(str).str.strip().tolist()
+        if has_cmid
+        else [""] * len(dataset)
+    )
+    child_group_values = (
+        dataset["groupLabel"].fillna("").astype(str).str.strip().tolist()
+        if has_group_label
+        else [""] * len(dataset)
+    )
+    parent_value_lists = (
+        dataset["parent"].fillna("").astype(str).apply(_split_multi_value_cell).tolist()
+    )
+
+    child_group_sets = []
+    for row_index, (cmid_value, group_label_value) in enumerate(
+        zip(child_cmid_values, child_group_values),
+        start=1,
+    ):
+        if cmid_value:
+            child_group_sets.append(
+                set(cmid_metadata.get(cmid_value, {}).get("groupLabels", set()))
+            )
+        elif group_label_value:
+            child_group_sets.append({group_label_value})
+        else:
+            raise ValueError(
+                f"Both CMID and labels are missing for row {row_index - 1} "
+            )
+
+    total_pairs = sum(max(1, len(values)) for values in parent_value_lists)
+    processed_pairs = 0
+    next_log_time = time.monotonic() + 1.5
+
+    for row_number, (parent_values, child_groups) in enumerate(
+        zip(parent_value_lists, child_group_sets),
+        start=1,
+    ):
+        normalized_parent_values = parent_values if parent_values else [None]
+
+        for parent_value in normalized_parent_values:
+            processed_pairs += 1
+            if parent_value is None:
+                parent_groups = child_groups
+            else:
+                parent_groups = set(
+                    cmid_metadata.get(parent_value, {}).get("groupLabels", set())
+                )
+
+            if processed_pairs % 250 == 0:
+                check_query_cancellation()
+
+            if processed_pairs == total_pairs or time.monotonic() >= next_log_time:
+                updateLog(
+                    f"log/{user}uploadProgress.txt",
+                    f"parent label validation progress: {processed_pairs}/{total_pairs}",
+                    write="a",
+                )
+                next_log_time = time.monotonic() + 1.5
+
+            parent_group_match = valid_group_labels.intersection(parent_groups)
+            if not parent_group_match:
+                continue
+
+            child_group_match = valid_group_labels.intersection(child_groups)
+            if "GENERIC" in parent_group_match:
+                continue
+            if parent_group_match != child_group_match:
+                raise ValueError(
+                    f"Mismatch at row {row_number}: Parent node labels dont match that of the child node.\n"
+                    f"Parent Labels: {sorted(parent_groups)}\n"
+                    f"Child Labels: {sorted(child_groups)}"
+                )
+
+    updateLog(
+        f"log/{user}uploadProgress.txt",
+        "completed parent label validation checks",
+        write="a",
+    )
+
 #Checks whether labels in parent_labels have same group_label as labels in child_labels.arguments must be lists
 def validate_labels(uploadOption,driver,parent_labels, child_labels):
     all_group_labels = getQuery("MATCH (n:LABEL) RETURN DISTINCT n.groupLabel AS groupLabel", driver, type="dict")
@@ -1710,21 +1915,12 @@ def input_Nodes_Uses(
             OPTIONAL MATCH (n:{search_label} {{CMID: row.value}})
             RETURN row.value AS value, COUNT(n) AS count
             """
-            rows_to_check = []
-            seen_values = set()
-            for row in data_dict:
-                if row.get(i):
-                    if i in multi_value_columns:
-                        values = [
-                            val.strip() for val in row[i].split(";") if val.strip()
-                        ]
-                    else:
-                        values = [str(row[i])]
-            
-                    for v in values:
-                        if v not in seen_values:
-                            seen_values.add(v)
-                            rows_to_check.append({"value": v})
+            unique_values = _collect_unique_column_values(
+                dataset,
+                i,
+                set(multi_value_columns),
+            )
+            rows_to_check = [{"value": value} for value in unique_values]
 
             if not rows_to_check:
                 continue
@@ -1831,158 +2027,34 @@ def input_Nodes_Uses(
                 )
 
     # 2) Grouplabel for CMID in property matches property
-    # 3) Grouplabel for CMID for parent matches Grouplabel of child. 
-    for i in multi_value_columns:
-        if i in dataset.columns:
-            rows_to_check = []
-            for row in data_dict:
-                if row.get(i):
-                    values = [val.strip() for val in row[i].split(";") if val.strip()]
-                    rows_to_check.extend([{"value": v} for v in values])
-            
-            if not rows_to_check:
-                continue
+    # 3) Grouplabel for CMID for parent matches Grouplabel of child.
+    multi_value_column_map = _collect_multi_value_column_map(dataset, multi_value_columns)
+    unique_multi_value_cmids = sorted(
+        {
+            cmid
+            for values in multi_value_column_map.values()
+            for cmid in values
+        }
+    )
+    cmid_metadata = {}
+    if unique_multi_value_cmids:
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            f"loading metadata for {len(unique_multi_value_cmids)} multi-value CMIDs",
+            write="a",
+        )
+        cmid_metadata = _fetch_cmid_metadata(driver, unique_multi_value_cmids)
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            f"loaded metadata for {len(cmid_metadata)} multi-value CMIDs",
+            write="a",
+        )
 
-            # checks for validity of non-parent labels
-            if i != "parent":
-
-                if i == "country":
-                    check_label = "DISTRICT"
-                elif i == "language":
-                    check_label = "LANGUOID"
-                else:
-                    check_label = i.upper()
-
-                query = """UNWIND $rows AS row
-                        MATCH (n:CATEGORY {CMID: row.value})
-                        WHERE NOT $label IN labels(n)
-                        RETURN row.value AS value
-                        """
-
-                wrong_labels = getQuery(
-                    query,
-                    driver,
-                    params={"rows": rows_to_check, "label": check_label},
-                    type="list",
-                )
-
-                if wrong_labels:
-                    raise ValueError(
-                        f"Error: Wrong labels in database for column '{i}': {wrong_labels}"
-                    )
-
-            elif i == "parent":
-                updateLog(
-                    f"log/{user}uploadProgress.txt",
-                    "validating parent column label compatibility",
-                    write="a",
-                )
-                # if uploadOption == "add_node":
-                #     child_column = "label"
-                # else:
-                #     child_column = "CMID"
-
-                query = """
-                        UNWIND $cmids AS cmid
-                        OPTIONAL MATCH (n {CMID: cmid})
-                        WITH cmid, head([lbl IN labels(n) WHERE lbl <> 'CATEGORY']) AS otherLabel
-                        OPTIONAL MATCH (m:LABEL {CMName: otherLabel})
-                        RETURN cmid, collect(m.groupLabel) AS groupLabels
-                        """
-
-                # combined is a list of tuples
-                combined = []
-
-                child_cmids = set()
-                parent_cmids = set()
-                for _, row in dataset.iterrows():
-                    if "CMID" in dataset.columns and row["CMID"]:
-                        child_cmids.add(str(row["CMID"]).strip())
-                    if row["parent"] != "":
-                        for parent_value in str(row["parent"]).split(";"):
-                            parent_value = parent_value.strip()
-                            if parent_value:
-                                parent_cmids.add(parent_value)
-
-                all_cmids = sorted([cmid for cmid in (child_cmids | parent_cmids) if cmid])
-                cmid_to_labels = {}
-                if all_cmids:
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        f"resolving labels for {len(all_cmids)} CMIDs in parent validation",
-                        write="a",
-                    )
-                    query_result = getQuery(
-                        query,
-                        driver,
-                        params={"cmids": all_cmids},
-                    )
-                    for record in query_result:
-                        labels = [label for label in (record.get("groupLabels") or []) if label]
-                        cmid_to_labels[record.get("cmid")] = labels
-                    updateLog(
-                        f"log/{user}uploadProgress.txt",
-                        f"resolved labels for {len(cmid_to_labels)} CMIDs in parent validation",
-                        write="a",
-                    )
-
-                # Builds dictionary of labels for parents and children
-                # dictionary can have more elements than the original number of rows if there are multiple parents in a row
-                row_count = len(dataset)
-                progress_interval = 25
-                for row_index, row in dataset.iterrows():
-                    if "CMID" in dataset.columns and row["CMID"]:
-                        child_value = cmid_to_labels.get(str(row["CMID"]).strip(), [])
-                    elif "groupLabel" in dataset.columns and row["groupLabel"]:
-                        child_value = row['groupLabel']
-                    else:
-                        raise ValueError(
-                           
-                            f"Both CMID and labels are missing for row {row_index} "
-                        )
-                    
-                    if row['parent'] != "":
-                                        
-                        parent_values = str(row['parent']).split(';')
-
-                        # iterating through parents in a single row
-                        for j in parent_values:
-                            j = j.strip()
-                            j = cmid_to_labels.get(j, [])
-                            if isinstance(child_value,list):
-                                combined.append((child_value, j))
-                            else:
-                                combined.append(([child_value],j))
-                    else:
-                        if isinstance(child_value,list):
-                                combined.append((child_value, child_value))
-                        else:
-                            combined.append(([child_value],[child_value]))
-
-                    if row_count > progress_interval and (row_index + 1) % progress_interval == 0:
-                        check_query_cancellation()
-                        updateLog(
-                            f"log/{user}uploadProgress.txt",
-                            f"parent label validation progress: {row_index + 1}/{row_count}",
-                            write="a",
-                        )
-                                       
-
-                parent_labels = []
-                child_labels = []
-                
-                for a, b in combined:
-                    parent_labels.append(b)
-                    child_labels.append(a)
-                
-                updateLog(
-                    f"log/{user}uploadProgress.txt",
-                    "completed parent label validation checks",
-                    write="a",
-                )
-                check_query_cancellation()
-                validate_labels(uploadOption,driver,parent_labels, child_labels)
-                check_query_cancellation()
+    _validate_non_parent_multi_value_columns(multi_value_column_map, cmid_metadata)
+    check_query_cancellation()
+    if "parent" in multi_value_column_map:
+        _validate_parent_label_compatibility(dataset, cmid_metadata, driver, user)
+        check_query_cancellation()
             
     # checks if the eventType value is valid
 
