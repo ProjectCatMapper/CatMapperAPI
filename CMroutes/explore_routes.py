@@ -365,13 +365,9 @@ def getNetworkjs():
         cmid = re.split(",", cmid)
         domain = request.args.get('domain')
         limit = int(request.args.get('limit'))
+        domains = []
         if domain is not None:
-            domain = re.split(",", domain)
-        else:
-            if cmid[0].startswith(("SD", "AD")):
-                domain = "DATASET"
-            else:
-                domain = "CATEGORY"
+            domains = [d.strip() for d in re.split(",", domain) if d and d.strip()]
 
         relation = unlist(request.args.get('relation'))
         if relation is None:
@@ -380,15 +376,16 @@ def getNetworkjs():
         database = request.args.get('database')
 
         driver = getDriver(database)
-        
-        if domain == "DATASET" and relation == "USES":
+
+        is_dataset_root = bool(cmid) and cmid[0].startswith(("SD", "AD"))
+
+        if is_dataset_root and relation == "USES":
             cypher_query = """
             unwind $cmid as cmid
             MATCH (a:DATASET {CMID: cmid})
             OPTIONAL MATCH (a)-[r:USES]->(e:CATEGORY)
-            WITH a, e, collect(r) AS rels
-            WHERE e IS NOT NULL
-            WITH a, collect({e: e, r: rels[0]})[0..$limit] AS pairs
+            WHERE $domain_count = 0 OR ANY(label IN labels(e) WHERE label IN $domains)
+            WITH a, collect({e: e, r: r})[0..$limit] AS pairs
             RETURN
                 collect(distinct a) AS a,
                 [p IN pairs WHERE p.r IS NOT NULL | p.r] AS r,
@@ -412,7 +409,8 @@ def getNetworkjs():
             OPTIONAL MATCH (a)-[r4:MERGING]->(v2:VARIABLE)
             WITH a,
                  [x IN collect(distinct r1) + collect(distinct r2) + collect(distinct r5) + collect(distinct r6) + collect(distinct r3) + collect(distinct r4) WHERE x IS NOT NULL][0..$limit] AS r,
-                 [x IN collect(distinct s) + collect(distinct v) + collect(distinct s2) + collect(distinct m2) + collect(distinct m) + collect(distinct v2) WHERE x IS NOT NULL][0..$limit] AS e
+                 [x IN collect(distinct s) + collect(distinct v) + collect(distinct s2) + collect(distinct m2) + collect(distinct m) + collect(distinct v2)
+                  WHERE x IS NOT NULL AND ($domain_count = 0 OR ANY(label IN labels(x) WHERE label IN $domains))][0..$limit] AS e
             RETURN collect(distinct a) AS a, r, e
             """
         else:
@@ -420,13 +418,14 @@ def getNetworkjs():
             unwind $cmid as cmid
             MATCH (a:CATEGORY|DATASET {{CMID: cmid}})
             optional match (a)-[r:{relation}]-(e:CATEGORY|DATASET)
-            with a, r, e limit $limit
-            return collect(distinct a) as a, collect(distinct r) as r, collect(distinct e) as e
+            WHERE e IS NULL OR $domain_count = 0 OR ANY(label IN labels(e) WHERE label IN $domains)
+            with a, collect(distinct r)[0..$limit] as r, collect(distinct e)[0..$limit] as e
+            return collect(distinct a) as a, r, e
             """
 
         # Execute the Cypher queries
         result = getQuery(
-            cypher_query, driver = driver, cmid=cmid, limit=limit, type = "records")
+            cypher_query, driver = driver, cmid=cmid, limit=limit, domains=domains, domain_count=len(domains), type = "records")
         result = unlist(result)
         node = []
         rel = []
@@ -468,7 +467,7 @@ def getNetworkjs():
         _apply_node_colors(node, label_metadata_map)
         _apply_node_colors(end, label_metadata_map)
 
-        return {"node": node, "relations": rel, "relNodes": end, "params": [{"cmid": cmid, "database": database, "domain": domain, "relation": relation}]}
+        return {"node": node, "relations": rel, "relNodes": end, "params": [{"cmid": cmid, "database": database, "domain": domains, "relation": relation}]}
     except Exception as e:
         return str(e), 500
 
