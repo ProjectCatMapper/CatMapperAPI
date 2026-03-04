@@ -1,5 +1,5 @@
 import inspect
-from flask import request, Blueprint
+from flask import request, Blueprint, jsonify
 import CM.routines as routines_module
 import CM.USES as uses_module
 from .extensions import mail
@@ -56,7 +56,13 @@ def get_routines(routine, database):
             if k in sig.parameters
         }
 
-        return func(**kwargs)
+        result = func(**kwargs)
+
+        # Flask cannot return scalar bool/int/float directly from a route handler.
+        if isinstance(result, (bool, int, float)) or result is None:
+            return jsonify({"result": result})
+
+        return result
 
     except Exception as e:
         return str(e), 500
