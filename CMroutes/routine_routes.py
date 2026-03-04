@@ -6,6 +6,13 @@ from .extensions import mail
 
 routine_bp = Blueprint('routine', __name__)
 
+
+def _parse_bool(value, default=True):
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 @routine_bp.route('/routines/<routine>/<database>', methods=['GET'])
 def get_routines(routine, database):
     try:
@@ -36,7 +43,10 @@ def get_routines(routine, database):
             'user': request.args.get('user') or None,
             'action': request.args.get('action') or "default",
             'return_type': request.args.get('return_type') or "info",
-            'save': request.args.get('save') or True
+            'save': _parse_bool(request.args.get('save'), True),
+            'property': request.args.get('property') or None,
+            'path': request.args.get('path') or None,
+            'value': request.args.get('value') or None,
         }
 
         # Match args to function signature
