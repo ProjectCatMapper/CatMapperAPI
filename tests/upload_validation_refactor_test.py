@@ -12,6 +12,31 @@ def test_collect_unique_column_values_for_multi_value_column():
     assert set(values) == {"AM1", "AM2", "AM3"}
 
 
+def test_input_nodes_uses_formats_key_before_key_validation(monkeypatch):
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+    monkeypatch.setattr(upload, "getQuery", lambda *args, **kwargs: [])
+
+    def _raise_on_create_key(_dataset, _cols):
+        raise RuntimeError("createKey called")
+
+    monkeypatch.setattr(upload, "createKey", _raise_on_create_key)
+
+    with pytest.raises(RuntimeError, match="createKey called"):
+        upload.input_Nodes_Uses(
+            dataset=[{"CMID": "", "datasetID": "AD1", "Key": "raw-key", "label": "DIALECT"}],
+            database="ArchaMap",
+            uploadOption="add_uses",
+            formatKey=True,
+            optionalProperties=[],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
+
+
 def test_validate_non_parent_multi_value_columns_raises_for_wrong_label():
     dataset = pd.DataFrame(
         {

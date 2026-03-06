@@ -1766,8 +1766,14 @@ def input_Nodes_Uses(
                         axis=1
                     )
        
+    # When simple upload is used, convert raw selected key column values into
+    # CatMapper key format before key validation (e.g., "Key == value").
+    if formatKey is True:
+        if "Key" not in dataset.columns:
+            raise ValueError("Key column is required when formatKey is True")
+        dataset = createKey(dataset, "Key").copy()
+
     # When uploading keys or new keys, need to make sure they follow the standard convention
-        
     #pattern = re.compile(r"^\s*[^=&&]+?\s*==\s*[^=&&]+?(?:\s*&&\s*[^=&&]+?\s*==\s*[^=&&]+?)*\s*$")
     pattern = re.compile(r"^.+?\s==\s.+?(?:\s&&\s.+?\s==\s.+?)*$")
 
@@ -2469,9 +2475,6 @@ def input_Nodes_Uses(
         dataset["label"] = "CATEGORY"
     elif uploadOption == "node_add" or uploadOption == "node_replace":
         dataset["label"] = "DATASET"
-
-    if formatKey is True:
-        dataset = createKey(dataset, "Key").copy()
 
     if geocode is True:
         raise Exception("Error: geocode must be False")
