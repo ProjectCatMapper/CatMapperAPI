@@ -54,9 +54,13 @@ if ! run_as_deploy_user grep -q '^CATMAPPER_AUTH_SECRET=' .env; then
   echo "Generated CATMAPPER_AUTH_SECRET in .env"
 fi
 
-# 4. Restart the Docker container
-echo "Restarting API container..."
+# 4. Restart API and worker containers so background jobs run updated code.
+echo "Restarting API and worker containers..."
 docker restart api
+docker restart api-worker
+if docker ps -a --format '{{.Names}}' | grep -qx "api-waiting-worker"; then
+  docker restart api-waiting-worker
+fi
 
 # 5. Git Tagging
 # This creates a local tag and pushes it to your remote (e.g., GitHub/GitLab)

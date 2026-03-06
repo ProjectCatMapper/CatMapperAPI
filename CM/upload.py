@@ -377,8 +377,6 @@ def createUSES(links, database, user):
             driver=driver,
         )
 
-        updateLog(f"log/{user}uploadProgress.txt", " test 3 ", write="a")
-
         # Get the number of relationships after adding
         nRels2 = getQuery(
             "MATCH ()-[r]->() RETURN count(*) AS count", driver, type="list"

@@ -21,12 +21,12 @@ def is_rq_enabled():
     return get_redis_connection() is not None
 
 
-def _enqueue(function_path, *args):
+def _enqueue(function_path, *args, queue_name_env="CATMAPPER_UPLOAD_QUEUE", default_queue="catmapper-upload"):
     connection = get_redis_connection()
     if Queue is None or connection is None:
         raise RuntimeError("RQ queue is not available. Check redis/rq setup.")
 
-    queue_name = os.getenv("CATMAPPER_UPLOAD_QUEUE", "catmapper-upload")
+    queue_name = os.getenv(queue_name_env, default_queue)
     failure_ttl = int(os.getenv("CATMAPPER_RQ_FAILURE_TTL", "86400"))
     queue = Queue(name=queue_name, connection=connection)
     return queue.enqueue(
@@ -39,8 +39,19 @@ def _enqueue(function_path, *args):
 
 
 def enqueue_upload_task(task_id):
-    return _enqueue("CMroutes.upload_jobs.run_upload_task", task_id)
+    return _enqueue(
+        "CMroutes.upload_jobs.run_upload_task",
+        task_id,
+        queue_name_env="CATMAPPER_UPLOAD_QUEUE",
+        default_queue="catmapper-upload",
+    )
 
 
 def enqueue_waiting_uses_task(waiting_task_id, database):
-    return _enqueue("CMroutes.upload_jobs.run_waiting_uses_task", waiting_task_id, database)
+    return _enqueue(
+        "CMroutes.upload_jobs.run_waiting_uses_task",
+        waiting_task_id,
+        database,
+        queue_name_env="CATMAPPER_WAITING_USES_QUEUE",
+        default_queue="catmapper-waiting-uses",
+    )
