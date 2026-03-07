@@ -108,12 +108,12 @@ return u.userid as userid, u.first as first, u.last as last, u.email as email, u
         result = getQuery(query, driver, params={"userids": userid})
 
     else:
-        query = f"""
+        query = """
 match (u {{access: 'pending'}})
-WHERE "{database}" in u.database 
+WHERE any(db in coalesce(u.database, []) WHERE toLower(toString(db)) = toLower($database))
 return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
 """
-        result = getQuery(query, driver)
+        result = getQuery(query, driver, params={"database": database})
 
     return result
 
