@@ -109,7 +109,7 @@ return u.userid as userid, u.first as first, u.last as last, u.email as email, u
 
     else:
         query = """
-match (u {{access: 'pending'}})
+match (u {access: 'pending'})
 with u, toLower(toString($database)) as target, toLower(toString(coalesce(u.database, ""))) as db_raw
 with
     u,
