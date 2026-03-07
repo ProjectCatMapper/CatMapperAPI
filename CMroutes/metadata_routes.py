@@ -34,6 +34,41 @@ def getProperties_route(database, domain):
     except Exception as e:
         return {"error": str(e)}, 500
 
+
+@metadata_bp.route("/metadata/uploadProperties/<database>", methods=["GET"])
+def get_upload_properties(database):
+    try:
+        driver = getDriver(database)
+        rows = getPropertiesMetadata(driver)
+        if not isinstance(rows, list):
+            rows = []
+
+        node_properties = {}
+        uses_properties = {}
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("property") or "").strip()
+            if not name:
+                continue
+            description = str(row.get("description") or "").strip()
+            prop_type = str(row.get("type") or "").strip().lower()
+            entry = {"property": name, "description": description}
+
+            if prop_type == "relationship":
+                uses_properties[name] = entry
+            elif prop_type == "node":
+                node_properties[name] = entry
+
+        return jsonify({
+            "database": str(database),
+            "nodeProperties": sorted(node_properties.values(), key=lambda x: x["property"].lower()),
+            "usesProperties": sorted(uses_properties.values(), key=lambda x: x["property"].lower()),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @metadata_bp.route("/getTranslatedomains", methods=['GET'])
 def getTranslatedomains():
     database = request.args.get("database")
