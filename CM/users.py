@@ -110,7 +110,14 @@ return u.userid as userid, u.first as first, u.last as last, u.email as email, u
     else:
         query = """
 match (u {{access: 'pending'}})
-WHERE any(db in coalesce(u.database, []) WHERE toLower(toString(db)) = toLower($database))
+with u, toLower(toString($database)) as target, toLower(toString(coalesce(u.database, ""))) as db_raw
+with
+    u,
+    target,
+    [token in reduce(parts = [], part in split(db_raw, ",") | parts + split(part, "|")) |
+        trim(replace(replace(replace(replace(token, "[", ""), "]", ""), "\"", ""), "'", ""))
+    ] as db_tokens
+where target in [token in db_tokens where token <> ""]
 return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
 """
         result = getQuery(query, driver, params={"database": database})
