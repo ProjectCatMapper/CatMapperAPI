@@ -272,7 +272,10 @@ def translate(
         query,
         table,
         countsamename,
-        uniqueRows=False):
+        uniqueRows=False,
+        progress_callback=None,
+        batch_size=None,
+        cancel_checker=None):
     """
     database: Name or identifier of the target database; used to initialize a connection driver.
     property: The property or attribute to match against in the graph database (e.g., 'Name', 'Key', 'glottocode').
@@ -290,6 +293,16 @@ def translate(
     """
 
     overwrite_warnings = []
+
+    def emit_progress(percent, message, processed_rows=0, total_rows=0):
+        if not callable(progress_callback):
+            return
+        progress_callback(
+            percent=max(0, min(100, int(percent))),
+            message=str(message),
+            processedRows=int(processed_rows or 0),
+            totalRows=int(total_rows or 0),
+        )
 
     if isinstance(uniqueRows, str):
         if uniqueRows.lower() == 'true' or uniqueRows == True:
@@ -336,6 +349,8 @@ def translate(
     if property not in {"Key", "Name", "glottocode", "ISO", "CMID"}:
         property = sanitize_cypher_identifier(property, "property")
 
+    emit_progress(10, "Processing input...")
+
     # format data
     # add rowid,
     # table = [{'Name':'test1',"key": 1}, {'Name':'test1',"key": 2}, {'Name':'test2',"key": 3}]
@@ -380,6 +395,21 @@ def translate(
     rows['CMuniqueCategoryID'] = rows.index
 
     rows = rows.to_dict('records')
+    total_rows = len(rows)
+    emit_progress(20, "Preprocessing complete.", processed_rows=0, total_rows=total_rows)
+
+    if total_rows == 0:
+        data = df.copy()
+        match_type_col = f'matchType_{term}'
+        if match_type_col in data.columns:
+            overwrite_warnings.append(
+                f"Overwrote existing uploaded column: {match_type_col}"
+            )
+        data[match_type_col] = "none"
+        desired_order = [col for col in data.columns.tolist()]
+        emit_progress(90, "Processing 0 out of 0 rows.", processed_rows=0, total_rows=0)
+        emit_progress(100, "Translation completed.", processed_rows=0, total_rows=0)
+        return data, desired_order, overwrite_warnings
 
     # Define the Cypher query
 
@@ -546,7 +576,37 @@ def translate(
     else:
         # data contains any matching rows found by the propose translate query
         # any rows that are not matched are not included
-        data = getQuery(cypher_query, driver, params={'rows': rows})
+        if callable(progress_callback):
+            try:
+                effective_batch_size = int(batch_size) if batch_size is not None else 2000
+            except Exception:
+                effective_batch_size = 2000
+            effective_batch_size = max(1, effective_batch_size)
+            data = []
+
+            if total_rows == 0:
+                emit_progress(90, "Processing 0 out of 0 rows.", processed_rows=0, total_rows=0)
+            else:
+                for start_index in range(0, total_rows, effective_batch_size):
+                    if callable(cancel_checker) and cancel_checker():
+                        raise Exception("Translation cancelled by user request.")
+
+                    batch_rows = rows[start_index:start_index + effective_batch_size]
+                    batch_result = getQuery(cypher_query, driver, params={'rows': batch_rows})
+                    if isinstance(batch_result, list) and batch_result:
+                        data.extend(batch_result)
+
+                    processed_rows = min(total_rows, start_index + len(batch_rows))
+                    interval_percent = 20 + int((processed_rows / total_rows) * 70)
+                    emit_progress(
+                        min(90, interval_percent),
+                        f"Processing {processed_rows} out of {total_rows} rows.",
+                        processed_rows=processed_rows,
+                        total_rows=total_rows,
+                    )
+                emit_progress(90, f"Processing {total_rows} out of {total_rows} rows.", processed_rows=total_rows, total_rows=total_rows)
+        else:
+            data = getQuery(cypher_query, driver, params={'rows': rows})
 
     if not data:
         data = df
@@ -557,6 +617,7 @@ def translate(
             )
         data[f'matchType_{term}'] = "None"
         desired_order = [col for col in data.columns.tolist()]
+        emit_progress(100, "Translation completed.", processed_rows=total_rows, total_rows=total_rows)
         return data, desired_order, overwrite_warnings
 
     data = pd.DataFrame(data)
@@ -661,6 +722,7 @@ def translate(
 
     desired_order = [col for col in data.columns.tolist()]
 
+    emit_progress(100, "Translation completed.", processed_rows=total_rows, total_rows=total_rows)
     return data, desired_order, overwrite_warnings
 
 # this determines what type of match each matched row is and returns the df with matchtype column
