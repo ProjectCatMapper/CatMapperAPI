@@ -12,10 +12,9 @@ def test_enable_user_pending_lookup_filters_database_case_insensitively(monkeypa
 
     monkeypatch.setattr(users_module, "getQuery", fake_get_query)
 
-    users_module.enableUser(database="archamap", process="pending", userid=None, approver="100")
+    users_module.enableUser(database="ArchaMap", process="pending", userid=None, approver="100")
 
     assert "match (u {access: 'pending'})" in captured["query"]
     assert "{{access" not in captured["query"]
-    assert "reduce(parts = [], part in split(db_raw, \",\") | parts + split(part, \"|\"))" in captured["query"]
-    assert "where target in [token in db_tokens where token <> \"\"]" in captured["query"]
+    assert "where $database in [db in coalesce(u.database, []) | toLower(toString(db))]" in captured["query"]
     assert captured["params"] == {"database": "archamap"}

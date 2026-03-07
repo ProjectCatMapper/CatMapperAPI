@@ -91,6 +91,7 @@ def verifyUser(user, pwd, role=None):
 def enableUser(database, process, userid, approver):
 
     driver = getDriver('userdb')
+    database = str(database or "").strip().lower()
 
     if process == "approve":
         if userid is None:
@@ -108,16 +109,11 @@ return u.userid as userid, u.first as first, u.last as last, u.email as email, u
         result = getQuery(query, driver, params={"userids": userid})
 
     else:
+        if not database:
+            raise Exception("Error: database must be specified")
         query = """
 match (u {access: 'pending'})
-with u, toLower(toString($database)) as target, toLower(toString(coalesce(u.database, ""))) as db_raw
-with
-    u,
-    target,
-    [token in reduce(parts = [], part in split(db_raw, ",") | parts + split(part, "|")) |
-        trim(replace(replace(replace(replace(token, "[", ""), "]", ""), "\"", ""), "'", ""))
-    ] as db_tokens
-where target in [token in db_tokens where token <> ""]
+where $database in [db in coalesce(u.database, []) | toLower(toString(db))]
 return u.userid as userid, u.first as first, u.last as last, u.email as email, u.database as database, u.intendedUse as intendedUse, u.access as access
 """
         result = getQuery(query, driver, params={"database": database})

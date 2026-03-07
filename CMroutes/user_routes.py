@@ -94,10 +94,14 @@ def _cleanup_requests():
 
 def _normalize_database(database_value):
     if isinstance(database_value, list):
-        return "|".join(str(item) for item in database_value if item)
+        return "|".join(
+            str(item).strip().lower()
+            for item in database_value
+            if str(item).strip()
+        )
     if database_value is None:
         return ""
-    return str(database_value)
+    return str(database_value).strip().lower()
 
 
 def _read_json_payload():
@@ -331,7 +335,7 @@ def getnewuser():
         support_email = get_support_email() or "the configured support email"
         data = request.get_data()
         data = json.loads(data)
-        database = data.get("database")
+        database = _normalize_database(data.get("database"))
         firstName = data.get("firstName")
         lastName = data.get("lastName")
         email = data.get("email")
@@ -340,12 +344,8 @@ def getnewuser():
         password = password_hash(password)
         intendedUse = data.get("intendedUse")
 
-        if database.lower() == "sociomap":
-            database = "SocioMap"
-        elif database.lower() == "archamap":
-            database = "ArchaMap"
-        else:
-            raise Exception("database must be 'SocioMap' or 'ArchaMap'")
+        if database not in {"sociomap", "archamap"}:
+            raise Exception("database must be 'sociomap' or 'archamap'")
 
         driver = getDriver("userdb")
 
@@ -1110,7 +1110,7 @@ def updateNewUsers():
     try:
         data = request.get_data()
         data = json.loads(data)
-        database = unlist(data.get('database'))
+        database = _normalize_database(unlist(data.get('database')))
         credentials = unlist(data.get('credentials'))
         process = unlist(data.get('process'))
         userid = data.get('userid')

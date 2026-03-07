@@ -191,7 +191,7 @@ def test_profile_update_request_and_confirm(client, monkeypatch):
     confirm_payload = confirm_response.get_json()
     assert confirm_payload["lastName"] == "Byron"
     assert confirm_payload["username"] == "ada-byron"
-    assert confirm_payload["database"] == "ArchaMap"
+    assert confirm_payload["database"] == "archamap"
 
 
 def test_password_change_request_and_confirm(client, monkeypatch):
