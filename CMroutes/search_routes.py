@@ -347,12 +347,12 @@ def start_translate_task():
         payload = request.get_data()
         payload = json.loads(payload)
         translate_kwargs = _parse_translate_payload(payload)
-        batch_size_raw = payload.get("batchSize", 2000)
+        batch_size_raw = payload.get("batchSize", 500)
 
         try:
             batch_size = int(batch_size_raw)
         except Exception:
-            batch_size = 2000
+            batch_size = 500
         batch_size = max(1, batch_size)
 
         task_id = uuid.uuid4().hex

@@ -578,9 +578,9 @@ def translate(
         # any rows that are not matched are not included
         if callable(progress_callback):
             try:
-                effective_batch_size = int(batch_size) if batch_size is not None else 2000
+                effective_batch_size = int(batch_size) if batch_size is not None else 500
             except Exception:
-                effective_batch_size = 2000
+                effective_batch_size = 500
             effective_batch_size = max(1, effective_batch_size)
             data = []
 
