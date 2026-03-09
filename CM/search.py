@@ -592,18 +592,18 @@ def translate(
                         raise Exception("Translation cancelled by user request.")
 
                     batch_rows = rows[start_index:start_index + effective_batch_size]
+                    target_rows = min(total_rows, start_index + len(batch_rows))
+                    interval_percent = 20 + int((target_rows / total_rows) * 70)
+                    emit_progress(
+                        min(90, interval_percent),
+                        f"Processing {target_rows} out of {total_rows} rows.",
+                        processed_rows=start_index,
+                        total_rows=total_rows,
+                    )
+
                     batch_result = getQuery(cypher_query, driver, params={'rows': batch_rows})
                     if isinstance(batch_result, list) and batch_result:
                         data.extend(batch_result)
-
-                    processed_rows = min(total_rows, start_index + len(batch_rows))
-                    interval_percent = 20 + int((processed_rows / total_rows) * 70)
-                    emit_progress(
-                        min(90, interval_percent),
-                        f"Processing {processed_rows} out of {total_rows} rows.",
-                        processed_rows=processed_rows,
-                        total_rows=total_rows,
-                    )
                 emit_progress(90, f"Processing {total_rows} out of {total_rows} rows.", processed_rows=total_rows, total_rows=total_rows)
         else:
             data = getQuery(cypher_query, driver, params={'rows': rows})
