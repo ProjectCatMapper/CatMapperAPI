@@ -119,12 +119,13 @@ def test_validate_parent_label_compatibility_accepts_generic_parent(monkeypatch)
         ],
     )
 
-    upload._validate_parent_label_compatibility(
+    result = upload._validate_parent_label_compatibility(
         dataset=dataset,
         cmid_metadata=cmid_metadata,
         driver=object(),
         user="tester",
     )
+    assert result is None
 
 
 def test_collect_cmid_metadata_targets_includes_child_cmids_for_parent_validation():

@@ -46,16 +46,19 @@ def test_translate_start_and_status_flow_returns_progress_and_result(client, mon
     assert task_id
 
     final_payload = None
-    for _ in range(50):
+    last_payload = None
+    deadline = time.monotonic() + 1.5
+    while time.monotonic() < deadline:
         status_response = client.post("/translate/status", json={"taskId": task_id})
         assert status_response.status_code == 200
         payload = status_response.get_json()
+        last_payload = payload
         if payload.get("status") == "completed":
             final_payload = payload
             break
-        time.sleep(0.02)
+        time.sleep(0.01)
 
-    assert final_payload is not None
+    assert final_payload is not None, f"translate task did not complete in time; last payload={last_payload}"
     assert final_payload["percent"] == 100
     assert final_payload["file"] == [{"CMID": "AM1", "period": "Archaic"}]
     assert final_payload["order"] == ["period", "CMID"]
