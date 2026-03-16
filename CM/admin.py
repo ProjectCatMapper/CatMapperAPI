@@ -288,8 +288,11 @@ def add_edit_delete_USES(database,user,input):
     new_property_value = input.get('s1_3').strip()
     addOrEditNode = input.get('s1_1')
     indexValue = input.get('s1_7')
-    key = input.get('s1_4')[indexValue-1][1]["Key"]
-    datasetID = input.get('s1_4')[indexValue-1][2]["CMID"]
+    selected_index = int(indexValue) - 1
+    selected_relation = input.get('s1_4')[selected_index]
+    key = selected_relation[1].get("Key")
+    relID = selected_relation[1].get("id")
+    datasetID = selected_relation[2]["CMID"]
     integer_constrained_properties = {
         "yearStart", "yearEnd", "recordStart", 
         "recordEnd", "sampleSize", "yearPublished"
@@ -299,6 +302,7 @@ def add_edit_delete_USES(database,user,input):
 
     metaTypes = getPropertiesMetadata(driver)
     metaType = [item['metaType'] for item in metaTypes if item["type"] == "relationship" and item["property"] == USES_property]
+    is_list_meta = any(isinstance(mt, str) and "list" in mt.lower() for mt in metaType)
     
     # When adding or editing properties, checks to make sure CMIDs are valid and the labels are correct.
     if addOrEditNode != "delete":
@@ -332,16 +336,20 @@ def add_edit_delete_USES(database,user,input):
 
         elif USES_property == "populationEstimate":
             try:
-                new_property_value = float(new_property_value)
+                # Validate numeric input, but keep string form for list-like metaTypes.
+                parsed_population = float(new_property_value)
+                if not is_list_meta:
+                    new_property_value = parsed_population
             except (ValueError, TypeError):
                 raise TypeError(f"Property '{USES_property}' requires a floating-point number. Received: {new_property_value}")
 
                 
-    if "list" in metaType:        
-        if "||" in new_property_value:
-            new_property_value=new_property_value.split("||")
+    if is_list_meta:
+        normalized_value = str(new_property_value).strip()
+        if "||" in normalized_value:
+            new_property_value = [part.strip() for part in normalized_value.split("||") if part.strip()]
         else:
-            new_property_value=[new_property_value]
+            new_property_value = [normalized_value]
     
     if addOrEditNode == "edit" or addOrEditNode == "add":
         if USES_property == "Key":
@@ -349,6 +357,7 @@ def add_edit_delete_USES(database,user,input):
                 'CMID': CMID,
                 'Key': key,
                 'datasetID': datasetID,
+                'relID': relID,
                 "NewKey": new_property_value
             }
             USES_property = ["NewKey"]
@@ -382,6 +391,7 @@ def add_edit_delete_USES(database,user,input):
                     'CMID': CMID,
                     'Key': key,
                     'datasetID': datasetID,
+                    'relID': relID,
                     USES_property: new_property_value
                 }
             USES_property = [USES_property]
@@ -393,19 +403,45 @@ def add_edit_delete_USES(database,user,input):
               
         df = pd.DataFrame([data])
         # Arguments coming from admin have already been parsed into lists
-        updateProperty(df,USES_property,isDataset,database,user,updateType = "overwrite", propertyType="USES")
+        update_result = updateProperty(
+            df,
+            USES_property,
+            isDataset,
+            database,
+            user,
+            updateType="overwrite",
+            propertyType="USES",
+        )
+        if isinstance(update_result, str) and update_result.lower().startswith("error"):
+            raise Exception(update_result)
+        if isinstance(update_result, dict):
+            updated_rows = update_result.get("result")
+            if isinstance(updated_rows, list) and len(updated_rows) == 0:
+                raise Exception("No USES ties were updated. Verify the selected relation still exists.")
         processUSES(CMID=CMID,database=database,user=user)
     elif addOrEditNode == "delete":
-        q = f"""
-                MATCH (a:CATEGORY {{CMID: $CMID}})<-[r:USES {{Key: $key}}]-(d:DATASET {{CMID: $datasetID}})
-                REMOVE r[$USES_property] RETURN elementId(r) as relID
-            """
-        params = {
-            "CMID": CMID,
-            "key": key,
-            "datasetID": datasetID,
-            "USES_property": USES_property
-        }
+        if relID:
+            q = """
+                    MATCH ()-[r:USES]-()
+                    WHERE elementId(r) = $relID
+                    REMOVE r[$USES_property]
+                    RETURN elementId(r) as relID
+                """
+            params = {
+                "relID": relID,
+                "USES_property": USES_property
+            }
+        else:
+            q = f"""
+                    MATCH (a:CATEGORY {{CMID: $CMID}})<-[r:USES {{Key: $key}}]-(d:DATASET {{CMID: $datasetID}})
+                    REMOVE r[$USES_property] RETURN elementId(r) as relID
+                """
+            params = {
+                "CMID": CMID,
+                "key": key,
+                "datasetID": datasetID,
+                "USES_property": USES_property
+            }
         result = getQuery(q,driver=driver,params = params)
         processUSES(CMID=CMID,database=database,user=user)
 

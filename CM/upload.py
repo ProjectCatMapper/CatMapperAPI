@@ -421,8 +421,13 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
 
         driver = getDriver(database)
 
+        has_relid = False
         if propertyType == "USES":
-            requiredCols = ["datasetID", "CMID", "Key"]
+            relid_series = None
+            if "relID" in df.columns:
+                relid_series = df["relID"].fillna("").astype(str).str.strip()
+                has_relid = (not relid_series.empty) and relid_series.ne("").all()
+            requiredCols = ["relID"] if has_relid else ["datasetID", "CMID", "Key"]
         elif propertyType == "NODE":
             requiredCols = ["CMID"]
         else:
@@ -448,22 +453,23 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
         
         #get elementID of USES tie uniquely identified by CMID,Key and datasetID
         if propertyType == "USES":
-            id_query = """UNWIND $rows AS row
-                MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
-                RETURN elementId(r) AS relID, row.CMID AS CMID, row.Key AS Key, row.datasetID AS datasetID
-                """
-            
-            id_values = getQuery(
-                query=id_query,
-                driver=driver,
-                params={"rows": df.to_dict(orient="records")}, type="df"
-            )
-
-            df = df.merge(
-                    id_values,
-                    on=["CMID", "Key", "datasetID"],
-                    how="left"
+            if not has_relid:
+                id_query = """UNWIND $rows AS row
+                    MATCH (a:DATASET {CMID: row.datasetID})-[r:USES {Key: row.Key}]->(b:CATEGORY {CMID: row.CMID})
+                    RETURN elementId(r) AS relID, row.CMID AS CMID, row.Key AS Key, row.datasetID AS datasetID
+                    """
+                
+                id_values = getQuery(
+                    query=id_query,
+                    driver=driver,
+                    params={"rows": df.to_dict(orient="records")}, type="df"
                 )
+
+                df = df.merge(
+                        id_values,
+                        on=["CMID", "Key", "datasetID"],
+                        how="left"
+                    )
                         
         if "NewKey" in df.columns:
             df = df.rename(columns={
