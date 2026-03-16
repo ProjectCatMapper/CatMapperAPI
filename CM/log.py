@@ -5,11 +5,17 @@ from datetime import datetime
 
 def createLog(id, type, log, user, driver,isDataset = False):
     print("inside create Log")
-    # Ensure both id and log are lists of the same length
-    if isinstance(log, str):
-        log = [log]
+    # Ensure both id and log are lists of the same length.
     if isinstance(id, str):
         id = [id]
+    elif not isinstance(id, list):
+        id = list(id) if isinstance(id, tuple) else [id]
+
+    if isinstance(log, str):
+        log = [log] * len(id)
+    elif not isinstance(log, list):
+        log = list(log) if isinstance(log, tuple) else [log]
+
     if len(id) != len(log):
         raise ValueError(
             "If passing multiple IDs and logs, they must match 1-to-1")

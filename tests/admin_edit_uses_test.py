@@ -49,7 +49,7 @@ def test_add_edit_delete_uses_uses_relid_for_selected_relation(monkeypatch):
     assert row["relID"] == "rel-123"
     assert row["CMID"] == "SM254496"
     assert row["datasetID"] == "SD1"
-    assert row["populationEstimate"] == 792.0
+    assert row["populationEstimate"] == "792"
 
 
 def test_add_edit_delete_uses_raises_when_no_rows_are_updated(monkeypatch):
@@ -106,3 +106,40 @@ def test_add_edit_delete_uses_handles_list_population_meta_type(monkeypatch):
     assert result == "done"
     row = captured["df"].to_dict(orient="records")[0]
     assert row["populationEstimate"] == ["792"]
+
+
+def test_add_edit_delete_uses_delete_logs_multiple_rel_ids(monkeypatch):
+    captured = {}
+
+    payload = _base_input()
+    payload["s1_1"] = "delete"
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [])
+    monkeypatch.setattr(admin, "processUSES", lambda **kwargs: None)
+    monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "REMOVE r[$USES_property]" in query:
+            return [{"relID": "rel-1"}, {"relID": "rel-2"}]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin, "getQuery", fake_get_query)
+
+    def fake_create_log(id, type, log, user, driver, isDataset=False):
+        captured["id"] = id
+        captured["log"] = log
+        captured["type"] = type
+        return "Completed"
+
+    monkeypatch.setattr(admin, "createLog", fake_create_log)
+
+    result = admin.add_edit_delete_USES("sociomap", "tester", payload)
+
+    assert result == "done"
+    assert captured["type"] == "relation"
+    assert captured["id"] == ["rel-1", "rel-2"]
+    assert captured["log"] == [
+        "deleted USES property populationEstimate",
+        "deleted USES property populationEstimate",
+    ]

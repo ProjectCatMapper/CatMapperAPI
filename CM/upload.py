@@ -504,7 +504,25 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
         for var in vars:
             # Get the metaType for the given property
             metaType = metaTypeDict.get(var)
-            if updateType == "overwrite" and var != "log":
+            if var == "populationEstimate":
+                # custom.formatProperties expects string-compatible tokens.
+                new_tokens = (
+                    f"[v IN apoc.coll.flatten([row.{var}], true) "
+                    f"WHERE v IS NOT NULL | toString(v)]"
+                )
+                existing_tokens = (
+                    f"[v IN apoc.coll.flatten([{node_or_tie}.{var}], true) "
+                    f"WHERE v IS NOT NULL | toString(v)]"
+                )
+                if updateType == "overwrite" and var != "log":
+                    props.append(
+                        f"{node_or_tie}.{var} = custom.formatProperties({new_tokens},'{metaType}','{sep}')[0].prop"
+                    )
+                else:
+                    props.append(
+                        f"{node_or_tie}.{var} = custom.formatProperties(apoc.coll.flatten([{existing_tokens},{new_tokens}], true),'{metaType}','{sep}')[0].prop"
+                    )
+            elif updateType == "overwrite" and var != "log":
                 props.append(
                     f"{node_or_tie}.{var} = custom.formatProperties(['',row.{var}],'{metaType}','{sep}')[0].prop"
                 )

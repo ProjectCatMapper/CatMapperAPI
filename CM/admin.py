@@ -336,10 +336,9 @@ def add_edit_delete_USES(database,user,input):
 
         elif USES_property == "populationEstimate":
             try:
-                # Validate numeric input, but keep string form for list-like metaTypes.
-                parsed_population = float(new_property_value)
-                if not is_list_meta:
-                    new_property_value = parsed_population
+                # Validate numeric input, then keep string form for formatter compatibility.
+                float(new_property_value)
+                new_property_value = str(new_property_value).strip()
             except (ValueError, TypeError):
                 raise TypeError(f"Property '{USES_property}' requires a floating-point number. Received: {new_property_value}")
 
@@ -444,10 +443,17 @@ def add_edit_delete_USES(database,user,input):
             }
         result = getQuery(q,driver=driver,params = params)
         processUSES(CMID=CMID,database=database,user=user)
-
-        createLog(id=[row["relID"] for row in result], type="relation",
-                        log=f"deleted USES property {input.get('s1_8')}",
-                        user=user, driver=driver)
+        rel_ids = [row["relID"] for row in result] if isinstance(result, list) else []
+        if not rel_ids:
+            raise Exception("No USES ties were updated. Verify the selected relation still exists.")
+        log_message = f"deleted USES property {input.get('s1_8')}"
+        createLog(
+            id=rel_ids,
+            type="relation",
+            log=[log_message] * len(rel_ids),
+            user=user,
+            driver=driver,
+        )
 
     return "done"
 
