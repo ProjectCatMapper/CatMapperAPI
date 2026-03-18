@@ -480,6 +480,37 @@ def processUSES(database, CMID=None, user="0", detailed = True):
         result = str(e)
         return result, 500
 
+
+def updateUSES(database, CMID=None, user="0", detailed=False):
+    """
+    Admin-friendly wrapper around processUSES.
+
+    - If CMID is omitted/blank, run for the full database.
+    - If CMID is provided, run for exactly one validated CMID.
+    """
+    cmid_value = CMID
+    if isinstance(cmid_value, list):
+        cmid_value = [str(item).strip().upper() for item in cmid_value if str(item).strip()]
+        if len(cmid_value) > 1:
+            raise ValueError("updateUSES accepts a single CMID or no CMID.")
+        cmid_value = cmid_value[0] if cmid_value else None
+    elif isinstance(cmid_value, str):
+        cmid_value = cmid_value.strip().upper()
+        if cmid_value == "":
+            cmid_value = None
+    elif cmid_value is not None:
+        raise ValueError("CMID must be a string, list, or null.")
+
+    if cmid_value is not None:
+        validated_cmid = cleanCMID(cmid_value)
+        if validated_cmid is None:
+            raise ValueError(
+                f"Invalid CMID '{cmid_value}'. Expected one CMID starting with AM, SM, AD, or SD."
+            )
+        cmid_value = validated_cmid
+
+    return processUSES(database=database, CMID=cmid_value, user=user, detailed=detailed)
+
 # gets all CMIDs based on r.status = 'update' and sends to processUSES in batches
 #If no CMIDs are found , it does nothing
 def waitingUSES(database, BATCH_SIZE=1000):
