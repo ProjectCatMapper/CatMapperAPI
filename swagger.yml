@@ -1,152 +1,989 @@
 openapi: 3.1.0
 info:
   title: CatMapper API
-  description: This is the CatMapper API
-  version: 1.0.0
+  version: 1.1.0
+  description: |
+    Public and authenticated endpoints for CatMapper (SocioMap and ArchaMap).
+
+    Notes on auth:
+    - Most read endpoints do not require authentication.
+    - Write/task endpoints support either:
+      1) `Authorization: Bearer <token>`
+      2) `X-API-Key: <key>` (or `Authorization: ApiKey <key>`)
+      3) Backward-compatible body credentials in `cred` (`{ userid, key }`).
 servers:
-- url: https://api.catmapper.org
+  - url: https://api.catmapper.org
+    description: Production
+  - url: http://localhost:5000
+    description: Local development
+
+tags:
+  - name: Docs
+  - name: Search
+  - name: Explore
+  - name: Metadata
+  - name: Merge
+  - name: Translate
+  - name: Upload
+  - name: Admin
+
 paths:
-  /dataset:
+  /docs:
     get:
-      summary: Download dataset information
-      description: Return all USES relationships for the specified dataset
-      parameters:
-      - name: database
-        in: query
-        description: Name of the CatMapper database to search
-        required: true
-        style: form
-        explode: true
-        schema:
-          enum:
-          - SocioMap
-          - ArchaMap
+      tags: [Docs]
+      summary: Swagger UI
+      description: Returns the interactive Swagger UI page.
       responses:
-        "200":
-          description: "JSON of search results unless query is true, then a JSON with\
-            \ the cypher query is returned."
+        '200':
+          description: HTML page
           content:
-            application/json:
+            text/html:
               schema:
-                $ref: '#/components/schemas/inline_response_200'
-        "500":
-          description: JSON of error
+                type: string
+
+  /swagger:
+    get:
+      tags: [Docs]
+      summary: OpenAPI YAML
+      description: Returns this OpenAPI specification file.
+      responses:
+        '200':
+          description: YAML spec
           content:
-            application/json:
-              schema: {}
+            application/x-yaml:
+              schema:
+                type: string
+
   /search:
     get:
-      summary: Search in the database
-      description: Performs a search across various parameters in the CatMapper database.
+      tags: [Search]
+      summary: Search categories/entities
+      description: |
+        Searches a CatMapper database for matching categories/entities.
+
+        Multi-context filtering:
+        - `contexts` can be passed as comma-separated values and/or repeated params.
+        - `contextMode=all` requires ties to every context CMID.
+        - `contextMode=any` requires at least one context CMID.
       parameters:
-      - name: database
-        in: query
-        description: Name of the CatMapper database to search
-        required: true
-        style: form
-        explode: true
-        schema:
-          enum:
-          - SocioMap
-          - ArchaMap
-      - name: term
-        in: query
-        description: Search term
-        required: false
-        style: form
-        explode: true
-        schema: {}
-      - name: property
-        in: query
-        description: Property to search by
-        required: false
-        style: form
-        explode: true
-        schema:
-          enum:
-          - Name
-          - CMID
-          - Key
-      - name: domain
-        in: query
-        description: Domain containing the category
-        required: false
-        style: form
-        explode: true
-        schema:
-          default: CATEGORY
-          enum:
-          - DISTRICT
-          - ETHNICITY
-          - STONE
-      - name: yearStart
-        in: query
-        description: Earliest year the category existed or data was collected from
-        required: false
-        style: form
-        explode: true
-        schema: {}
-      - name: yearEnd
-        in: query
-        description: Latest year the category existed or data was collected from
-        required: false
-        style: form
-        explode: true
-        schema: {}
-      - name: country
-        in: query
-        description: CMID of ADM0 node with DISTRICT_OF tie
-        required: false
-        style: form
-        explode: true
-        schema: {}
-      - name: context
-        in: query
-        description: CMID of parent node in network
-        required: false
-        style: form
-        explode: true
-        schema: {}
-      - name: limit
-        in: query
-        description: Number of results to limit search to
-        required: false
-        style: form
-        explode: true
-        schema:
-          default: "10000"
-      - name: query
-        in: query
-        description: Whether to return results or cypher query
-        required: false
-        style: form
-        explode: true
-        schema:
-          enum:
-          - "true"
-          - "false"
+        - $ref: '#/components/parameters/databaseQuery'
+        - name: term
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Search term.
+        - name: property
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [Name, CMID, Key]
+          description: Property to search by.
+        - name: domain
+          in: query
+          required: false
+          schema:
+            type: string
+            default: CATEGORY
+          description: Domain/subdomain label to constrain matches.
+        - name: dataset
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Optional dataset CMID filter.
+        - name: yearStart
+          in: query
+          required: false
+          schema:
+            oneOf:
+              - type: integer
+              - type: string
+        - name: yearEnd
+          in: query
+          required: false
+          schema:
+            oneOf:
+              - type: integer
+              - type: string
+        - name: country
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Context by ADM0 CMID.
+        - name: context
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Single context CMID.
+        - name: contexts
+          in: query
+          required: false
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+          description: Comma-separated or repeated context CMIDs.
+        - name: contextMode
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [all, any]
+            default: all
+          description: How multiple contexts are combined.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            oneOf:
+              - type: integer
+              - type: string
+            default: 10000
+        - name: query
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ['true', 'false']
+          description: Return Cypher query metadata instead of result payload details.
       responses:
-        "200":
-          description: "JSON of search results unless query is true, then a JSON with\
-            \ the cypher query is returned."
+        '200':
+          description: Search results
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/inline_response_200'
-        "500":
-          description: JSON of error
+                type: array
+                items:
+                  $ref: '#/components/schemas/SearchResult'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /translate:
+    post:
+      tags: [Translate]
+      summary: Synchronous translate
+      description: Performs translation and returns rows immediately.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TranslateRequest'
+      responses:
+        '200':
+          description: Translation completed
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/TranslateResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /translate/start:
+    post:
+      tags: [Translate]
+      summary: Start async translate task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/TranslateRequest'
+                - type: object
+                  properties:
+                    batchSize:
+                      type: integer
+                      minimum: 1
+      responses:
+        '200':
+          description: Task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslateTask'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /translate/status:
+    post:
+      tags: [Translate]
+      summary: Get async translate status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [taskId]
+              properties:
+                taskId:
+                  type: string
+      responses:
+        '200':
+          description: Task state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslateTask'
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /translate/cancel:
+    post:
+      tags: [Translate]
+      summary: Cancel async translate task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [taskId]
+              properties:
+                taskId:
+                  type: string
+      responses:
+        '200':
+          description: Task state after cancel request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TranslateTask'
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /nlp/parse-log:
+    post:
+      tags: [Translate]
+      summary: Save NLP parse request log entry
+      description: Saves a JSON log entry under server log storage for NLP parse diagnostics.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Log entry written
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  path:
+                    type: string
+        '400':
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /dataset:
+    get:
+      tags: [Explore]
+      summary: Dataset detail/query (GET)
+      parameters:
+        - $ref: '#/components/parameters/databaseQuery'
+        - name: cmid
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: domain
+          in: query
+          required: false
+          schema:
+            oneOf:
+              - type: string
+              - type: array
+                items:
+                  type: string
+        - name: children
+          in: query
+          required: false
+          schema:
+            oneOf:
+              - type: boolean
+              - type: string
+      responses:
+        '200':
+          description: Dataset payload
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '500':
+          $ref: '#/components/responses/InternalError'
+    post:
+      tags: [Explore]
+      summary: Dataset detail/query (POST)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [database, cmid]
+              properties:
+                database:
+                  type: string
+                cmid:
+                  oneOf:
+                    - type: string
+                    - type: array
+                      items:
+                        type: string
+                domain:
+                  oneOf:
+                    - type: string
+                    - type: array
+                      items:
+                        type: string
+                children:
+                  type: boolean
+      responses:
+        '200':
+          description: Dataset payload
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /CMID/{database}/{cmid}:
+    get:
+      tags: [Explore]
+      summary: CMID node details
+      parameters:
+        - $ref: '#/components/parameters/databasePath'
+        - $ref: '#/components/parameters/cmidPath'
+      responses:
+        '200':
+          description: Node and USES tie property details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  node:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  relations:
+                    type: object
+                    additionalProperties: true
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /allDatasets:
+    get:
+      tags: [Metadata]
+      summary: List all datasets in a database
+      parameters:
+        - $ref: '#/components/parameters/databaseQuery'
+      responses:
+        '200':
+          description: Dataset list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /datasetDomains:
+    post:
+      tags: [Metadata]
+      summary: Domains represented in dataset ties
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [database, cmid]
+              properties:
+                database:
+                  type: string
+                cmid:
+                  oneOf:
+                    - type: string
+                    - type: array
+                      items:
+                        type: string
+                children:
+                  oneOf:
+                    - type: boolean
+                    - type: string
+      responses:
+        '200':
+          description: Domain labels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /metadata/domains/{database}:
+    get:
+      tags: [Metadata]
+      summary: Public domains
+      parameters:
+        - $ref: '#/components/parameters/databasePath'
+      responses:
+        '200':
+          description: Domain list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+  /metadata/subdomains/{database}:
+    get:
+      tags: [Metadata]
+      summary: Public subdomains
+      parameters:
+        - $ref: '#/components/parameters/databasePath'
+      responses:
+        '200':
+          description: Subdomain list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+  /joinDatasets:
+    post:
+      tags: [Merge]
+      summary: Join two dataset payloads by mapped keys
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [database, joinLeft, joinRight, domain]
+              properties:
+                database:
+                  type: string
+                domain:
+                  type: string
+                joinLeft:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+                joinRight:
+                  type: array
+                  items:
+                    type: object
+                    additionalProperties: true
+      responses:
+        '200':
+          description: Join result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /proposeMergeSubmit:
+    post:
+      tags: [Merge]
+      summary: Propose merge mappings across datasets
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [datasetChoices, categoryLabel, database, equivalence]
+              properties:
+                datasetChoices:
+                  type: string
+                  description: Comma-separated dataset CMIDs.
+                categoryLabel:
+                  type: string
+                mergelevel:
+                  type: string
+                intersection:
+                  oneOf:
+                    - type: boolean
+                    - type: string
+                database:
+                  type: string
+                equivalence:
+                  type: string
+                resultFormat:
+                  type: string
+                selectedKeyvariable:
+                  oneOf:
+                    - type: string
+                    - type: array
+                      items:
+                        type: string
+      responses:
+        '200':
+          description: Merge proposal result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /uploadInputNodes:
+    post:
+      tags: [Upload]
+      summary: Start upload task
+      description: Queues upload processing and returns a task id.
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadStartRequest'
+      responses:
+        '202':
+          description: Upload task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadTaskResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /uploadInputNodesStatus:
+    post:
+      tags: [Upload]
+      summary: Get upload task status
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskStatusRequest'
+      responses:
+        '200':
+          description: Upload task status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /uploadInputNodesCancel:
+    post:
+      tags: [Upload]
+      summary: Cancel upload task
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskStatusRequest'
+      responses:
+        '202':
+          description: Cancel request accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /uploadWaitingUSESStatus:
+    post:
+      tags: [Upload]
+      summary: Get waiting-USES task status
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskStatusRequest'
+      responses:
+        '200':
+          description: Waiting-USES task status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          description: Task not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /updateWaitingUSES:
+    post:
+      tags: [Admin]
+      summary: Run waiting-USES refresh
+      description: Triggers update of queued USES relationships for a database.
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [database]
+              properties:
+                database:
+                  type: string
+                user:
+                  type: string
+                cred:
+                  $ref: '#/components/schemas/LegacyCred'
+      responses:
+        '200':
+          description: Refresh result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '500':
+          $ref: '#/components/responses/InternalError'
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: token
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  parameters:
+    databaseQuery:
+      name: database
+      in: query
+      required: true
+      schema:
+        type: string
+      description: Database identifier (for example `SocioMap` or `ArchaMap`).
+    databasePath:
+      name: database
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Database identifier (for example `SocioMap` or `ArchaMap`).
+    cmidPath:
+      name: cmid
+      in: path
+      required: true
+      schema:
+        type: string
+      description: CatMapper ID.
+
+  responses:
+    InternalError:
+      description: Server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
   schemas:
-    inline_response_200:
+    ErrorResponse:
+      type: object
       properties:
-        CMID: {}
-        CMName: {}
+        error:
+          type: string
+      additionalProperties: true
+
+    LegacyCred:
+      type: object
+      properties:
+        userid:
+          type: string
+        key:
+          type: string
+      additionalProperties: true
+
+    SearchResult:
+      type: object
+      properties:
+        CMID:
+          type: string
+        CMName:
+          type: string
         country:
-          items: {}
+          type: array
+          items:
+            type: string
         domain:
-          items: {}
-        matching: {}
-        matchingDistance: {}
+          type: array
+          items:
+            type: string
+        matching:
+          type: string
+        matchingDistance:
+          oneOf:
+            - type: integer
+            - type: number
+      additionalProperties: true
+
+    TranslateRequest:
+      type: object
+      properties:
+        database:
+          type: string
+        property:
+          type: string
+        domain:
+          type: string
+        key:
+          type: string
+        term:
+          type: string
+        country:
+          type: string
+        context:
+          type: string
+        dataset:
+          type: string
+        yearStart:
+          oneOf:
+            - type: integer
+            - type: string
+        yearEnd:
+          oneOf:
+            - type: integer
+            - type: string
+        query:
+          oneOf:
+            - type: boolean
+            - type: string
+        table:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        countsamename:
+          oneOf:
+            - type: boolean
+            - type: string
+        uniqueRows:
+          oneOf:
+            - type: boolean
+            - type: string
+      additionalProperties: true
+
+    TranslateResponse:
+      type: object
+      properties:
+        file:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        order:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+      additionalProperties: true
+
+    TranslateTask:
+      type: object
+      properties:
+        taskId:
+          type: string
+        status:
+          type: string
+          enum: [processing, completed, failed, canceled, queued]
+        stage:
+          type: string
+        percent:
+          type: integer
+        message:
+          type: string
+        error:
+          type: string
+        file:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        order:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        processedRows:
+          type: integer
+        totalRows:
+          type: integer
+        elapsedSeconds:
+          type: number
+      additionalProperties: true
+
+    UploadStartRequest:
+      type: object
+      required: [database, formData, df]
+      properties:
+        database:
+          type: string
+        user:
+          type: string
+        cred:
+          $ref: '#/components/schemas/LegacyCred'
+        so:
+          type: string
+          description: Upload mode selector (`standard` or app-specific values).
+        ao:
+          type: string
+          description: Upload action option (for example `add_uses`).
+        formData:
+          type: object
+          additionalProperties: true
+        df:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        addoptions:
+          type: object
+          additionalProperties: true
+        allContext:
+          type: array
+          items:
+            type: string
+        cursor:
+          type: integer
+      additionalProperties: true
+
+    TaskStatusRequest:
+      type: object
+      required: [taskId]
+      properties:
+        taskId:
+          type: string
+        user:
+          type: string
+        cred:
+          $ref: '#/components/schemas/LegacyCred'
+        cursor:
+          type: integer
+      additionalProperties: true
+
+    UploadTaskResponse:
+      type: object
+      properties:
+        taskId:
+          type: string
+        status:
+          type: string
+          example: queued
+        queue:
+          type: string
+          example: rq
+        progress:
+          type: object
+          properties:
+            batchSize:
+              type: integer
+            totalRows:
+              type: integer
+            totalBatches:
+              type: integer
+            completedBatches:
+              type: integer
+            percent:
+              type: integer
+          additionalProperties: true
+      additionalProperties: true
