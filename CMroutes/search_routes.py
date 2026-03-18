@@ -1,6 +1,7 @@
 from flask import request, Blueprint, jsonify
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -14,6 +15,10 @@ search_bp = Blueprint('search', __name__)
 _TRANSLATE_TASKS = {}
 _TRANSLATE_TASKS_LOCK = threading.Lock()
 _TRANSLATE_TASK_RETENTION_SECONDS = int(os.getenv("CATMAPPER_TRANSLATE_TASK_RETENTION_SECONDS", "7200"))
+_NLP_PARSE_LOG_WRITE_LOCK = threading.Lock()
+_DEFAULT_NLP_PARSE_LOG_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "log", "nlp_parse_requests")
+)
 
 
 def _utc_now_iso():
@@ -22,6 +27,49 @@ def _utc_now_iso():
 
 def _translate_task_key(task_id):
     return f"cm:translate:task:{task_id}"
+
+
+def _sanitize_log_value(value, depth=0):
+    if depth > 6:
+        return "<max_depth>"
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:10000]
+    if isinstance(value, list):
+        return [_sanitize_log_value(item, depth + 1) for item in value[:200]]
+    if isinstance(value, dict):
+        clipped = {}
+        for idx, (key, item) in enumerate(value.items()):
+            if idx >= 200:
+                break
+            clipped[str(key)[:120]] = _sanitize_log_value(item, depth + 1)
+        return clipped
+    return str(value)[:2000]
+
+
+def _safe_log_database_name(raw_database):
+    value = str(raw_database or "").strip().lower()
+    if re.fullmatch(r"[a-z0-9_-]{1,40}", value):
+        return value
+    return "unknown"
+
+
+def _parse_contexts_query_args(req):
+    values = []
+
+    for raw in req.args.getlist("contexts"):
+        if raw is None:
+            continue
+        values.extend(str(raw).split(","))
+
+    raw_context = req.args.get("context")
+    if raw_context is not None:
+        values.append(raw_context)
+
+    cleaned = [str(value).strip() for value in values if str(value).strip()]
+    # preserve order while deduplicating
+    return list(dict.fromkeys(cleaned))
 
 
 def _load_translate_task(task_id):
@@ -233,6 +281,18 @@ def getSearch():
           type: string
           required: false
           description: CMID of parent node in network
+        - name: contexts
+          in: query
+          type: string
+          required: false
+          description: Comma-separated list of context CMIDs (or repeated query parameter). Supports multi-context filtering.
+        - name: contextMode
+          in: query
+          type: string
+          enum: ['all','any']
+          required: false
+          default: all
+          description: Multi-context mode. `all` requires ties to every context CMID. `any` requires at least one.
         - name: limit
           in: query
           type: string
@@ -290,6 +350,8 @@ def getSearch():
         yearStart = request.args.get('yearStart')
         yearEnd = request.args.get('yearEnd')
         context = request.args.get('context')
+        contexts = _parse_contexts_query_args(request)
+        context_mode = request.args.get('contextMode') or request.args.get('context_mode') or "all"
         dataset = request.args.get('dataset')
         country = request.args.get('country')
         query = request.args.get('query')
@@ -304,7 +366,9 @@ def getSearch():
             context,
             country,
             query,
-            dataset)
+            dataset,
+            contexts=contexts,
+            context_mode=context_mode)
         
         return jsonify(result)
 
@@ -438,5 +502,37 @@ def cancel_translate_task():
             message="Cancel requested. Waiting for current batch to finish.",
         )
         return jsonify(_translate_task_response(updated))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@search_bp.route('/nlp/parse-log', methods=['POST'])
+def save_nlp_parse_log():
+    try:
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"error": "JSON object payload is required."}), 400
+
+        database = _safe_log_database_name(payload.get("database"))
+        now_utc = datetime.now(timezone.utc)
+        log_dir = os.getenv("CATMAPPER_NLP_PARSE_LOG_DIR", _DEFAULT_NLP_PARSE_LOG_DIR)
+        os.makedirs(log_dir, exist_ok=True)
+
+        file_name = f"{database}_{now_utc.strftime('%Y-%m-%d')}.jsonl"
+        target_file = os.path.join(log_dir, file_name)
+
+        sanitized_payload = _sanitize_log_value(payload)
+        record = {
+            "server_received_at": now_utc.isoformat(),
+            "database": database,
+            "entry": sanitized_payload
+        }
+        line = json.dumps(record, ensure_ascii=False)
+
+        with _NLP_PARSE_LOG_WRITE_LOCK:
+            with open(target_file, "a", encoding="utf-8") as handle:
+                handle.write(line + "\n")
+
+        return jsonify({"status": "ok", "path": target_file}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500

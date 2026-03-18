@@ -12,7 +12,9 @@ def search(
         context,
         country,
         query,
-        dataset):
+        dataset,
+        contexts=None,
+        context_mode="all"):
 
     if domain == "ANY DOMAIN":
         domain = "CATEGORY"
@@ -46,12 +48,34 @@ def search(
 
     # need to add check to make sure property is valid and domain is valid
 
-    if context is not None:
-        if context == "null" or context == "":
-            context = None
-        else:
-            if re.search("^SM|^SD|^AD|^AM", context) is None:
-                raise Exception("context must be a valid CMID")
+    normalized_contexts = []
+
+    if isinstance(contexts, str):
+        contexts = [value.strip() for value in contexts.split(",")]
+    elif contexts is None:
+        contexts = []
+    elif not isinstance(contexts, list):
+        contexts = [contexts]
+
+    if context is not None and str(context).strip() not in {"", "null"}:
+        contexts = [context] + contexts
+
+    for raw_context in contexts:
+        if raw_context is None:
+            continue
+        cleaned_context = str(raw_context).strip()
+        if cleaned_context in {"", "null"}:
+            continue
+        if re.search("^SM|^SD|^AD|^AM", cleaned_context) is None:
+            raise Exception("context must be a valid CMID")
+        normalized_contexts.append(cleaned_context)
+
+    # preserve order while deduplicating
+    normalized_contexts = list(dict.fromkeys(normalized_contexts))
+
+    context_mode = str(context_mode or "all").strip().lower()
+    if context_mode not in {"all", "any"}:
+        raise Exception("contextMode must be 'all' or 'any'")
             
 
     if dataset is not None:
@@ -178,13 +202,13 @@ def search(
         qCountryFilter = " "
 
     # filter by context
-    if context is not None:
-        qContext = """
-    where (a)<--({CMID: $context})
+    if normalized_contexts:
+        context_predicate = "all" if context_mode == "all" else "any"
+        qContext = f"""
+    where {context_predicate}(ctx in $contexts WHERE (a)<-[]-({{CMID: ctx}}))
     with a, matching, score
     """
     else:
-        context = ""
         qContext = " "
 
     # filter by dataset
@@ -248,14 +272,14 @@ def search(
     if query != 'true':
 
         data = getQuery(cypher_query, driver, params={
-                        "term": term, "context": context, "dataset": dataset, "country": country, "yearStart": yearStart, "yearEnd": yearEnd})
+                        "term": term, "context": context, "contexts": normalized_contexts, "contextMode": context_mode, "dataset": dataset, "country": country, "yearStart": yearStart, "yearEnd": yearEnd})
         
         count = getQuery(cypher_query_count, driver, params={
-                        "term": term, "context": context, "dataset": dataset, "country": country, "yearStart": yearStart, "yearEnd": yearEnd})
+                        "term": term, "context": context, "contexts": normalized_contexts, "contextMode": context_mode, "dataset": dataset, "country": country, "yearStart": yearStart, "yearEnd": yearEnd})
 
         return ({"data":data,"count":count})
     else:
-        return ({"query": cypher_query, "parameters": [{"term": term, "context": context, "dataset": dataset, "country": country, "domain": domain, "yearStart": yearStart, "yearEnd": yearEnd}]})
+        return ({"query": cypher_query, "parameters": [{"term": term, "context": context, "contexts": normalized_contexts, "contextMode": context_mode, "dataset": dataset, "country": country, "domain": domain, "yearStart": yearStart, "yearEnd": yearEnd}]})
 
 
 def translate(
