@@ -1,11 +1,15 @@
 # extract_graph.py
 from neo4j import GraphDatabase
 import json
+import os
 
-# configure your Neo4j connection
-NEO4J_URI = "neo4j://sociomap.rc.asu.edu:7687"
-NEO4J_USER = "neo4j"
-NEO4J_PASSWORD = "[REDACTED]"
+# Configure Neo4j from environment variables to avoid hardcoded credentials.
+NEO4J_URI = os.getenv("NEO4J_URI")
+NEO4J_USER = os.getenv("NEO4J_USER")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+
+if not NEO4J_URI or not NEO4J_USER or not NEO4J_PASSWORD:
+    raise RuntimeError("Missing Neo4j credentials. Set NEO4J_URI, NEO4J_USER, and NEO4J_PASSWORD.")
 
 driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 
