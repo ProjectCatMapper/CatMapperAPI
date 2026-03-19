@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+staged_files="$(git diff --cached --name-only --diff-filter=ACMR)"
+if [ -z "$staged_files" ]; then
+  exit 0
+fi
+
+if printf '%s\n' "$staged_files" | rg -q '(^|/)\.env($|\.)|(^|/)aws_credentials($|\.)|(^|/)id_rsa($|\.)|\.pem$|\.key$|\.p12$|\.pfx$'; then
+  echo "Blocked commit: staged file path matches secret-bearing patterns." >&2
+  exit 1
+fi
+
+if git diff --cached -U0 | rg -n -i '^\+.*(CATMAPPER_AUTH_SECRET|SECRET_KEY|AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID|MAIL_PASSWORD|NEO4J_PASSWORD|api[_-]?key|password\s*=|passwd\s*=|neo4j\.auth\.basic\(|createDriver\(' >/dev/null; then
+  echo "Blocked commit: staged diff contains potential secrets. Rotate/remove first." >&2
+  exit 1
+fi
