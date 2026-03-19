@@ -11,7 +11,18 @@ if printf '%s\n' "$staged_files" | rg -q '(^|/)\.env($|\.)|(^|/)aws_credentials(
   exit 1
 fi
 
-if git diff --cached -U0 | rg -n -i '^\+.*(CATMAPPER_AUTH_SECRET|SECRET_KEY|AWS_SECRET_ACCESS_KEY|AWS_ACCESS_KEY_ID|MAIL_PASSWORD|NEO4J_PASSWORD|api[_-]?key|password\s*=|passwd\s*=|neo4j\.auth\.basic\(|createDriver\(' >/dev/null; then
+if git diff --cached -U0 -- . ':(exclude).githooks/pre-commit' | rg -n -i \
+  -e '^\+.*CATMAPPER_AUTH_SECRET' \
+  -e '^\+.*SECRET_KEY' \
+  -e '^\+.*AWS_SECRET_ACCESS_KEY' \
+  -e '^\+.*AWS_ACCESS_KEY_ID' \
+  -e '^\+.*MAIL_PASSWORD' \
+  -e '^\+.*NEO4J_PASSWORD' \
+  -e '^\+.*api[_-]?key' \
+  -e '^\+.*password\s*=' \
+  -e '^\+.*passwd\s*=' \
+  -e '^\+.*neo4j\.auth\.basic\(' \
+  -e '^\+.*createDriver\(' >/dev/null; then
   echo "Blocked commit: staged diff contains potential secrets. Rotate/remove first." >&2
   exit 1
 fi
