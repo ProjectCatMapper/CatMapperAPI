@@ -15,5 +15,11 @@ git config core.hooksPath .githooks
 chmod +x .githooks/pre-commit
 ```
 
+Or run:
+
+```bash
+./scripts/setup-hooks.sh
+```
+
 ## After History Rewrite
 If history was force-pushed, collaborators must re-clone or hard-reset local clones to new `origin/main`.
