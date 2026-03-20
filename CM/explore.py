@@ -20,7 +20,7 @@ def getCategoryInfo(database, cmid):
     label = getQuery(
         """
             UNWIND $cmid AS cmid
-            MATCH (n:CATEGORY|DATASET {CMID: cmid})
+            MATCH (n:CATEGORY|DATASET|DELETED {CMID: cmid})
             RETURN labels(n) AS labels
             """,
             driver=driver, cmid=cmid, type = "list")
@@ -28,7 +28,12 @@ def getCategoryInfo(database, cmid):
     if not label or not label[0]:
         return {"error": "Node not found"}
     
-    label = "DATASET" if "DATASET" in label[0] else "CATEGORY"
+    if "DELETED" in label[0]:
+        label = "DELETED"
+    elif "DATASET" in label[0]:
+        label = "DATASET"
+    else:
+        label = "CATEGORY"
     
     queries = _get_queries_for_label(label, database = database)
     
@@ -70,7 +75,7 @@ def getCategoryPage(database, cmid):
     # Get node metadata
     q_metadata = """
     UNWIND $cmid as cmid
-    MATCH (n:CATEGORY|DATASET {CMID: cmid}) 
+    MATCH (n:CATEGORY|DATASET|DELETED {CMID: cmid}) 
     OPTIONAL MATCH path=((n)-[r]-())
     RETURN DISTINCT 
         labels(n) AS labels, 
@@ -78,6 +83,13 @@ def getCategoryPage(database, cmid):
     """
     
     nodeMetaData = getQuery(q_metadata, driver=driver, params={'cmid': cmid}, type="records")
+    if not nodeMetaData:
+        return {
+            "samples": [],
+            "categories": [],
+            "childcategories": [],
+            "relnames": []
+        }
     
     # Extract and filter relation names
     relnames = nodeMetaData[0].get('relation_names', [])
