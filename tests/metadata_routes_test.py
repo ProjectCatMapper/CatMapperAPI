@@ -35,3 +35,32 @@ def test_upload_properties_endpoint_returns_error_payload_on_exception(client, m
 
     assert response.status_code == 500
     assert response.get_json()["error"] == "metadata unavailable"
+
+
+def test_property_nodes_table_endpoint_returns_all_property_node_properties(client, monkeypatch):
+    monkeypatch.setattr(metadata_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(
+        metadata_routes,
+        "getQuery",
+        lambda query, driver, type="dict", **kwargs: [
+            {"nodeID": "P1", "CMName": "country", "property": "CMName", "value": "country"},
+            {"nodeID": "P1", "CMName": "country", "property": "type", "value": "relationship"},
+        ],
+    )
+
+    response = client.get("/metadata/properties/archamap")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["database"] == "archamap"
+    assert payload["table"] == [
+        {"nodeID": "P1", "CMName": "country", "property": "CMName", "value": "country"},
+        {"nodeID": "P1", "CMName": "country", "property": "type", "value": "relationship"},
+    ]
+
+
+def test_property_nodes_table_endpoint_rejects_invalid_domain(client):
+    response = client.get("/metadata/properties/gisdb")
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "Invalid domain. Use 'sociomap' or 'archamap'."

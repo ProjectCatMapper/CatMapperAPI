@@ -4,6 +4,8 @@ from flask import jsonify, request, Blueprint
 
 metadata_bp = Blueprint('metadata', __name__)
 
+ALLOWED_PROPERTY_METADATA_DATABASES = {"sociomap", "archamap"}
+
 @metadata_bp.route('/metadata/domains/<database>', methods=['GET'])
 def getDomains1(database):
     domains = get_public_domains(database)
@@ -65,6 +67,32 @@ def get_upload_properties(database):
             "database": str(database),
             "nodeProperties": sorted(node_properties.values(), key=lambda x: x["property"].lower()),
             "usesProperties": sorted(uses_properties.values(), key=lambda x: x["property"].lower()),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@metadata_bp.route("/metadata/properties/<domain>", methods=["GET"])
+def get_all_property_node_properties(domain):
+    try:
+        database = str(domain or "").strip().lower()
+        if database not in ALLOWED_PROPERTY_METADATA_DATABASES:
+            return jsonify({"error": "Invalid domain. Use 'sociomap' or 'archamap'."}), 400
+
+        driver = getDriver(database)
+        query = """
+        MATCH (p:PROPERTY)
+        UNWIND keys(p) AS property
+        RETURN coalesce(p.CMID, elementId(p)) AS nodeID,
+               p.CMName AS CMName,
+               property,
+               p[property] AS value
+        ORDER BY toLower(coalesce(p.CMName, "")), property
+        """
+        table = getQuery(query=query, driver=driver, type="dict")
+
+        return jsonify({
+            "database": database,
+            "table": table if isinstance(table, list) else [],
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
