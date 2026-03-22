@@ -59,8 +59,8 @@ def test_property_nodes_table_endpoint_returns_all_property_node_properties(clie
     ]
 
 
-def test_property_nodes_table_endpoint_rejects_invalid_domain(client):
+def test_property_nodes_table_endpoint_rejects_invalid_database(client):
     response = client.get("/metadata/properties/gisdb")
 
     assert response.status_code == 400
-    assert response.get_json()["error"] == "Invalid domain. Use 'sociomap' or 'archamap'."
+    assert response.get_json()["error"] == "Invalid database. Use 'sociomap' or 'archamap'."

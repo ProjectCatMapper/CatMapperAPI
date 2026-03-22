@@ -71,12 +71,12 @@ def get_upload_properties(database):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@metadata_bp.route("/metadata/properties/<domain>", methods=["GET"])
-def get_all_property_node_properties(domain):
+@metadata_bp.route("/metadata/properties/<database>", methods=["GET"])
+def get_all_property_node_properties(database):
     try:
-        database = str(domain or "").strip().lower()
+        database = str(database or "").strip().lower()
         if database not in ALLOWED_PROPERTY_METADATA_DATABASES:
-            return jsonify({"error": "Invalid domain. Use 'sociomap' or 'archamap'."}), 400
+            return jsonify({"error": "Invalid database. Use 'sociomap' or 'archamap'."}), 400
 
         driver = getDriver(database)
         query = """

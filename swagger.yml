@@ -493,6 +493,58 @@ paths:
                 items:
                   type: string
 
+  /metadata/properties/{database}:
+    get:
+      tags: [Metadata]
+      summary: PROPERTY-node property table
+      description: |
+        Public endpoint that returns a tabular export of all key/value properties
+        found on all `PROPERTY` nodes for the selected database.
+        Supported databases are `sociomap` and `archamap`.
+      parameters:
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [sociomap, archamap]
+          description: Target database to query.
+      responses:
+        '200':
+          description: PROPERTY node property table
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  database:
+                    type: string
+                    enum: [sociomap, archamap]
+                  table:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        nodeID:
+                          type: string
+                        CMName:
+                          type: string
+                        property:
+                          type: string
+                        value: {}
+                      required: [nodeID, CMName, property]
+                      additionalProperties: false
+                required: [database, table]
+                additionalProperties: false
+        '400':
+          description: Invalid database name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
   /joinDatasets:
     post:
       tags: [Merge]
