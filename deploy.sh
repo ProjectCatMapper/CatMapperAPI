@@ -4,6 +4,7 @@ set -e  # Exit immediately if a command exits with a non-zero status
 
 DEPLOY_USER="rjbischo"
 APP_DIR="/mnt/storage/app/CatMapperAPI"
+ENV_FILE="$APP_DIR/.env"
 
 if [ ! -d "$APP_DIR" ]; then
   echo "❌ Error: App directory not found: $APP_DIR"
@@ -11,6 +12,13 @@ if [ ! -d "$APP_DIR" ]; then
 fi
 
 cd "$APP_DIR"
+
+if [ ! -f "$ENV_FILE" ]; then
+  echo "❌ Error: Missing required environment file: $ENV_FILE"
+  echo "Deployment halted to avoid silently regenerating auth settings."
+  echo "Restore the server-specific .env file and rerun deploy."
+  exit 1
+fi
 
 # Require sudo/root so deployment behavior is explicit.
 if [ "$EUID" -ne 0 ]; then
@@ -42,8 +50,7 @@ NEW_VERSION=$(date +%Y.%m.%d.%H%M)
 
 echo "🚀 Starting deployment for version: $NEW_VERSION"
 
-# 2. Ensure .env exists and update VERSION without clobbering other secrets.
-run_as_deploy_user touch .env
+# 2. Update VERSION in .env without clobbering other secrets.
 run_as_deploy_user sed -i '/^VERSION=/d' .env
 run_as_deploy_user bash -c "echo VERSION=$NEW_VERSION >> .env"
 
