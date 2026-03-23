@@ -1,4 +1,9 @@
-# !/bin/bash
+#!/bin/bash
+
+mkdir -p \
+    /mnt/storage/app/CatMapperAPI/log \
+    /mnt/storage/app/db/sociomap1/backups/download \
+    /mnt/storage/app/db/archamap1/backups/download
 
 echo "Starting CSV export and pivoting process"
 

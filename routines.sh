@@ -1,6 +1,8 @@
 #!/bin/bash
 set -uo pipefail
 
+mkdir -p /mnt/storage/app/CatMapperAPI/log
+
 api_url="${CATMAPPER_ROUTINES_URL:-https://127.0.0.1/runRoutines/all}"
 api_host_header="${CATMAPPER_ROUTINES_HOST:-api.catmapper.org}"
 recipient="${CATMAPPER_ROUTINES_EMAIL:-admin@catmapper.org}"

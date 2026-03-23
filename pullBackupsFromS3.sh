@@ -1,5 +1,12 @@
 #!/bin/bash
 
+mkdir -p \
+    /mnt/storage/app/db/sociomap1/backups \
+    /mnt/storage/app/db/archamap1/backups \
+    /mnt/storage/app/db/gisdb/backups \
+    /mnt/storage/app/db/userdb/backups \
+    /mnt/storage/app/CatMapperAPI/log
+
 docker stop sociomap1 archamap1 gisdb userdb
 
 chmod -R 777 /mnt/storage/app/db/sociomap1/backups;

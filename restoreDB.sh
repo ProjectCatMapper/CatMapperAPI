@@ -19,6 +19,11 @@ echo "pullAWS is set to: $pullAWS"
 # Assign the first command line argument to the variable
 database_name="$1"
 
+mkdir -p \
+    /mnt/storage/app/db/"$database_name" \
+    /mnt/storage/app/db/"$database_name"/backups \
+    /mnt/storage/app/CatMapperAPI/log
+
 chmod -R 777 /mnt/storage/app/db/"$database_name"/backups;
 
 # Pull the backup from AWS S3 if pullAWS is true

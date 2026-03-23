@@ -3,6 +3,7 @@
 
 TARGET_DIR="/mnt/storage/app/CatMapperAPI/tmp"
 TARGET_DIR2="/tmp"
+mkdir -p "$TARGET_DIR" /mnt/storage/app/CatMapperAPI/log
 # Delete files older than 7 days
 find "$TARGET_DIR" -type f -mtime +7 -exec rm -f {} \;
 

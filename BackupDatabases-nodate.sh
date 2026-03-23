@@ -2,6 +2,13 @@
 
 # backup databases
 
+mkdir -p \
+    /mnt/storage/app/CatMapperAPI/log \
+    /mnt/storage/app/db/sociomap1/backups \
+    /mnt/storage/app/db/archamap1/backups \
+    /mnt/storage/app/db/gisdb/backups \
+    /mnt/storage/app/db/userdb/backups
+
 # Check if a parameter was provided
 if [ "$#" -eq 0 ]; then
     # No parameter provided, run all sections

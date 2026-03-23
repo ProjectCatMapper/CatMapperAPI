@@ -2,6 +2,7 @@
 
 # Set the target directory
 target_dir="/mnt/storage/app/db/archamap1/backups/download"
+mkdir -p "$target_dir"
 
 # Loop over all files in the directory
 for fp in "$target_dir"/*; do

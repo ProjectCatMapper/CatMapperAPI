@@ -1,6 +1,11 @@
 #!/bin/bash
 
 # sync backups
+mkdir -p \
+    /mnt/storage/app/db/sociomap1/backups \
+    /mnt/storage/app/db/archamap1/backups \
+    /mnt/storage/app/db/gisdb/backups \
+    /mnt/storage/app/db/userdb/backups
 
 aws s3 sync /mnt/storage/app/db/sociomap1/backups/ s3://catmapper/backups/sociomap1/;
 
@@ -9,4 +14,3 @@ aws s3 sync /mnt/storage/app/db/archamap1/backups/ s3://catmapper/backups/archam
 aws s3 sync /mnt/storage/app/db/gisdb/backups/ s3://catmapper/backups/gisdb/;
 
 aws s3 sync /mnt/storage/app/db/userdb/backups/ s3://catmapper/backups/userdb/;
-

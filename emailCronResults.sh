@@ -1,5 +1,13 @@
 #!/bin/bash
 
+log_file="${1:-}"
+if [ -n "$log_file" ]; then
+    mkdir -p "$(dirname "$log_file")"
+    exec >>"$log_file" 2>&1
+fi
+
+mkdir -p /mnt/storage/app/CatMapperAPI/log
+
 # File paths for backups
 archamap_backup="/mnt/storage/app/db/archamap1/backups/neo4j-backup.tar.zst"
 sociomap_backup="/mnt/storage/app/db/sociomap1/backups/neo4j-backup.tar.zst"
@@ -36,4 +44,3 @@ body="Archamap last backed up: $archamap_last_modified<br>Sociomap last backed u
 
 # Send the email
 echo -e "$body" | mail -a "Content-Type: text/html" -s "$subject" admin@catmapper.org
-
