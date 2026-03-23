@@ -8,6 +8,7 @@ from .log import *
 from .metadata import getPropertiesMetadata
 
 import json
+import os
 import pandas as pd
 import numpy as np
 import time
@@ -109,10 +110,17 @@ def _summarize_upload_log_payload(payload):
     return message
 
 
+def _ensure_parent_dir(path):
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+
+
 def updateLog(f, txt, write="a"):
     message = _format_upload_log_timing(_summarize_upload_log_payload(txt))
     print(message)
     try:
+        _ensure_parent_dir(f)
         with open(f, write) as file:
             file.write(message + "\n")
     except Exception as e:
@@ -337,7 +345,9 @@ def createUSES(links, database, user):
 
         # Execute the query and return results
         updateLog(f"log/{user}uploadProgress.txt", "Uploading new USES ties", write="a")
-        links.to_csv(f"log/{user}uploadProgress.csv")
+        progress_csv = f"log/{user}uploadProgress.csv"
+        _ensure_parent_dir(progress_csv)
+        links.to_csv(progress_csv)
         links_dict = links.to_dict(orient="records")
         result = getQuery(q, driver, params={"rows": links_dict})
 
@@ -3200,14 +3210,16 @@ def input_Nodes_Uses(
             else:
                 error_message = str(e)
             warnings.warn(error_message)
-            with open(f"log/{user}uploadProgress.txt", "a") as f:
-                f.write(f"Error: {error_message}\n")
+            updateLog(f"log/{user}uploadProgress.txt", f"Error: {error_message}", write="a")
 
             # Return None
         except Exception as internal_error:
             warnings.warn(f"Failed to process the exception: {internal_error}")
-            with open(f"log/{user}uploadProgress.txt", "a") as f:
-                f.write(f"Failed to process the exception: {internal_error}\n")
+            updateLog(
+                f"log/{user}uploadProgress.txt",
+                f"Failed to process the exception: {internal_error}",
+                write="a",
+            )
         return None
     
     ''' Download spreadsheet '''
