@@ -27,10 +27,10 @@ if [ ! -f "$ENV_FILE" ]; then
   exit 1
 fi
 
-# Require sudo/root so deployment behavior is explicit.
-if [ "$EUID" -ne 0 ]; then
-  echo "❌ Error: This script must be run with sudo."
-  echo "Run: sudo ./deploy.sh"
+# Require running as deploy user so git identity and permissions stay predictable.
+if [ "$(id -un)" != "$DEPLOY_USER" ]; then
+  echo "❌ Error: This script must be run as '$DEPLOY_USER' (without sudo)."
+  echo "Run as that user and execute: ./deploy.sh"
   exit 1
 fi
 
@@ -40,7 +40,7 @@ if ! id "$DEPLOY_USER" >/dev/null 2>&1; then
 fi
 
 run_as_deploy_user() {
-  sudo -u "$DEPLOY_USER" -H "$@"
+  "$@"
 }
 
 # Detect current branch for push target
