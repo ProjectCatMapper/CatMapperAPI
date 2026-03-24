@@ -27,3 +27,27 @@ The goal of these tests is to confirm that core account, admin, upload/download,
 
 - This summary reflects the automated suites in `tests/*_test.py`.
 - Non-suite files like `test.py`, `test.sh`, notebooks, and output artifacts are not counted as automated test suites.
+
+## Real Neo4j Integration Tests
+
+- Suite: `tests/neo4j_realdb_integration_test.py`
+- Marker: `realdb`
+- Default behavior: skipped unless explicitly enabled
+
+Run only real-DB integration tests:
+
+```bash
+python3 -m pytest -q tests/neo4j_realdb_integration_test.py --run-realdb
+```
+
+Run all tests including real-DB integration tests:
+
+```bash
+CM_RUN_REALDB_TESTS=1 python3 -m pytest -q
+```
+
+Optional database selection (default: `ArchaMap`):
+
+```bash
+CM_REALDB_DATABASE=SocioMap python3 -m pytest -q tests/neo4j_realdb_integration_test.py --run-realdb
+```

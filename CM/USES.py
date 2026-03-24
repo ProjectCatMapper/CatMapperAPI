@@ -649,24 +649,25 @@ def processDATASETs(database, CMID=None, user="0"):
             q2 = ""
         query = f"""
         {q1}
-        match (d:DATASET {q2}) 
-optional match (d)<-[:DISTRICT_OF]-(c:DISTRICT) 
-unwind d.District as dist
-with d, dist, collect(c.CMID) as districts 
-with d, dist, districts, [i in collect(dist) where not i in districts] as missing,
-[i in districts where not i = dist] as extra
-with d, missing, extra
-FOREACH (cm IN missing |
-  FOREACH (c IN [(c:DISTRICT {CMID: cm}) | c] |
-    MERGE (d)<-[:DISTRICT_OF]-(c)
-  )
-)
-FOREACH (cm IN extra |
-  FOREACH (rel IN [(d)<-[rel:DISTRICT_OF]-(:DISTRICT {CMID: cm}) | rel] |
-    DELETE rel
-  )
-)
-return count(*)
+        MATCH (d:DATASET {q2})
+        OPTIONAL MATCH (d)<-[:DISTRICT_OF]-(c:DISTRICT)
+        WITH d, coalesce(d.District, []) AS desiredDistricts, collect(c.CMID) AS linkedDistricts
+        WITH d,
+             [cm IN desiredDistricts WHERE NOT cm IN linkedDistricts] AS missing,
+             [cm IN linkedDistricts WHERE NOT cm IN desiredDistricts] AS extra
+        CALL (d, missing) {{
+            UNWIND missing AS cm
+            MERGE (c:DISTRICT {{CMID: cm}})
+            MERGE (d)<-[:DISTRICT_OF]-(c)
+            RETURN count(*) AS mergedDistrictRels
+        }}
+        CALL (d, extra) {{
+            UNWIND extra AS cm
+            OPTIONAL MATCH (d)<-[rel:DISTRICT_OF]-(:DISTRICT {{CMID: cm}})
+            DELETE rel
+            RETURN count(*) AS deletedDistrictRels
+        }}
+        RETURN count(*) AS processedDatasets
 """
         getQuery(query, driver=driver, params={"CMID": CMID})
 
@@ -674,24 +675,25 @@ return count(*)
         print("updating parent")
         query = f"""
         {q1}
-        match (d:DATASET {q2}) 
-optional match (d)<-[:CONTAINS]-(p:DATASET) 
-unwind d.parent as par
-with d, par, collect(p.CMID) as parents 
-with d, par, parents, [i in collect(par) where not i in parents] as missing,
-[i in parents where not i = par] as extra
-with d, missing, extra
-FOREACH (cm IN missing |
-  FOREACH (p IN [(p:DATASET {CMID: cm}) | p] |
-    MERGE (d)<-[:CONTAINS]-(p)
-  )
-)
-FOREACH (cm IN extra |
-  FOREACH (rel IN [(d)<-[rel:CONTAINS]-(:DATASET {CMID: cm}) | rel] |
-    DELETE rel
-  )
-)
-return count(*)
+        MATCH (d:DATASET {q2})
+        OPTIONAL MATCH (d)<-[:CONTAINS]-(p:DATASET)
+        WITH d, coalesce(d.parent, []) AS desiredParents, collect(p.CMID) AS linkedParents
+        WITH d,
+             [cm IN desiredParents WHERE NOT cm IN linkedParents] AS missing,
+             [cm IN linkedParents WHERE NOT cm IN desiredParents] AS extra
+        CALL (d, missing) {{
+            UNWIND missing AS cm
+            MERGE (p:DATASET {{CMID: cm}})
+            MERGE (d)<-[:CONTAINS]-(p)
+            RETURN count(*) AS mergedParentRels
+        }}
+        CALL (d, extra) {{
+            UNWIND extra AS cm
+            OPTIONAL MATCH (d)<-[rel:CONTAINS]-(:DATASET {{CMID: cm}})
+            DELETE rel
+            RETURN count(*) AS deletedParentRels
+        }}
+        RETURN count(*) AS processedDatasets
 """
         getQuery(query, driver=driver, params={"CMID": CMID})
 

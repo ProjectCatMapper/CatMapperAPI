@@ -18,6 +18,7 @@ neo4j==5.28.2
 numpy==2.2.6
 packaging>=24,<25
 pandas==2.2.3
+pytest==8.4.1
 pysodium==0.7.17
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.0

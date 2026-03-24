@@ -175,11 +175,12 @@ def search(
     elif property == "Name":
         if domain != "DATASET":
             qStart = f"""
-    call {{with $term as term
+    with $term as term
+    call (term) {{
     call db.index.fulltext.queryNodes('{domain}', '"' + term +'"') yield node return node
-    union with $term as term
+    union with term
     call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term)) yield node return node
-    union with $term as term
+    union with term
     call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term) + '~') yield node return node}}
     with node as a
     with a, a.names as nameList
@@ -190,11 +191,12 @@ def search(
 
         else:
             qStart = f"""
-    call {{with $term as term
+    with $term as term
+    call (term) {{
     call db.index.fulltext.queryNodes('{domain}', '"' + term +'"') yield node return node
-    union with $term as term
+    union with term
     call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term))  yield node return node
-    union with $term as term
+    union with term
     call db.index.fulltext.queryNodes('{domain}', custom.cleanText(term) + '~') yield node return node}}
     with node as a
     with a, [a.CMName, a.shortName, a.DatasetCitation] as nameList
@@ -226,7 +228,7 @@ def search(
 
     qUnique = """
     with a, collect(matching) as matchingL,
-    collect(score) as scores call {with matchingL,
+    collect(score) as scores call (matchingL, scores) {with matchingL,
     scores unwind matchingL as matching
     unwind scores as score return distinct matching, score order by score limit 1}
     with a, matching, score
@@ -256,17 +258,39 @@ def search(
     if yearStart is not None:
         if domain == "DATASET":
             qYear = f"""
-    call {{with a where not a.ApplicableYears is null with a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-')
+    call (a) {{with a where not a.ApplicableYears is null with a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-')
     else a.ApplicableYears end as yearMatch, range(toInteger('{yearStart}'),toInteger('{yearEnd}')) as years
-    with a, years, [i in apoc.coll.toSet(apoc.coll.flatten(collect(coalesce(yearMatch,"")),true))) | toInteger(i)] as yearMatch
-    where not isEmpty([i in yearMatch where toInteger(i) in years]) return a as node}}
+    with a, years, [i in apoc.coll.toSet(apoc.coll.flatten(collect(coalesce(yearMatch,"")),true))) WHERE toInteger(toString(i)) IS NOT NULL | toInteger(toString(i))] as yearMatch
+    where not isEmpty([i in yearMatch where i in years]) return a as node}}
     with node as a, matching, score
     """
         else:
             qYear = f"""
-    call {{ with a with a, range(toInteger('{yearStart}'),toInteger('{yearEnd}')) as inputYears
-    match (a)<-[r:USES]-(:DATASET) where r.yearStart is not null and not isEmpty(r.yearStart) with a, inputYears, range(apoc.coll.min([i in apoc.coll.flatten(collect(r.yearStart),true) |
-    toInteger(i)]), apoc.coll.max(custom.getYear(collect(r.yearEnd)))) as years where not isEmpty([i in inputYears where i in years]) return a as node}}
+    call (a) {{ with a, range(toInteger('{yearStart}'),toInteger('{yearEnd}')) as inputYears
+    match (a)<-[r:USES]-(:DATASET)
+    with a, inputYears,
+    collect(
+        CASE
+            WHEN r.yearStart IS NULL THEN []
+            WHEN r.yearStart IS :: LIST<ANY> THEN [x IN r.yearStart | x]
+            ELSE [r.yearStart]
+        END
+    ) AS startLists,
+    collect(
+        CASE
+            WHEN r.yearEnd IS NULL THEN []
+            WHEN r.yearEnd IS :: LIST<ANY> THEN [x IN r.yearEnd | x]
+            ELSE [r.yearEnd]
+        END
+    ) AS endLists
+    with a, inputYears,
+    apoc.coll.flatten(startLists, true) AS rawStarts,
+    apoc.coll.flatten(endLists, true) AS rawEnds
+    with a, inputYears,
+    [i in rawStarts WHERE i IS NOT NULL AND toInteger(toString(i)) IS NOT NULL | toInteger(toString(i))] AS starts,
+    [i in rawEnds WHERE i IS NOT NULL AND toInteger(toString(i)) IS NOT NULL | toInteger(toString(i))] AS ends
+    with a, inputYears, range(apoc.coll.min(starts), apoc.coll.max(ends)) as years
+    where size(starts) > 0 AND size(ends) > 0 AND not isEmpty([i in inputYears where i in years]) return a as node}}
     with node as a, matching, score order by score desc
     """
     else:
@@ -375,7 +399,7 @@ def translate(
 
     # Define the Cypher query
 
-    qLoad = "unwind $rows as row with row call {"
+    qLoad = "unwind $rows as row with row call (row) {"
 
     if property == "Key":
         qStart = f"""
@@ -408,7 +432,7 @@ def translate(
 
         if domain != "DATASET":
             qStart = f"""
-    with row call {{ with row
+    with row call (row) {{ with row
     call db.index.fulltext.queryNodes('{domain}', '"' + row.term + '"') yield node return node
     union with row
     call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term)) yield node return node
@@ -422,7 +446,7 @@ def translate(
     """
         else:
             qStart = f"""
-    with row call {{ with row
+    with row call (row) {{ with row
     call db.index.fulltext.queryNodes('{domain}', '"' + row.term + '"') yield node return node
     union with row
     call db.index.fulltext.queryNodes('{domain}', custom.cleanText(row.term)) yield node return node
@@ -485,18 +509,41 @@ def translate(
     if 'yearStart' in rows[0] and 'yearEnd' in rows[0]:
         if domain == "DATASET":
             qYear = """
-    call {with row, a with row, a, case when a.ApplicableYears contains '-' then split(a.ApplicableYears,'-')
-    else a.ApplicableYears end as yearMatch, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
-    with a, years, apoc.convert.toIntList(apoc.coll.toSet(apoc.coll.flatten(collect(yearMatch),true))) as yearMatch
-    where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}
+    call (row, a) {with row, a, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
+    with a, years,
+    CASE
+        WHEN a.ApplicableYears IS NULL THEN []
+        WHEN a.ApplicableYears IS :: LIST<ANY> THEN [x IN a.ApplicableYears | toString(x)]
+        WHEN toString(a.ApplicableYears) CONTAINS '-' THEN split(toString(a.ApplicableYears), '-')
+        ELSE [toString(a.ApplicableYears)]
+    END as rawYears
+    with a, years, [i in apoc.coll.toSet(apoc.coll.flatten(collect(rawYears),true)) WHERE toInteger(toString(i)) IS NOT NULL | toInteger(toString(i))] as yearMatch
+    where size([i in yearMatch where i in years]) > 0 return a as node}
     with node as a, matching, score
     """
         else:
             qYear = f"""
-    call {{with row, a with row, a, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
-    match (a)<-[r:USES]-(:DATASET) unwind r.yearStart as yearStart
-    unwind r.yearEnd as yearEnd with years, a, r, apoc.coll.toSet(collect(yearStart) + collect(yearEnd)) as yearMatch
-    where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}}
+    call (row, a) {{with row, a, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
+    match (a)<-[r:USES]-(:DATASET)
+    with years, a,
+    collect(
+        CASE
+            WHEN r.yearStart IS NULL THEN []
+            WHEN r.yearStart IS :: LIST<ANY> THEN [x IN r.yearStart | x]
+            ELSE [r.yearStart]
+        END
+    ) AS startLists,
+    collect(
+        CASE
+            WHEN r.yearEnd IS NULL THEN []
+            WHEN r.yearEnd IS :: LIST<ANY> THEN [x IN r.yearEnd | x]
+            ELSE [r.yearEnd]
+        END
+    ) AS endLists
+    with years, a,
+    apoc.coll.flatten(startLists, true) + apoc.coll.flatten(endLists, true) as rawYearMatch
+    with years, a, [i in rawYearMatch WHERE i IS NOT NULL AND toInteger(toString(i)) IS NOT NULL | toInteger(toString(i))] as yearMatch
+    where size([i in yearMatch where i in years]) > 0 return a as node}}
     with row, node as a, matching, score order by score desc
     """
     else:
