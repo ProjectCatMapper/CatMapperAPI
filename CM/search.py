@@ -150,8 +150,7 @@ def search(
 
         qStart = f"""
             with replace(toLower(apoc.text.clean($term)), ' ', '') as cleanTerm
-            call {{
-                with cleanTerm
+            call (cleanTerm) {{
                 call db.index.fulltext.queryNodes('{domain}', '"' + cleanTerm + '"') yield node return node
                                 union with cleanTerm
                 call db.index.fulltext.queryNodes('{domain}', '*' + cleanTerm + '*') yield node return node
@@ -190,7 +189,7 @@ def search(
 
     qUnique = """
     with a, collect(matching) as matchingL, 
-    collect(score) as scores call {with matchingL, 
+    collect(score) as scores call (matchingL, scores) {with matchingL, 
     scores unwind matchingL as matching 
     unwind scores as score return distinct matching, score order by score limit 1}
     with a, matching, score
@@ -230,22 +229,31 @@ def search(
     if yearStart is not None:
         if domain == "DATASET":
             qYear = f"""
-                    call {{ with a with a, toInteger('{yearStart}') AS inputYearStart,toInteger('{yearEnd}') AS inputYearEnd 
-                    match (a:DATASET) where a.recordStart IS NOT NULL AND a.recordStart <> ''
-                    AND a.recordEnd IS NOT NULL AND a.recordEnd <> '' 
-                    WITH a, toInteger(a.recordStart) AS rStart,toInteger(a.recordEnd) AS rEnd,inputYearStart, inputYearEnd
-                    WHERE rStart >= inputYearStart AND rEnd <= inputYearEnd return a as node}}
+                    call (a) {{ with a, toInteger('{yearStart}') AS inputYearStart,toInteger('{yearEnd}') AS inputYearEnd
+                    with a, inputYearStart, inputYearEnd,
+                    [v IN apoc.coll.flatten([a.recordStart], true) WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] AS rStarts,
+                    [v IN apoc.coll.flatten([a.recordEnd], true) WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] AS rEnds
+                    WITH a, inputYearStart, inputYearEnd, rStarts, rEnds
+                    WHERE size(rStarts) > 0 AND size(rEnds) > 0
+                    AND apoc.coll.min(rStarts) >= inputYearStart AND apoc.coll.max(rEnds) <= inputYearEnd
+                    return a as node}}
                     with node as a, matching, score order by score desc
                     """
         elif domain == "ALLNODES":
             qYear = " "
         else:
             qYear = f"""
-    call {{ with a with a, toInteger('{yearStart}') AS inputYearStart,toInteger('{yearEnd}') AS inputYearEnd 
-    match (a)<-[r:USES]-(:DATASET) where r.recordStart IS NOT NULL AND r.recordStart <> ''
-    AND r.recordEnd IS NOT NULL AND r.recordEnd <> '' 
-    WITH a, toInteger(r.recordStart) AS rStart,toInteger(r.recordEnd) AS rEnd,inputYearStart, inputYearEnd
-    WHERE rStart >= inputYearStart AND rEnd <= inputYearEnd return a as node}}
+    call (a) {{ with a, toInteger('{yearStart}') AS inputYearStart,toInteger('{yearEnd}') AS inputYearEnd
+    match (a)<-[r:USES]-(:DATASET)
+    WITH a, inputYearStart, inputYearEnd,
+    apoc.coll.flatten(collect(apoc.coll.flatten([r.recordStart], true)), true) AS rawStarts,
+    apoc.coll.flatten(collect(apoc.coll.flatten([r.recordEnd], true)), true) AS rawEnds
+    WITH a, inputYearStart, inputYearEnd,
+    [v IN rawStarts WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] AS rStarts,
+    [v IN rawEnds WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] AS rEnds
+    WHERE size(rStarts) > 0 AND size(rEnds) > 0
+    AND apoc.coll.min(rStarts) >= inputYearStart AND apoc.coll.max(rEnds) <= inputYearEnd
+    return a as node}}
     with node as a, matching, score order by score desc
     """
     else:
@@ -442,7 +450,7 @@ def translate(
 
     # Define the Cypher query
 
-    qLoad = "unwind $rows as row with row call {"
+    qLoad = "unwind $rows as row with row call (row) {"
 
     if property == "Key":
         # Only finds exact matches for keys, which can include cases where an inputted 173 matches with ID: 173.
@@ -486,7 +494,7 @@ def translate(
         qStart = f"""
     with row
     with row, replace(toLower(apoc.text.clean(row.term)), ' ', '') as cleanTerm
-    call {{with cleanTerm
+    call (cleanTerm) {{with cleanTerm
                 call db.index.fulltext.queryNodes('{domain}', '"' + cleanTerm + '"') yield node return node
                 UNION
                 with cleanTerm
@@ -552,18 +560,23 @@ def translate(
     if 'yearStart' in rows[0] and 'yearEnd' in rows[0]:
         if domain == "DATASET":
             qYear = """
-    call {with row, a with row, a,range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
-    with a, years, apoc.coll.toSet(collect(a.recordStart) + collect(a.recordEnd)) as yearMatch
-    where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}
+    call (row, a) {with row, a,range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
+    with a, years,
+    [v IN apoc.coll.flatten([a.recordStart], true) WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] +
+    [v IN apoc.coll.flatten([a.recordEnd], true) WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] as yearMatch
+    where size([i in yearMatch where i in years]) > 0 return a as node}
     with node as a, matching, score
     """
                 
         else:
             qYear = f"""
-    call {{with row, a with row, a, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years 
-    match (a)<-[r:USES]-(:DATASET) unwind r.recordStart as recordStart 
-    unwind r.recordEnd as recordEnd with years, a, r, apoc.coll.toSet(collect(recordStart) + collect(recordEnd)) as yearMatch 
-    where size([i in yearMatch where toInteger(i) in years]) > 0 return a as node}}
+    call (row, a) {{with row, a, range(toInteger(row.yearStart),toInteger(row.yearEnd)) as years
+    match (a)<-[r:USES]-(:DATASET)
+    with years, a,
+    apoc.coll.flatten(collect(apoc.coll.flatten([r.recordStart], true)), true) +
+    apoc.coll.flatten(collect(apoc.coll.flatten([r.recordEnd], true)), true) as rawYearMatch
+    with years, a, [i in rawYearMatch WHERE i IS NOT NULL AND toInteger(toString(i)) IS NOT NULL | toInteger(toString(i))] as yearMatch
+    where size([i in yearMatch where i in years]) > 0 return a as node}}
     with row, node as a, matching, score order by score desc
     """
     else:

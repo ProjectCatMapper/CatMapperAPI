@@ -1973,9 +1973,19 @@ def get_duplicate_empty_USES(database, mail=None, return_type="data"):
         WITH d, c, r, [prop IN keys(r) | prop] AS allProps
         UNWIND allProps AS prop
         WITH d, c, r, prop, r[prop] AS value
-        WHERE value IS NULL 
-        OR (valueType(value) STARTS WITH 'STRING' AND trim(value) = '')
-        OR (valueType(value) STARTS WITH 'LIST<' AND size(value) = 0)
+        WHERE value IS NULL
+        OR (
+            CASE
+                WHEN value IS :: STRING THEN trim(value) = ''
+                ELSE false
+            END
+        )
+        OR (
+            CASE
+                WHEN value IS :: LIST<ANY> THEN size(value) = 0
+                ELSE false
+            END
+        )
         RETURN d.CMID AS datasetID,
             c.CMID AS CMID,
             prop AS emptyProperty,
@@ -2111,8 +2121,18 @@ def get_empty_nodeprops(database, mail=None, return_type="data"):
         UNWIND props AS prop
         WITH n, prop, n[prop] AS value
         WHERE value IS NULL
-        OR (valueType(value) STARTS WITH 'STRING' AND trim(value) = '')
-        OR (valueType(value) STARTS WITH 'LIST<' AND size(value) = 0)
+        OR (
+            CASE
+                WHEN value IS :: STRING THEN trim(value) = ''
+                ELSE false
+            END
+        )
+        OR (
+            CASE
+                WHEN value IS :: LIST<ANY> THEN size(value) = 0
+                ELSE false
+            END
+        )
         RETURN labels(n) AS labels,
             n.CMID AS CMID,
             prop AS emptyProperty,
@@ -2127,8 +2147,18 @@ def get_empty_nodeprops(database, mail=None, return_type="data"):
         UNWIND props AS prop
         WITH n, prop, n[prop] AS value
         WHERE value IS NULL
-        OR (valueType(value) STARTS WITH 'STRING' AND trim(value) = '')
-        OR (valueType(value) STARTS WITH 'LIST<' AND size(value) = 0)
+        OR (
+            CASE
+                WHEN value IS :: STRING THEN trim(value) = ''
+                ELSE false
+            END
+        )
+        OR (
+            CASE
+                WHEN value IS :: LIST<ANY> THEN size(value) = 0
+                ELSE false
+            END
+        )
 
         REMOVE n[prop]
 

@@ -271,8 +271,14 @@ def _get_queries_for_label(label, database):
             'categories': """
                 UNWIND $cmid AS cmid
                 MATCH (d:DATASET {CMID: cmid})-[r:USES]->(c)
-                UNWIND r.label AS Domain
-                WITH Domain, c, r
+                WITH c, r,
+                    CASE
+                        WHEN r.label IS NULL THEN []
+                        WHEN r.label IS :: LIST<ANY> THEN [x IN r.label | toString(x)]
+                        WHEN r.label IS :: STRING THEN [r.label]
+                        ELSE [toString(r.label)]
+                    END AS domains
+                UNWIND domains AS Domain
                 WITH Domain, 
                     COUNT(DISTINCT c) AS distinctNodeCount,
                     COLLECT(r) AS usesRels
@@ -285,7 +291,14 @@ def _get_queries_for_label(label, database):
                 UNWIND $cmid AS cmid
                 MATCH (d:DATASET {CMID: cmid})
                 OPTIONAL MATCH (d)-[:CONTAINS*..5]->(a)-[b:USES]->(cc)
-                UNWIND b.label AS Domain
+                WITH b, cc,
+                    CASE
+                        WHEN b.label IS NULL THEN []
+                        WHEN b.label IS :: LIST<ANY> THEN [x IN b.label | toString(x)]
+                        WHEN b.label IS :: STRING THEN [b.label]
+                        ELSE [toString(b.label)]
+                    END AS domains
+                UNWIND domains AS Domain
                 RETURN
                     Domain,
                     COUNT(DISTINCT cc) AS ChildCount,

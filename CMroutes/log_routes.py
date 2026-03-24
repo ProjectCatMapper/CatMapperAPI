@@ -12,8 +12,9 @@ def getLogs(database, CMID):
         return "Database connection failed."
 
     query = """
-    CALL {
-        MATCH (a:CATEGORY|DATASET {CMID: $CMID})-[:HAS_LOG]->(log:LOG)
+    WITH $CMID AS CMID
+    CALL (CMID) {
+        MATCH (a:CATEGORY|DATASET {CMID: CMID})-[:HAS_LOG]->(log:LOG)
         RETURN
             "node" AS log_type,
             elementId(log) AS ID,
@@ -22,7 +23,7 @@ def getLogs(database, CMID):
             log.timestamp AS timestamp
         UNION ALL
         MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
-        WHERE (c.CMID = $CMID OR d.CMID = $CMID)
+        WHERE (c.CMID = CMID OR d.CMID = CMID)
           AND r.logID IS NOT NULL
         UNWIND apoc.coll.flatten([r.logID], true) AS relLogID
         MATCH (log:LOG)
