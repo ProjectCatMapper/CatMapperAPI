@@ -172,7 +172,7 @@ def updateLabels(database, CMID=None):
         match (c:CATEGORY {match})<-[r:USES]-(:DATASET)
         where r.label is not null
         WITH c, apoc.coll.toSet(apoc.coll.flatten(collect(distinct [r.label,"CATEGORY"]), true)) AS labels
-        CALL apoc.create.setLabels(c, labels) YIELD node
+        SET c:$(labels)
         RETURN count(distinct c)
         """
         if CMID is not None:
@@ -225,7 +225,7 @@ def updateContains(database, CMID=None):
         """ + qFilterb + """
         unwind rU.parentContext as propsL
         // Filter out non-string types if necessary
-        with a, propsL where apoc.meta.cypher.type(propsL) = "STRING"
+        with a, propsL where valueType(propsL) STARTS WITH "STRING"
 
         // Parse JSON strings into lists or maps
         with a, 
@@ -241,12 +241,12 @@ def updateContains(database, CMID=None):
         WITH rC, p,
                 CASE
                     WHEN p.eventType IS NULL THEN []
-                    WHEN apoc.meta.cypher.type(p.eventType) = "STRING" THEN [p.eventType]
+                    WHEN valueType(p.eventType) STARTS WITH "STRING" THEN [p.eventType]
                     ELSE p.eventType
                 END AS eventType,
                 CASE
                     WHEN p.eventDate IS NULL THEN []
-                    WHEN apoc.meta.cypher.type(p.eventDate) = "STRING" THEN [p.eventDate]
+                    WHEN valueType(p.eventDate) STARTS WITH "STRING" THEN [p.eventDate]
                     ELSE p.eventDate
                 END AS eventDate
 
@@ -278,7 +278,7 @@ def updateContains(database, CMID=None):
         # // Update rC properties with events data using APOC
         # call {
         # with rC, eventDate
-        # call apoc.do.when(
+        # Conditional updates handled below using native Cypher.
         #     size(eventDate) > 0,
         #     "set rC.eventDate = $eventDate",
         #     "set rC.eventDate = NULL",
@@ -288,7 +288,7 @@ def updateContains(database, CMID=None):
         # with rC, eventType
         # call {
         # with rC, eventType
-        # call apoc.do.when(
+        # Conditional updates handled below using native Cypher.
         #     size(eventType) > 0,
         #     "set rC.eventType = $eventType",
         #     "set rC.eventType = NULL",
@@ -656,9 +656,16 @@ with d, dist, collect(c.CMID) as districts
 with d, dist, districts, [i in collect(dist) where not i in districts] as missing,
 [i in districts where not i = dist] as extra
 with d, missing, extra
-call apoc.do.when(size(missing) > 0,'with missing, d match (c:DISTRICT) where c.CMID in missing CREATE (d)<-[:DISTRICT_OF]-(c)','return NULL', {{d:d, missing:missing}}) yield value as v1
-with d, missing, extra, v1
-call apoc.do.when(size(extra) > 0,'match (d)<-[r:DISTRICT_OF]-(c) where c.CMID in extra delete r','RETURN NULL',{{d:d,extra:extra}}) yield value as v2
+FOREACH (cm IN missing |
+  FOREACH (c IN [(c:DISTRICT {CMID: cm}) | c] |
+    MERGE (d)<-[:DISTRICT_OF]-(c)
+  )
+)
+FOREACH (cm IN extra |
+  FOREACH (rel IN [(d)<-[rel:DISTRICT_OF]-(:DISTRICT {CMID: cm}) | rel] |
+    DELETE rel
+  )
+)
 return count(*)
 """
         getQuery(query, driver=driver, params={"CMID": CMID})
@@ -674,9 +681,16 @@ with d, par, collect(p.CMID) as parents
 with d, par, parents, [i in collect(par) where not i in parents] as missing,
 [i in parents where not i = par] as extra
 with d, missing, extra
-call apoc.do.when(size(missing) > 0,'with missing, d match (p:DATASET) where p.CMID in missing CREATE (d)<-[:CONTAINS]-(p)','return NULL', {{d:d, missing:missing}}) yield value as v1
-with d, missing, extra, v1
-call apoc.do.when(size(extra) > 0,'match (d)<-[r:CONTAINS]-(p) where p.CMID in extra delete r','RETURN NULL',{{d:d,extra:extra}}) yield value as v2
+FOREACH (cm IN missing |
+  FOREACH (p IN [(p:DATASET {CMID: cm}) | p] |
+    MERGE (d)<-[:CONTAINS]-(p)
+  )
+)
+FOREACH (cm IN extra |
+  FOREACH (rel IN [(d)<-[rel:CONTAINS]-(:DATASET {CMID: cm}) | rel] |
+    DELETE rel
+  )
+)
 return count(*)
 """
         getQuery(query, driver=driver, params={"CMID": CMID})

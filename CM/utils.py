@@ -390,7 +390,7 @@ def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database="SocioMap"):
     MATCH (a) 
     WHERE a.{new_id} IS NOT NULL 
     WITH toInteger(apoc.text.replace(toString(a.{new_id}), "[^0-9]", "")) AS new_id 
-    WHERE NOT apoc.meta.cypher.isType(new_id, "NULL") 
+    WHERE valueType(new_id) <> "NULL" 
     WITH new_id 
     ORDER BY new_id DESC 
     LIMIT 1 

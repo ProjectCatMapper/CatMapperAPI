@@ -150,14 +150,14 @@ def checkDomains(database, mail=None, return_type="data"):
         return "MissingCATEGORY" as query,  n.CMID as CMID, n.CMName as CMName, r.label as subdomain, '' as domain, d.CMID as datasetID
         UNION ALL
         match (n:CATEGORY)<-[r:USES]-(d:DATASET)
-        where r.label is not null and apoc.meta.cypher.type(r.label) = "STRING" and not r.label in labels(n)
+        where r.label is not null and valueType(r.label) STARTS WITH "STRING" and not r.label in labels(n)
         return "MissingSubDomain" as query, n.CMID as CMID, n.CMName as CMName, r.label as subdomain, '' as domain, d.CMID as datasetID
         UNION ALL
         match (p:LABEL)
         WITH apoc.map.fromPairs([[p.CMName, p.groupLabel]]) AS m
         WITH collect(m) AS labelGroupMap
         match (n:CATEGORY)<-[r:USES]-(d:DATASET)
-        where r.label is not null and apoc.meta.cypher.type(r.label) = "STRING"
+        where r.label is not null and valueType(r.label) STARTS WITH "STRING"
         with n,r,d,labelGroupMap
         unwind labelGroupMap as labelGroup
         with n,r,d,labelGroup
@@ -496,7 +496,7 @@ def getMultipleLabels(database, mail=None, return_type="data"):
     try:
         driver = getDriver(database)
         query = """
-        match (d:DATASET)-[r:USES]->(c:CATEGORY) where apoc.meta.cypher.type(r.label) = "LIST OF STRING" and size(r.label) > 1 return c.CMID as CMID, c.CMName as CMName, d.CMID as datasetID, r.Key as Key, apoc.text.join(r.label, "; ") as label
+        match (d:DATASET)-[r:USES]->(c:CATEGORY) where valueType(r.label) STARTS WITH "LIST<STRING" and size(r.label) > 1 return c.CMID as CMID, c.CMName as CMName, d.CMID as datasetID, r.Key as Key, apoc.text.join(r.label, "; ") as label
         """
         results = getQuery(query, driver, type="df")
 
@@ -603,15 +603,15 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
         WITH d, c, r,
 
             CASE
-                WHEN apoc.meta.cypher.type(r.parent) = 'LIST OF STRING'
+                WHEN valueType(r.parent) STARTS WITH 'LIST<STRING'
                     THEN r.parent
-                WHEN apoc.meta.cypher.type(r.parent) = 'STRING'
+                WHEN valueType(r.parent) STARTS WITH 'STRING'
                     THEN apoc.text.split(r.parent, ",")
                 ELSE []
             END AS parentList,
 
             CASE
-                WHEN apoc.meta.cypher.type(r.parentContext) = 'LIST OF MAP'
+                WHEN valueType(r.parentContext) STARTS WITH 'LIST<MAP'
                     THEN r.parentContext
                 ELSE []
             END AS ctxList
@@ -818,13 +818,13 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                 WHERE r.parentContext IS NOT NULL
                 WITH d, c, r,
                     CASE
-                        WHEN apoc.meta.cypher.type(r.parentContext) = 'LIST OF STRING'
+                        WHEN valueType(r.parentContext) STARTS WITH 'LIST<STRING'
                             THEN r.parentContext
-                        WHEN apoc.meta.cypher.type(r.parentContext) = 'STRING'
+                        WHEN valueType(r.parentContext) STARTS WITH 'STRING'
                             THEN [r.parentContext]
-                        WHEN apoc.meta.cypher.type(r.parentContext) = 'LIST OF MAP'
+                        WHEN valueType(r.parentContext) STARTS WITH 'LIST<MAP'
                             THEN [pc IN r.parentContext | apoc.convert.toJson(pc)]
-                        WHEN apoc.meta.cypher.type(r.parentContext) = 'MAP'
+                        WHEN valueType(r.parentContext) STARTS WITH 'MAP'
                             THEN [apoc.convert.toJson(r.parentContext)]
                         ELSE []
                     END AS parentContexts
@@ -856,13 +856,13 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                 WHERE r.parentContext IS NOT NULL
                 WITH d, c, r,
                     CASE
-                        WHEN apoc.meta.cypher.type(r.parentContext) = 'LIST OF STRING'
+                        WHEN valueType(r.parentContext) STARTS WITH 'LIST<STRING'
                             THEN r.parentContext
-                        WHEN apoc.meta.cypher.type(r.parentContext) = 'STRING'
+                        WHEN valueType(r.parentContext) STARTS WITH 'STRING'
                             THEN [r.parentContext]
-                        WHEN apoc.meta.cypher.type(r.parentContext) = 'LIST OF MAP'
+                        WHEN valueType(r.parentContext) STARTS WITH 'LIST<MAP'
                             THEN [pc IN r.parentContext | apoc.convert.toJson(pc)]
-                        WHEN apoc.meta.cypher.type(r.parentContext) = 'MAP'
+                        WHEN valueType(r.parentContext) STARTS WITH 'MAP'
                             THEN [apoc.convert.toJson(r.parentContext)]
                         ELSE []
                     END AS parentContexts
@@ -1414,11 +1414,15 @@ def fixMetaTypes(database, return_type="data"):
         for property, metaType in zip(node_properties['property'], node_properties['metaType']):
             metaType = str(metaType).upper().strip()
             prop = str(property).replace("`", "")
-            metaType_neo4j = "LIST OF STRING" if metaType == "LIST" else "STRING"
+            meta_type_predicate = (
+                f'valueType(n.`{prop}`) STARTS WITH "LIST<STRING"'
+                if metaType == "LIST"
+                else f'valueType(n.`{prop}`) STARTS WITH "STRING"'
+            )
             query = f"""
             MATCH (n)
             WHERE n.`{prop}` IS NOT NULL
-              AND apoc.meta.cypher.type(n.`{prop}`) <> "{metaType_neo4j}"
+              AND NOT ({meta_type_predicate})
             SET n.`{prop}` = custom.formatProperties(
               [v IN apoc.coll.flatten([n.`{prop}`], true) WHERE v IS NOT NULL | toString(v)],
               '{metaType}',
@@ -1438,11 +1442,15 @@ def fixMetaTypes(database, return_type="data"):
         for property, metaType in zip(relationship_properties['property'], relationship_properties['metaType']):
             metaType = str(metaType).upper().strip()
             prop = str(property).replace("`", "")
-            metaType_neo4j = "LIST OF STRING" if metaType == "LIST" else "STRING"
+            meta_type_predicate = (
+                f'valueType(rel.`{prop}`) STARTS WITH "LIST<STRING"'
+                if metaType == "LIST"
+                else f'valueType(rel.`{prop}`) STARTS WITH "STRING"'
+            )
             query = f"""
             MATCH (n)-[rel]->(m)
             WHERE rel.`{prop}` IS NOT NULL
-              AND apoc.meta.cypher.type(rel.`{prop}`) <> "{metaType_neo4j}"
+              AND NOT ({meta_type_predicate})
             SET rel.`{prop}` = custom.formatProperties(
               [v IN apoc.coll.flatten([rel.`{prop}`], true) WHERE v IS NOT NULL | toString(v)],
               '{metaType}',
@@ -1966,8 +1974,8 @@ def get_duplicate_empty_USES(database, mail=None, return_type="data"):
         UNWIND allProps AS prop
         WITH d, c, r, prop, r[prop] AS value
         WHERE value IS NULL 
-        OR (apoc.meta.cypher.type(value) = 'STRING' AND trim(value) = '')
-        OR (apoc.meta.cypher.type(value) = 'LIST OF ANY' AND size(value) = 0)
+        OR (valueType(value) STARTS WITH 'STRING' AND trim(value) = '')
+        OR (valueType(value) STARTS WITH 'LIST<' AND size(value) = 0)
         RETURN d.CMID AS datasetID,
             c.CMID AS CMID,
             prop AS emptyProperty,
@@ -2068,7 +2076,7 @@ def get_duplicate_empty_USES(database, mail=None, return_type="data"):
                     WHERE prop IN ['populationSize','sampleSize','yearStart','yearEnd','recordStart','recordEnd']] AS singleProps
                 UNWIND singleProps AS prop
                 WITH d, c, r, prop, r[prop] AS value
-                WHERE value IS NOT NULL AND apoc.meta.cypher.type(value) = 'LIST OF ANY' AND size(value) > 1
+                WHERE value IS NOT NULL AND valueType(value) STARTS WITH 'LIST<' AND size(value) > 1
                 RETURN d.CMID AS datasetID,
                     c.CMID AS CMID,
                     prop AS propertyWithMultipleValues,
@@ -2103,8 +2111,8 @@ def get_empty_nodeprops(database, mail=None, return_type="data"):
         UNWIND props AS prop
         WITH n, prop, n[prop] AS value
         WHERE value IS NULL
-        OR (apoc.meta.cypher.type(value) = 'STRING' AND trim(value) = '')
-        OR (apoc.meta.cypher.type(value) STARTS WITH 'LIST' AND size(value) = 0)
+        OR (valueType(value) STARTS WITH 'STRING' AND trim(value) = '')
+        OR (valueType(value) STARTS WITH 'LIST<' AND size(value) = 0)
         RETURN labels(n) AS labels,
             n.CMID AS CMID,
             prop AS emptyProperty,
@@ -2119,8 +2127,8 @@ def get_empty_nodeprops(database, mail=None, return_type="data"):
         UNWIND props AS prop
         WITH n, prop, n[prop] AS value
         WHERE value IS NULL
-        OR (apoc.meta.cypher.type(value) = 'STRING' AND trim(value) = '')
-        OR (apoc.meta.cypher.type(value) STARTS WITH 'LIST' AND size(value) = 0)
+        OR (valueType(value) STARTS WITH 'STRING' AND trim(value) = '')
+        OR (valueType(value) STARTS WITH 'LIST<' AND size(value) = 0)
 
         REMOVE n[prop]
 
@@ -2252,8 +2260,8 @@ def get_label_check(database, mail=None, return_type="data"):
         WHERE r.label IS NOT NULL
         WITH r,
         CASE
-            WHEN apoc.meta.cypher.type(r.label) = 'LIST OF STRING' THEN size(r.label)
-            WHEN apoc.meta.cypher.type(r.label) = 'STRING' THEN size(split(r.label, ","))
+            WHEN valueType(r.label) STARTS WITH 'LIST<STRING' THEN size(r.label)
+            WHEN valueType(r.label) STARTS WITH 'STRING' THEN size(split(r.label, ","))
             ELSE 0
         END AS labelCount
         WHERE labelCount > 1

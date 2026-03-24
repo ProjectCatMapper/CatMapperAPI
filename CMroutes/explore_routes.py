@@ -191,35 +191,32 @@ def getExplore():
         if label == "CATEGORY":
             qInfo = '''
     unwind $cmid as cmid match (a)<-[r:USES]-(d:DATASET)
-    where a.CMID = cmid with a,r,d
-    call apoc.when(r.country is not null and not r.country = [],'return custom.getName($id) as name','return null as name',{id:r.country}) yield value as country
-    call apoc.when(r.district is not null and not r.district = [],'return custom.getName($id) as name','return null as name',{id:r.district}) yield value as district
-    call apoc.when(r.language is not null and not r.language = [],'return custom.getGlot($id) as name','return null as name',{id:r.language}) yield value as language
-    call apoc.when(r.religion is not null and not r.religion = [],'return custom.getName($id) as name','return null as name',{id:r.religion}) yield value as religion
-    with a,r,d, country, district, language, religion,
+    where a.CMID = cmid with a,r,d,
+    case when r.country is not null and not r.country = [] then custom.getName(r.country) else null end as country,
+    case when r.district is not null and not r.district = [] then custom.getName(r.district) else null end as district,
+    case when r.language is not null and not r.language = [] then custom.getGlot(r.language) else null end as language,
+    case when r.religion is not null and not r.religion = [] then custom.getName(r.religion) else null end as religion,
     case when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is not null then custom.getMinYear(r.yearStart) + '-' + custom.getMaxYear(r.yearEnd)
     when custom.getMinYear(r.yearStart) is not null and custom.getMaxYear(r.yearEnd) is null then custom.getMinYear(r.yearStart) + '-present'
     when custom.getMinYear(r.yearStart) is null and custom.getMaxYear(r.yearEnd) is not null then custom.getMaxYear(r.yearEnd)
     else null
     end as timeSpan
-    return a.CMName as CMName, apoc.text.join([i in [custom.anytoList(collect(split(country.name,', ')),true),
-    custom.anytoList(collect(split(district.name,', ')),true)] where not i = ''],', ') as Location,
+    return a.CMName as CMName, apoc.text.join([i in [custom.anytoList(collect(split(country,', ')),true),
+    custom.anytoList(collect(split(district,', ')),true)] where not i = ''],', ') as Location,
     a.CMID as CMID, apoc.text.join([i in labels(a) where not i = 'CATEGORY'],', ') as Domains,
-    custom.anytoList(collect(split(language.name,', ')),true) as Languages, custom.anytoList(collect(split(religion.name,', ')),true) as Religions,
+    custom.anytoList(collect(split(language,', ')),true) as Languages, custom.anytoList(collect(split(religion,', ')),true) as Religions,
     custom.anytoList(collect(split(timeSpan,', ')),true) as `Date range`
     '''
             qSamples = '''
     unwind $cmid as cmid
     match (a)<-[r:USES]-(d:DATASET)
     where a.CMID = cmid
-    with custom.anytoList(collect(r.Name),true) as Name, r.country as countryID,
-    r.district as districtID, d.project as Source, d.CMID as datasetID, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd,
+    with custom.anytoList(collect(r.Name),true) as Name,
+    case when r.country is not null then custom.getName(r.country) else null end as country,
+    case when r.district is not null then custom.getName(r.district) else null end as district,
+    d.project as Source, d.CMID as datasetID, d.DatasetVersion as Version, r.url as Link, r.recordStart as recordStart, r.recordEnd as recordEnd,
     toIntegerList(apoc.coll.flatten(collect(r.populationEstimate))) as Population, toIntegerList(apoc.coll.flatten(collect(r.sampleSize))) as `Sample size`, r.type as type
-    call apoc.when(countryID is not null,'return custom.getName($id) as country','return null',{id:countryID}) yield value
-    with Name, value as country, districtID, Source, datasetID, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
-    call apoc.when(districtID is not null,'return custom.getName($id) as district','return null',{id:districtID}) yield value
-    with Name, country, value as district, Source, datasetID, Version, Link, recordStart, recordEnd, Population, `Sample size`, type
-    return Name, apoc.text.join([i in [custom.anytoList(collect(country.country),true),custom.anytoList(collect(district.district),true)] where not i = ''],', ') as Location, type as Type,
+    return Name, apoc.text.join([i in [custom.anytoList(collect(country),true),custom.anytoList(collect(district),true)] where not i = ''],', ') as Location, type as Type,
     apoc.text.join(apoc.coll.toSet([coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))),
     toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd)))))),coalesce(toString(apoc.coll.min(apoc.coll.toSet(apoc.coll.flatten(collect(recordEnd))))),
     toString(apoc.coll.max(apoc.coll.toSet(apoc.coll.flatten(collect(recordStart))))))]),'-') as `Time span`,  apoc.coll.sum(apoc.coll.removeAll(Population,[NULL])) as `Population est.`,
@@ -241,9 +238,8 @@ def getExplore():
             qInfo = '''
     unwind $cmid as cmid
     match (a:DATASET {CMID: cmid})
-    with a call apoc.when(a.District is not null,'return custom.getName($id) as name',
-    'return null as name',{id:a.District}) yield value as Location
-    return a.CMName as CMName, custom.anytoList(collect(Location.name),true) as Location, a.CMID as CMID,
+    with a, case when a.District is not null then custom.getName(a.District) else null end as Location
+    return a.CMName as CMName, custom.anytoList(collect(Location),true) as Location, a.CMID as CMID,
     labels(a) as Domains, a.parent as Parent, a.DatasetCitation as Citation,
       "<a href ='" + a.DatasetLocation + "' target='_blank' >" + a.DatasetLocation +"</a>" as `Dataset Location`,
         a.ApplicableYears as `Applicable Years`,

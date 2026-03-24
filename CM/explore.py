@@ -152,42 +152,21 @@ def _get_queries_for_label(label, database):
             'info': '''
                 UNWIND $cmid AS cmid 
                 MATCH (a:CATEGORY {CMID: cmid})<-[r:USES]-(d:DATASET)
-                WITH a, r, d
-                CALL apoc.when(
-                    r.country IS NOT NULL AND NOT r.country = [],
-                    'RETURN custom.getName($id) AS name',
-                    'RETURN null AS name',
-                    {id: r.country}
-                ) YIELD value AS country
-                CALL apoc.when(
-                    r.district IS NOT NULL AND NOT r.district = [],
-                    'RETURN custom.getName($id) AS name',
-                    'RETURN null AS name',
-                    {id: r.district}
-                ) YIELD value AS district
-                CALL apoc.when(
-                    r.language IS NOT NULL AND NOT r.language = [],
-                    'RETURN custom.getGlot($id) AS name',
-                    'RETURN null AS name',
-                    {id: r.language}
-                ) YIELD value AS language
-                CALL apoc.when(
-                    r.religion IS NOT NULL AND NOT r.religion = [],
-                    'RETURN custom.getName($id) AS name',
-                    'RETURN null AS name',
-                    {id: r.religion}
-                ) YIELD value AS religion
-                WITH a, r, d, country, district, language, religion
+                WITH a, r, d,
+                    CASE WHEN r.country IS NOT NULL AND NOT r.country = [] THEN custom.getName(r.country) ELSE null END AS country,
+                    CASE WHEN r.district IS NOT NULL AND NOT r.district = [] THEN custom.getName(r.district) ELSE null END AS district,
+                    CASE WHEN r.language IS NOT NULL AND NOT r.language = [] THEN custom.getGlot(r.language) ELSE null END AS language,
+                    CASE WHEN r.religion IS NOT NULL AND NOT r.religion = [] THEN custom.getName(r.religion) ELSE null END AS religion
                 RETURN 
                     a.CMName AS CMName,
                     apoc.text.join([i IN [
-                        custom.anytoList(collect(split(country.name, ', ')), true),
-                        custom.anytoList(collect(split(district.name, ', ')), true)
+                        custom.anytoList(collect(split(country, ', ')), true),
+                        custom.anytoList(collect(split(district, ', ')), true)
                     ] WHERE NOT i = ''], ', ') AS Location,
                     a.CMID AS CMID,
                     apoc.text.join([i IN labels(a) WHERE NOT i = 'CATEGORY'], ', ') AS Domains,
-                    custom.anytoList(collect(split(language.name, ', ')), true) AS Languages,
-                    custom.anytoList(collect(split(religion.name, ', ')), true) AS Religions
+                    custom.anytoList(collect(split(language, ', ')), true) AS Languages,
+                    custom.anytoList(collect(split(religion, ', ')), true) AS Religions
             ''',
             
             'samples': '''
@@ -203,8 +182,8 @@ def _get_queries_for_label(label, database):
                     SIZE([x IN allCTypes WHERE x IS NOT NULL AND x <> '']) AS cTypeCount
                 WITH r, d, Source, datasetID, Version, cTypeCount,
                     r.Name AS Name,
-                    r.country AS countryID,
-                    r.district AS districtID,
+                    CASE WHEN r.country IS NOT NULL THEN custom.getName(r.country) ELSE null END AS country,
+                    CASE WHEN r.district IS NOT NULL THEN custom.getName(r.district) ELSE null END AS district,
                     r.url AS Link,
                     r.recordStart AS recordStart,
                     r.recordEnd AS recordEnd,
@@ -218,21 +197,9 @@ def _get_queries_for_label(label, database):
                         WHEN cTypeCount >= 1 THEN r.categoryType
                         ELSE null
                     END AS cType
-                CALL apoc.when(
-                    countryID IS NOT NULL,
-                    'RETURN custom.getName($id) AS country',
-                    'RETURN null AS country',
-                    {id: countryID}
-                ) YIELD value AS country
-                CALL apoc.when(
-                    districtID IS NOT NULL,
-                    'RETURN custom.getName($id) AS district',
-                    'RETURN null AS district',
-                    {id: districtID}
-                ) YIELD value AS district
                 RETURN 
                     apoc.text.join(Name, '; ') AS Name,
-                    apoc.text.join([i IN [country.country, district.district] 
+                    apoc.text.join([i IN [country, district] 
                         WHERE i IS NOT NULL AND i <> ''], ', ') AS Location,
                     type AS Type,
                     recordStart AS `rStart`,
@@ -280,16 +247,10 @@ def _get_queries_for_label(label, database):
                 UNWIND $cmid AS cmid
                 MATCH (a:DATASET)
                 WHERE a.CMID = cmid
-                WITH a 
-                CALL apoc.when(
-                    a.District IS NOT NULL,
-                    'RETURN custom.getName($id) AS name',
-                    'RETURN null AS name',
-                    {id: a.District}
-                ) YIELD value AS Location
+                WITH a, CASE WHEN a.District IS NOT NULL THEN custom.getName(a.District) ELSE null END AS Location
                 RETURN 
                     a.CMName AS CMName,
-                    custom.anytoList(collect(Location.name), true) AS Location,
+                    custom.anytoList(collect(Location), true) AS Location,
                     a.CMID AS CMID,
                     labels(a) AS Domains,
                     a.parent AS Parent,

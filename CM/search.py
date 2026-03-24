@@ -167,8 +167,13 @@ def search(
     elif property == "CMID":
         qStart = """
     match (a) where a.CMID = $term
-    call apoc.when("DELETED" in labels(a),"match (a)-[:IS]->(b) return b as node, a.CMID as matching","return a as node, a.CMID as matching",{a:a}) yield value
-    with value.node as a, value.matching as matching, 0 as score
+    optional match (a)-[:IS]->(b)
+    with a as sourceNode,
+    case
+      when "DELETED" in labels(a) and b is not null then b
+      else a
+    end as a
+    with a, sourceNode.CMID as matching, 0 as score
     """
 
     else:
@@ -467,8 +472,13 @@ def translate(
     with row call db.index.fulltext.queryNodes('{indx}','"' + toupper(row.term) + '"') yield node
     with row, node as a, toupper(node['{property}']) as matching, toupper(row.term) as term
     where matching = term
-    with row, a call apoc.do.when("DELETED" in labels(a),"match (a)-[:IS]->(b) return b as node, a.CMID as matching","return a as node, a.CMID as matching",{{a:a}}) yield value
-    with row, value.node as a, value.matching as matching, 0 as score
+    optional match (a)-[:IS]->(b)
+    with row, a as sourceNode,
+    case
+      when "DELETED" in labels(a) and b is not null then b
+      else a
+    end as a
+    with row, a, sourceNode.CMID as matching, 0 as score
     """
 
     elif property == "Name":
