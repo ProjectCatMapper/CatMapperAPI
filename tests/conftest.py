@@ -59,10 +59,14 @@ def realdb_database():
 
 @pytest.fixture(scope="session")
 def realdb_driver(pytestconfig, realdb_database):
-    from CM.utils import getDriver
+    from CM.utils import closeAllDrivers, getDriver
 
     if not _run_realdb_enabled(pytestconfig):
         pytest.skip("realdb tests are disabled")
 
     # Let failures raise so CI/local runs fail loudly if connectivity breaks.
-    return getDriver(realdb_database)
+    driver = getDriver(realdb_database)
+    try:
+        yield driver
+    finally:
+        closeAllDrivers()

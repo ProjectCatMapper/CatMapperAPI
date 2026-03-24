@@ -373,7 +373,7 @@ def translate(
     # add rowid,
     # table = [{'Name':'test1',"key": 1}, {'Name':'test1',"key": 2}, {'Name':'test2',"key": 3}]
     df = pd.DataFrame(table)
-    df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    df = df.map(lambda x: x.strip() if isinstance(x, str) else x)
     df['CMuniqueRowID'] = df.index
     rows = pd.DataFrame(
         {'term': df[term], 'CMuniqueRowID': df["CMuniqueRowID"]})
