@@ -4,10 +4,17 @@ set -e  # Exit immediately if a command exits with a non-zero status
 
 DEPLOY_USER="rjbischo"
 APP_DIR="/mnt/storage/app/CatMapperAPI"
+STACK_DIR="/mnt/storage/app"
+COMPOSE_FILE="$STACK_DIR/docker-compose.yml"
 ENV_FILE="$APP_DIR/.env"
 
 if [ ! -d "$APP_DIR" ]; then
   echo "❌ Error: App directory not found: $APP_DIR"
+  exit 1
+fi
+
+if [ ! -f "$COMPOSE_FILE" ]; then
+  echo "❌ Error: docker compose file not found: $COMPOSE_FILE"
   exit 1
 fi
 
@@ -62,12 +69,13 @@ if ! run_as_deploy_user grep -q '^CATMAPPER_AUTH_SECRET=' .env; then
 fi
 
 # 4. Restart API, workers, and nginx so upstreams and job code are refreshed.
-echo "Restarting API, worker, and nginx containers..."
-docker restart api
-docker restart api-worker
-if docker ps -a --format '{{.Names}}' | grep -qx "api-waiting-worker"; then
-  docker restart api-waiting-worker
-fi
+echo "Rebuilding API images (api/workers)..."
+docker compose -f "$COMPOSE_FILE" build api api-worker api-waiting-worker
+
+echo "Recreating API and worker containers..."
+docker compose -f "$COMPOSE_FILE" up -d --no-deps api api-worker api-waiting-worker
+
+echo "Restarting nginx container..."
 docker restart nginx
 
 # 5. Git Tagging

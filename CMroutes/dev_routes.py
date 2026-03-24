@@ -1,4 +1,3 @@
-from turtle import up
 from CM import *
 from flask import Blueprint, jsonify, render_template
 from .extensions import mail
