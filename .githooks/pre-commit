@@ -6,12 +6,13 @@ if [ -z "$staged_files" ]; then
   exit 0
 fi
 
-if printf '%s\n' "$staged_files" | rg -q '(^|/)\.env($|\.)|(^|/)aws_credentials($|\.)|(^|/)id_rsa($|\.)|\.pem$|\.key$|\.p12$|\.pfx$'; then
+path_check_files="$(printf '%s\n' "$staged_files" | rg -v '(^|/)\.env\.example$' || true)"
+if printf '%s\n' "$path_check_files" | rg -q '(^|/)\.env($|\.)|(^|/)aws_credentials($|\.)|(^|/)id_rsa($|\.)|\.pem$|\.key$|\.p12$|\.pfx$'; then
   echo "Blocked commit: staged file path matches secret-bearing patterns." >&2
   exit 1
 fi
 
-if git diff --cached -U0 -- . ':(exclude).githooks/pre-commit' | rg -n -i \
+if git diff --cached -U0 -- . ':(exclude).githooks/pre-commit' ':(exclude).env.example' | rg -n -i \
   -e '^\+.*CATMAPPER_AUTH_SECRET' \
   -e '^\+.*SECRET_KEY' \
   -e '^\+.*AWS_SECRET_ACCESS_KEY' \

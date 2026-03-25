@@ -79,17 +79,17 @@ echo "Restarting nginx container..."
 docker restart nginx
 
 # 5. Git Tagging
-# This creates a local tag and pushes it to your remote (e.g., GitHub/GitLab)
+# Tag and push code only. Never commit secret-bearing environment files.
 echo "Creating Git tag: v$NEW_VERSION"
 
-# Add the .env change so the version record is committed
-run_as_deploy_user git add .env -f
-run_as_deploy_user git commit -m "Deploy version $NEW_VERSION"
+if run_as_deploy_user git rev-parse "v$NEW_VERSION" >/dev/null 2>&1; then
+  echo "❌ Error: Tag v$NEW_VERSION already exists."
+  exit 1
+fi
 
-# Create the tag
 run_as_deploy_user git tag -a "v$NEW_VERSION" -m "Deployment on $(date)"
 
-# Push the commit and the tag to the server
+# Push branch tip and tag to remote.
 run_as_deploy_user git push origin "$CURRENT_BRANCH"
 run_as_deploy_user git push origin "v$NEW_VERSION"
 

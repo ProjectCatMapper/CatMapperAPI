@@ -75,7 +75,7 @@ Option B (scripted release):
 cd /mnt/storage/app/CatMapperAPI
 sudo ./deploy.sh
 ```
-Note: `deploy.sh` updates `.env` `VERSION`, commits that change, tags, and pushes.
+Note: `deploy.sh` updates local `.env` `VERSION` for runtime, but it does not commit `.env`. It tags and pushes code only.
 
 ## 6. Post-Cutover Validation
 Container/runtime checks:
