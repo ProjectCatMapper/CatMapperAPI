@@ -1,6 +1,7 @@
 import pytest
+import importlib
 
-import CM.search as search_module
+search_module = importlib.import_module("CM.search")
 
 
 def test_search_uses_requested_limit_in_query(monkeypatch):
