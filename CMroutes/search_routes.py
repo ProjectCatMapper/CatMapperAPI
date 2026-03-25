@@ -355,6 +355,7 @@ def getSearch():
         dataset = request.args.get('dataset')
         country = request.args.get('country')
         query = request.args.get('query')
+        limit = request.args.get('limit')
 
         result = search(
             database,
@@ -367,6 +368,7 @@ def getSearch():
             country,
             query,
             dataset,
+            limit=limit,
             contexts=contexts,
             context_mode=context_mode)
         

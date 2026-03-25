@@ -14,7 +14,8 @@ def search(
         query,
         dataset,
         contexts=None,
-        context_mode="all"):
+        context_mode="all",
+        limit=None):
 
     if domain == "ANY DOMAIN":
         domain = "CATEGORY"
@@ -111,14 +112,15 @@ def search(
     if yearStart is None and yearEnd is not None:
         raise Exception("must specify yearStart property")
 
-    # try:
-    #     if limit is not None:
-    #         limit = int(limit)
-    # except ValueError:
-    #     limit = None
-
-    # if limit is None:
-    limit = 10000
+    if limit is None or str(limit).strip().lower() in {"", "null"}:
+        limit = 10000
+    else:
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            raise Exception("limit must be an integer")
+        if limit <= 0:
+            raise Exception("limit must be greater than 0")
 
     if property is None and term is not None:
         raise Exception("Must specify a property (e.g., Name, CMID, or Key)")
