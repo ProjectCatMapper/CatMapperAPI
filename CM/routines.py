@@ -237,7 +237,21 @@ def backup2CSV(database, mail=None):
 
         results = [database]
         query_datasets = """
-            with 'match (d:DATASET) unwind keys(d) as property return distinct elementId(d) as nodeID, property, d[property] as value' as query CALL apoc.export.csv.query(query, '/backups/download/datasetNodes_' + toString(date()) + '.csv', {})
+            CALL () {
+                MATCH (d:DATASET)
+                UNWIND keys(d) AS p
+                RETURN collect(DISTINCT p) AS props
+            }
+            WITH [p IN props |
+                'd.`' + replace(p, '`', '``') + '` as `' +
+                replace(CASE WHEN p IN ['nodeID'] THEN 'prop_' + p ELSE p END, '`', '``') + '`'
+            ] AS projections
+            WITH 'MATCH (d:DATASET) RETURN elementId(d) as nodeID' +
+                CASE
+                    WHEN size(projections) = 0 THEN ''
+                    ELSE ', ' + apoc.text.join(projections, ', ')
+                END AS query
+            CALL apoc.export.csv.query(query, '/backups/download/datasetNodes_' + toString(date()) + '.csv', {})
             YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
             RETURN count(*);
         """
@@ -246,7 +260,21 @@ def backup2CSV(database, mail=None):
         results.append(datasets)
 
         query_CATEGORIES = """
-            with 'match (d:CATEGORY) unwind keys(d) as property return distinct elementId(d) as nodeID, apoc.text.join(labels(d),"; ") as label, apoc.text.join(d.names,"; ") as names, property, d[property] as value' as query CALL apoc.export.csv.query(query, '/backups/download/categoryNodes_' + toString(date()) + '.csv', {})
+            CALL () {
+                MATCH (d:CATEGORY)
+                UNWIND keys(d) AS p
+                RETURN collect(DISTINCT p) AS props
+            }
+            WITH [p IN props |
+                'd.`' + replace(p, '`', '``') + '` as `' +
+                replace(CASE WHEN p IN ['nodeID', 'label', 'names'] THEN 'prop_' + p ELSE p END, '`', '``') + '`'
+            ] AS projections
+            WITH 'MATCH (d:CATEGORY) RETURN elementId(d) as nodeID, apoc.text.join(labels(d),"; ") as label, apoc.text.join(d.names,"; ") as names' +
+                CASE
+                    WHEN size(projections) = 0 THEN ''
+                    ELSE ', ' + apoc.text.join(projections, ', ')
+                END AS query
+            CALL apoc.export.csv.query(query, '/backups/download/categoryNodes_' + toString(date()) + '.csv', {})
             YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
             RETURN count(*);
         """
@@ -255,8 +283,28 @@ def backup2CSV(database, mail=None):
         results.append(CATEGORIES)
 
         query_USES = """
-            with 'match (n:CATEGORY)<-[r:USES]-(d:DATASET) 
-            unwind keys(r) as property with n,r,d, property where not property = "logID" return distinct elementId(r) as relID, n.CMID as CMID, n.CMName as CMName, d.CMName as dataset, d.CMID as datasetID, property, r[property] as value order by CMName' as query CALL apoc.export.csv.query(query, '/backups/download/USESties_' + toString(date()) + '.csv', {})
+            CALL () {
+                MATCH ()-[r:USES]->()
+                UNWIND keys(r) AS p
+                RETURN collect(DISTINCT p) AS props
+            }
+            WITH [p IN props |
+                'r.`' + replace(p, '`', '``') + '` as `' +
+                replace(
+                    CASE
+                        WHEN p IN ['relID', 'CMID', 'CMName', 'dataset', 'datasetID']
+                            THEN 'prop_' + p
+                        ELSE p
+                    END,
+                '`', '``') + '`'
+            ] AS projections
+            WITH 'MATCH (n:CATEGORY)<-[r:USES]-(d:DATASET) RETURN elementId(r) as relID, n.CMID as CMID, n.CMName as CMName, d.CMName as dataset, d.CMID as datasetID' +
+                CASE
+                    WHEN size(projections) = 0 THEN ''
+                    ELSE ', ' + apoc.text.join(projections, ', ')
+                END +
+                ' ORDER BY CMName' AS query
+            CALL apoc.export.csv.query(query, '/backups/download/USESties_' + toString(date()) + '.csv', {})
             YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
             RETURN count(*);
             """
@@ -273,7 +321,21 @@ def backup2CSV(database, mail=None):
         results.append(DELETED)
         
         query_Metadata = """
-            with 'match (m:METADATA) unwind keys(m) as property return distinct elementId(m) as nodeID, m.CMID as CMID, m.CMName as CMName, property, m[property] as value' as query CALL apoc.export.csv.query(query, '/backups/download/metadata_' + toString(date()) + '.csv', {})
+            CALL () {
+                MATCH (m:METADATA)
+                UNWIND keys(m) AS p
+                RETURN collect(DISTINCT p) AS props
+            }
+            WITH [p IN props |
+                'm.`' + replace(p, '`', '``') + '` as `' +
+                replace(CASE WHEN p IN ['nodeID', 'CMID', 'CMName'] THEN 'prop_' + p ELSE p END, '`', '``') + '`'
+            ] AS projections
+            WITH 'MATCH (m:METADATA) RETURN elementId(m) as nodeID, m.CMID as CMID, m.CMName as CMName' +
+                CASE
+                    WHEN size(projections) = 0 THEN ''
+                    ELSE ', ' + apoc.text.join(projections, ', ')
+                END AS query
+            CALL apoc.export.csv.query(query, '/backups/download/metadata_' + toString(date()) + '.csv', {})
             YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
             RETURN count(*);
             """

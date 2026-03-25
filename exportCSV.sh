@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -euo pipefail
+
 mkdir -p \
     /mnt/storage/app/CatMapperAPI/log \
     /mnt/storage/app/db/sociomap1/backups/download \
@@ -7,40 +9,43 @@ mkdir -p \
 
 echo "Starting CSV export and pivoting process"
 
-api_url="https://catmapper.org/api/routines/backup2CSV/ArchaMap"
+chmod 777 /mnt/storage/app/db/sociomap1/backups/download /mnt/storage/app/db/archamap1/backups/download >/dev/null 2>&1 || true
+today="$(date +%Y-%m-%d)"
+find /mnt/storage/app/db/sociomap1/backups/download -maxdepth 1 -type f -name "*_${today}.csv" -exec chmod 666 {} + 2>/dev/null || true
+find /mnt/storage/app/db/archamap1/backups/download -maxdepth 1 -type f -name "*_${today}.csv" -exec chmod 666 {} + 2>/dev/null || true
+rm -f /mnt/storage/app/db/sociomap1/backups/download/*_"$today".csv
+rm -f /mnt/storage/app/db/archamap1/backups/download/*_"$today".csv
 
-response=$(curl -ks "Content-Type: application/json" "$api_url")
+response=$(docker exec -i api python - <<'PY'
+from CM.routines import backup2CSV
+print(backup2CSV('ArchaMap'))
+PY
+)
 
 echo "API Response for backup CSV in ArchaMap:"
 echo "$response"
+if [[ "$response" != *"backup2CSV completed for ArchaMap"* ]]; then
+    echo "ArchaMap export did not report success. Aborting."
+    exit 1
+fi
 
-api_url="https://catmapper.org/api/routines/backup2CSV/SocioMap"
+response=$(docker exec -i api python - <<'PY'
+from CM.routines import backup2CSV
+print(backup2CSV('SocioMap'))
+PY
+)
 
-response=$(curl -ks "Content-Type: application/json" "$api_url")
-
-echo "API Response for backup CSV in ArchaMap:"
+echo "API Response for backup CSV in SocioMap:"
 echo "$response"
+if [[ "$response" != *"backup2CSV completed for SocioMap"* ]]; then
+    echo "SocioMap export did not report success. Aborting."
+    exit 1
+fi
 
-chmod -R 777 /mnt/storage/app/db/sociomap1/backups;
-chmod -R 777 /mnt/storage/app/db/archamap1/backups;
-
-fp1="/mnt/storage/app/db/sociomap1/backups/download/datasetNodes_$(date +%Y-%m-%d).csv"
-fp2="/mnt/storage/app/db/archamap1/backups/download/datasetNodes_$(date +%Y-%m-%d).csv"
-fp3="/mnt/storage/app/db/sociomap1/backups/download/categoryNodes_$(date +%Y-%m-%d).csv"
-fp4="/mnt/storage/app/db/archamap1/backups/download/categoryNodes_$(date +%Y-%m-%d).csv"
-fp5="/mnt/storage/app/db/sociomap1/backups/download/USESties_$(date +%Y-%m-%d).csv"
-fp6="/mnt/storage/app/db/archamap1/backups/download/USESties_$(date +%Y-%m-%d).csv"
-fp7="/mnt/storage/app/db/sociomap1/backups/download/metadata_$(date +%Y-%m-%d).csv"
-fp8="/mnt/storage/app/db/archamap1/backups/download/metadata_$(date +%Y-%m-%d).csv"
-
-echo "Pivoting CSV files"
-
-for fp in "$fp1" "$fp2" "$fp3" "$fp4" "$fp5" "$fp6" "$fp7" "$fp8"; do
-    /opt/conda/bin/conda run -n global_api_env python /mnt/storage/app/CatMapperAPI/pivotCSVs.py "$fp"
-done
+echo "CSV files are exported already pivoted by Neo4j/APOC."
 
 echo "Syncing CSV files"
 sudo -u rjbischo aws s3 sync /mnt/storage/app/db/sociomap1/backups/download s3://sociomap-backups/sociomap1-backups/download/ --acl public-read;
 sudo -u rjbischo aws s3 sync /mnt/storage/app/db/archamap1/backups/download s3://sociomap-backups/archamap-backups/download/ --acl public-read;
 
-echo "CSV files exported, pivoted, and synced to S3"
+echo "CSV files exported and synced to S3"
