@@ -270,7 +270,7 @@ def get_merge_template_summary(database, cmid):
           s,
           datasetCount,
           variableCount,
-          count(DISTINCT CASE WHEN c1.CMID = c2.CMID THEN e END) AS equivalenceTieCount,
+          count(DISTINCT e) AS equivalenceTieCount,
           count(DISTINCT CASE WHEN c1.CMID <> c2.CMID THEN e END) AS keyReassignmentCount
         RETURN
           s.CMID AS stackID,
@@ -304,7 +304,7 @@ def get_merge_template_summary(database, cmid):
         WITH
           d,
           variableCount,
-          count(DISTINCT CASE WHEN c1.CMID = c2.CMID THEN e END) AS equivalenceTieCount,
+          count(DISTINCT e) AS equivalenceTieCount,
           count(DISTINCT CASE WHEN c1.CMID <> c2.CMID THEN e END) AS keyReassignmentCount
         RETURN
           d.CMID AS datasetID,
