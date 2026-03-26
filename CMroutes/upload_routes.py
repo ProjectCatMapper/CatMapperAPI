@@ -19,6 +19,7 @@ except Exception:  # pragma: no cover
     send_stop_job_command = None
 
 upload_bp = Blueprint('upload', __name__)
+API_HELP_URL = "https://help.catmapper.org/API.html"
 
 # Compatibility placeholders for tests/tools that introspect module attributes.
 UPLOAD_TASKS = {}
@@ -44,6 +45,25 @@ def _request_json_payload():
     if not isinstance(data, dict):
         raise Exception("Invalid payload")
     return data
+
+
+def _build_auth_error_response(error_message, fallback_status=500):
+    error_message = str(error_message or "").strip()
+    status_code = classify_auth_error_status(error_message) or fallback_status
+    if status_code in (401, 403):
+        clear_error = (
+            f"Not authorized: {error_message or 'missing or invalid credentials'}. "
+            f"Provide a valid Bearer token or X-API-Key. See {API_HELP_URL}"
+        )
+        return jsonify(
+            {
+                "error": clear_error,
+                "detail": error_message,
+                "help": API_HELP_URL,
+                "code": "NOT_AUTHORIZED",
+            }
+        ), status_code
+    return None, status_code
 
 
 def _request_acting_user(data):
@@ -336,7 +356,9 @@ def upload_waiting_uses_status():
         return jsonify(task)
     except Exception as e:
         error_message = str(e)
-        status_code = classify_auth_error_status(error_message) or 500
+        auth_response, status_code = _build_auth_error_response(error_message, fallback_status=500)
+        if auth_response is not None:
+            return auth_response, status_code
         return jsonify({"error": error_message}), status_code
 
 
@@ -360,7 +382,9 @@ def upload_input_nodes_status():
         return jsonify(task)
     except Exception as e:
         error_message = str(e)
-        status_code = classify_auth_error_status(error_message) or 500
+        auth_response, status_code = _build_auth_error_response(error_message, fallback_status=500)
+        if auth_response is not None:
+            return auth_response, status_code
         return jsonify({"error": error_message}), status_code
 
 
@@ -386,7 +410,9 @@ def upload_input_nodes_cancel():
         return jsonify(task), 202
     except Exception as e:
         error_message = str(e)
-        status_code = classify_auth_error_status(error_message) or 500
+        auth_response, status_code = _build_auth_error_response(error_message, fallback_status=500)
+        if auth_response is not None:
+            return auth_response, status_code
         return jsonify({"error": error_message}), status_code
 
 
@@ -432,11 +458,15 @@ def upload_API():
         else:
             full_log.append("Log file not found.")
 
+        auth_response, status_code = _build_auth_error_response(error_message, fallback_status=500)
+        if auth_response is not None:
+            auth_payload = auth_response.get_json() or {}
+            auth_payload["full_log"] = full_log
+            return jsonify(auth_payload), status_code
+
         response_data = {
             "error": f"Upload error - {error_message}",
             "full_log": full_log,
             "error_details": extract_upload_error_details(error_message),
         }
-
-        status_code = classify_auth_error_status(error_message) or 500
         return jsonify(response_data), status_code

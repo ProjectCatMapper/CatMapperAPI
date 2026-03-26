@@ -253,6 +253,9 @@ def test_upload_returns_401_for_missing_credentials(client, monkeypatch):
 
     assert response.status_code == 401
     body = response.get_json() or {}
+    assert "not authorized" in str(body.get("error", "")).lower()
+    assert str(body.get("code", "")) == "NOT_AUTHORIZED"
+    assert str(body.get("help", "")) == "https://help.catmapper.org/API.html"
     assert "missing credentials" in str(body.get("error", "")).lower()
 
 
