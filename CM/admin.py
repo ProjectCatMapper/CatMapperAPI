@@ -626,22 +626,12 @@ def mergeNodes(keepcmid,deletecmid,user,database):
 
         results = [f"Started Combining {deletecmid} into {keepcmid}"]
 
-        validKeep = isValidCMID(keepcmid, driver)
-
-        results = results + ["checking if keepcmid is valid", validKeep]
-
-        if len(validKeep) == 0:
-            raise Exception(f"{keepcmid} is invalid")
-
-        deleteKeep = isValidCMID(deletecmid, driver)
-
-        results = results + ["checking if deletecmid is valid", deleteKeep]
-
-        if len(deleteKeep) == 0:
-            raise Exception(f"{deletecmid} is invalid")
-
         keep_summary = getNodeMergeSummary(keepcmid, driver)
         delete_summary = getNodeMergeSummary(deletecmid, driver)
+        results = results + [
+            "checking if keepcmid is valid", [keep_summary.get("CMID")],
+            "checking if deletecmid is valid", [delete_summary.get("CMID")],
+        ]
 
         keep_label = keep_summary["primaryDomain"]
         delete_label = delete_summary["primaryDomain"]

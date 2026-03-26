@@ -19,7 +19,9 @@ def test_logs_route_returns_logs_and_queries_both_uses_sides(client, monkeypatch
     payload = response.get_json() or {}
     assert payload.get("logs") == [{"ID": "1", "user": "tester"}]
     assert captured.get("cmid") == "AD339121"
-    assert "(c.CMID = $CMID OR d.CMID = $CMID)" in (captured.get("query") or "")
+    query = captured.get("query") or ""
+    assert "WITH $CMID AS CMID" in query
+    assert "(c.CMID = CMID OR d.CMID = CMID)" in query
 
 
 def test_logs_route_passes_through_query_error_dict(client, monkeypatch):

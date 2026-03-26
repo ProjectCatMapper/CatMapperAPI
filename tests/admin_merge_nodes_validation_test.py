@@ -99,3 +99,45 @@ def test_merge_nodes_uses_variable_label_for_variable_domain(monkeypatch):
 
     assert isinstance(result, list)
     assert any("Started Combining AM2 into AM1" in str(item) for item in result)
+
+
+def test_merge_nodes_allows_variable_domain_when_isvalidcmid_would_reject(monkeypatch):
+    monkeypatch.setattr(admin_module, "getDriver", lambda _database: object())
+    monkeypatch.setattr(admin_module, "isValidCMID", lambda _cmid, _driver: [])
+    monkeypatch.setattr(
+        admin_module,
+        "getNodeMergeSummary",
+        lambda cmid, _driver: {
+            "CMID": cmid,
+            "CMName": f"Node {cmid}",
+            "primaryDomain": "VARIABLE",
+        },
+    )
+    monkeypatch.setattr(admin_module, "addCMNameRel", lambda database, cmid: f"ok:{cmid}")
+    monkeypatch.setattr(admin_module, "replaceProperty", lambda **kwargs: None)
+    monkeypatch.setattr(admin_module, "createLog", lambda **kwargs: None)
+    monkeypatch.setattr(admin_module, "processUSES", lambda **kwargs: None)
+
+    def fake_get_query(query, driver, params=None, type=None, **kwargs):
+        if "return elementId(r) as relID" in query:
+            return []
+        if "return c.CMID as cmid" in query:
+            return []
+        if "return m.CMName as property" in query:
+            return []
+        if "CALL apoc.refactor.mergeNodes" in query:
+            assert "match (a:VARIABLE {CMID: $keepcmid})" in query
+            assert "match (b:VARIABLE {CMID: $deletecmid})" in query
+            return ["AM1"]
+        if "create (del:DELETED" in query:
+            return ["deleted-node-id"]
+        if "return elementId(n) as id" in query:
+            return ["node-id"]
+        return []
+
+    monkeypatch.setattr(admin_module, "getQuery", fake_get_query)
+
+    result = admin_module.mergeNodes("AM1", "AM2", "admin_user", "ArchaMap")
+
+    assert isinstance(result, list)
+    assert any("Completed combining AM2 into AM1" in str(item) for item in result)
