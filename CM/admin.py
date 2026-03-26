@@ -100,7 +100,7 @@ def _resolve_primary_domain_from_labels(labels, driver):
     labels = [lbl for lbl in (labels or []) if lbl]
     labels_no_structural = [
         lbl for lbl in labels
-        if lbl not in {"CATEGORY", "DELETED", "MERGING", "STACK", "VARIABLE"}
+        if lbl not in {"CATEGORY", "DELETED", "MERGING", "STACK"}
     ]
 
     if "DATASET" in labels_no_structural:
@@ -682,10 +682,12 @@ def mergeNodes(keepcmid,deletecmid,user,database):
             replaceProperty(cmid=cmids, property=property,
                             old=deletecmid, new=keepcmid, database=database)
 
-        # determine if the CMID is dataset or category
+        # determine the merge label from the resolved primary domain
         if len(keepcmid) > 1 and keepcmid[1] == "D":
             domain = "DATASET"
-        else: 
+        elif keep_label == "VARIABLE":
+            domain = "VARIABLE"
+        else:
             domain = "CATEGORY"
         domain = sanitize_cypher_identifier(domain, "domain")
         

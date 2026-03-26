@@ -42,3 +42,60 @@ def test_admin_node_summary_returns_cmid_name_and_primary_domain(client, monkeyp
     assert payload["CMID"] == "AM123"
     assert payload["CMName"] == "Example Node"
     assert payload["primaryDomain"] == "DISTRICT"
+
+
+def test_resolve_primary_domain_accepts_variable_label(monkeypatch):
+    monkeypatch.setattr(
+        admin_module,
+        "getQuery",
+        lambda query, driver, params=None, type=None: [{"label": "VARIABLE", "groupLabel": None}],
+    )
+
+    result = admin_module._resolve_primary_domain_from_labels(
+        ["VARIABLE"],
+        driver=object(),
+    )
+
+    assert result == "VARIABLE"
+
+
+def test_merge_nodes_uses_variable_label_for_variable_domain(monkeypatch):
+    monkeypatch.setattr(admin_module, "getDriver", lambda _database: object())
+    monkeypatch.setattr(admin_module, "isValidCMID", lambda _cmid, _driver: ["ok"])
+    monkeypatch.setattr(
+        admin_module,
+        "getNodeMergeSummary",
+        lambda cmid, _driver: {
+            "CMID": cmid,
+            "CMName": f"Node {cmid}",
+            "primaryDomain": "VARIABLE",
+        },
+    )
+    monkeypatch.setattr(admin_module, "addCMNameRel", lambda database, cmid: f"ok:{cmid}")
+    monkeypatch.setattr(admin_module, "replaceProperty", lambda **kwargs: None)
+    monkeypatch.setattr(admin_module, "createLog", lambda **kwargs: None)
+
+    queries = []
+
+    def fake_get_query(query, driver, params=None, type=None, **kwargs):
+        queries.append(query)
+        if "return elementId(r) as relID" in query:
+            return []
+        if "return c.CMID as cmid" in query:
+            return []
+        if "return m.CMName as property" in query:
+            return []
+        if "CALL apoc.refactor.mergeNodes" in query:
+            assert "match (a:VARIABLE {CMID: $keepcmid})" in query
+            assert "match (b:VARIABLE {CMID: $deletecmid})" in query
+            return ["AM1"]
+        if "create (del:DELETED" in query:
+            return ["deleted-node-id"]
+        return []
+
+    monkeypatch.setattr(admin_module, "getQuery", fake_get_query)
+
+    result = admin_module.mergeNodes("AM1", "AM2", "admin_user", "ArchaMap")
+
+    assert isinstance(result, list)
+    assert any("Started Combining AM2 into AM1" in str(item) for item in result)
