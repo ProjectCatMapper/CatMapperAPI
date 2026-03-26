@@ -6,6 +6,23 @@ from .auth_utils import verify_request_auth, classify_auth_error_status
 admin_bp = Blueprint('admin', __name__)
 
 
+def _parse_credentials(raw_value):
+    value = unlist(raw_value)
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return None
+    return None
+
+
 @admin_bp.route("/admin_add_edit_delete_nodeproperties", methods=['GET'])
 def admin_nodeproperties():
     CMID = request.args.get('CMID')
@@ -187,11 +204,14 @@ def getAdminEdit():
         user = unlist(data.get('user'))
         pwd = unlist(data.get('pwd'))
         apikey = unlist(data.get('apikey'))
-        credentials = unlist(data.get("cred"))
+        credentials = _parse_credentials(data.get("cred"))
         input = unlist(data.get("input"))
         acting_user = None
         auth_header = request.headers.get("Authorization", "")
-        if credentials or auth_header.startswith("Bearer "):
+        request_api_key = request.headers.get("X-API-Key", "").strip()
+        auth_lower = auth_header.lower()
+        has_api_key_auth = bool(request_api_key) or auth_lower.startswith("apikey ") or auth_lower.startswith("api-key ")
+        if credentials or auth_header.startswith("Bearer ") or has_api_key_auth:
             claims = verify_request_auth(credentials=credentials, required_role="admin", req=request)
             acting_user = claims.get("userid")
         else:
@@ -327,13 +347,8 @@ def saveMetadata():
         data = request.get_json(silent=True)
         if data is None:
             data = {}
-        auth_header = request.headers.get("Authorization", "")
-        credentials = unlist(data.get("cred")) if isinstance(data, dict) else None
-
-        if credentials or auth_header.startswith("Bearer "):
-            verify_request_auth(credentials=credentials, required_role="admin", req=request)
-        else:
-            raise Exception("Admin authorization is required")
+        credentials = _parse_credentials(data.get("cred")) if isinstance(data, dict) else None
+        verify_request_auth(credentials=credentials, required_role="admin", req=request)
 
         updates = data if isinstance(data, list) else data.get("updates")
         if not isinstance(updates, list):
@@ -433,8 +448,10 @@ def saveMetadata():
         }), 200
 
     except Exception as e:
-        print(f"Error saving metadata: {e}")
-        return jsonify({"error": str(e)}), 500
+        error_message = str(e)
+        print(f"Error saving metadata: {error_message}")
+        status_code = classify_auth_error_status(error_message) or 500
+        return jsonify({"error": error_message}), status_code
 
 
 @admin_bp.route('/admin/metadata/create', methods=['POST'])
@@ -444,12 +461,8 @@ def create_metadata_node():
         if data is None:
             data = {}
 
-        auth_header = request.headers.get("Authorization", "")
-        credentials = unlist(data.get("cred")) if isinstance(data, dict) else None
-        if credentials or auth_header.startswith("Bearer "):
-            verify_request_auth(credentials=credentials, required_role="admin", req=request)
-        else:
-            raise Exception("Admin authorization is required")
+        credentials = _parse_credentials(data.get("cred")) if isinstance(data, dict) else None
+        verify_request_auth(credentials=credentials, required_role="admin", req=request)
 
         cmname = str(data.get("CMName", "")).strip()
         group_label = str(data.get("groupLabel", "")).strip()
@@ -601,8 +614,8 @@ def create_metadata_node():
         }), 200
     except Exception as e:
         err = str(e)
-        status = 400
-        if "already exists" in err.lower():
+        status = classify_auth_error_status(err) or 400
+        if status == 400 and "already exists" in err.lower():
             status = 409
         return jsonify({"error": err}), status
 
@@ -610,12 +623,8 @@ def create_metadata_node():
 @admin_bp.route('/admin/metadata/properties/<node_label>', methods=['GET'])
 def metadata_properties_by_label(node_label):
     try:
-        auth_header = request.headers.get("Authorization", "")
-        credentials = request.args.get("cred")
-        if credentials or auth_header.startswith("Bearer "):
-            verify_request_auth(credentials=credentials, required_role="admin", req=request)
-        else:
-            raise Exception("Admin authorization is required")
+        credentials = _parse_credentials(request.args.get("cred"))
+        verify_request_auth(credentials=credentials, required_role="admin", req=request)
 
         safe_label = sanitize_cypher_identifier(str(node_label or "").strip().upper(), "nodeLabel")
         if safe_label not in {"PROPERTY", "LABEL", "TRANSLATION"}:
@@ -653,18 +662,16 @@ def metadata_properties_by_label(node_label):
             "properties": sorted(all_props),
         }), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 400
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message}), status_code
 
 
 @admin_bp.route('/admin/metadata/nodes', methods=['GET'])
 def list_metadata_nodes():
     try:
-        auth_header = request.headers.get("Authorization", "")
-        credentials = request.args.get("cred")
-        if credentials or auth_header.startswith("Bearer "):
-            verify_request_auth(credentials=credentials, required_role="admin", req=request)
-        else:
-            raise Exception("Admin authorization is required")
+        credentials = _parse_credentials(request.args.get("cred"))
+        verify_request_auth(credentials=credentials, required_role="admin", req=request)
 
         query = """
         MATCH (n:METADATA)
@@ -723,18 +730,16 @@ def list_metadata_nodes():
             "ArchaMap": sanitize_rows(result_a)
         }), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 500
+        return jsonify({"error": error_message}), status_code
 
 
 @admin_bp.route('/admin/metadata/node/<CMID>', methods=['GET'])
 def get_metadata_node_admin(CMID):
     try:
-        auth_header = request.headers.get("Authorization", "")
-        credentials = request.args.get("cred")
-        if credentials or auth_header.startswith("Bearer "):
-            verify_request_auth(credentials=credentials, required_role="admin", req=request)
-        else:
-            raise Exception("Admin authorization is required")
+        credentials = _parse_credentials(request.args.get("cred"))
+        verify_request_auth(credentials=credentials, required_role="admin", req=request)
 
         if not isinstance(CMID, str) or not CMID:
             raise Exception("CMID must be a non-empty string")
@@ -751,4 +756,6 @@ def get_metadata_node_admin(CMID):
 
         return jsonify(nodes), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 500
+        return jsonify({"error": error_message}), status_code
