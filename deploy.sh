@@ -20,13 +20,6 @@ fi
 
 cd "$APP_DIR"
 
-if [ ! -f "$ENV_FILE" ]; then
-  echo "❌ Error: Missing required environment file: $ENV_FILE"
-  echo "Deployment halted to avoid silently regenerating auth settings."
-  echo "Restore the server-specific .env file and rerun deploy."
-  exit 1
-fi
-
 # Require running as deploy user so git identity and permissions stay predictable.
 if [ "$(id -un)" != "$DEPLOY_USER" ]; then
   echo "❌ Error: This script must be run as '$DEPLOY_USER' (without sudo)."
@@ -57,14 +50,19 @@ NEW_VERSION=$(date +%Y.%m.%d.%H%M)
 
 echo "🚀 Starting deployment for version: $NEW_VERSION"
 
-# 2. Update VERSION in .env without clobbering other secrets.
-run_as_deploy_user sed -i '/^VERSION=/d' .env
-run_as_deploy_user bash -c "echo VERSION=$NEW_VERSION >> .env"
+# 2. Ensure .env exists, then update VERSION without clobbering other values.
+if [ ! -f "$ENV_FILE" ]; then
+  echo "⚠️  .env not found at $ENV_FILE; creating a new one."
+  run_as_deploy_user touch "$ENV_FILE"
+fi
+
+run_as_deploy_user sed -i '/^VERSION=/d' "$ENV_FILE"
+run_as_deploy_user bash -c "echo VERSION=$NEW_VERSION >> \"$ENV_FILE\""
 
 # 3. Ensure auth secret exists for signed API auth tokens.
-if ! run_as_deploy_user grep -q '^CATMAPPER_AUTH_SECRET=' .env; then
+if ! run_as_deploy_user grep -q '^CATMAPPER_AUTH_SECRET=' "$ENV_FILE"; then
   AUTH_SECRET=$(openssl rand -hex 64)
-  run_as_deploy_user bash -c "echo CATMAPPER_AUTH_SECRET=$AUTH_SECRET >> .env"
+  run_as_deploy_user bash -c "echo CATMAPPER_AUTH_SECRET=$AUTH_SECRET >> \"$ENV_FILE\""
   echo "Generated CATMAPPER_AUTH_SECRET in .env"
 fi
 
