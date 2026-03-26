@@ -14,6 +14,7 @@ from CM import (
 
 from .task_queue import enqueue_waiting_uses_task, is_rq_enabled
 from .task_store import get_task_store
+from .upload_error_utils import extract_upload_error_details
 
 
 class UploadCancelledError(Exception):
@@ -98,7 +99,9 @@ def run_upload_task(task_id):
     except (UploadCancelledError, QueryCancelledError) as err:
         store.cancel_upload_task(task_id, str(err))
     except Exception as err:
-        store.fail_upload_task(task_id, str(err))
+        message = str(err)
+        details = extract_upload_error_details(message)
+        store.fail_upload_task(task_id, message, error_details=details)
     finally:
         clear_upload_log_listener()
         clear_query_cancel_checker()

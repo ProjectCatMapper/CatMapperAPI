@@ -1618,12 +1618,19 @@ def updateMergeProperty(df,optionalProperties, database, user, mergingType, requ
     except Exception as e:
         return f"Error: {str(e)}"
 
+def _is_same_update_add_value(existing_value, incoming_value):
+    if existing_value is None:
+        return False
+    return str(existing_value) == str(incoming_value)
+
+
 def input_Nodes_Uses(
     dataset,
     database,
     uploadOption,
     formatKey=False,
     optionalProperties=None,
+    ignoreIfSame=False,
     user=None,
     addDistrict=False,
     addRecordYear=False,
@@ -1636,6 +1643,8 @@ def input_Nodes_Uses(
 
     if user is None:
         raise ValueError("Error: user must be specified")
+    if optionalProperties is None:
+        optionalProperties = []
     
     if uploadOption in [
         "add_node",
@@ -2628,6 +2637,8 @@ def input_Nodes_Uses(
                 
                 for j in result:
                     if j.get("existing_value") is not None:
+                        if ignoreIfSame and _is_same_update_add_value(j.get("existing_value"), j.get("row", {}).get(i)):
+                            continue
                         raise ValueError(
                             f"Property '{i}' already exists for USES tie between "
                             f"DATASET {j['row']['datasetID']} and CATEGORY {j['row']['CMID']} with Key {j['row']['Key']}"

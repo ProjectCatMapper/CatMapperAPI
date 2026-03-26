@@ -37,6 +37,13 @@ def test_input_nodes_uses_formats_key_before_key_validation(monkeypatch):
         )
 
 
+def test_is_same_update_add_value_matches_stringified_values():
+    assert upload._is_same_update_add_value("alpha", "alpha") is True
+    assert upload._is_same_update_add_value(10, "10") is True
+    assert upload._is_same_update_add_value(None, "10") is False
+    assert upload._is_same_update_add_value("alpha", "beta") is False
+
+
 def test_validate_non_parent_multi_value_columns_raises_for_wrong_label():
     dataset = pd.DataFrame(
         {

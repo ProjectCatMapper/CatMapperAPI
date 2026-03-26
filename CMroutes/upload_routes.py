@@ -11,6 +11,7 @@ from .auth_utils import verify_request_auth, classify_auth_error_status
 from .task_store import get_task_store, DEFAULT_UPLOAD_BATCH_SIZE
 from .task_queue import enqueue_upload_task, is_rq_enabled
 from .upload_jobs import run_upload_task
+from .upload_error_utils import extract_upload_error_details
 
 try:
     from rq.command import send_stop_job_command
@@ -58,6 +59,42 @@ def _request_acting_user(data):
     return acting_user
 
 
+def _coerce_property_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [v for v in value if v not in (None, "")]
+    if isinstance(value, tuple):
+        return [v for v in value if v not in (None, "")]
+    return [value] if value not in (None, "") else []
+
+
+def _resolve_optional_properties(data):
+    warnings = []
+    optional_properties = _coerce_property_list(data.get("optionalProperties"))
+    if optional_properties:
+        return optional_properties, warnings
+
+    all_context = _coerce_property_list(data.get("allContext"))
+    if all_context and "allContext" in data and "optionalProperties" not in data:
+        warnings.append(
+            "`allContext` is deprecated for upload property selection; use `optionalProperties`."
+        )
+    return all_context, warnings
+
+
+def _validate_simple_key_values(df, key_column):
+    if key_column not in df.columns:
+        raise Exception(f"Simple upload requires key column '{key_column}' in payload rows.")
+    key_series = df[key_column].fillna("").astype(str)
+    bad_rows = key_series[key_series.str.contains(r"==", regex=True)].index.tolist()
+    if bad_rows:
+        bad_rows = [i + 1 for i in bad_rows]
+        raise Exception(
+            f"Simple upload expects raw key values without '=='. Rows {bad_rows} include preformatted keys; use so='standard'."
+        )
+
+
 def _prepare_upload_job(data, acting_user):
     df = data.get("df")
     database = unlist(data.get("database"))
@@ -83,20 +120,27 @@ def _prepare_upload_job(data, acting_user):
     CMID = formData["cmidColumn"]
     Key = formData["keyColumn"]
 
-    optionalProperties = data.get("allContext") or []
+    optionalProperties, warnings = _resolve_optional_properties(data)
     addoptions = data.get("addoptions") or {}
     addDistrict = bool(addoptions.get("district"))
     addRecordYear = bool(addoptions.get("recordyear"))
     mergingType = data.get("mergingType")
+    so = str(data.get("so") or "standard").strip().lower()
+    upload_option = str(data.get("ao") or "").strip()
 
-    if data.get("so") == "standard":
-        uploadOption = data.get("ao")
+    if so not in {"standard", "simple"}:
+        raise Exception("`so` must be either 'standard' or 'simple'.")
+
+    if so == "simple" and upload_option != "add_uses":
+        raise Exception("`so = simple` is only supported with `ao = add_uses`. Use `so = standard` for other actions.")
+
+    if so == "standard":
         dataset_payload = df
         total_rows = len(pd.DataFrame(df))
         job_args = {
             "dataset": dataset_payload,
             "database": database,
-            "uploadOption": uploadOption,
+            "uploadOption": upload_option,
             "formatKey": False,
             "optionalProperties": optionalProperties,
             "user": acting_user,
@@ -105,8 +149,9 @@ def _prepare_upload_job(data, acting_user):
             "mergingType": mergingType,
             "geocode": False,
             "batchSize": UPLOAD_BATCH_SIZE,
+            "ignoreIfSame": bool(data.get("ignore_if_same", False)),
         }
-        return job_args, total_rows, database
+        return job_args, total_rows, database, warnings
 
     if not label:
         raise Exception("Must specify a domain")
@@ -141,6 +186,7 @@ def _prepare_upload_job(data, acting_user):
     elif altNames and altNames in df.columns:
         df.rename(columns={altNames: "altNames"}, inplace=True)
 
+    _validate_simple_key_values(df, Key)
     df.rename(columns={CMName: "CMName", CMID: "CMID", Name: "Name", Key: "Key"}, inplace=True)
     dataset_payload = df.to_dict(orient='records')
 
@@ -155,8 +201,9 @@ def _prepare_upload_job(data, acting_user):
         "addRecordYear": False,
         "geocode": False,
         "batchSize": UPLOAD_BATCH_SIZE,
+        "ignoreIfSame": bool(data.get("ignore_if_same", False)),
     }
-    return job_args, len(df), database
+    return job_args, len(df), database, warnings
 
 
 def _start_upload_task(job_args, user, database, total_rows):
@@ -350,7 +397,7 @@ def upload_API():
         data = _request_json_payload()
         acting_user = _request_acting_user(data)
 
-        job_args, total_rows, database = _prepare_upload_job(data, acting_user)
+        job_args, total_rows, database, warnings = _prepare_upload_job(data, acting_user)
         task_id = _start_upload_task(
             job_args=job_args,
             user=acting_user,
@@ -359,20 +406,21 @@ def upload_API():
         )
 
         total_batches = math.ceil(total_rows / UPLOAD_BATCH_SIZE) if total_rows > 0 else 0
-        return jsonify(
-            {
-                "taskId": task_id,
-                "status": "queued",
-                "progress": {
-                    "batchSize": UPLOAD_BATCH_SIZE,
-                    "totalRows": total_rows,
-                    "totalBatches": total_batches,
-                    "completedBatches": 0,
-                    "percent": 0,
-                },
-                "queue": "rq" if is_rq_enabled() else "thread",
-            }
-        ), 202
+        response = {
+            "taskId": task_id,
+            "status": "queued",
+            "progress": {
+                "batchSize": UPLOAD_BATCH_SIZE,
+                "totalRows": total_rows,
+                "totalBatches": total_batches,
+                "completedBatches": 0,
+                "percent": 0,
+            },
+            "queue": "rq" if is_rq_enabled() else "thread",
+        }
+        if warnings:
+            response["warnings"] = warnings
+        return jsonify(response), 202
 
     except Exception as e:
         error_message = str(e)
@@ -386,7 +434,8 @@ def upload_API():
 
         response_data = {
             "error": f"Upload error - {error_message}",
-            "full_log": full_log
+            "full_log": full_log,
+            "error_details": extract_upload_error_details(error_message),
         }
 
         status_code = classify_auth_error_status(error_message) or 500

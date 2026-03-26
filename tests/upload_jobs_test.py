@@ -83,3 +83,43 @@ def test_run_upload_task_increments_batch_for_timed_end_of_batch_log(monkeypatch
     assert store.marked_running is True
     assert store.increment_calls == 1
     assert store.completed is True
+
+
+def test_run_upload_task_stores_structured_error_details(monkeypatch):
+    class FailingStore(FakeUploadStore):
+        def __init__(self):
+            super().__init__()
+            self.failed = None
+
+        def fail_upload_task(self, task_id, message, error_details=None):
+            self.failed = {
+                "task_id": task_id,
+                "message": message,
+                "error_details": error_details,
+            }
+
+        def complete_upload_task(self, **kwargs):
+            raise AssertionError("complete_upload_task should not be called")
+
+    store = FailingStore()
+
+    monkeypatch.setattr(upload_jobs, "get_task_store", lambda: store)
+    monkeypatch.setattr(upload_jobs, "set_upload_log_listener", lambda cb: None)
+    monkeypatch.setattr(upload_jobs, "clear_upload_log_listener", lambda: None)
+    monkeypatch.setattr(upload_jobs, "set_query_cancel_checker", lambda checker: None)
+    monkeypatch.setattr(upload_jobs, "clear_query_cancel_checker", lambda: None)
+    monkeypatch.setattr(upload_jobs, "is_rq_enabled", lambda: False)
+    monkeypatch.setattr(upload_jobs, "_run_waiting_uses_inline", lambda waiting_task_id, database: None)
+    monkeypatch.setattr(
+        upload_jobs,
+        "input_Nodes_Uses",
+        lambda **kwargs: (_ for _ in ()).throw(ValueError("Invalid 'Key' format in rows:\n[2]. Must be of form VARIABLE == VALUE")),
+    )
+
+    upload_jobs.run_upload_task("task-err")
+
+    assert store.failed is not None
+    assert store.failed["task_id"] == "task-err"
+    assert isinstance(store.failed["error_details"], list)
+    assert store.failed["error_details"][0]["row"] == 2
+    assert store.failed["error_details"][0]["field"] == "Key"

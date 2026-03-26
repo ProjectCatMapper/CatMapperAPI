@@ -52,6 +52,7 @@ def _new_upload_task(task_id, user, database, total_rows, batch_size):
         "finishedAt": None,
         "message": None,
         "error": None,
+        "errorDetails": None,
         "finishedAtTs": None,
         "batchSize": batch_size,
         "totalRows": total_rows,
@@ -106,6 +107,7 @@ def _serialize_upload_task(task, cursor=0):
 
     response_task["file"] = response_task.pop("resultFile", None)
     response_task["order"] = response_task.pop("resultOrder", None)
+    response_task["error_details"] = response_task.pop("errorDetails", None)
     return response_task
 
 
@@ -251,7 +253,7 @@ class InMemoryTaskStore:
             task["message"] = str(message)
             task["error"] = None
 
-    def fail_upload_task(self, task_id, error_message):
+    def fail_upload_task(self, task_id, error_message, error_details=None):
         with self.lock:
             task = self.upload_tasks.get(task_id)
             if task is None:
@@ -261,6 +263,7 @@ class InMemoryTaskStore:
             task["finishedAtTs"] = time.time()
             task["message"] = None
             task["error"] = str(error_message)
+            task["errorDetails"] = error_details if isinstance(error_details, list) else None
             task["events"].append(str(error_message))
 
     def set_upload_waiting_status(self, upload_task_id, waiting_status):
@@ -431,6 +434,7 @@ class RedisTaskStore:
             "finishedAt": "",
             "message": "",
             "error": "",
+            "errorDetails": "[]",
             "batchSize": str(task["batchSize"]),
             "totalRows": str(task["totalRows"]),
             "totalBatches": str(task["totalBatches"]),
@@ -535,6 +539,7 @@ class RedisTaskStore:
             "finishedAt": _utc_now_iso(),
             "message": str(message),
             "error": "",
+            "errorDetails": "[]",
             "resultFile": json.dumps(result_file or []),
             "resultOrder": json.dumps(result_order or []),
             "waitingUsesTask": waiting_task_id or "",
@@ -553,11 +558,12 @@ class RedisTaskStore:
                 "finishedAt": _utc_now_iso(),
                 "message": str(message),
                 "error": "",
+                "errorDetails": "[]",
             },
         )
         self._expire_upload_keys(task_id)
 
-    def fail_upload_task(self, task_id, error_message):
+    def fail_upload_task(self, task_id, error_message, error_details=None):
         self.redis.hset(
             self._upload_task_key(task_id),
             mapping={
@@ -565,6 +571,7 @@ class RedisTaskStore:
                 "finishedAt": _utc_now_iso(),
                 "message": "",
                 "error": str(error_message),
+                "errorDetails": json.dumps(error_details or []),
             },
         )
         self.append_upload_event(task_id, str(error_message))
@@ -636,6 +643,7 @@ class RedisTaskStore:
 
         result_file = []
         result_order = []
+        error_details = []
         if task_raw.get("resultFile"):
             try:
                 result_file = json.loads(task_raw["resultFile"])
@@ -646,6 +654,11 @@ class RedisTaskStore:
                 result_order = json.loads(task_raw["resultOrder"])
             except Exception:
                 result_order = []
+        if task_raw.get("errorDetails"):
+            try:
+                error_details = json.loads(task_raw["errorDetails"])
+            except Exception:
+                error_details = []
 
         return {
             "taskId": task_raw.get("taskId"),
@@ -657,6 +670,7 @@ class RedisTaskStore:
             "finishedAt": task_raw.get("finishedAt") or None,
             "message": task_raw.get("message") or None,
             "error": task_raw.get("error") or None,
+            "error_details": error_details or None,
             "events": events,
             "nextCursor": total_events,
             "progress": {
