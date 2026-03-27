@@ -70,8 +70,8 @@ fi
 echo "Rebuilding API images (api/workers)..."
 docker compose -f "$COMPOSE_FILE" build api api-worker api-waiting-worker
 
-echo "Recreating API and worker containers..."
-docker compose -f "$COMPOSE_FILE" up -d --no-deps api api-worker api-waiting-worker
+echo "Recreating API and worker containers (forced) to guarantee code reload..."
+docker compose -f "$COMPOSE_FILE" up -d --no-deps --force-recreate api api-worker api-waiting-worker
 
 echo "Restarting nginx container..."
 docker restart nginx
