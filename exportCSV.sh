@@ -77,7 +77,7 @@ sudo -u rjbischo aws s3 sync /mnt/storage/app/db/sociomap1/backups/download s3:/
 sudo -u rjbischo aws s3 sync /mnt/storage/app/db/archamap1/backups/download s3://sociomap-backups/archamap-backups/download/ --acl public-read;
 
 echo "Renaming S3 CSV files so database name is first..."
-sudo -u rjbischo python - <<'PY'
+sudo -u rjbischo python3 - <<'PY'
 import boto3
 
 BUCKET = "sociomap-backups"
