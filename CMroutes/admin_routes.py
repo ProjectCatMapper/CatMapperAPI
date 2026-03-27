@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, render_template, make_response
 from CM import *
 import json
+from datetime import datetime, timezone
 from .auth_utils import verify_request_auth, classify_auth_error_status
 
 admin_bp = Blueprint('admin', __name__)
@@ -21,6 +22,364 @@ def _parse_credentials(raw_value):
         except Exception:
             return None
     return None
+
+
+def _now_iso():
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _normalize_userdb_database(value):
+    if isinstance(value, list):
+        return [
+            str(item).strip().lower()
+            for item in value
+            if str(item).strip()
+        ]
+    if value is None:
+        return []
+    text = str(value).strip()
+    if not text:
+        return []
+    parts = []
+    for chunk in text.replace(",", "|").split("|"):
+        cleaned = str(chunk).strip().lower()
+        if cleaned:
+            parts.append(cleaned)
+    return parts
+
+
+def _join_userdb_database(value):
+    return "|".join(_normalize_userdb_database(value))
+
+
+def _serialize_user_lookup_row(row):
+    databases = row.get("database") if isinstance(row.get("database"), list) else []
+    return {
+        "userid": str(row.get("userid", "") or ""),
+        "first": str(row.get("first", "") or ""),
+        "last": str(row.get("last", "") or ""),
+        "username": str(row.get("username", "") or ""),
+        "email": str(row.get("email", "") or ""),
+        "database": "|".join(str(item) for item in databases if str(item).strip()),
+        "intendedUse": str(row.get("intendedUse", "") or ""),
+        "access": str(row.get("access", "") or ""),
+        "role": str(row.get("role", "") or ""),
+        "createdAt": row.get("createdAt") or "",
+        "updatedAt": row.get("updatedAt") or "",
+        "logCount": int(row.get("logCount") or 0),
+    }
+
+
+def _build_activity_stats_for_userids(userids):
+    ids = [str(uid).strip() for uid in (userids or []) if str(uid).strip()]
+    if not ids:
+        return {}
+
+    def summarize(database_name):
+        driver = getDriver(database_name)
+        query = """
+        UNWIND $userids AS uid
+        OPTIONAL MATCH (l:LOG)
+        WHERE toString(l.user) = toString(uid)
+        WITH uid, collect(l) AS logs
+        RETURN
+          toString(uid) AS userid,
+          size(logs) AS totalActions,
+          size([x IN logs WHERE toLower(coalesce(x.action, '')) CONTAINS 'created node']) AS createdNodes,
+          size([x IN logs WHERE toLower(coalesce(x.action, '')) CONTAINS 'created relationship']) AS createdRelationships,
+          size([x IN logs WHERE toLower(coalesce(x.action, '')) CONTAINS 'changed' AND toLower(coalesce(x.action, '')) CONTAINS 'relationship']) AS updatedRelationships,
+          size([x IN logs WHERE toLower(coalesce(x.action, '')) CONTAINS 'changed' AND NOT toLower(coalesce(x.action, '')) CONTAINS 'relationship']) AS updatedNodes,
+          size([x IN logs WHERE toLower(coalesce(x.action, '')) CONTAINS 'deleted']) AS deletedObjects,
+          reduce(lastSeen = '', x IN logs |
+            CASE
+              WHEN coalesce(x.timestamp, '') > lastSeen THEN coalesce(x.timestamp, '')
+              ELSE lastSeen
+            END
+          ) AS lastActionAt
+        """
+        rows = getQuery(query, driver=driver, params={"userids": ids}, type="dict")
+        out = {}
+        for row in rows or []:
+            uid = str(row.get("userid", "") or "")
+            out[uid] = {
+                "totalActions": int(row.get("totalActions") or 0),
+                "createdNodes": int(row.get("createdNodes") or 0),
+                "createdRelationships": int(row.get("createdRelationships") or 0),
+                "updatedNodes": int(row.get("updatedNodes") or 0),
+                "updatedRelationships": int(row.get("updatedRelationships") or 0),
+                "deletedObjects": int(row.get("deletedObjects") or 0),
+                "lastActionAt": row.get("lastActionAt") or "",
+            }
+        return out
+
+    stats_s = summarize("sociomap")
+    stats_a = summarize("archamap")
+    combined = {}
+    for uid in ids:
+        socio = stats_s.get(uid, {
+            "totalActions": 0,
+            "createdNodes": 0,
+            "createdRelationships": 0,
+            "updatedNodes": 0,
+            "updatedRelationships": 0,
+            "deletedObjects": 0,
+            "lastActionAt": "",
+        })
+        archa = stats_a.get(uid, {
+            "totalActions": 0,
+            "createdNodes": 0,
+            "createdRelationships": 0,
+            "updatedNodes": 0,
+            "updatedRelationships": 0,
+            "deletedObjects": 0,
+            "lastActionAt": "",
+        })
+        total = {
+            "totalActions": socio["totalActions"] + archa["totalActions"],
+            "createdNodes": socio["createdNodes"] + archa["createdNodes"],
+            "createdRelationships": socio["createdRelationships"] + archa["createdRelationships"],
+            "updatedNodes": socio["updatedNodes"] + archa["updatedNodes"],
+            "updatedRelationships": socio["updatedRelationships"] + archa["updatedRelationships"],
+            "deletedObjects": socio["deletedObjects"] + archa["deletedObjects"],
+            "lastActionAt": max([socio.get("lastActionAt") or "", archa.get("lastActionAt") or ""]),
+        }
+        combined[uid] = {
+            "SocioMap": socio,
+            "ArchaMap": archa,
+            "total": total,
+        }
+    return combined
+
+
+@admin_bp.route('/admin/users/lookup', methods=['POST'])
+def admin_user_lookup():
+    try:
+        data = request.get_json(silent=True) or {}
+        credentials = _parse_credentials(data.get("cred")) if isinstance(data, dict) else None
+        verify_request_auth(credentials=credentials, required_role="admin", req=request)
+
+        query_text = str(unlist(data.get("query")) or "").strip()
+        limit = unlist(data.get("limit")) if isinstance(data, dict) else None
+        try:
+            limit = int(limit) if limit is not None else 50
+        except Exception:
+            limit = 50
+        limit = max(1, min(limit, 250))
+
+        driver = getDriver("userdb")
+        query = """
+        WITH trim(toString($query)) AS q
+        MATCH (u:USER)
+        WITH
+          u,
+          q,
+          toLower(q) AS ql,
+          toLower(coalesce(u.first, '')) AS first_lower,
+          toLower(coalesce(u.last, '')) AS last_lower,
+          toLower(coalesce(u.username, '')) AS username_lower,
+          toLower(coalesce(u.email, '')) AS email_lower
+        WHERE q = ''
+           OR toString(u.userid) = q
+           OR username_lower CONTAINS ql
+           OR email_lower CONTAINS ql
+           OR first_lower CONTAINS ql
+           OR last_lower CONTAINS ql
+           OR (first_lower + ' ' + last_lower) CONTAINS ql
+        RETURN
+          toString(u.userid) AS userid,
+          coalesce(u.first, '') AS first,
+          coalesce(u.last, '') AS last,
+          coalesce(u.username, '') AS username,
+          coalesce(u.email, '') AS email,
+          coalesce(u.database, []) AS database,
+          coalesce(u.intendedUse, '') AS intendedUse,
+          coalesce(u.access, '') AS access,
+          coalesce(u.role, '') AS role,
+          coalesce(u.createdAt, '') AS createdAt,
+          coalesce(u.updatedAt, '') AS updatedAt,
+          size(coalesce(u.log, [])) AS logCount
+        ORDER BY
+          toInteger(coalesce(toString(u.userid), '0')) ASC,
+          username ASC
+        LIMIT $limit
+        """
+        rows = getQuery(query, driver=driver, params={"query": query_text, "limit": limit}, type="dict")
+        serialized = [_serialize_user_lookup_row(row) for row in (rows or [])]
+        stats_map = _build_activity_stats_for_userids([row.get("userid") for row in serialized])
+        for row in serialized:
+            row["updateStats"] = stats_map.get(row["userid"], {
+                "SocioMap": {},
+                "ArchaMap": {},
+                "total": {},
+            })
+        return jsonify({"users": serialized}), 200
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message}), status_code
+
+
+@admin_bp.route('/admin/users/update', methods=['POST'])
+def admin_user_update():
+    try:
+        data = request.get_json(silent=True) or {}
+        credentials = _parse_credentials(data.get("cred")) if isinstance(data, dict) else None
+        claims = verify_request_auth(credentials=credentials, required_role="admin", req=request)
+        acting_userid = str(claims.get("userid") or "")
+
+        userid = str(unlist(data.get("userid")) or "").strip()
+        updates = data.get("updates") if isinstance(data, dict) else None
+        if not userid:
+            raise Exception("userid is required")
+        if not isinstance(updates, dict) or not updates:
+            raise Exception("updates must be a non-empty object")
+
+        allowed = {"first", "last", "username", "email", "database", "intendedUse", "access", "role"}
+        incoming = {str(k): v for k, v in updates.items() if str(k) in allowed}
+        if not incoming:
+            raise Exception("No editable fields provided")
+
+        driver = getDriver("userdb")
+        current_query = """
+        MATCH (u:USER {userid: toString($userid)})
+        RETURN
+          toString(u.userid) AS userid,
+          coalesce(u.first, '') AS first,
+          coalesce(u.last, '') AS last,
+          coalesce(u.username, '') AS username,
+          coalesce(u.email, '') AS email,
+          coalesce(u.database, []) AS database,
+          coalesce(u.intendedUse, '') AS intendedUse,
+          coalesce(u.access, '') AS access,
+          coalesce(u.role, '') AS role,
+          coalesce(u.createdAt, '') AS createdAt,
+          coalesce(u.updatedAt, '') AS updatedAt,
+          size(coalesce(u.log, [])) AS logCount
+        """
+        rows = getQuery(current_query, driver=driver, params={"userid": userid}, type="dict")
+        if not rows:
+            raise Exception("User not found")
+        current = rows[0]
+
+        resolved = {
+            "first": str(current.get("first") or ""),
+            "last": str(current.get("last") or ""),
+            "username": str(current.get("username") or ""),
+            "email": str(current.get("email") or ""),
+            "database": _normalize_userdb_database(current.get("database")),
+            "intendedUse": str(current.get("intendedUse") or ""),
+            "access": str(current.get("access") or ""),
+            "role": str(current.get("role") or ""),
+        }
+
+        changed = {}
+        for field, value in incoming.items():
+            if field == "database":
+                new_value = _normalize_userdb_database(value)
+            else:
+                new_value = str(value or "").strip()
+            old_value = resolved.get(field)
+            if new_value != old_value:
+                changed[field] = {"old": old_value, "new": new_value}
+                resolved[field] = new_value
+
+        if not changed:
+            payload = _serialize_user_lookup_row(current)
+            payload["updateStats"] = _build_activity_stats_for_userids([userid]).get(userid, {})
+            return jsonify({"message": "No changes detected", "user": payload, "changedFields": []}), 200
+
+        if "username" in changed:
+            username_check = """
+            MATCH (u:USER)
+            WHERE toLower(coalesce(u.username, '')) = toLower($username)
+              AND toString(u.userid) <> toString($userid)
+            RETURN count(u) AS count
+            """
+            count_rows = getQuery(username_check, driver=driver, params={"username": resolved["username"], "userid": userid}, type="dict")
+            if count_rows and int(count_rows[0].get("count") or 0) > 0:
+                raise Exception("Username already exists")
+
+        if "email" in changed:
+            email_check = """
+            MATCH (u:USER)
+            WHERE toLower(coalesce(u.email, '')) = toLower($email)
+              AND toString(u.userid) <> toString($userid)
+            RETURN count(u) AS count
+            """
+            count_rows = getQuery(email_check, driver=driver, params={"email": resolved["email"], "userid": userid}, type="dict")
+            if count_rows and int(count_rows[0].get("count") or 0) > 0:
+                raise Exception("Email already exists")
+
+        timestamp = _now_iso()
+        change_bits = []
+        for field in sorted(changed.keys()):
+            old_value = changed[field]["old"]
+            new_value = changed[field]["new"]
+            old_text = "|".join(old_value) if isinstance(old_value, list) else str(old_value)
+            new_text = "|".join(new_value) if isinstance(new_value, list) else str(new_value)
+            change_bits.append(f"{field}: '{old_text}' -> '{new_text}'")
+        log_entry = f"{timestamp}: admin {acting_userid} updated user {userid}: " + "; ".join(change_bits)
+
+        update_query = """
+        MATCH (u:USER {userid: toString($userid)})
+        SET
+          u.first = $first,
+          u.last = $last,
+          u.username = $username,
+          u.email = $email,
+          u.database = $database,
+          u.intendedUse = $intendedUse,
+          u.access = $access,
+          u.role = $role,
+          u.updatedAt = $updatedAt,
+          u.log = coalesce(u.log, []) + $logEntries
+        RETURN
+          toString(u.userid) AS userid,
+          coalesce(u.first, '') AS first,
+          coalesce(u.last, '') AS last,
+          coalesce(u.username, '') AS username,
+          coalesce(u.email, '') AS email,
+          coalesce(u.database, []) AS database,
+          coalesce(u.intendedUse, '') AS intendedUse,
+          coalesce(u.access, '') AS access,
+          coalesce(u.role, '') AS role,
+          coalesce(u.createdAt, '') AS createdAt,
+          coalesce(u.updatedAt, '') AS updatedAt,
+          size(coalesce(u.log, [])) AS logCount
+        """
+        saved_rows = getQuery(
+            update_query,
+            driver=driver,
+            params={
+                "userid": userid,
+                "first": resolved["first"],
+                "last": resolved["last"],
+                "username": resolved["username"],
+                "email": resolved["email"],
+                "database": resolved["database"],
+                "intendedUse": resolved["intendedUse"],
+                "access": resolved["access"],
+                "role": resolved["role"],
+                "updatedAt": timestamp,
+                "logEntries": [log_entry],
+            },
+            type="dict",
+        )
+        if not saved_rows:
+            raise Exception("User not found")
+
+        payload = _serialize_user_lookup_row(saved_rows[0])
+        payload["updateStats"] = _build_activity_stats_for_userids([userid]).get(userid, {})
+        return jsonify({
+            "message": "User updated",
+            "user": payload,
+            "changedFields": sorted(changed.keys()),
+            "logEntry": log_entry,
+        }), 200
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message}), status_code
 
 
 @admin_bp.route("/admin_add_edit_delete_nodeproperties", methods=['GET'])
