@@ -1832,22 +1832,39 @@ def input_Nodes_Uses(
             if invalid_rows:
                 raise ValueError(f"Invalid 'NewKey' format in rows:\n{invalid_rows}. Must be of form VARIABLE == VALUE")
 
-    # When uploading uses ties, if we need to create new nodes and CMName is not present, then create CMName from Name
-    if uploadOption == "add_uses":
-        if dataset['CMID'].isna().any():
-            if "CMName" not in dataset.columns:
-                dataset['CMName'] = dataset['Name']
-            else:
-                dataset['CMName'] = dataset['CMName'].fillna(dataset['Name'])
+    # Treat whitespace-only values as missing for key identifier/name columns.
+    # This prevents creating nodes with blank CMName when CMID is missing.
+    if uploadOption in {"add_node", "add_uses"}:
+        for col in ["CMID", "CMName", "Name"]:
+            if col in dataset.columns:
+                dataset[col] = dataset[col].replace(r"^\s*$", pd.NA, regex=True)
+
+    # When uploading uses ties, if we need to create new nodes and CMName is not present,
+    # then create CMName from Name (after blank normalization above).
+    if uploadOption == "add_uses" and dataset["CMID"].isna().any():
+        if "CMName" not in dataset.columns:
+            dataset["CMName"] = dataset["Name"]
+        else:
+            dataset["CMName"] = dataset["CMName"].fillna(dataset["Name"])
 
     # When adding a new node, CMName is required    
     if uploadOption == "add_node" or uploadOption == "add_uses":
         mask = pd.Series(False, index=dataset.index)
 
-        if uploadOption == "add_uses" and dataset['CMID'].isna().any() :
-            mask = dataset['CMID'].isna() & dataset['CMName'].isna()
+        if uploadOption == "add_uses":
+            cmname_present = (
+                dataset["CMName"].apply(is_non_empty)
+                if "CMName" in dataset.columns
+                else pd.Series(False, index=dataset.index)
+            )
+            name_present = (
+                dataset["Name"].apply(is_non_empty)
+                if "Name" in dataset.columns
+                else pd.Series(False, index=dataset.index)
+            )
+            mask = dataset["CMID"].isna() & ~(cmname_present | name_present)
         elif uploadOption == "add_node":
-            mask = dataset['CMName'].isna()
+            mask = ~dataset["CMName"].apply(is_non_empty)
 
         if mask.any():
             invalid_rows = dataset[mask]

@@ -37,6 +37,62 @@ def test_input_nodes_uses_formats_key_before_key_validation(monkeypatch):
         )
 
 
+def test_add_uses_rejects_blank_name_when_creating_new_node(monkeypatch):
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+    monkeypatch.setattr(upload, "getQuery", lambda *args, **kwargs: [])
+
+    with pytest.raises(ValueError, match="non-empty Name or CMName"):
+        upload.input_Nodes_Uses(
+            dataset=[
+                {
+                    "CMID": "   ",
+                    "datasetID": "AD1",
+                    "Key": "Type == Adamana Brown",
+                    "label": "DIALECT",
+                    "Name": "   ",
+                }
+            ],
+            database="ArchaMap",
+            uploadOption="add_uses",
+            formatKey=False,
+            optionalProperties=[],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
+
+
+def test_add_node_rejects_blank_cmname(monkeypatch):
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+    monkeypatch.setattr(upload, "getQuery", lambda *args, **kwargs: [])
+
+    with pytest.raises(ValueError, match="non-empty Name or CMName"):
+        upload.input_Nodes_Uses(
+            dataset=[
+                {
+                    "CMName": "   ",
+                    "Name": "Visible Name",
+                    "datasetID": "AD1",
+                    "Key": "Type == Adamana Brown",
+                    "label": "DIALECT",
+                }
+            ],
+            database="ArchaMap",
+            uploadOption="add_node",
+            formatKey=False,
+            optionalProperties=[],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
+
+
 def test_is_same_update_add_value_matches_stringified_values():
     assert upload._is_same_update_add_value("alpha", "alpha") is True
     assert upload._is_same_update_add_value(10, "10") is True
