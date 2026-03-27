@@ -76,41 +76,30 @@ echo "Syncing CSV files"
 sudo -u rjbischo aws s3 sync /mnt/storage/app/db/sociomap1/backups/download s3://sociomap-backups/sociomap1-backups/download/ --acl public-read;
 sudo -u rjbischo aws s3 sync /mnt/storage/app/db/archamap1/backups/download s3://sociomap-backups/archamap-backups/download/ --acl public-read;
 
+rename_s3_prefixed_files() {
+    local db_prefix="$1"
+    local key_prefix="$2"
+    local moved=0
+    local filename target
+
+    while IFS= read -r filename; do
+        [[ -z "$filename" ]] && continue
+        [[ "$filename" != *.csv ]] && continue
+        [[ "$filename" == SocioMap_* || "$filename" == ArchaMap_* ]] && continue
+
+        target="${db_prefix}_${filename}"
+        sudo -u rjbischo aws s3 mv \
+            "s3://sociomap-backups/${key_prefix}${filename}" \
+            "s3://sociomap-backups/${key_prefix}${target}" \
+            --acl public-read >/dev/null
+        moved=$((moved + 1))
+    done < <(sudo -u rjbischo aws s3 ls "s3://sociomap-backups/${key_prefix}" | awk '{print $4}')
+
+    echo "$db_prefix: moved $moved file(s)."
+}
+
 echo "Renaming S3 CSV files so database name is first..."
-sudo -u rjbischo python3 - <<'PY'
-import boto3
-
-BUCKET = "sociomap-backups"
-TARGETS = [
-    ("SocioMap", "sociomap1-backups/download/"),
-    ("ArchaMap", "archamap-backups/download/"),
-]
-
-s3 = boto3.client("s3")
-moved = 0
-
-for prefix_name, key_prefix in TARGETS:
-    paginator = s3.get_paginator("list_objects_v2")
-    for page in paginator.paginate(Bucket=BUCKET, Prefix=key_prefix):
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            filename = key.rsplit("/", 1)[-1]
-            if not filename.endswith(".csv"):
-                continue
-            if filename.startswith("SocioMap_") or filename.startswith("ArchaMap_"):
-                continue
-
-            new_key = f"{key_prefix}{prefix_name}_{filename}"
-            s3.copy_object(
-                Bucket=BUCKET,
-                CopySource={"Bucket": BUCKET, "Key": key},
-                Key=new_key,
-                ACL="public-read",
-            )
-            s3.delete_object(Bucket=BUCKET, Key=key)
-            moved += 1
-
-print(f"S3 rename operations completed: {moved} file(s) moved.")
-PY
+rename_s3_prefixed_files "SocioMap" "sociomap1-backups/download/"
+rename_s3_prefixed_files "ArchaMap" "archamap-backups/download/"
 
 echo "CSV files exported and synced to S3"
