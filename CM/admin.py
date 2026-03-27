@@ -729,17 +729,27 @@ def mergeNodes(keepcmid,deletecmid,user,database):
             raise Exception(f"Failed to merge {deletecmid} into {keepcmid}")
 
         # create deleted node and "IS" relationship to remaining node
+        # Preserve the old CMName on the DELETED marker node.
+        delete_cmname = delete_summary.get("CMName")
         query = f"""
         unwind $keepcmid as keepcmid 
         unwind $deletecmid as deletecmid 
         match (new:{domain} {{CMID: keepcmid}}) 
         create (del:DELETED {{CMID: deletecmid}}) 
+        set del.CMName = $deletecmname
         with new, del
         create (del)-[:IS]->(new)
         return elementId(del) as delID
         """
 
-        delID = getQuery(query = query, driver = driver, keepcmid=keepcmid, deletecmid=deletecmid, type = "list")
+        delID = getQuery(
+            query=query,
+            driver=driver,
+            keepcmid=keepcmid,
+            deletecmid=deletecmid,
+            deletecmname=delete_cmname,
+            type="list",
+        )
 
         createLog(id=delID, type="node",
                   log=f"deleted {deletecmid} and merged into {keepcmid}", user=user, driver=driver)
