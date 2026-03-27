@@ -546,11 +546,15 @@ def moveEQUIVALENTties(database, user, input):
     safe_rel_id = sanitize_cypher_element_id(rel_id, "relationship elementId")
 
     query_move_rel = """
-        MATCH (from:CATEGORY)-[r:EQUIVALENT]->(oldTo:CATEGORY)
-        WHERE from.CMID = $CMID_from AND elementId(r) = $rel_id
+        MATCH (from:CATEGORY {CMID: $CMID_from})-[r:EQUIVALENT]-(oldTo:CATEGORY)
+        WHERE elementId(r) = $rel_id
         MATCH (newTo:CATEGORY {CMID: $CMID_to})
-        CALL apoc.refactor.to(r, newTo) YIELD output
-        RETURN elementId(output) AS relID, oldTo.CMID AS oldToCMID
+        WITH from, oldTo, r, newTo, properties(r) AS relProps
+        CREATE (from)-[newR:EQUIVALENT]->(newTo)
+        SET newR = relProps
+        WITH r, newR, oldTo
+        DELETE r
+        RETURN elementId(newR) AS relID, oldTo.CMID AS oldToCMID
     """
     move_result = getQuery(
         query_move_rel,

@@ -115,8 +115,7 @@ def admin_equivalentproperties():
     driver = getDriver(database)
 
     q = """
-        MATCH (n:CATEGORY)-[r:EQUIVALENT]->(d:CATEGORY)
-        WHERE n.CMID = $cmid
+        MATCH (n:CATEGORY {CMID: $cmid})-[r:EQUIVALENT]-(d:CATEGORY)
         RETURN {CMName: n.CMName, CMID: n.CMID, elementId: elementId(n)} AS n, r,
                {CMName: d.CMName, CMID: d.CMID, elementId: elementId(d)} AS d
     """
