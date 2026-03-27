@@ -457,6 +457,122 @@ def add_edit_delete_USES(database,user,input):
 
     return "done"
 
+
+def add_edit_delete_EQUIVALENT(database, user, input):
+    CMID = (input.get('s1_2') or "").strip()
+    EQUIV_property = input.get('s1_8')
+    new_property_value = (input.get('s1_3') or "").strip()
+    addOrEditNode = input.get('s1_1')
+    indexValue = input.get('s1_7')
+    selected_relations = input.get('s1_4') or []
+    allowed_properties = {"stack", "dataset", "Key"}
+
+    if EQUIV_property not in allowed_properties:
+        raise ValueError("Only stack, dataset, and Key can be edited on EQUIVALENT ties.")
+
+    try:
+        selected_index = int(indexValue) - 1
+    except (ValueError, TypeError):
+        raise ValueError("Invalid EQUIVALENT tie selection index.")
+
+    if not isinstance(selected_relations, list) or selected_index < 0 or selected_index >= len(selected_relations):
+        raise ValueError("Selected EQUIVALENT tie is invalid or no longer available.")
+
+    selected_relation = selected_relations[selected_index]
+    if not isinstance(selected_relation, list) or len(selected_relation) < 2:
+        raise ValueError("Selected EQUIVALENT tie payload is invalid.")
+
+    relID = selected_relation[1].get("id")
+    safe_rel_id = sanitize_cypher_element_id(relID, "relationship elementId")
+    driver = getDriver(database)
+
+    if addOrEditNode == "edit" or addOrEditNode == "add":
+        q = """
+            MATCH ()-[r:EQUIVALENT]-()
+            WHERE elementId(r) = $relID
+            SET r[$prop] = $value
+            RETURN elementId(r) as relID
+        """
+        result = getQuery(q, driver=driver, params={"relID": safe_rel_id, "prop": EQUIV_property, "value": new_property_value})
+        rel_ids = [row["relID"] for row in result] if isinstance(result, list) else []
+        if not rel_ids:
+            raise Exception("No EQUIVALENT ties were updated. Verify the selected relation still exists.")
+        createLog(
+            id=rel_ids,
+            type="relation",
+            log=[f"updated EQUIVALENT property {EQUIV_property} to {new_property_value} for {CMID}"] * len(rel_ids),
+            user=user,
+            driver=driver,
+        )
+    elif addOrEditNode == "delete":
+        q = """
+            MATCH ()-[r:EQUIVALENT]-()
+            WHERE elementId(r) = $relID
+            REMOVE r[$prop]
+            RETURN elementId(r) as relID
+        """
+        result = getQuery(q, driver=driver, params={"relID": safe_rel_id, "prop": EQUIV_property})
+        rel_ids = [row["relID"] for row in result] if isinstance(result, list) else []
+        if not rel_ids:
+            raise Exception("No EQUIVALENT ties were updated. Verify the selected relation still exists.")
+        createLog(
+            id=rel_ids,
+            type="relation",
+            log=[f"deleted EQUIVALENT property {EQUIV_property} for {CMID}"] * len(rel_ids),
+            user=user,
+            driver=driver,
+        )
+    else:
+        raise ValueError("Action must be add, edit, or delete.")
+
+    return "done"
+
+
+def moveEQUIVALENTties(database, user, input):
+    driver = getDriver(database)
+    CMID_from = (input.get('s1_2') or "").strip()
+    CMID_to = (input.get('s1_3') or "").strip()
+    selected_relation = input.get('s1_7')
+
+    if CMID_from == CMID_to:
+        raise ValueError("Both CMIDs cannot be the same.")
+
+    try:
+        selected_relation = json.loads(selected_relation)
+    except Exception:
+        raise ValueError("Invalid EQUIVALENT tie payload.")
+
+    rel_id = selected_relation[1].get("id")
+    safe_rel_id = sanitize_cypher_element_id(rel_id, "relationship elementId")
+
+    query_move_rel = """
+        MATCH (from:CATEGORY)-[r:EQUIVALENT]->(oldTo:CATEGORY)
+        WHERE from.CMID = $CMID_from AND elementId(r) = $rel_id
+        MATCH (newTo:CATEGORY {CMID: $CMID_to})
+        CALL apoc.refactor.to(r, newTo) YIELD output
+        RETURN elementId(output) AS relID, oldTo.CMID AS oldToCMID
+    """
+    move_result = getQuery(
+        query_move_rel,
+        driver,
+        params={"CMID_from": CMID_from, "rel_id": safe_rel_id, "CMID_to": CMID_to},
+    )
+
+    if not move_result:
+        raise ValueError("No EQUIVALENT tie was moved. Verify the selected tie and destination CMID.")
+
+    new_rel_id = move_result[0]["relID"]
+    old_to_cmid = move_result[0]["oldToCMID"]
+    createLog(
+        id=[new_rel_id],
+        type="relation",
+        log=[f"moved EQUIVALENT tie from {CMID_from}->{old_to_cmid} to {CMID_from}->{CMID_to}"],
+        user=user,
+        driver=driver,
+    )
+
+    return "done"
+
 ############################
 #section for add, edit, delete node ties
 #Function that allows editing Node properties.
@@ -1398,6 +1514,26 @@ def deleteUSES(database,user,input):
     result = getQuery(q, driver=driver, params={"id": rel_id})
 
     processUSES(database,CMID)
+
+    return "done"
+
+
+def deleteEQUIVALENT(database, user, input):
+    driver = getDriver(database)
+    selected_tie = input.get('s1_7')
+
+    try:
+        selected_tie = json.loads(selected_tie)
+    except Exception:
+        raise ValueError("Invalid EQUIVALENT tie payload.")
+
+    rel_id = sanitize_cypher_element_id(selected_tie[1]["id"], "relationship elementId")
+    q = "MATCH ()-[r:EQUIVALENT]->() WHERE elementId(r) = $id DELETE r RETURN count(*) AS count"
+    result = getQuery(q, driver=driver, params={"id": rel_id})
+
+    deleted_count = result[0]["count"] if result and "count" in result[0] else 0
+    if deleted_count == 0:
+        raise ValueError("No EQUIVALENT tie was deleted. Verify the selected relation still exists.")
 
     return "done"
 

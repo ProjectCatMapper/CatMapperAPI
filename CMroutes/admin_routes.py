@@ -107,6 +107,51 @@ def admin_usesproperties():
     }
 
 
+@admin_bp.route("/admin_add_edit_delete_equivalentproperties", methods=['GET'])
+def admin_equivalentproperties():
+    CMID = request.args.get('CMID')
+    database = request.args.get('database')
+
+    driver = getDriver(database)
+
+    q = """
+        MATCH (n:CATEGORY)-[r:EQUIVALENT]->(d:CATEGORY)
+        WHERE n.CMID = $cmid
+        RETURN {CMName: n.CMName, CMID: n.CMID, elementId: elementId(n)} AS n, r,
+               {CMName: d.CMName, CMID: d.CMID, elementId: elementId(d)} AS d
+    """
+
+    allowed_props = ["stack", "dataset", "Key"]
+
+    with driver.session() as session:
+        result = session.run(q, cmid=CMID)
+
+        records_list = []
+        temp_list = []
+        for record in result:
+            n = dict(record["n"].items())
+            r = dict(record["r"].items())
+            r["id"] = record["r"].element_id
+            d = dict(record["d"].items())
+            temp_list.append((n, r, d))
+
+        temp_list.sort(
+            key=lambda x: (
+                x[2].get("CMName", ""),
+                x[1].get("dataset", ""),
+                x[1].get("stack", ""),
+                x[1].get("Key", ""),
+            )
+        )
+        records_list.extend(temp_list)
+
+    return {
+        "r": records_list,
+        "r1": allowed_props,
+        "error": ""
+    }
+
+
 
 @admin_bp.route('/create_label_helper', methods=['GET'])
 def create_label():
@@ -249,6 +294,9 @@ def getAdminEdit():
         elif fun == "add/edit/delete USES property":
             result = add_edit_delete_USES(
                 database, acting_user, input)
+        elif fun == "add/edit/delete EQUIVALENT property":
+            result = add_edit_delete_EQUIVALENT(
+                database, acting_user, input)
         elif fun == "merge nodes":
             result = mergeNodes(input.get('s1_2'), input.get(
                 's1_3'), acting_user, database)
@@ -258,10 +306,14 @@ def getAdminEdit():
             result = deleteNode(database, acting_user, input)
         elif fun == "delete USES relation":
             result = deleteUSES(database, acting_user, input)
+        elif fun == "delete EQUIVALENT relation":
+            result = deleteEQUIVALENT(database, acting_user, input)
         elif fun == "move USES tie":
             tabledata = data.get("tabledata")
             dataset = data.get("datasetID")
             result = moveUSESties(database, acting_user, input,dataset,tabledata)
+        elif fun == "move EQUIVALENT tie":
+            result = moveEQUIVALENTties(database, acting_user, input)
         else:
             raise Exception("Function does not exist")
         return result
