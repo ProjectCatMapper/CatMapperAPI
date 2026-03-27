@@ -9,18 +9,30 @@ merge_bp = Blueprint('merge', __name__)
 def get_merge_syntax_route(database):
     try:
         from CM.merge import createSyntax
-        data = request.get_data()
-        data = json.loads(data)
+        data = request.get_json(silent=True) or {}
         template = data.get("template")
         result = createSyntax(template=template, database=database)
 
-        if result.get("hash") != "":
+        # Backward-compatible guard: older helpers may return (payload, status_code).
+        status_code = 200
+        if isinstance(result, tuple):
+            payload = result[0] if len(result) > 0 else {}
+            status_code = result[1] if len(result) > 1 and isinstance(result[1], int) else 500
+            result = payload if isinstance(payload, dict) else {"error": str(payload)}
+
+        if not isinstance(result, dict):
+            raise TypeError(f"Unexpected createSyntax result type: {type(result).__name__}")
+
+        error_message = result.get("error")
+        if error_message:
+            return {"msg": "Syntax creation failed", "error": str(error_message)}, status_code if status_code >= 400 else 500
+
+        if str(result.get("hash", "")).strip() != "":
             return {"msg": "Syntax created successfully", "download": result}, 200
         else:
             return {"msg": "Syntax creation failed"}, 500
     except Exception as e:
-        result = str(e)
-        return result, 500
+        return {"error": str(e)}, 500
 
 @merge_bp.route('/merge/template/<database>/<datasetID>', methods=['GET'])
 def get_merge_template(database, datasetID):

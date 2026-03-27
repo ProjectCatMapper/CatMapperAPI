@@ -1,4 +1,5 @@
 import CMroutes.merge_routes as merge_routes
+import CM.merge as merge_module
 
 
 def test_submit_merge_rejects_category_cmids(client):
@@ -66,3 +67,45 @@ def test_submit_merge_allows_two_datasets_for_extended(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["ok"] is True
+
+
+def test_merge_syntax_route_accepts_dict_result(client, monkeypatch):
+    monkeypatch.setattr(
+        merge_module,
+        "createSyntax",
+        lambda template, database="SocioMap", syntax="R", dirpath=None, download=True: {
+            "zip": "/tmp/merged_output.zip",
+            "hash": "abc123",
+        },
+    )
+
+    response = client.post(
+        "/merge/syntax/ArchaMap",
+        json={"template": [{"mergingID": "AM1", "datasetID": "AM2", "filePath": "/tmp"}]},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json() or {}
+    assert payload.get("msg") == "Syntax created successfully"
+    assert payload.get("download", {}).get("hash") == "abc123"
+
+
+def test_merge_syntax_route_handles_tuple_error_payload(client, monkeypatch):
+    monkeypatch.setattr(
+        merge_module,
+        "createSyntax",
+        lambda template, database="SocioMap", syntax="R", dirpath=None, download=True: (
+            {"error": "synthetic merge syntax failure"},
+            500,
+        ),
+    )
+
+    response = client.post(
+        "/merge/syntax/ArchaMap",
+        json={"template": [{"mergingID": "AM1", "datasetID": "AM2", "filePath": "/tmp"}]},
+    )
+
+    assert response.status_code == 500
+    payload = response.get_json() or {}
+    assert payload.get("msg") == "Syntax creation failed"
+    assert "synthetic merge syntax failure" in str(payload.get("error", ""))

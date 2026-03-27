@@ -627,182 +627,202 @@ def getMergingTemplate(datasetID, database):
 # download=True
 def createSyntax(template, database="SocioMap",
                  syntax="R", dirpath=None, download=True):
+    driver = getDriver(database)
+
     try:
-        
-        driver = getDriver(database)
-
-        try:
-            template = pd.DataFrame(template)
-        except Exception as e:
-            raise ValueError("Template must be a pandas DataFrame.")
-
-        if template.empty:
-            raise ValueError("Template DataFrame is empty.")
-
-        required_cols = ["mergingID", "datasetID", "filePath"]
-        for col in required_cols:
-            if col not in template.columns:
-                raise ValueError(
-                    f"Required column '{col}' is missing from the template.")
-
-        if "stackID" not in template.columns:
-            # obtain stackID from database
-            query = """
-            UNWIND $rows as row
-            MATCH (m:DATASET {CMID: row.mergingID})-[rs:MERGING]->(s:DATASET)-[rm:MERGING]->(d:DATASET {CMID: row.datasetID})
-            RETURN
-            m.CMID as mergingID, s.CMID as stackID, d.CMID as datasetID
-            """
-            stacks = getQuery(query, driver=driver, params={
-                              "rows": template.to_dict(orient='records')}, type="df")
-            if stacks.empty:
-                raise ValueError(
-                    "Could not retrieve stackIDs from the database. Please ensure mergingID and datasetID are correct.")
-            template = pd.merge(template, stacks, on=[
-                                "mergingID", "datasetID"], how="left")
-        template = template[["mergingID", "stackID",
-                                 "datasetID", "filePath"]]
-
-        if dirpath is None:
-            dirpath = "./tmp"
-
-        wd = template.iloc[0]["filePath"]
-
-        if re.match(r"^[a-zA-Z]:\\\\", wd) or "\\" in wd:
-            print("Detected Windows path. Converting to compatible format...")
-
-            # Convert backslashes to forward slashes
-            wd = wd.replace("\\", "/")
-
-            # Ensure proper formatting (R escape sequences)
-            wd = wd.replace(" ", "\\ ")  # Escape spaces if needed
-
-        template = template.iloc[1:]
-
-        # verify CMIDs
-        cols = ["mergingID", "stackID", "datasetID"]
-        CMIDs = list(set(template[cols].values.flatten().tolist()))
-
-        check = getQuery(
-            """
-            UNWIND $CMIDs as cmid
-            match (a:DATASET {CMID: cmid})
-            return a.CMID as CMID, a.CMName as CMName
-            """, driver=driver,
-            params={"CMIDs": CMIDs},
-            type="df"
-        )
-        
-        missing = set(CMIDs) - set(check["CMID"].tolist())
-        missing = [str(m) + "\n" for m in missing]
-
-        if len(check) != len(CMIDs):
-            raise ValueError(
-                "Error: One or more CMIDs not found in the database\nMissing CMIDs: ", missing)
-        else:
-            print("All CMIDs found in the database.")
-            
-        # get merging variables
-        variable_query = """
-            unwind $rows as row
-            match (m:DATASET {CMID: row.mergingID})-[:MERGING]->(s:DATASET {CMID: row.stackID})-[rsv:MERGING]->(v:VARIABLE)<-[rdv:MERGING]-(d:DATASET {CMID: row.datasetID}) where rdv.stack = s.CMID
-            optional match (v)<-[ru:USES]-(d) 
-            RETURN DISTINCT
-            m.CMID as mergingID, m.CMName as mergingName, s.CMID as stackID, s.CMName as stackName, d.CMID as datasetID, d.CMName as datasetName, rsv.varName as varName, v.CMID as variableID, rsv.stackTransform as stackTransform, rsv.summaryStatistic as summaryStatistic, rdv.datasetTransform as datasetTransform, ru.Key as variableKey
-            """
-        variables = getQuery(variable_query, driver=driver, params={
-                        "rows": template.to_dict(orient='records')}, type="df")
-
-
-        template_names = variables[['mergingID', 'mergingName','stackID','stackName']].drop_duplicates()
-        variables = data[["datasetID", "variableKey"]].copy()
-        variables = variables.drop_duplicates()
-        variables[['variable', 'value']] = variables['Key'].str.split(
-            ': ', n=1, expand=True)
-
-        data = pd.merge(data, variables, on=["datasetID", "Key"], how="left")
-
-        data["variable"] = data["variable"].str.lower()
-        data = data.astype(str)
-        data.replace("None", np.nan, inplace=True)
-        data = pd.merge(
-            data, template[["datasetID", "filePath"]], on="datasetID", how="left")
-        # print(dirpath)
-        data.to_excel(os.path.join(dirpath, "data.xlsx"), index=False)
-        # missing the where clause to make sure the equivalent tie is associated with the merging template
-        cat_query = f"""
-            unwind $rows as row
-            match (d:DATASET {{CMID: row.datasetID}})-[ru:USES]->(c:{domain}) optional match (c)-[:EQUIVALENT]->(e:{domain})
-            return d.CMID as datasetID, ru.Key as Key, c.CMID as CMID, c.CMName as CMName, e.CMID as equivalentCMID, e.CMName as equivalentCMName
-        """
-        categories = getQuery(cat_query, driver=driver, params={
-            "rows": template.to_dict(orient='records')}, type="df")
-
-        print(len(categories))
-        # number of categories that have equivalent categories
-        print(len(categories[categories["equivalentCMID"].notnull()]))
-        categories.columns
-        keys_df = categories[["datasetID", "Key"]].copy()
-        keys_df = keys_df.drop_duplicates()
-        # keys_df = extract_key(keys_df, col="Key")
-        # keys_df = keys_df.melt(
-        #     id_vars=["datasetID",'Key'],
-        #     var_name='variable',
-        #     value_name='value'
-        # )
-        # print(keys_df.head(10))
-        keys_df['Key2'] = keys_df['Key'].str.split('; ')
-        keys_df = keys_df.explode('Key2').reset_index(drop=True)
-        keys_df[['variable', 'value']] = keys_df['Key2'].str.split(
-            ': ', n=1, expand=True)
-        keys_df.drop(columns=["Key2"], inplace=True)
-        categories = pd.merge(categories, keys_df, on=[
-                              "datasetID", "Key"], how="left")
-        categories = categories.drop_duplicates(
-            subset=["datasetID", "Key", "CMID", "variable", "value"])
-        categories["variable"] = categories["variable"].str.lower()
-        categories = categories.astype(str)
-        categories.replace("None", np.nan, inplace=True)
-        # len(categories)
-        # print(categories.head(100))
-        categories.to_excel(os.path.join(
-            dirpath, "categories.xlsx"), index=False)
-        r_syntax_template = "syntax/R_syntax.txt"
-        replacements = {
-            # Functions applied
-            "${f}": "\n".join(data['transform'].dropna()),
-            "${wd}": wd,  # Working directory
-            "${database}": database  # Database name
-        }
-
-        # print(replacements)
-        if syntax == "R":
-            r_syntax = load_r_syntax_template(r_syntax_template, replacements)
-            with open(os.path.join(dirpath, "syntax.R"), "w") as f:
-                f.write(r_syntax)
-        else:
-            raise ValueError("Invalid syntax type. Only 'R' is supported.")
-
-        files = []
-        files.extend([
-            os.path.join(dirpath, "data.xlsx"),
-            os.path.join(dirpath, "categories.xlsx"),
-            os.path.join(dirpath, "syntax.R")
-
-        ])
-
-        if download == True:
-            hash_id = generate_unique_hash()
-            zip_filename = f"merged_output_{hash_id}.zip"
-        else:
-            hash_id = ""
-            zip_filename = "merged_output.zip"
-        zip_path = zip_output_files(files, dirpath, zip_filename)
-
-        return {"zip": zip_path, "hash": hash_id}
-
+        template = pd.DataFrame(template)
     except Exception as e:
-        try:
-            return {"error": str(e)}, 500
-        except:
-            return {"Error": "Unable to process error"}, 500
+        raise ValueError("Template must be a pandas DataFrame.") from e
+
+    if template.empty:
+        raise ValueError("Template DataFrame is empty.")
+
+    required_cols = ["mergingID", "datasetID", "filePath"]
+    for col in required_cols:
+        if col not in template.columns:
+            raise ValueError(f"Required column '{col}' is missing from the template.")
+
+    # Use the first non-empty filePath as the R working directory.
+    filepaths = template["filePath"].fillna("").astype(str).str.strip()
+    wd = next((p for p in filepaths if p), "")
+    if not wd:
+        raise ValueError("Template must include at least one non-empty filePath value.")
+
+    if re.match(r"^[a-zA-Z]:\\\\", wd) or "\\" in wd:
+        print("Detected Windows path. Converting to compatible format...")
+        wd = wd.replace("\\", "/")
+        wd = wd.replace(" ", "\\ ")
+
+    # Keep only actionable merge rows.
+    template["mergingID"] = template["mergingID"].fillna("").astype(str).str.strip()
+    template["datasetID"] = template["datasetID"].fillna("").astype(str).str.strip()
+    template = template[(template["mergingID"] != "") & (template["datasetID"] != "")]
+    if template.empty:
+        raise ValueError("Template has no actionable rows after filtering blank mergingID/datasetID values.")
+
+    if "stackID" not in template.columns:
+        query = """
+        UNWIND $rows as row
+        MATCH (m:DATASET {CMID: row.mergingID})-[rs:MERGING]->(s:DATASET)-[rm:MERGING]->(d:DATASET {CMID: row.datasetID})
+        RETURN
+        m.CMID as mergingID, s.CMID as stackID, d.CMID as datasetID
+        """
+        stacks = getQuery(
+            query,
+            driver=driver,
+            params={"rows": template.to_dict(orient='records')},
+            type="df",
+        )
+        if stacks.empty:
+            raise ValueError(
+                "Could not retrieve stackIDs from the database. Please ensure mergingID and datasetID are correct."
+            )
+        template = pd.merge(template, stacks, on=["mergingID", "datasetID"], how="left")
+
+    template = template[["mergingID", "stackID", "datasetID", "filePath"]].copy()
+
+    if dirpath is None:
+        dirpath = "./tmp"
+    os.makedirs(dirpath, exist_ok=True)
+
+    # verify CMIDs
+    cols = ["mergingID", "stackID", "datasetID"]
+    cmids = list(set(template[cols].values.flatten().tolist()))
+    check = getQuery(
+        """
+        UNWIND $CMIDs as cmid
+        MATCH (a:DATASET {CMID: cmid})
+        RETURN a.CMID as CMID, a.CMName as CMName
+        """,
+        driver=driver,
+        params={"CMIDs": cmids},
+        type="df",
+    )
+
+    missing = sorted(set(cmids) - set(check["CMID"].tolist()))
+    if missing:
+        raise ValueError(
+            "Error: One or more CMIDs not found in the database\nMissing CMIDs: "
+            + ", ".join(missing)
+        )
+
+    variable_query = """
+        UNWIND $rows as row
+        MATCH (m:DATASET {CMID: row.mergingID})-[:MERGING]->(s:DATASET {CMID: row.stackID})-[rsv:MERGING]->(v:VARIABLE)<-[rdv:MERGING]-(d:DATASET {CMID: row.datasetID})
+        WHERE rdv.stack = s.CMID
+        OPTIONAL MATCH (v)<-[ru:USES]-(d)
+        RETURN DISTINCT
+        m.CMID as mergingID,
+        m.CMName as mergingName,
+        s.CMID as stackID,
+        s.CMName as stackName,
+        d.CMID as datasetID,
+        d.CMName as datasetName,
+        rsv.varName as varName,
+        v.CMID as variableID,
+        rsv.stackTransform as stackTransform,
+        rsv.summaryStatistic as summaryStatistic,
+        rdv.datasetTransform as datasetTransform,
+        ru.Key as variableKey
+    """
+    variables = getQuery(
+        variable_query,
+        driver=driver,
+        params={"rows": template.to_dict(orient='records')},
+        type="df",
+    )
+
+    if variables.empty:
+        raise ValueError("No merging variable mappings found for the provided template rows.")
+
+    # Build data.xlsx payload from variable mappings.
+    data = variables.copy()
+    data["Key"] = data["variableKey"].fillna("").astype(str)
+    data["transform"] = (
+        data["datasetTransform"].fillna("").astype(str).str.strip().replace("", np.nan)
+        .fillna(data["stackTransform"].fillna("").astype(str).str.strip())
+        .replace("", np.nan)
+    )
+
+    key_pairs = data[["datasetID", "Key"]].drop_duplicates().copy()
+    key_pairs["Key2"] = key_pairs["Key"].str.split("; ")
+    key_pairs = key_pairs.explode("Key2").reset_index(drop=True)
+    parsed = key_pairs["Key2"].fillna("").astype(str).str.split(r"\s*(?:==|:)\s*", n=1, regex=True, expand=True)
+    key_pairs["variable"] = parsed[0]
+    key_pairs["value"] = parsed[1]
+    key_pairs = key_pairs.drop(columns=["Key2"])
+
+    data = pd.merge(data, key_pairs, on=["datasetID", "Key"], how="left")
+    data["variable"] = data["variable"].fillna("").astype(str).str.lower()
+    data = pd.merge(data, template[["datasetID", "filePath"]], on="datasetID", how="left")
+    data = data.astype(str).replace("None", np.nan)
+    data.to_excel(os.path.join(dirpath, "data.xlsx"), index=False)
+
+    domain = validate_domain_label("CATEGORY", driver=driver)
+    cat_query = f"""
+        UNWIND $rows as row
+        MATCH (d:DATASET {{CMID: row.datasetID}})-[ru:USES]->(c:{domain})
+        OPTIONAL MATCH (c)-[:EQUIVALENT]->(e:{domain})
+        RETURN
+        d.CMID as datasetID,
+        ru.Key as Key,
+        c.CMID as CMID,
+        c.CMName as CMName,
+        e.CMID as equivalentCMID,
+        e.CMName as equivalentCMName
+    """
+    categories = getQuery(
+        cat_query,
+        driver=driver,
+        params={"rows": template.to_dict(orient='records')},
+        type="df",
+    )
+
+    if categories.empty:
+        categories = pd.DataFrame(
+            columns=["datasetID", "Key", "CMID", "CMName", "equivalentCMID", "equivalentCMName"]
+        )
+    else:
+        category_keys = categories[["datasetID", "Key"]].drop_duplicates().copy()
+        category_keys["Key2"] = category_keys["Key"].str.split("; ")
+        category_keys = category_keys.explode("Key2").reset_index(drop=True)
+        parsed_keys = category_keys["Key2"].fillna("").astype(str).str.split(r"\s*(?:==|:)\s*", n=1, regex=True, expand=True)
+        category_keys["variable"] = parsed_keys[0]
+        category_keys["value"] = parsed_keys[1]
+        category_keys = category_keys.drop(columns=["Key2"])
+
+        categories = pd.merge(categories, category_keys, on=["datasetID", "Key"], how="left")
+        categories = categories.drop_duplicates(subset=["datasetID", "Key", "CMID", "variable", "value"])
+        categories["variable"] = categories["variable"].fillna("").astype(str).str.lower()
+        categories = categories.astype(str).replace("None", np.nan)
+    categories.to_excel(os.path.join(dirpath, "categories.xlsx"), index=False)
+
+    r_syntax_template = "syntax/R_syntax.txt"
+    replacements = {
+        "${f}": "\n".join(data["transform"].dropna().astype(str).tolist()),
+        "${wd}": wd,
+        "${database}": database,
+    }
+
+    if syntax == "R":
+        r_syntax = load_r_syntax_template(r_syntax_template, replacements)
+        with open(os.path.join(dirpath, "syntax.R"), "w") as f:
+            f.write(r_syntax)
+    else:
+        raise ValueError("Invalid syntax type. Only 'R' is supported.")
+
+    files = [
+        os.path.join(dirpath, "data.xlsx"),
+        os.path.join(dirpath, "categories.xlsx"),
+        os.path.join(dirpath, "syntax.R"),
+    ]
+
+    if download is True:
+        hash_id = generate_unique_hash()
+        zip_filename = f"merged_output_{hash_id}.zip"
+    else:
+        hash_id = ""
+        zip_filename = "merged_output.zip"
+    zip_path = zip_output_files(files, dirpath, zip_filename)
+
+    return {"zip": zip_path, "hash": hash_id}
