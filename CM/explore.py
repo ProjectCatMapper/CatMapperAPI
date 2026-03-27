@@ -212,6 +212,7 @@ def _get_queries_for_label(label, database):
                     'https://catmapper.org/' + tolower($database) + '/' + datasetID AS `link2`,
                     Version,
                     cType,
+                    r.Key AS Key,
                     Link
                 ORDER BY Source, Name
             ''',
@@ -353,6 +354,7 @@ def _aggregate_samples(samples):
     """
     grouped = defaultdict(lambda: {
         'Name': set(),
+        'Key': [],
         'Population est.': 0,
         'Sample size': 0
     })
@@ -379,6 +381,18 @@ def _aggregate_samples(samples):
         name = row.get('Name')
         if name:
             group['Name'].add(name)
+
+        # Aggregate Key values. When rows are combined, join distinct keys using
+        # " || " so source keys remain visible without changing row grouping.
+        raw_key = row.get('Key')
+        if raw_key:
+            if isinstance(raw_key, list):
+                key_values = [str(v).strip() for v in raw_key if str(v).strip()]
+            else:
+                key_values = [str(raw_key).strip()]
+            for key_value in key_values:
+                if key_value and key_value not in group['Key']:
+                    group['Key'].append(key_value)
         
         # Aggregate population
         try:
@@ -403,6 +417,7 @@ def _aggregate_samples(samples):
         # Deduplicate and join names
         names_set = set(name.strip() for name in values['Name'])
         names_str = ", ".join(sorted(names_set))
+        keys_str = " || ".join(values['Key'])
         
         # Round and handle zero values
         pop_est = round(values['Population est.'])
@@ -421,6 +436,7 @@ def _aggregate_samples(samples):
             'cType': cType,
             'Link': Link,
             'Name': names_str,
+            'Key': keys_str,
             'Population est.': pop_est if pop_est > 0 else "",
             'Sample size': sample_size if sample_size > 0 else "",
         })
