@@ -161,6 +161,224 @@ def _select_best_extended_rows(result, dataset_choices, ncontains, intersection)
 
     return result.drop(columns=["_matchedDatasetCount"], errors="ignore")
 
+
+def _discover_crossdomain_of_relationship(driver, source_domain, target_domain):
+    source_domain = sanitize_cypher_identifier(source_domain, "sourceDomain")
+    target_domain = sanitize_cypher_identifier(target_domain, "targetDomain")
+    query = f"""
+    MATCH (s:{source_domain})-[r]-(t:{target_domain})
+    WHERE type(r) ENDS WITH '_OF'
+    RETURN DISTINCT type(r) AS relType
+    ORDER BY relType
+    """
+    rows = getQuery(query, driver=driver) or []
+    rel_types = [row.get("relType") for row in rows if isinstance(row, dict) and row.get("relType")]
+
+    if not rel_types:
+        raise ValueError(
+            f"No *_OF relationship exists between {source_domain} and {target_domain}. "
+            "Cross-domain merge requires one *_OF tie plus CONTAINS ties."
+        )
+    if len(rel_types) > 1:
+        raise ValueError(
+            f"Multiple *_OF relationships found between {source_domain} and {target_domain}: "
+            f"{', '.join(sorted(rel_types))}. Please resolve metadata before running cross-domain merge."
+        )
+
+    return sanitize_cypher_identifier(rel_types[0], "crossDomainRelationship")
+
+
+def _get_crossdomain_matches(
+    driver,
+    dataset_choices,
+    source_domain,
+    target_domain,
+    return_domain,
+    max_hops,
+    of_relationship,
+):
+    source_domain = sanitize_cypher_identifier(source_domain, "sourceDomain")
+    target_domain = sanitize_cypher_identifier(target_domain, "targetDomain")
+    return_domain = sanitize_cypher_identifier(return_domain, "returnDomain")
+    of_relationship = sanitize_cypher_identifier(of_relationship, "ofRelationship")
+
+    if max_hops < 1 or max_hops > 6:
+        raise ValueError("maxHops must be between 1 and 6")
+
+    query = f"""
+    UNWIND $datasets AS dataset
+    MATCH (d:DATASET {{CMID: dataset}})-[r:USES]->(src:{source_domain})
+    CALL {{
+        WITH src
+        RETURN src AS srcExpanded, 0 AS sourceTie
+        UNION
+        WITH src
+        MATCH p=(src)-[rc:CONTAINS*1..{max_hops}]-(srcExpanded:{source_domain})
+        WHERE isEmpty([rel IN rc WHERE rel.generic = true])
+        RETURN srcExpanded, length(p) AS sourceTie
+    }}
+    MATCH (srcExpanded)-[:{of_relationship}]-(tgt:{target_domain})
+    CALL {{
+        WITH tgt
+        MATCH (outNode:{return_domain})
+        WHERE elementId(outNode) = elementId(tgt)
+        RETURN outNode, 0 AS targetTie
+        UNION
+        WITH tgt
+        MATCH p2=(tgt)-[tc:CONTAINS*1..{max_hops}]-(outNode:{return_domain})
+        WHERE isEmpty([rel IN tc WHERE rel.generic = true])
+        RETURN outNode, length(p2) AS targetTie
+    }}
+    RETURN DISTINCT
+        d.CMID AS datasetID,
+        src.CMID AS sourceCMID,
+        src.CMName AS sourceCMName,
+        srcExpanded.CMID AS sourceExpandedCMID,
+        srcExpanded.CMName AS sourceExpandedCMName,
+        tgt.CMID AS targetCMID,
+        tgt.CMName AS targetCMName,
+        outNode.CMID AS CMID,
+        outNode.CMName AS CMName,
+        r.Key AS Key,
+        apoc.text.join(apoc.coll.toSet(r.Name), '; ') AS Name,
+        sourceTie,
+        targetTie,
+        sourceTie + targetTie + 1 AS tie
+    """
+    matches = getQuery(query, driver=driver, params={"datasets": dataset_choices}, type="df")
+    if not isinstance(matches, pd.DataFrame):
+        matches = pd.DataFrame(matches or [])
+    return matches
+
+
+def _normalize_selected_key_variables(selectedKeyvariables):
+    selectedKeyvariables = selectedKeyvariables or {}
+    return {
+        str(k).strip(): str(v).strip()
+        for k, v in selectedKeyvariables.items()
+        if str(k).strip() and str(v).strip()
+    }
+
+
+def _filter_long_crossdomain_by_selected_keyvariables(matches, selectedKeyvariables):
+    if matches.empty:
+        return matches
+    selectedKeyvariables = _normalize_selected_key_variables(selectedKeyvariables)
+    if not selectedKeyvariables:
+        return matches
+
+    result = matches.copy()
+    for dataset_id, prefix in selectedKeyvariables.items():
+        mask = result["datasetID"].astype(str).str.strip().eq(dataset_id)
+        if mask.any():
+            key_mask = result["Key"].fillna("").astype(str).str.startswith(prefix, na=False)
+            result = result[~mask | key_mask]
+    return result
+
+
+def _select_best_crossdomain_rows(matches):
+    if matches.empty:
+        return matches
+
+    sort_cols = [col for col in ["datasetID", "sourceCMID", "Key", "tie", "sourceTie", "targetTie", "CMID"] if col in matches.columns]
+    if sort_cols:
+        matches = matches.sort_values(by=sort_cols, kind="mergesort")
+
+    dedupe_cols = [col for col in ["datasetID", "sourceCMID", "Key"] if col in matches.columns]
+    if dedupe_cols:
+        matches = matches.drop_duplicates(subset=dedupe_cols, keep="first")
+
+    return matches
+
+
+def _apply_crossdomain_anchor_and_intersection(matches, dataset_choices, primary_dataset, intersection):
+    if matches.empty:
+        return matches
+
+    primary = matches[matches["datasetID"] == primary_dataset].copy()
+    if primary.empty:
+        return pd.DataFrame()
+
+    anchor_nodes = set(primary["CMID"].dropna().astype(str))
+    anchored = matches[matches["CMID"].astype(str).isin(anchor_nodes)].copy()
+
+    if intersection:
+        expected = len(dataset_choices)
+        coverage = anchored.groupby("CMID")["datasetID"].nunique()
+        keep_nodes = coverage[coverage == expected].index
+        anchored = anchored[anchored["CMID"].isin(keep_nodes)]
+
+    return anchored
+
+
+def _build_crossdomain_wide_frame(matches, dataset_choices, primary_dataset, intersection):
+    if matches.empty:
+        return pd.DataFrame()
+
+    primary = matches[matches["datasetID"] == primary_dataset].copy()
+    if primary.empty:
+        return pd.DataFrame()
+
+    base = primary.rename(
+        columns={
+            "Key": f"Key_{primary_dataset}",
+            "Name": f"Name_{primary_dataset}",
+            "tie": f"tie_{primary_dataset}",
+            "sourceCMID": f"sourceCMID_{primary_dataset}",
+            "sourceCMName": f"sourceCMName_{primary_dataset}",
+        }
+    )
+    keep_cols = ["CMID", "CMName", f"Key_{primary_dataset}", f"Name_{primary_dataset}", f"tie_{primary_dataset}", f"sourceCMID_{primary_dataset}", f"sourceCMName_{primary_dataset}"]
+    keep_cols = [c for c in keep_cols if c in base.columns]
+    wide = base[keep_cols].drop_duplicates()
+
+    for dataset_id in dataset_choices:
+        if dataset_id == primary_dataset:
+            continue
+        rows = matches[matches["datasetID"] == dataset_id].copy()
+        rows = rows.rename(
+            columns={
+                "Key": f"Key_{dataset_id}",
+                "Name": f"Name_{dataset_id}",
+                "tie": f"tie_{dataset_id}",
+                "sourceCMID": f"sourceCMID_{dataset_id}",
+                "sourceCMName": f"sourceCMName_{dataset_id}",
+            }
+        )
+        cols = ["CMID", "CMName", f"Key_{dataset_id}", f"Name_{dataset_id}", f"tie_{dataset_id}", f"sourceCMID_{dataset_id}", f"sourceCMName_{dataset_id}"]
+        cols = [c for c in cols if c in rows.columns]
+        frame = rows[cols].drop_duplicates()
+        merge_how = "inner" if intersection else "left"
+        wide = pd.merge(wide, frame, on=["CMID", "CMName"], how=merge_how)
+
+    tie_cols = [f"tie_{dataset_id}" for dataset_id in dataset_choices if f"tie_{dataset_id}" in wide.columns]
+    key_cols = [f"Key_{dataset_id}" for dataset_id in dataset_choices if f"Key_{dataset_id}" in wide.columns]
+    if tie_cols:
+        tie_vals = wide[tie_cols].apply(pd.to_numeric, errors="coerce")
+        if key_cols:
+            present = wide[key_cols].fillna("").astype(str).apply(lambda col: col.str.strip().ne(""))
+            matched_count = present.sum(axis=1)
+        else:
+            matched_count = pd.Series(0, index=wide.index)
+        wide["nTie"] = tie_vals.sum(axis=1, skipna=True) + (len(dataset_choices) - matched_count) * 1000
+    else:
+        wide["nTie"] = 0
+
+    cols = ["CMID", "CMName", "nTie"] + [col for col in wide.columns if col not in ["CMID", "CMName", "nTie"]]
+    return wide[cols].drop_duplicates()
+
+
+def _filter_wide_crossdomain_by_selected_keyvariables(result, selectedKeyvariables):
+    selectedKeyvariables = _normalize_selected_key_variables(selectedKeyvariables)
+    if not selectedKeyvariables:
+        return result
+    filtered = result.copy()
+    for dataset_id, prefix in selectedKeyvariables.items():
+        col = f"Key_{dataset_id}"
+        if col in filtered.columns:
+            filtered = filtered[filtered[col].fillna("").astype(str).str.startswith(prefix, na=False)]
+    return filtered
+
 # joins two datasets that have previously been translated into CatMapper’s database.Each dataset must include two columns: datasetiD and the Key pointing to a category.
 # It returns a single spreadsheet with: 1) datasetIDs, 2) data columns from the original dataset (renamed with _left and _right suffixes if overlapping.  Rows with keys pointing to the same category are aligned in the output spreadsheet.
 # When keys point to a CatMapper category, standardized identifiers are also returned (CMID, CMName).
@@ -341,20 +559,146 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
 
     except Exception as e:
         try:
-            return {"error": str(e)}, 500
+            status_code = 400 if isinstance(e, ValueError) else 500
+            return {"error": str(e)}, status_code
         except:
             return {"Error": "Unable to process error"}, 500
 
 
-def proposeMerge(dataset_choices, category_label, criteria, database, intersection, selectedKeyvariables, ncontains=2, resultFormat = "key-to-key"):
+def proposeMerge(
+    dataset_choices,
+    category_label,
+    criteria,
+    database,
+    intersection,
+    selectedKeyvariables,
+    ncontains=2,
+    resultFormat="key-to-key",
+    source_domain=None,
+    target_domain=None,
+    return_domain=None,
+    primary_dataset=None,
+    max_hops=3,
+):
 
     try:
-        #return resultFormat
         driver = getDriver(database)
-        category_label = validate_domain_label(category_label, driver=driver)
+        criteria = str(criteria or "").lower()
 
         if len(dataset_choices) < 1:
             return jsonify({"message": "Please select more options"}), 400
+
+        if criteria == "crossdomain":
+            source_domain = validate_domain_label(source_domain, driver=driver)
+            target_domain = validate_domain_label(target_domain, driver=driver)
+            return_domain = validate_domain_label(return_domain or target_domain, driver=driver)
+            primary_dataset = str(primary_dataset or "").strip()
+            if primary_dataset == "":
+                raise ValueError("primaryDataset is required for crossdomain merges")
+            if primary_dataset not in dataset_choices:
+                raise ValueError("primaryDataset must be one of datasetChoices")
+            try:
+                max_hops = int(max_hops)
+            except Exception:
+                raise ValueError("maxHops must be an integer")
+            if max_hops < 1 or max_hops > 6:
+                raise ValueError("maxHops must be between 1 and 6")
+
+            of_relationship = _discover_crossdomain_of_relationship(
+                driver=driver,
+                source_domain=source_domain,
+                target_domain=target_domain,
+            )
+
+            matches = _get_crossdomain_matches(
+                driver=driver,
+                dataset_choices=dataset_choices,
+                source_domain=source_domain,
+                target_domain=target_domain,
+                return_domain=return_domain,
+                max_hops=max_hops,
+                of_relationship=of_relationship,
+            )
+            if matches.empty:
+                return jsonify({"message": "No data found"}), 404
+
+            matches = _select_best_crossdomain_rows(matches)
+            matches = _filter_long_crossdomain_by_selected_keyvariables(matches, selectedKeyvariables)
+            matches = _apply_crossdomain_anchor_and_intersection(
+                matches=matches,
+                dataset_choices=dataset_choices,
+                primary_dataset=primary_dataset,
+                intersection=intersection,
+            )
+            if matches.empty:
+                return jsonify({"message": "No cross-domain matches found"}), 404
+
+            dataset_name_map = get_dataset_name_map(driver, dataset_choices)
+
+            if resultFormat == "key-to-category":
+                result = matches.copy()
+                result["datasetCMName"] = result["datasetID"].map(dataset_name_map).fillna("")
+                result["relationshipType"] = of_relationship
+                preferred_cols = [
+                    "CMID",
+                    "CMName",
+                    "datasetID",
+                    "datasetCMName",
+                    "Key",
+                    "Name",
+                    "tie",
+                    "sourceCMID",
+                    "sourceCMName",
+                    "targetCMID",
+                    "targetCMName",
+                    "relationshipType",
+                ]
+                cols = [c for c in preferred_cols if c in result.columns] + [c for c in result.columns if c not in preferred_cols]
+                result = result[cols].fillna("")
+                return result.to_dict(orient="records")
+
+            if resultFormat == "category-to-category":
+                matches = matches.groupby(["datasetID", "CMID", "CMName"], as_index=False).agg({
+                    "Key": lambda x: " || ".join(sorted(set([str(i) for i in x if str(i).strip()]))),
+                    "Name": lambda x: " || ".join(sorted(set([str(i) for i in x if str(i).strip()]))),
+                    "tie": "min",
+                    "sourceCMID": lambda x: " || ".join(sorted(set([str(i) for i in x if str(i).strip()]))),
+                    "sourceCMName": lambda x: " || ".join(sorted(set([str(i) for i in x if str(i).strip()]))),
+                })
+
+            result = _build_crossdomain_wide_frame(
+                matches=matches,
+                dataset_choices=dataset_choices,
+                primary_dataset=primary_dataset,
+                intersection=intersection,
+            )
+            if result.empty:
+                return jsonify({"message": "No cross-domain matches found"}), 404
+
+            result = _filter_wide_crossdomain_by_selected_keyvariables(result, selectedKeyvariables)
+            if result.empty:
+                return jsonify({"message": "No cross-domain matches found"}), 404
+
+            result["nTie"] = pd.to_numeric(result["nTie"], errors="coerce").fillna(0).astype(int)
+            for dataset_id in dataset_choices:
+                result[f"datasetCMName_{dataset_id}"] = dataset_name_map.get(dataset_id, "")
+            result["relationshipType"] = of_relationship
+
+            if resultFormat == "key-to-key":
+                for col in result.filter(like="Key_").columns:
+                    parsed = result[col].apply(split_vars_values)
+                    var_series = parsed[0]
+                    val_series = parsed[1]
+                    has_var_values = var_series.fillna("").astype(str).str.strip().ne("").any()
+                    has_val_values = val_series.fillna("").astype(str).str.strip().ne("").any()
+                    if has_var_values or has_val_values:
+                        result[f"variable_{col}"] = var_series.fillna("")
+                        result[f"value_{col}"] = val_series.fillna("")
+
+            result = result.fillna("")
+            return result.to_dict(orient="records")
+
+        category_label = validate_domain_label(category_label, driver=driver)
 
         if criteria == "standard":
 
@@ -495,7 +839,8 @@ def proposeMerge(dataset_choices, category_label, criteria, database, intersecti
 
     except Exception as e:
         try:
-            return {"error": str(e)}, 500
+            status_code = 400 if isinstance(e, ValueError) else 500
+            return {"error": str(e)}, status_code
         except:
             return {"Error": "Unable to process error"}, 500
 

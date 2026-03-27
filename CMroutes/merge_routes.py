@@ -48,29 +48,78 @@ def get_merge_template(database, datasetID):
 # what about calling this createLinkfile internally? # do we want to?
 @merge_bp.route('/proposeMergeSubmit', methods=['POST'])
 def submit_merge():
-    data = request.get_data()
-    data = json.loads(data)
-    dataset_choices = data.get("datasetChoices")
-    dataset_choices = [choice.strip() for choice in dataset_choices.split(",") if choice.strip()]
+    data = request.get_json(silent=True) or {}
+    dataset_choices_raw = data.get("datasetChoices", "")
+    dataset_choices = [choice.strip() for choice in str(dataset_choices_raw).split(",") if choice.strip()]
     ncontains = data.get("mergelevel")
     category_label = unlist(data.get("categoryLabel", ""))
     intersection = unlist(data.get("intersection", False))
     database = unlist(data.get('database'))
-    criteria = str.lower(unlist(data.get('equivalence')))
+    criteria = str.lower(str(unlist(data.get('equivalence', 'standard'))))
     resultFormat = unlist(data.get('resultFormat', 'key-to-key'))
     selectedKeyvariables = data.get('selectedKeyvariable')
-    print(selectedKeyvariables)
 
     invalid_dataset_ids = [cmid for cmid in dataset_choices if re.match(r"^(SD|AD)\d+$", cmid, re.IGNORECASE) is None]
     if invalid_dataset_ids:
         return jsonify({"error": f"Only DATASET CMIDs are allowed: {', '.join(invalid_dataset_ids)}"}), 400
+
+    driver = getDriver(database)
+
+    if criteria == "crossdomain":
+        source_domain = str(unlist(data.get("sourceDomain", ""))).strip()
+        target_domain = str(unlist(data.get("targetDomain", ""))).strip()
+        return_domain = str(unlist(data.get("returnDomain", ""))).strip()
+        primary_dataset = str(unlist(data.get("primaryDataset", ""))).strip()
+        max_hops = data.get("maxHops", 3)
+
+        if source_domain == "" or target_domain == "":
+            return jsonify({"error": "sourceDomain and targetDomain are required for crossdomain merges"}), 400
+        if primary_dataset == "":
+            return jsonify({"error": "primaryDataset is required for crossdomain merges"}), 400
+        if primary_dataset not in dataset_choices:
+            return jsonify({"error": "primaryDataset must be included in datasetChoices"}), 400
+        try:
+            max_hops = int(max_hops)
+        except Exception:
+            return jsonify({"error": "maxHops must be an integer"}), 400
+        if max_hops < 1 or max_hops > 6:
+            return jsonify({"error": "maxHops must be between 1 and 6"}), 400
+
+        if source_domain == "AREA":
+            source_domain = "DISTRICT"
+        if target_domain == "AREA":
+            target_domain = "DISTRICT"
+        if return_domain == "AREA":
+            return_domain = "DISTRICT"
+
+        source_domain = validate_domain_label(source_domain, driver=driver)
+        target_domain = validate_domain_label(target_domain, driver=driver)
+        if return_domain:
+            return_domain = validate_domain_label(return_domain, driver=driver)
+
+        result = proposeMerge(
+            dataset_choices=dataset_choices,
+            category_label="CATEGORY",
+            criteria=criteria,
+            database=database,
+            intersection=intersection,
+            selectedKeyvariables=selectedKeyvariables,
+            ncontains=ncontains,
+            resultFormat=resultFormat,
+            source_domain=source_domain,
+            target_domain=target_domain,
+            return_domain=return_domain,
+            primary_dataset=primary_dataset,
+            max_hops=max_hops,
+        )
+        return result
 
     if category_label == "ANY DOMAIN":
         category_label = "CATEGORY"
     elif category_label == "AREA":
         category_label = "DISTRICT"
 
-    category_label = validate_domain_label(category_label, driver=getDriver(database))
+    category_label = validate_domain_label(category_label, driver=driver)
 
     result = proposeMerge(dataset_choices=dataset_choices, category_label=category_label,
                           criteria=criteria, database=database, intersection=intersection, selectedKeyvariables=selectedKeyvariables, ncontains=ncontains,resultFormat = resultFormat)

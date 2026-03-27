@@ -586,6 +586,10 @@ paths:
     post:
       tags: [Merge]
       summary: Propose merge mappings across datasets
+      description: |
+        Supports Standard, Extended, and CrossDomain merge proposals.
+        For `equivalence=CrossDomain`, include `sourceDomain`, `targetDomain`, `primaryDataset`,
+        and optional `returnDomain`, `maxHops`.
       requestBody:
         required: true
         content:
@@ -617,6 +621,23 @@ paths:
                     - type: array
                       items:
                         type: string
+                sourceDomain:
+                  type: string
+                  description: Required when equivalence is CrossDomain.
+                targetDomain:
+                  type: string
+                  description: Required when equivalence is CrossDomain.
+                returnDomain:
+                  type: string
+                  description: Optional return/output domain when equivalence is CrossDomain.
+                primaryDataset:
+                  type: string
+                  description: Required when equivalence is CrossDomain.
+                maxHops:
+                  type: integer
+                  minimum: 1
+                  maximum: 6
+                  description: Optional, defaults to 3 for CrossDomain.
       responses:
         '200':
           description: Merge proposal result
