@@ -234,6 +234,13 @@ def backup2CSV(database, mail=None):
     """
     try:
         driver = getDriver(database)
+        db_name = str(database or "").strip()
+        if db_name.lower() == "archamap":
+            file_prefix = "ArchaMap"
+        elif db_name.lower() == "sociomap":
+            file_prefix = "SocioMap"
+        else:
+            file_prefix = db_name if db_name else "Database"
 
         results = [database]
         query_datasets = """
@@ -251,10 +258,11 @@ def backup2CSV(database, mail=None):
                     WHEN size(projections) = 0 THEN ''
                     ELSE ', ' + apoc.text.join(projections, ', ')
                 END AS query
-            CALL apoc.export.csv.query(query, '/backups/download/datasetNodes_' + toString(date()) + '.csv', {})
+            CALL apoc.export.csv.query(query, '/backups/download/__FILE_PREFIX___datasetNodes_' + toString(date()) + '.csv', {})
             YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
             RETURN count(*);
         """
+        query_datasets = query_datasets.replace("__FILE_PREFIX__", file_prefix)
 
         datasets = getQuery(query_datasets, driver)
         results.append(datasets)
@@ -274,10 +282,11 @@ def backup2CSV(database, mail=None):
                     WHEN size(projections) = 0 THEN ''
                     ELSE ', ' + apoc.text.join(projections, ', ')
                 END AS query
-            CALL apoc.export.csv.query(query, '/backups/download/categoryNodes_' + toString(date()) + '.csv', {})
+            CALL apoc.export.csv.query(query, '/backups/download/__FILE_PREFIX___categoryNodes_' + toString(date()) + '.csv', {})
             YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
             RETURN count(*);
         """
+        query_CATEGORIES = query_CATEGORIES.replace("__FILE_PREFIX__", file_prefix)
 
         CATEGORIES = getQuery(query_CATEGORIES, driver)
         results.append(CATEGORIES)
@@ -304,19 +313,21 @@ def backup2CSV(database, mail=None):
                     ELSE ', ' + apoc.text.join(projections, ', ')
                 END +
                 ' ORDER BY CMName' AS query
-            CALL apoc.export.csv.query(query, '/backups/download/USESties_' + toString(date()) + '.csv', {})
+            CALL apoc.export.csv.query(query, '/backups/download/__FILE_PREFIX___USESties_' + toString(date()) + '.csv', {})
             YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
             RETURN count(*);
             """
+        query_USES = query_USES.replace("__FILE_PREFIX__", file_prefix)
 
         USES = getQuery(query_USES, driver)
         results.append(USES)
 
         query_DELETED = """
-            with 'match (d:DELETED) optional match (d)-[:IS]-(now) unwind keys(d) as property return distinct elementId(d) as nodeID, elementId(now) as newNodeID, d.CMID as CMID, now.CMID as newCMID' as query CALL apoc.export.csv.query(query, '/backups/download/deletedNodes_' + toString(date()) + '.csv', {})
+            with 'match (d:DELETED) optional match (d)-[:IS]-(now) unwind keys(d) as property return distinct elementId(d) as nodeID, elementId(now) as newNodeID, d.CMID as CMID, now.CMID as newCMID' as query CALL apoc.export.csv.query(query, '/backups/download/__FILE_PREFIX___deletedNodes_' + toString(date()) + '.csv', {})
             YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
             RETURN count(*);
             """
+        query_DELETED = query_DELETED.replace("__FILE_PREFIX__", file_prefix)
         DELETED = getQuery(query_DELETED, driver)
         results.append(DELETED)
         
@@ -335,10 +346,11 @@ def backup2CSV(database, mail=None):
                     WHEN size(projections) = 0 THEN ''
                     ELSE ', ' + apoc.text.join(projections, ', ')
                 END AS query
-            CALL apoc.export.csv.query(query, '/backups/download/metadata_' + toString(date()) + '.csv', {})
+            CALL apoc.export.csv.query(query, '/backups/download/__FILE_PREFIX___metadata_' + toString(date()) + '.csv', {})
             YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
             RETURN count(*);
             """
+        query_Metadata = query_Metadata.replace("__FILE_PREFIX__", file_prefix)
         Metadata = getQuery(query_Metadata, driver)
         results.append(Metadata)
         
@@ -347,10 +359,11 @@ def backup2CSV(database, mail=None):
         MATCH (m:MERGING)-[:MERGING]->(s:STACK)-[:MERGING]->(d:DATASET)-[ru:USES]->(c:CATEGORY) OPTIONAL MATCH (c)-[:EQUIVALENT]->(e:CATEGORY) OPTIONAL MATCH (s)-[rm:MERGING]->(c) RETURN m.CMID as mergingID, m.CMName as mergingName, s.CMID as stackID, s.CMName as stackName, d.CMID as datasetID, d.CMName as datasetName, head(apoc.coll.flatten(collect(rm.varName),true)) as varName, rm.transform as transform, rm.Rtransform as Rtransform, rm.Rfunction as Rfunction, rm.summaryStatistic as summaryStatistic, custom.getLabel(c) as domain, c.CMID as CMID, c.CMName as CMName, ru.Key as Key, e.CMID as equivalentCMID, e.CMName as equivalentName ORDER BY mergingName, stackName, datasetName, domain, CMName
         UNION ALL
         MATCH (m:MERGING)-[:MERGING]->(d:DATASET)-[ru:USES]->(c:CATEGORY) OPTIONAL MATCH (c)-[:EQUIVALENT]->(e:CATEGORY) OPTIONAL MATCH (m)-[rm:MERGING]->(c) RETURN m.CMID as mergingID, m.CMName as mergingName, "" as stackID, "" as stackName, d.CMID as datasetID, d.CMName as datasetName, head(apoc.coll.flatten(collect(rm.varName),true)) as varName, rm.transform as transform, rm.Rtransform as Rtransform, rm.Rfunction as Rfunction, rm.summaryStatistic as summaryStatistic, custom.getLabel(c) as domain, c.CMID as CMID, c.CMName as CMName, ru.Key as Key, e.CMID as equivalentCMID, e.CMName as equivalentName ORDER BY mergingName, stackName, datasetName, domain, CMName
-        ' as query CALL apoc.export.csv.query(query, '/backups/download/merging_' + toString(date()) + '.csv', {})
+        ' as query CALL apoc.export.csv.query(query, '/backups/download/__FILE_PREFIX___merging_' + toString(date()) + '.csv', {})
         YIELD file, source, format, nodes, relationships, properties, time, rows, batchSize, batches, done, data
         RETURN count(*);
         """
+        query_Merging = query_Merging.replace("__FILE_PREFIX__", file_prefix)
         Merging = getQuery(query_Merging, driver)
         results.append(Merging)
 
