@@ -165,10 +165,22 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         df["CMID"] = newID
 
         updateLog(
-            f"log/{user}uploadProgress.txt", "Converting variables to string", write="a"
+            f"log/{user}uploadProgress.txt", "Normalizing node property values", write="a"
         )
 
-        df = df.astype(str)
+        def _normalize_node_value(value):
+            if isinstance(value, (list, dict, bool, int, float)):
+                return value
+            if pd.isna(value):
+                return ""
+            return str(value)
+
+        df = df.applymap(_normalize_node_value)
+
+        if isDataset:
+            for district_col in ("District", "district"):
+                if district_col in df.columns:
+                    df[district_col] = df[district_col].apply(_normalize_semicolon_value_list)
 
         # Checks that all columns in df represent valid CatMapper node properties.
         # We get all columns that need to be set as properties for nodes, excludes label and uniqueID
@@ -914,6 +926,33 @@ def _split_multi_value_cell(value):
     if not raw_value:
         return []
     return [item.strip() for item in raw_value.split(";") if item.strip()]
+
+
+def _normalize_semicolon_value_list(value):
+    tokens = []
+    if value is None:
+        return tokens
+
+    if isinstance(value, (list, tuple, set)):
+        iterable_values = value
+    else:
+        if pd.isna(value):
+            return tokens
+        iterable_values = [value]
+
+    for item in iterable_values:
+        if item is None:
+            continue
+        item_str = str(item).strip()
+        if not item_str:
+            continue
+        for token in item_str.split(";"):
+            cleaned = token.strip()
+            if cleaned:
+                tokens.append(cleaned)
+
+    # De-duplicate while preserving order.
+    return list(dict.fromkeys(tokens))
 
 
 def _collect_unique_column_values(dataset, column_name, multi_value_columns):
@@ -2830,6 +2869,11 @@ def input_Nodes_Uses(
         if not matches.empty:
             dataset = dataset.merge(matches, on="datasetID", how="left")
             linkProperties.append("recordStart")
+
+    # Keep district values as clean list properties when semicolon-delimited text is provided.
+    for district_col in ("District", "district"):
+        if district_col in dataset.columns:
+            dataset[district_col] = dataset[district_col].apply(_normalize_semicolon_value_list)
     
     if "Name" in linkProperties and "altNames" in linkProperties:
         updateLog(

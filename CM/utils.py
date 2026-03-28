@@ -365,66 +365,90 @@ def cleanCMID(cmid):
 
 
 def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database="SocioMap"):
-    print(database)
-
-    if database.lower() == 'sociomap':
-        database = 'SocioMap'
-    elif database.lower() == 'archamap':
-        database = 'ArchaMap'
-    elif database.lower() == 'gisdb':
-        database = 'gisdb'
-    elif database.lower() == 'userdb':
-        database = 'userdb'
+    if database.lower() == "sociomap":
+        database = "SocioMap"
+    elif database.lower() == "archamap":
+        database = "ArchaMap"
+    elif database.lower() == "gisdb":
+        database = "gisdb"
+    elif database.lower() == "userdb":
+        database = "userdb"
     else:
         raise ValueError(
-            f"Database must be 'SocioMap', 'ArchaMap', 'gisdb', or 'userdb', but database is {database}")
+            f"Database must be 'SocioMap', 'ArchaMap', 'gisdb', or 'userdb', but database is {database}"
+        )
 
-    driver = getDriver(database)
+    if not isinstance(n, int) or n < 1:
+        raise ValueError("`n` must be a positive integer.")
 
     # Ensure label is either "DATASET", "USER", or "CATEGORY"
     if label not in ["DATASET", "USER"]:
         label = "CATEGORY"
 
-    # Define the Cypher query to find the next available ID
-    query = f'''
-    MATCH (a) 
-    WHERE a.{new_id} IS NOT NULL 
-    WITH toInteger(apoc.text.replace(toString(a.{new_id}), "[^0-9]", "")) AS new_id 
-    WHERE valueType(new_id) <> "NULL" 
-    WITH new_id 
-    ORDER BY new_id DESC 
-    LIMIT 1 
-    RETURN new_id + 1 as new_id
-    '''
+    driver = getDriver(database)
 
-    newID = getQuery(query, driver, type="list")
-    newID = newID[0]
-
-    # If no ID is found, start from 1
-    if newID is None:
-        newID = 1
-
-    # Generate the range of new IDs
-    newID = list(range(newID, newID + n))
-
-    # Add prefixes based on the database and label
-    prefix = ''
-    if database == "SocioMap":
-        prefix = "S"
-    elif database == "ArchaMap":
-        prefix = "A"
-    elif database == "gisdb":
-        prefix = "gis"
+    prefix_by_target = {
+        ("SocioMap", "DATASET"): "SD",
+        ("SocioMap", "CATEGORY"): "SM",
+        ("ArchaMap", "DATASET"): "AD",
+        ("ArchaMap", "CATEGORY"): "AM",
+    }
 
     if database == "gisdb":
-        newID = [f"{prefix}{x}" for x in newID]
+        prefix = "gis"
+        label_filter = ""
+    elif database == "userdb":
+        # Keep legacy behavior for userdb by using all nodes for index scanning.
+        # CMIDs are not expected to be generated here in normal workflows.
+        prefix = "M" if label != "DATASET" else "D"
+        label_filter = ""
     else:
-        if label == "DATASET":
-            newID = [f"{prefix}D{x}" for x in newID]
+        prefix = prefix_by_target[(database, "DATASET" if label == "DATASET" else "CATEGORY")]
+        if label == "CATEGORY":
+            # CATEGORY IDs must not collide with existing CATEGORY or DELETED CMIDs.
+            label_filter = "WHERE (n:CATEGORY OR n:DELETED)"
+        elif label == "DATASET":
+            label_filter = "WHERE n:DATASET"
         else:
-            newID = [f"{prefix}M{x}" for x in newID]
+            label_filter = ""
 
-    return newID
+    query = f"""
+    MATCH (n)
+    {label_filter}
+    WITH n
+    WHERE n.{new_id} IS NOT NULL
+      AND toString(n.{new_id}) =~ $pattern
+    RETURN toInteger(substring(toString(n.{new_id}), size($prefix))) AS used_id
+    """
+
+    used_ids_raw = getQuery(
+        query,
+        driver,
+        type="list",
+        params={
+            "pattern": f"^{prefix}[0-9]+$",
+            "prefix": prefix,
+        },
+    )
+    used_ids = {
+        int(value)
+        for value in (used_ids_raw or [])
+        if isinstance(value, (int, float)) and int(value) > 0
+    }
+
+    # Fill any missing sequential IDs first, then continue after the highest.
+    next_numeric_ids = []
+    candidate = 1
+    while len(next_numeric_ids) < n:
+        if candidate not in used_ids:
+            next_numeric_ids.append(candidate)
+            used_ids.add(candidate)
+        candidate += 1
+
+    if database == "gisdb":
+        return [f"{prefix}{x}" for x in next_numeric_ids]
+
+    return [f"{prefix}{x}" for x in next_numeric_ids]
 
 
 def flattenList(input_data):
