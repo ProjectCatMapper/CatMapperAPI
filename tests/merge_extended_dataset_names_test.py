@@ -323,3 +323,42 @@ def test_extended_key_to_key_supports_three_datasets(monkeypatch):
     assert result[0]["datasetCMName_SD1"] == "Dataset One"
     assert result[0]["datasetCMName_AD2"] == "Dataset Two"
     assert result[0]["datasetCMName_SD3"] == "Dataset Three"
+
+
+def test_standard_key_to_key_returns_friendly_warning_when_dataset_has_no_rows(monkeypatch):
+    seen, fake_driver = _setup_merge_domain_validation(monkeypatch)
+
+    def fake_get_query(_query, driver=None, params=None, type=None):
+        if type == "df":
+            return pd.DataFrame(
+                [
+                    {
+                        "datasetID": "SD1",
+                        "CMName": "Category Name",
+                        "CMID": "AM123",
+                        "Key": "varA: value1",
+                        "Name": "Term A",
+                    }
+                ]
+            )
+        raise AssertionError("Unexpected query type")
+
+    monkeypatch.setattr(merge_mod, "getQuery", fake_get_query)
+
+    payload, status = merge_mod.proposeMerge(
+        dataset_choices=["SD1", "AD2"],
+        category_label="CATEGORY",
+        criteria="standard",
+        database="ArchaMap",
+        intersection=True,
+        selectedKeyvariables={},
+        ncontains=2,
+        resultFormat="key-to-key",
+    )
+
+    assert seen["domain"] == "CATEGORY"
+    assert seen["driver"] is fake_driver
+    assert status == 400
+    assert "could not find any matches" in payload["error"]
+    assert "AD2" in payload["error"]
+    assert "CATEGORY" in payload["error"]

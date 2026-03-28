@@ -112,7 +112,7 @@ def test_upload_simple_concatenates_multiple_altname_columns(client, monkeypatch
     assert seen["user"] == "api-user"
 
 
-def test_upload_rejects_simple_mode_for_non_add_uses(client, monkeypatch):
+def test_upload_rejects_simple_mode_for_non_add_uses_or_add_node(client, monkeypatch):
     monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
     monkeypatch.setattr(
         upload_routes,
@@ -127,7 +127,27 @@ def test_upload_rejects_simple_mode_for_non_add_uses(client, monkeypatch):
 
     assert response.status_code == 500
     body = response.get_json() or {}
-    assert "only supported with `ao = add_uses`" in str(body.get("error", "")).lower()
+    assert "only supported with `ao = add_uses` or `ao = add_node`" in str(body.get("error", "")).lower()
+
+
+def test_upload_simple_allows_add_node(client, monkeypatch):
+    seen = {}
+
+    def fake_start_upload_task(**kwargs):
+        seen.update(kwargs)
+        return "upload-task-123"
+
+    monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
+    monkeypatch.setattr(upload_routes, "_start_upload_task", fake_start_upload_task)
+
+    payload = _base_payload()
+    payload["ao"] = "add_node"
+
+    response = client.post("/uploadInputNodes", json=payload)
+
+    assert response.status_code == 202
+    assert seen["job_args"]["uploadOption"] == "add_node"
+    assert seen["job_args"]["formatKey"] is True
 
 
 def test_upload_rejects_preformatted_keys_in_simple_mode(client, monkeypatch):

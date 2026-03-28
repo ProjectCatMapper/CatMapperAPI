@@ -151,8 +151,8 @@ def _prepare_upload_job(data, acting_user):
     if so not in {"standard", "simple"}:
         raise Exception("`so` must be either 'standard' or 'simple'.")
 
-    if so == "simple" and upload_option != "add_uses":
-        raise Exception("`so = simple` is only supported with `ao = add_uses`. Use `so = standard` for other actions.")
+    if so == "simple" and upload_option not in {"add_uses", "add_node"}:
+        raise Exception("`so = simple` is only supported with `ao = add_uses` or `ao = add_node`. Use `so = standard` for other actions.")
 
     if so == "standard":
         dataset_payload = df
@@ -213,7 +213,7 @@ def _prepare_upload_job(data, acting_user):
     job_args = {
         "dataset": dataset_payload,
         "database": database,
-        "uploadOption": "add_uses",
+        "uploadOption": upload_option,
         "formatKey": True,
         "optionalProperties": optionalProperties,
         "user": acting_user,

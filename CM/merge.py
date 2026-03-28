@@ -736,6 +736,17 @@ def proposeMerge(
             for dataset in dataset_choices:
                 tmp = merged[merged['datasetID'] == dataset].copy()
                 dataset_list.append(tmp)
+            missing_datasets = [
+                dataset_id
+                for dataset_id, dataset_df in zip(dataset_choices, dataset_list)
+                if dataset_df.empty
+            ]
+            if missing_datasets:
+                missing_label = ", ".join(missing_datasets)
+                raise ValueError(
+                    f"We could not find any matches for dataset(s) {missing_label} in domain "
+                    f"'{category_label}'. Please try a different domain (or switch criteria) and run propose merge again."
+                )
             merged_df = dataset_list[0]
             merged_df.rename(columns={"Key": f"Key_{merged_df['datasetID'].iloc[0]}", "Name": f"Name_{merged_df['datasetID'].iloc[0]}"}, inplace=True)
             merged_df.drop(columns=["datasetID"], inplace=True)
