@@ -236,8 +236,10 @@ def search(
             qYear = f"""
                     call (a) {{ with a, toInteger($yearStart) AS inputYearStart, toInteger($yearEnd) AS inputYearEnd
                     with a, inputYearStart, inputYearEnd,
-                    [v IN apoc.coll.flatten([a.recordStart], true) WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] +
-                    [v IN apoc.coll.flatten([a.recordEnd], true) WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] AS years
+                    [v IN (
+                        apoc.coll.flatten([coalesce(a.recordStart, [])], true) +
+                        apoc.coll.flatten([coalesce(a.recordEnd, [])], true)
+                    ) WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] AS years
                     WITH a, inputYearStart, inputYearEnd, years
                     WHERE size(years) > 0
                     AND apoc.coll.min(years) <= inputYearEnd AND apoc.coll.max(years) >= inputYearStart
@@ -251,8 +253,8 @@ def search(
     call (a) {{ with a, toInteger($yearStart) AS inputYearStart, toInteger($yearEnd) AS inputYearEnd
     match (a)<-[r:USES]-(:DATASET)
     WITH a, inputYearStart, inputYearEnd,
-    apoc.coll.flatten(collect(apoc.coll.flatten([r.recordStart], true)), true) +
-    apoc.coll.flatten(collect(apoc.coll.flatten([r.recordEnd], true)), true) AS rawYears
+    apoc.coll.flatten(collect([coalesce(r.recordStart, [])]), true) +
+    apoc.coll.flatten(collect([coalesce(r.recordEnd, [])]), true) AS rawYears
     WITH a, inputYearStart, inputYearEnd,
     [v IN rawYears WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] AS years
     WHERE size(years) > 0
