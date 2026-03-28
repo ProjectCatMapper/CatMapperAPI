@@ -150,6 +150,28 @@ def test_upload_simple_allows_add_node(client, monkeypatch):
     assert seen["job_args"]["formatKey"] is True
 
 
+def test_upload_simple_forces_add_uses_when_cmid_column_is_supplied(client, monkeypatch):
+    seen = {}
+
+    def fake_start_upload_task(**kwargs):
+        seen.update(kwargs)
+        return "upload-task-123"
+
+    monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
+    monkeypatch.setattr(upload_routes, "_start_upload_task", fake_start_upload_task)
+
+    payload = _base_payload()
+    payload["ao"] = "add_node"
+    payload["df"] = [{"source_name": "Alpha", "source_key": "K1", "existing_cmid": "AM123"}]
+    payload["formData"]["cmidColumn"] = "existing_cmid"
+
+    response = client.post("/uploadInputNodes", json=payload)
+
+    assert response.status_code == 202
+    assert seen["job_args"]["uploadOption"] == "add_uses"
+    assert seen["job_args"]["formatKey"] is True
+
+
 def test_upload_rejects_preformatted_keys_in_simple_mode(client, monkeypatch):
     monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
     monkeypatch.setattr(

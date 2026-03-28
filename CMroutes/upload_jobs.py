@@ -21,6 +21,18 @@ class UploadCancelledError(Exception):
     pass
 
 
+def _humanize_upload_error(err):
+    if isinstance(err, KeyError):
+        missing = str(err).strip().strip("'\"")
+        if missing:
+            return (
+                f"Missing required column or mapping: '{missing}'. "
+                "Check your selected CMID/CMName/Name/Key column mappings and uploaded headers."
+            )
+        return "Missing required column or mapping in upload data."
+    return str(err)
+
+
 def _task_user(task):
     if not isinstance(task, dict):
         return None
@@ -99,7 +111,7 @@ def run_upload_task(task_id):
     except (UploadCancelledError, QueryCancelledError) as err:
         store.cancel_upload_task(task_id, str(err))
     except Exception as err:
-        message = str(err)
+        message = _humanize_upload_error(err)
         details = extract_upload_error_details(message)
         store.fail_upload_task(task_id, message, error_details=details)
     finally:

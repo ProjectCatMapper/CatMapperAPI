@@ -147,6 +147,7 @@ def _prepare_upload_job(data, acting_user):
     mergingType = data.get("mergingType")
     so = str(data.get("so") or "standard").strip().lower()
     upload_option = str(data.get("ao") or "").strip()
+    has_cmid_column_mapping = bool(str(CMID or "").strip())
 
     if so not in {"standard", "simple"}:
         raise Exception("`so` must be either 'standard' or 'simple'.")
@@ -213,7 +214,7 @@ def _prepare_upload_job(data, acting_user):
     job_args = {
         "dataset": dataset_payload,
         "database": database,
-        "uploadOption": upload_option,
+        "uploadOption": "add_uses" if has_cmid_column_mapping else upload_option,
         "formatKey": True,
         "optionalProperties": optionalProperties,
         "user": acting_user,
