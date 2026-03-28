@@ -156,13 +156,25 @@ def getAdvancedDownload(database,domain, properties,CMIDs):
     """
     driver = getDriver(database)
     
-    # if isinstance(CMID, str):
-    #     CMID = [CMID]
+    if isinstance(CMIDs, str):
+        CMIDs = [CMIDs]
+
+    if not isinstance(CMIDs, list):
+        raise ValueError("CMIDs must be provided as a list or string.")
+
+    CMIDs = [str(cmid).strip() for cmid in CMIDs if str(cmid).strip()]
+    if not CMIDs:
+        raise ValueError("No CMIDs were provided for the advanced download request.")
+
     if isinstance(properties, str):
         properties = [properties]
         
     if not isinstance(properties, list):
         raise ValueError("Properties must be lists.")
+
+    properties = [str(prop).strip() for prop in properties if str(prop).strip()]
+    if not properties:
+        raise ValueError("Properties must include at least one non-empty value.")
         
     # determine if properties are node or relationship properties
 
@@ -185,7 +197,10 @@ def getAdvancedDownload(database,domain, properties,CMIDs):
     node_query2 = [f"c.{prop} as {prop}" for prop in node_properties2]
     relationship_query = [f"r.{prop} as {prop}" for prop in relationship_properties]
     if not node_query1 and not node_query2 and not relationship_query:
-        raise ValueError("No valid properties found for the given CMIDs.")
+        raise ValueError(
+            "No valid downloadable properties were found for the requested property names: "
+            + ", ".join(properties)
+        )
     
     prop_query = ", ".join(node_query2 + relationship_query)  
     if node_query1: 
@@ -207,7 +222,12 @@ def getAdvancedDownload(database,domain, properties,CMIDs):
     result1 = getQuery(query=query1, driver=driver, CMID=CMIDs, type = "df")
     result2 = getQuery(query=query2, driver=driver, CMID=CMIDs, type = "df")
 
-    result = pd.concat([result1, result2])
+    result = pd.concat([result1, result2], ignore_index=True)
+    if result.empty:
+        raise LookupError(
+            "No downloadable records were found for the requested CMIDs: "
+            + ", ".join(CMIDs)
+        )
 
     def agg_semicolon(series):
         # flatten any lists

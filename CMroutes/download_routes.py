@@ -18,14 +18,16 @@ def get_backup_csv_urls_route(database):
 @download_bp.route('/download/advanced/<database>', methods=['POST'])
 def get_advanced_download_route(database):
     try:
-        CMIDs = request.json.get('CMIDs', [])
-        domain = request.json.get('domain', "")
-        properties = request.json.get('properties', [])
-        # return {"CMIDs":CMIDs,"properties":properties}
+        payload = request.get_json(silent=True) or {}
+        CMIDs = payload.get('CMIDs', [])
+        domain = payload.get('domain', "")
+        properties = payload.get('properties', [])
         if not properties:
             return {"error": "Properties must be provided"}, 400
         data = getAdvancedDownload(database,domain, properties,CMIDs)
         return {"data": data}
+    except (ValueError, LookupError) as e:
+        return {"error": str(e)}, 400
     except Exception as e:
         return {"error": str(e)}, 500
 

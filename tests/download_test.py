@@ -1,6 +1,7 @@
 import CMroutes.download_routes as download_routes
 from CM import download as download_module
 from botocore.exceptions import ClientError, NoCredentialsError
+import pandas as pd
 
 
 def test_csv_urls_endpoint_returns_urls(client, monkeypatch):
@@ -37,6 +38,31 @@ def test_advanced_download_returns_data(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["data"][0]["count"] == 2
+
+
+def test_advanced_download_requires_cmids(client):
+    response = client.post(
+        "/download/advanced/ArchaMap",
+        json={"CMIDs": [], "domain": "SITE", "properties": ["Name"]},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "No CMIDs were provided for the advanced download request."
+
+
+def test_advanced_download_returns_explicit_no_results_error(client, monkeypatch):
+    def fake_get_advanced_download(database, domain, properties, cmids):
+        raise LookupError("No downloadable records were found for the requested CMIDs: AM404")
+
+    monkeypatch.setattr(download_routes, "getAdvancedDownload", fake_get_advanced_download)
+
+    response = client.post(
+        "/download/advanced/ArchaMap",
+        json={"CMIDs": ["AM404"], "domain": "SITE", "properties": ["Name"]},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "No downloadable records were found for the requested CMIDs: AM404"
 
 
 def test_get_backup_csv_urls_falls_back_to_local_files(monkeypatch, tmp_path):
@@ -81,3 +107,23 @@ def test_get_backup_csv_urls_falls_back_to_local_files(monkeypatch, tmp_path):
             1.0,
         )
     ]
+
+
+def test_get_advanced_download_raises_explicit_error_when_queries_return_no_rows(monkeypatch):
+    monkeypatch.setattr(download_module, "getDriver", lambda database: object())
+
+    def fake_get_query(query, driver, params=None, type="dict", max_retries=3, **kwargs):
+        if type == "df":
+            return pd.DataFrame()
+        if type == "dict":
+            return [{"property": "Name", "type": "node"}]
+        raise AssertionError(f"Unexpected query type: {type}")
+
+    monkeypatch.setattr(download_module, "getQuery", fake_get_query)
+
+    try:
+        download_module.getAdvancedDownload("ArchaMap", "SITE", ["Name"], ["AM404"])
+    except LookupError as exc:
+        assert str(exc) == "No downloadable records were found for the requested CMIDs: AM404"
+    else:
+        raise AssertionError("Expected LookupError when advanced download finds no rows")
