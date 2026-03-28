@@ -104,14 +104,71 @@ def _resolve_optional_properties(data):
 
 
 def _validate_simple_key_values(df, key_column):
-    if key_column not in df.columns:
-        raise Exception(f"Simple upload requires key column '{key_column}' in payload rows.")
-    key_series = df[key_column].fillna("").astype(str)
-    bad_rows = key_series[key_series.str.contains(r"==", regex=True)].index.tolist()
-    if bad_rows:
-        bad_rows = [i + 1 for i in bad_rows]
+    key_columns = key_column if isinstance(key_column, list) else [key_column]
+    key_columns = [str(col).strip() for col in key_columns if str(col).strip()]
+    if not key_columns:
+        raise Exception("Simple upload requires at least one key column.")
+
+    for col in key_columns:
+        if col not in df.columns:
+            raise Exception(f"Simple upload requires key column '{col}' in payload rows.")
+        key_series = df[col].fillna("").astype(str)
+        bad_rows = key_series[key_series.str.contains(r"==", regex=True)].index.tolist()
+        if bad_rows:
+            bad_rows = [i + 1 for i in bad_rows]
+            raise Exception(
+                f"Simple upload expects raw key values without '=='. Rows {bad_rows} in key column '{col}' include preformatted keys; use so='standard'."
+            )
+
+
+def _resolve_simple_key_columns(form_data):
+    key_columns = form_data.get("keyColumns", [])
+    if not isinstance(key_columns, list):
+        key_columns = [key_columns] if key_columns else []
+    key_columns = [str(col).strip() for col in key_columns if str(col).strip()]
+
+    # Backward compatibility: support legacy single keyColumn payload.
+    legacy_key = str(form_data.get("keyColumn", "")).strip()
+    if legacy_key:
+        key_columns.append(legacy_key)
+
+    deduped = []
+    seen = set()
+    for col in key_columns:
+        if col in seen:
+            continue
+        seen.add(col)
+        deduped.append(col)
+    return deduped
+
+
+def _compose_simple_key(df, key_columns):
+    if not key_columns:
+        raise Exception("Simple upload requires at least one key column.")
+
+    for col in key_columns:
+        if col not in df.columns:
+            raise Exception(f"Simple upload requires key column '{col}' in payload rows.")
+
+    def _expr(row):
+        parts = []
+        for col in key_columns:
+            raw = row.get(col)
+            if pd.isna(raw):
+                continue
+            text = str(raw).strip()
+            if not text:
+                continue
+            parts.append(f"{col} == {text}")
+        return " && ".join(parts)
+
+    df["Key"] = df.apply(_expr, axis=1)
+    blank_rows = df.index[df["Key"].fillna("").astype(str).str.strip().eq("")].tolist()
+    if blank_rows:
+        rows_1_based = [i + 1 for i in blank_rows]
         raise Exception(
-            f"Simple upload expects raw key values without '=='. Rows {bad_rows} include preformatted keys; use so='standard'."
+            f"Simple upload requires at least one non-empty key value per row across selected key columns. "
+            f"Rows {rows_1_based} have no key values."
         )
 
 
@@ -138,7 +195,7 @@ def _prepare_upload_job(data, acting_user):
     altNamesColumns = [col for col in altNamesColumns if col]
     altNames = formData.get("alternateCategoryNamesColumn", "")
     CMID = formData["cmidColumn"]
-    Key = formData["keyColumn"]
+    key_columns = _resolve_simple_key_columns(formData)
 
     optionalProperties, warnings = _resolve_optional_properties(data)
     addoptions = data.get("addoptions") or {}
@@ -147,13 +204,9 @@ def _prepare_upload_job(data, acting_user):
     mergingType = data.get("mergingType")
     so = str(data.get("so") or "standard").strip().lower()
     upload_option = str(data.get("ao") or "").strip()
-    has_cmid_column_mapping = bool(str(CMID or "").strip())
 
     if so not in {"standard", "simple"}:
         raise Exception("`so` must be either 'standard' or 'simple'.")
-
-    if so == "simple" and upload_option not in {"add_uses", "add_node"}:
-        raise Exception("`so = simple` is only supported with `ao = add_uses` or `ao = add_node`. Use `so = standard` for other actions.")
 
     if so == "standard":
         dataset_payload = df
@@ -207,15 +260,16 @@ def _prepare_upload_job(data, acting_user):
     elif altNames and altNames in df.columns:
         df.rename(columns={altNames: "altNames"}, inplace=True)
 
-    _validate_simple_key_values(df, Key)
-    df.rename(columns={CMName: "CMName", CMID: "CMID", Name: "Name", Key: "Key"}, inplace=True)
+    _validate_simple_key_values(df, key_columns)
+    _compose_simple_key(df, key_columns)
+    df.rename(columns={CMName: "CMName", CMID: "CMID", Name: "Name"}, inplace=True)
     dataset_payload = df.to_dict(orient='records')
 
     job_args = {
         "dataset": dataset_payload,
         "database": database,
-        "uploadOption": "add_uses" if has_cmid_column_mapping else upload_option,
-        "formatKey": True,
+        "uploadOption": "add_uses",
+        "formatKey": False,
         "optionalProperties": optionalProperties,
         "user": acting_user,
         "addDistrict": False,

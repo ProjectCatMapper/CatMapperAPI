@@ -112,25 +112,7 @@ def test_upload_simple_concatenates_multiple_altname_columns(client, monkeypatch
     assert seen["user"] == "api-user"
 
 
-def test_upload_rejects_simple_mode_for_non_add_uses_or_add_node(client, monkeypatch):
-    monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
-    monkeypatch.setattr(
-        upload_routes,
-        "_start_upload_task",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("upload should not execute")),
-    )
-
-    payload = _base_payload()
-    payload["ao"] = "update_add"
-
-    response = client.post("/uploadInputNodes", json=payload)
-
-    assert response.status_code == 500
-    body = response.get_json() or {}
-    assert "only supported with `ao = add_uses` or `ao = add_node`" in str(body.get("error", "")).lower()
-
-
-def test_upload_simple_allows_add_node(client, monkeypatch):
+def test_upload_simple_forces_add_uses_even_when_ao_is_not_add_uses(client, monkeypatch):
     seen = {}
 
     def fake_start_upload_task(**kwargs):
@@ -141,13 +123,13 @@ def test_upload_simple_allows_add_node(client, monkeypatch):
     monkeypatch.setattr(upload_routes, "_start_upload_task", fake_start_upload_task)
 
     payload = _base_payload()
-    payload["ao"] = "add_node"
+    payload["ao"] = "update_add"
 
     response = client.post("/uploadInputNodes", json=payload)
 
     assert response.status_code == 202
-    assert seen["job_args"]["uploadOption"] == "add_node"
-    assert seen["job_args"]["formatKey"] is True
+    assert seen["job_args"]["uploadOption"] == "add_uses"
+    assert seen["job_args"]["formatKey"] is False
 
 
 def test_upload_simple_forces_add_uses_when_cmid_column_is_supplied(client, monkeypatch):
@@ -169,7 +151,93 @@ def test_upload_simple_forces_add_uses_when_cmid_column_is_supplied(client, monk
 
     assert response.status_code == 202
     assert seen["job_args"]["uploadOption"] == "add_uses"
-    assert seen["job_args"]["formatKey"] is True
+    assert seen["job_args"]["formatKey"] is False
+
+
+def test_upload_simple_maps_selected_columns_to_name_cmname_and_altnames(client, monkeypatch):
+    seen = {}
+
+    def fake_start_upload_task(**kwargs):
+        seen.update(kwargs)
+        return "upload-task-123"
+
+    monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
+    monkeypatch.setattr(upload_routes, "_start_upload_task", fake_start_upload_task)
+
+    payload = _base_payload()
+    payload["df"] = [
+        {
+            "cm_name_col": "Display CMName",
+            "category_name_col": "Display Name",
+            "source_key": "K1",
+            "alt1": "A1",
+            "alt2": "A2",
+        }
+    ]
+    payload["formData"]["cmNameColumn"] = "cm_name_col"
+    payload["formData"]["categoryNamesColumn"] = "category_name_col"
+    payload["formData"]["alternateCategoryNamesColumns"] = ["alt1", "alt2"]
+
+    response = client.post("/uploadInputNodes", json=payload)
+
+    assert response.status_code == 202
+    row = seen["job_args"]["dataset"][0]
+    assert row["CMName"] == "Display CMName"
+    assert row["Name"] == "Display Name"
+    assert row["altNames"] == "A1;A2"
+    assert row["Key"] == "source_key == K1"
+    assert seen["job_args"]["uploadOption"] == "add_uses"
+    assert seen["job_args"]["formatKey"] is False
+
+
+def test_upload_simple_supports_multiple_key_columns_with_and_join(client, monkeypatch):
+    seen = {}
+
+    def fake_start_upload_task(**kwargs):
+        seen.update(kwargs)
+        return "upload-task-123"
+
+    monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
+    monkeypatch.setattr(upload_routes, "_start_upload_task", fake_start_upload_task)
+
+    payload = _base_payload()
+    payload["df"] = [
+        {"source_name": "Alpha", "k1": "A", "k2": "B"},
+        {"source_name": "Beta", "k1": "OnlyA", "k2": ""},
+        {"source_name": "Gamma", "k1": "", "k2": "OnlyB"},
+    ]
+    payload["formData"]["keyColumns"] = ["k1", "k2"]
+    payload["formData"]["keyColumn"] = ""
+
+    response = client.post("/uploadInputNodes", json=payload)
+
+    assert response.status_code == 202
+    rows = seen["job_args"]["dataset"]
+    assert rows[0]["Key"] == "k1 == A && k2 == B"
+    assert rows[1]["Key"] == "k1 == OnlyA"
+    assert rows[2]["Key"] == "k2 == OnlyB"
+    assert seen["job_args"]["uploadOption"] == "add_uses"
+    assert seen["job_args"]["formatKey"] is False
+
+
+def test_upload_simple_rejects_rows_with_no_values_across_selected_key_columns(client, monkeypatch):
+    monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
+    monkeypatch.setattr(
+        upload_routes,
+        "_start_upload_task",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("upload should not execute")),
+    )
+
+    payload = _base_payload()
+    payload["df"] = [{"source_name": "Alpha", "k1": "", "k2": ""}]
+    payload["formData"]["keyColumns"] = ["k1", "k2"]
+    payload["formData"]["keyColumn"] = ""
+
+    response = client.post("/uploadInputNodes", json=payload)
+
+    assert response.status_code == 500
+    body = response.get_json() or {}
+    assert "requires at least one non-empty key value per row" in str(body.get("error", "")).lower()
 
 
 def test_upload_rejects_preformatted_keys_in_simple_mode(client, monkeypatch):
