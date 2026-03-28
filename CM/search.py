@@ -111,6 +111,9 @@ def search(
 
     if yearStart is None and yearEnd is not None:
         raise Exception("must specify yearStart property")
+    
+    if yearStart is not None and yearEnd is not None and yearStart > yearEnd:
+        raise Exception("yearStart must be less than or equal to yearEnd")
 
     if limit is None or str(limit).strip().lower() in {"", "null"}:
         limit = 10000
@@ -231,13 +234,13 @@ def search(
     if yearStart is not None:
         if domain == "DATASET":
             qYear = f"""
-                    call (a) {{ with a, toInteger('{yearStart}') AS inputYearStart,toInteger('{yearEnd}') AS inputYearEnd
+                    call (a) {{ with a, toInteger($yearStart) AS inputYearStart, toInteger($yearEnd) AS inputYearEnd
                     with a, inputYearStart, inputYearEnd,
-                    [v IN apoc.coll.flatten([a.recordStart], true) WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] AS rStarts,
-                    [v IN apoc.coll.flatten([a.recordEnd], true) WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] AS rEnds
-                    WITH a, inputYearStart, inputYearEnd, rStarts, rEnds
-                    WHERE size(rStarts) > 0 AND size(rEnds) > 0
-                    AND apoc.coll.min(rStarts) >= inputYearStart AND apoc.coll.max(rEnds) <= inputYearEnd
+                    [v IN apoc.coll.flatten([a.recordStart], true) WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] +
+                    [v IN apoc.coll.flatten([a.recordEnd], true) WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] AS years
+                    WITH a, inputYearStart, inputYearEnd, years
+                    WHERE size(years) > 0
+                    AND apoc.coll.min(years) <= inputYearEnd AND apoc.coll.max(years) >= inputYearStart
                     return a as node}}
                     with node as a, matching, score order by score desc
                     """
@@ -245,16 +248,15 @@ def search(
             qYear = " "
         else:
             qYear = f"""
-    call (a) {{ with a, toInteger('{yearStart}') AS inputYearStart,toInteger('{yearEnd}') AS inputYearEnd
+    call (a) {{ with a, toInteger($yearStart) AS inputYearStart, toInteger($yearEnd) AS inputYearEnd
     match (a)<-[r:USES]-(:DATASET)
     WITH a, inputYearStart, inputYearEnd,
-    apoc.coll.flatten(collect(apoc.coll.flatten([r.recordStart], true)), true) AS rawStarts,
-    apoc.coll.flatten(collect(apoc.coll.flatten([r.recordEnd], true)), true) AS rawEnds
+    apoc.coll.flatten(collect(apoc.coll.flatten([r.recordStart], true)), true) +
+    apoc.coll.flatten(collect(apoc.coll.flatten([r.recordEnd], true)), true) AS rawYears
     WITH a, inputYearStart, inputYearEnd,
-    [v IN rawStarts WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] AS rStarts,
-    [v IN rawEnds WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] AS rEnds
-    WHERE size(rStarts) > 0 AND size(rEnds) > 0
-    AND apoc.coll.min(rStarts) >= inputYearStart AND apoc.coll.max(rEnds) <= inputYearEnd
+    [v IN rawYears WHERE v IS NOT NULL AND toInteger(toString(v)) IS NOT NULL | toInteger(toString(v))] AS years
+    WHERE size(years) > 0
+    AND apoc.coll.min(years) <= inputYearEnd AND apoc.coll.max(years) >= inputYearStart
     return a as node}}
     with node as a, matching, score order by score desc
     """
