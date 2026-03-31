@@ -115,7 +115,7 @@ def sendEmail(
         msg = Message(subject, recipients=recipients, sender=sender)
         if msg.extra_headers is None:
             msg.extra_headers = {}
-        msg.extra_headers["Message-ID"] = audit["message_id"]
+        msg.extra_headers["X-CatMapper-Message-ID"] = audit["message_id"]
         msg.extra_headers["X-CatMapper-Trace-ID"] = audit["trace_id"]
         msg.extra_headers["X-CatMapper-Sent-At"] = audit["sent_at_utc"]
 
