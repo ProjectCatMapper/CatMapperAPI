@@ -52,6 +52,12 @@ def _join_userdb_database(value):
     return "|".join(_normalize_userdb_database(value))
 
 
+def _password_meets_policy(password):
+    if not isinstance(password, str):
+        return False
+    return len(password) >= 6
+
+
 def _serialize_user_lookup_row(row):
     databases = row.get("database") if isinstance(row.get("database"), list) else []
     return {
@@ -234,7 +240,7 @@ def admin_user_update():
         if not isinstance(updates, dict) or not updates:
             raise Exception("updates must be a non-empty object")
 
-        allowed = {"first", "last", "username", "email", "database", "intendedUse", "access", "role"}
+        allowed = {"first", "last", "username", "email", "database", "intendedUse", "access", "role", "password"}
         incoming = {str(k): v for k, v in updates.items() if str(k) in allowed}
         if not incoming:
             raise Exception("No editable fields provided")
@@ -276,12 +282,18 @@ def admin_user_update():
         for field, value in incoming.items():
             if field == "database":
                 new_value = _normalize_userdb_database(value)
+            elif field == "password":
+                new_value = str(value or "")
+                if not _password_meets_policy(new_value):
+                    raise Exception("Password must be at least 6 characters")
+                changed[field] = {"old": "[hidden]", "new": "[updated]"}
             else:
                 new_value = str(value or "").strip()
-            old_value = resolved.get(field)
-            if new_value != old_value:
-                changed[field] = {"old": old_value, "new": new_value}
-                resolved[field] = new_value
+            if field != "password":
+                old_value = resolved.get(field)
+                if new_value != old_value:
+                    changed[field] = {"old": old_value, "new": new_value}
+                    resolved[field] = new_value
 
         if not changed:
             payload = _serialize_user_lookup_row(current)
@@ -319,6 +331,7 @@ def admin_user_update():
             new_text = "|".join(new_value) if isinstance(new_value, list) else str(new_value)
             change_bits.append(f"{field}: '{old_text}' -> '{new_text}'")
         log_entry = f"{timestamp}: admin {acting_userid} updated user {userid}: " + "; ".join(change_bits)
+        password_hash_value = password_hash(str(incoming.get("password") or "")) if "password" in changed else None
 
         update_query = """
         MATCH (u:USER {userid: toString($userid)})
@@ -331,6 +344,8 @@ def admin_user_update():
           u.intendedUse = $intendedUse,
           u.access = $access,
           u.role = $role,
+          u.password = CASE WHEN $passwordProvided THEN $password ELSE u.password END,
+          u.passwordLastChangedAt = CASE WHEN $passwordProvided THEN $passwordChangedAt ELSE u.passwordLastChangedAt END,
           u.updatedAt = $updatedAt,
           u.log = coalesce(u.log, []) + $logEntries
         RETURN
@@ -360,6 +375,9 @@ def admin_user_update():
                 "intendedUse": resolved["intendedUse"],
                 "access": resolved["access"],
                 "role": resolved["role"],
+                "passwordProvided": "password" in changed,
+                "password": password_hash_value,
+                "passwordChangedAt": timestamp if "password" in changed else None,
                 "updatedAt": timestamp,
                 "logEntries": [log_entry],
             },
