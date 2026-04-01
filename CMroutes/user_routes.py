@@ -92,6 +92,23 @@ def _cleanup_requests():
                 store.pop(key, None)
 
 
+def _cleanup_persistent_requests(entries):
+    now = datetime.utcnow()
+    active = []
+    for entry in entries or []:
+        try:
+            expires_at = entry.get("expires_at")
+            if isinstance(expires_at, str):
+                expires_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00")).replace(tzinfo=None)
+            else:
+                expires_dt = expires_at
+            if expires_dt and expires_dt >= now:
+                active.append(entry)
+        except Exception:
+            continue
+    return active
+
+
 def _normalize_database(database_value):
     if isinstance(database_value, list):
         return "|".join(
@@ -488,13 +505,14 @@ def request_forgot_password():
 
         request_id = f"forgot_{uuid.uuid4().hex[:12]}"
         verification_code = f"{secrets.randbelow(900000) + 100000}"
-        with REQUEST_LOCK:
-            PASSWORD_CHANGE_REQUESTS[request_id] = {
-                "userid": userid,
-                "password_hash": password_hash(new_password),
-                "verification_code": verification_code,
-                "expires_at": datetime.utcnow() + timedelta(minutes=REQUEST_TTL_MINUTES),
-            }
+        persistent_requests = _cleanup_persistent_requests(_get_user_entries(userid, "pendingPasswordResetRequests"))
+        persistent_requests.append({
+            "request_id": request_id,
+            "password_hash": password_hash(new_password),
+            "verification_code": verification_code,
+            "expires_at": (datetime.utcnow() + timedelta(minutes=REQUEST_TTL_MINUTES)).isoformat() + "Z",
+        })
+        _set_user_entries(userid, "pendingPasswordResetRequests", persistent_requests)
 
         target_email = existing.get("email")
         _send_verification_email(
@@ -541,14 +559,20 @@ def confirm_forgot_password():
         existing = _load_user_by_identifier(lookup_identifier)
         userid = str(existing.get("userid"))
 
-        with REQUEST_LOCK:
-            pending = PASSWORD_CHANGE_REQUESTS.get(request_id)
-            if not pending or pending.get("userid") != userid:
-                raise Exception("Password reset request not found. Please request a new verification email.")
-            if pending.get("verification_code") != verification_code:
-                raise Exception("Invalid verification code.")
-            password_hash_value = pending.get("password_hash")
-            PASSWORD_CHANGE_REQUESTS.pop(request_id, None)
+        persistent_requests = _cleanup_persistent_requests(_get_user_entries(userid, "pendingPasswordResetRequests"))
+        pending = None
+        remaining = []
+        for entry in persistent_requests:
+            if str(entry.get("request_id") or "") == str(request_id):
+                pending = entry
+            else:
+                remaining.append(entry)
+        if not pending:
+            raise Exception("Password reset request not found. Please request a new verification email.")
+        if pending.get("verification_code") != verification_code:
+            raise Exception("Invalid verification code.")
+        password_hash_value = pending.get("password_hash")
+        _set_user_entries(userid, "pendingPasswordResetRequests", remaining)
 
         driver = getDriver("userdb")
         query = """
