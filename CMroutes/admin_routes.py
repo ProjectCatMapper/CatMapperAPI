@@ -3,6 +3,7 @@ from CM import *
 import json
 from datetime import datetime, timezone
 from .auth_utils import verify_request_auth, classify_auth_error_status
+from .extensions import mail
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -74,6 +75,40 @@ def _serialize_user_lookup_row(row):
         "updatedAt": row.get("updatedAt") or "",
         "logCount": int(row.get("logCount") or 0),
     }
+
+
+def _send_admin_password_change_email(target_user, acting_claims):
+    email = str(target_user.get("email") or "").strip()
+    if not email:
+        return None
+
+    acting_label = (
+        str(acting_claims.get("username") or "").strip()
+        or str(acting_claims.get("userid") or "").strip()
+        or "an administrator"
+    )
+    username = str(target_user.get("username") or "").strip() or str(target_user.get("userid") or "").strip()
+    support_email = get_support_email()
+    sender = get_default_sender()
+    body = (
+        "Hello,\n\n"
+        f"Your CatMapper password was changed by admin user {acting_label}.\n\n"
+        "For security, this email does not include the new password.\n"
+        "Use the temporary password shared with you through a secure admin channel to sign in.\n"
+        "After signing in, use the Change Password feature in your profile to set a new secure password.\n"
+        "If you cannot sign in, use the Forgot Password option on the login page to reset it.\n\n"
+        f"Account: {username}\n"
+        f"Support: {support_email}\n\n"
+        "CatMapper Team"
+    )
+
+    return sendEmail(
+        mail=mail,
+        subject="CatMapper password changed by admin",
+        recipients=[email],
+        body=body,
+        sender=sender,
+    )
 
 
 def _build_activity_stats_for_userids(userids):
@@ -407,14 +442,24 @@ def admin_user_update():
         if not saved_rows:
             raise Exception("User not found")
 
+        email_status = None
+        if "password" in changed:
+            try:
+                email_status = _send_admin_password_change_email(current, claims)
+            except Exception as email_error:
+                email_status = f"Error sending email: {email_error}"
+
         payload = _serialize_user_lookup_row(saved_rows[0])
         payload["updateStats"] = _build_activity_stats_for_userids([userid]).get(userid, {})
-        return jsonify({
+        response_payload = {
             "message": "User updated",
             "user": payload,
             "changedFields": sorted(changed.keys()),
             "logEntry": log_entry,
-        }), 200
+        }
+        if email_status:
+            response_payload["emailStatus"] = email_status
+        return jsonify(response_payload), 200
     except Exception as e:
         error_message = str(e)
         status_code = classify_auth_error_status(error_message) or 400

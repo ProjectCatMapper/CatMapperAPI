@@ -45,6 +45,16 @@ def test_admin_user_update_changes_password_with_hash_and_timestamp(client, monk
     monkeypatch.setattr(admin_routes, "_build_activity_stats_for_userids", lambda userids: {"42": {"total": {"totalActions": 3}}})
     monkeypatch.setattr(admin_routes, "password_hash", lambda value: f"hashed::{value}")
     monkeypatch.setattr(admin_routes, "_now_iso", lambda: "2026-04-01T12:00:00Z")
+    monkeypatch.setattr(admin_routes, "get_default_sender", lambda: "no-reply@catmapper.org")
+    monkeypatch.setattr(admin_routes, "get_support_email", lambda: "support@catmapper.org")
+
+    sent_email = {}
+
+    def fake_send_email(**kwargs):
+        sent_email.update(kwargs)
+        return "Email sent successfully"
+
+    monkeypatch.setattr(admin_routes, "sendEmail", fake_send_email)
 
     def fake_get_query(query, driver=None, params=None, type="dict", **kwargs):
         if "MATCH (u:USER {userid: toString($userid)})" in query and "SET" not in query:
@@ -81,6 +91,13 @@ def test_admin_user_update_changes_password_with_hash_and_timestamp(client, monk
     assert payload["message"] == "User updated"
     assert payload["changedFields"] == ["password"]
     assert payload["user"]["userid"] == "42"
+    assert payload["emailStatus"] == "Email sent successfully"
+    assert sent_email["subject"] == "CatMapper password changed by admin"
+    assert sent_email["recipients"] == ["ada@example.org"]
+    assert "admin user 900" in sent_email["body"]
+    assert "new-secret" not in sent_email["body"]
+    assert "Change Password" in sent_email["body"]
+    assert "Forgot Password" in sent_email["body"]
 
 
 def test_admin_user_update_rejects_short_password(client, monkeypatch):
