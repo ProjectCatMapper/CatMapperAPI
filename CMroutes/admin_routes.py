@@ -225,6 +225,27 @@ def admin_user_lookup():
         return jsonify({"error": error_message}), status_code
 
 
+@admin_bp.route('/admin/users/status-summary', methods=['GET'])
+def admin_user_status_summary():
+    try:
+        verify_request_auth(credentials=None, required_role="admin", req=request)
+
+        driver = getDriver("userdb")
+        query = """
+        MATCH (u:USER)
+        RETURN coalesce(nullif(trim(coalesce(u.access, '')), ''), 'missing') AS status, count(u) AS count
+        ORDER BY status
+        """
+        rows = getQuery(query, driver=driver, type="dict")
+        summary = {str(row.get("status") or "missing"): int(row.get("count") or 0) for row in (rows or [])}
+        total = sum(summary.values())
+        return jsonify({"summary": summary, "totalUsers": total}), 200
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message}), status_code
+
+
 @admin_bp.route('/admin/users/update', methods=['POST'])
 def admin_user_update():
     try:

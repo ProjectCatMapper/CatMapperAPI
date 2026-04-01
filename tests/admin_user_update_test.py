@@ -1,6 +1,29 @@
 import CMroutes.admin_routes as admin_routes
 
 
+def test_admin_user_status_summary_returns_counts(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "900", "role": "admin"})
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(
+        admin_routes,
+        "getQuery",
+        lambda query, driver=None, params=None, type="dict", **kwargs: [
+            {"status": "declined", "count": 9},
+            {"status": "enabled", "count": 122},
+        ],
+    )
+
+    response = client.get(
+        "/admin/users/status-summary",
+        headers={"Authorization": "Bearer test-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["summary"] == {"declined": 9, "enabled": 122}
+    assert payload["totalUsers"] == 131
+
+
 def test_admin_user_update_changes_password_with_hash_and_timestamp(client, monkeypatch):
     user_row = {
         "userid": "42",
