@@ -1077,7 +1077,10 @@ def createSyntax(template, database="SocioMap",
         rsv.varName as varName,
         v.CMID as variableID,
         rsv.stackTransform as stackTransform,
+        rsv.variableFilter as variableFilter,
         rsv.summaryStatistic as summaryStatistic,
+        rsv.summaryFilter as summaryFilter,
+        rsv.summaryWeight as summaryWeight,
         rdv.datasetTransform as datasetTransform,
         ru.Key as variableKey
     """

@@ -19,7 +19,26 @@ def test_merge_template_summary_for_merging_node(client, monkeypatch):
                 }
             ]
         if "MATCH (s:STACK {CMID: stackID})-[r:MERGING]->(target)" in query:
-            return [{"stackID": "S1", "targetCMID": "D1"}]
+            return [
+                {
+                    "mergingID": "M1",
+                    "mergingCMName": "merge one",
+                    "stackID": "S1",
+                    "stackCMName": "stack test 1",
+                    "relationship": "MERGING",
+                    "targetLabels": ["VARIABLE"],
+                    "targetCMID": "V1",
+                    "targetCMName": "variable one",
+                    "tieStackID": "S1",
+                    "varName": "value_a",
+                    "stackTransform": '[{"op":"as_numeric","target":"value_a"}]',
+                    "datasetTransform": '[{"op":"copy","target":"value_a","sources":["raw_a"]}]',
+                    "variableFilter": '[{"op":"drop_na","target":"value_a"}]',
+                    "summaryStatistic": "mean",
+                    "summaryFilter": None,
+                    "summaryWeight": None,
+                }
+            ]
         if "MATCH (c1:CATEGORY)-[e:EQUIVALENT {stack: stackID}]->(c2:CATEGORY)" in query:
             return [{"stackID": "S1", "datasetID": "D1"}]
         return []
@@ -32,6 +51,8 @@ def test_merge_template_summary_for_merging_node(client, monkeypatch):
     assert payload["nodeType"] == "MERGING"
     assert payload["stackSummary"][0]["stackID"] == "S1"
     assert payload["stackSummaryTotals"]["datasetCount"] == 5
+    assert payload["mergingTies"][0]["variableFilter"] == '[{"op":"drop_na","target":"value_a"}]'
+    assert payload["mergingTies"][0]["stackTransform"] == '[{"op":"as_numeric","target":"value_a"}]'
 
 
 def test_merge_template_summary_for_stack_node(client, monkeypatch):
@@ -40,7 +61,7 @@ def test_merge_template_summary_for_stack_node(client, monkeypatch):
     def fake_get_query(query, _driver=None, params=None):
         if "RETURN labels(n) AS labels" in query:
             return [{"labels": ["DATASET", "STACK"]}]
-        if "RETURN count(DISTINCT m) AS mergingTemplateCount" in query:
+        if "MATCH (m:MERGING)-[:MERGING]->(:STACK {CMID: $cmid})" in query:
             return [{"mergingTemplateCount": 3}]
         if "MATCH (:STACK {CMID: $cmid})-[:MERGING]->(d:DATASET)" in query:
             return [
@@ -53,7 +74,26 @@ def test_merge_template_summary_for_stack_node(client, monkeypatch):
                 }
             ]
         if "MATCH (s:STACK {CMID: stackID})-[r:MERGING]->(target)" in query:
-            return [{"stackID": "S1", "targetCMID": "D1"}]
+            return [
+                {
+                    "mergingID": "M1",
+                    "mergingCMName": "merge one",
+                    "stackID": "S1",
+                    "stackCMName": "stack one",
+                    "relationship": "MERGING",
+                    "targetLabels": ["VARIABLE"],
+                    "targetCMID": "V1",
+                    "targetCMName": "variable one",
+                    "tieStackID": "S1",
+                    "varName": "value_a",
+                    "stackTransform": '[{"op":"copy","target":"value_a","sources":["raw_a"]}]',
+                    "datasetTransform": None,
+                    "variableFilter": None,
+                    "summaryStatistic": "median",
+                    "summaryFilter": None,
+                    "summaryWeight": None,
+                }
+            ]
         if "MATCH (c1:CATEGORY)-[e:EQUIVALENT {stack: stackID}]->(c2:CATEGORY)" in query:
             return [{"stackID": "S1", "datasetID": "D1"}]
         return []
@@ -66,3 +106,4 @@ def test_merge_template_summary_for_stack_node(client, monkeypatch):
     assert payload["nodeType"] == "STACK"
     assert payload["mergingTemplateCount"] == 3
     assert payload["datasetSummary"][0]["datasetID"] == "D1"
+    assert payload["mergingTies"][0]["summaryStatistic"] == "median"

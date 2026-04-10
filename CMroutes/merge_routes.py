@@ -396,7 +396,12 @@ def get_merge_template_summary(database, cmid):
           target.CMName AS targetCMName,
           r.stack AS tieStackID,
           r.varName AS varName,
-          r.summaryStatistic AS summaryStatistic
+          r.stackTransform AS stackTransform,
+          r.datasetTransform AS datasetTransform,
+          r.variableFilter AS variableFilter,
+          r.summaryStatistic AS summaryStatistic,
+          r.summaryFilter AS summaryFilter,
+          r.summaryWeight AS summaryWeight
         ORDER BY stackID, targetCMID
         """
         merging_ties = getQuery(merging_ties_query, driver, params={"stack_ids": stack_ids}) or []
