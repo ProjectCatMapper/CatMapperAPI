@@ -19,7 +19,10 @@ class MergingTieVariable:
     key: str
     varName: str
     stackTransform: Optional[str]
+    variableFilter: Optional[str]
     summaryStatistic: Optional[str]
+    summaryFilter: Optional[str]
+    summaryWeight: Optional[str]
     datasetTransform: Optional[str]
 
 @dataclass
@@ -199,7 +202,7 @@ if __name__ == "__main__":
     ]
 
     variables = [
-        MergingTieVariable("m1", "s1", "d1", "v1", "k1", "test", None, "mean", None)
+        MergingTieVariable("m1", "s1", "d1", "v1", "k1", "test", None, None, "mean", None, None, None)
     ]
 
     eq_ties = [

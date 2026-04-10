@@ -1394,7 +1394,7 @@ def create_mties_variables(database, user, dataset):
     top_level = ["stackID", "variableID"]
 
     # Define the property columns dynamically (the rest)
-    property_columns = ["varName","stackTransform","summaryStatistic"]
+    property_columns = ["varName","stackTransform","variableFilter","summaryStatistic","summaryFilter","summaryWeight"]
     property_columns = [col for col in property_columns if col in dataset.columns.tolist()]
     
     nested = []
@@ -1506,7 +1506,7 @@ def create_equivalence_ties(database, user, dataset):
     }
 
 # this does essentially same operation as updateProeprty(...) but was create seperately for clarity and avoid extensive branching
-def updateMergeProperty(df,optionalProperties, database, user, mergingType, required, updateType):
+def updateMergeProperty(df,optionalProperties, database, user, mergingType, required, updateType, sep=";"):
     try:
         # double checking for errors, if in future we call this function elsewhere outside this pipeline
         if not updateType in ["overwrite", "update"]:
@@ -1564,8 +1564,8 @@ def updateMergeProperty(df,optionalProperties, database, user, mergingType, requ
             if required == ["datasetID", "stackID", "variableID"]:
                 get_old_vals_query = f"""
                 UNWIND $rows AS row
-                MATCH (a:datasetID)-[r:MERGING]->(b:VARIABLE)
-                WHERE elementId(r) = row.relID and r.stack = row.stackID
+                MATCH (a:DATASET)-[r:MERGING]->(b:VARIABLE)
+                WHERE elementId(r) = row.relID AND a.CMID = row.datasetID AND b.CMID = row.variableID AND r.stack = row.stackID
                 RETURN elementId(r) AS relID, row.datasetID AS datasetID, row.stackID AS stackID, row.variableID AS variableID,
                     {{ {old_props} }} AS oldVals
                 """
@@ -1607,8 +1607,8 @@ def updateMergeProperty(df,optionalProperties, database, user, mergingType, requ
             if required == ["datasetID", "stackID", "variableID"]:
                 q = f"""
                 UNWIND $rows AS row
-                MATCH (a:datasetID)-[r:MERGING]->(b:VARIABLE)
-                WHERE elementId(r) = row.relID and r.stack = row.stackID
+                MATCH (a:DATASET)-[r:MERGING]->(b:VARIABLE)
+                WHERE elementId(r) = row.relID AND a.CMID = row.datasetID AND b.CMID = row.variableID AND r.stack = row.stackID
                 WITH row, r
                 SET {props}
                 RETURN elementId(r) AS relID, row.datasetID AS datasetID, row.stackID AS stackID, row.variableID AS variableID,
@@ -1642,13 +1642,7 @@ def updateMergeProperty(df,optionalProperties, database, user, mergingType, requ
 
         logs = []
 
-        if mergingType == "merging_ties_to_variables":
-            if required == ["datasetID", "stackID", "variableID"] or required == ["stackID", "variableID"]:
-                match_column = "stackID"
-            elif required == ["stackID", "variableID"]:
-                match_column = "datasetID"
-        elif (mergingType == "equivalence_ties"):
-            match_column = "categoryID1"
+        match_column = "relID"
 
         # this section logs accordingly based on propertyType
 
@@ -1686,7 +1680,7 @@ def updateMergeProperty(df,optionalProperties, database, user, mergingType, requ
             log=logs,
             user=user,
             driver=driver,
-            isDataset = isDataset
+            isDataset=False
         )
 
         return {"result": result}

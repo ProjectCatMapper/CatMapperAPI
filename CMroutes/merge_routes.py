@@ -312,6 +312,30 @@ def get_merge_template_summary(database, cmid):
         node_type = "MERGING"
     elif "STACK" in labels:
         node_type = "STACK"
+    else:
+        merging_probe_query = """
+        MATCH (n {CMID: $cmid})-[:MERGING]->(s)-[:MERGING]->(d:DATASET)
+        WHERE NOT d:STACK AND NOT d:MERGING
+        RETURN count(DISTINCT s) AS stackCount
+        """
+        merging_probe_rows = getQuery(merging_probe_query, driver, params={"cmid": cmid}) or []
+        stack_count = 0
+        if merging_probe_rows:
+            stack_count = merging_probe_rows[0].get("stackCount", 0) or 0
+        if stack_count > 0:
+            node_type = "MERGING"
+        else:
+            stack_probe_query = """
+            MATCH (m)-[:MERGING]->(n {CMID: $cmid})-[:MERGING]->(d:DATASET)
+            WHERE NOT d:STACK AND NOT d:MERGING
+            RETURN count(DISTINCT d) AS datasetCount
+            """
+            stack_probe_rows = getQuery(stack_probe_query, driver, params={"cmid": cmid}) or []
+            dataset_count = 0
+            if stack_probe_rows:
+                dataset_count = stack_probe_rows[0].get("datasetCount", 0) or 0
+            if dataset_count > 0:
+                node_type = "STACK"
 
     stack_ids = []
     stack_summary = []
@@ -320,8 +344,7 @@ def get_merge_template_summary(database, cmid):
 
     if node_type == "MERGING":
         stack_summary_query = """
-        MATCH (m:MERGING {CMID: $cmid})-[:MERGING]->(s:STACK)
-        OPTIONAL MATCH (s)-[:MERGING]->(d:DATASET)
+        MATCH (m {CMID: $cmid})-[:MERGING]->(s)-[:MERGING]->(d:DATASET)
         WHERE NOT d:STACK AND NOT d:MERGING
         WITH s, collect(DISTINCT d) AS datasets
         OPTIONAL MATCH (s)-[:MERGING]->(v:VARIABLE)
@@ -349,7 +372,8 @@ def get_merge_template_summary(database, cmid):
         stack_ids = [cmid]
 
         merging_count_query = """
-        MATCH (m:MERGING)-[:MERGING]->(:STACK {CMID: $cmid})
+        MATCH (m)-[:MERGING]->(s {CMID: $cmid})-[:MERGING]->(:DATASET)
+        WHERE NOT s:MERGING
         RETURN count(DISTINCT m) AS mergingTemplateCount
         """
         count_rows = getQuery(merging_count_query, driver, params={"cmid": cmid}) or []
@@ -357,7 +381,7 @@ def get_merge_template_summary(database, cmid):
             merging_template_count = count_rows[0].get("mergingTemplateCount", 0) or 0
 
         dataset_summary_query = """
-        MATCH (:STACK {CMID: $cmid})-[:MERGING]->(d:DATASET)
+        MATCH (s {CMID: $cmid})-[:MERGING]->(d:DATASET)
         WHERE NOT d:STACK AND NOT d:MERGING
         OPTIONAL MATCH (d)-[:MERGING {stack: $cmid}]->(v:VARIABLE)
         WITH d, count(DISTINCT v) AS variableCount
@@ -383,8 +407,8 @@ def get_merge_template_summary(database, cmid):
     if stack_ids:
         merging_ties_query = """
         UNWIND $stack_ids AS stackID
-        MATCH (s:STACK {CMID: stackID})-[r:MERGING]->(target)
-        OPTIONAL MATCH (m:MERGING)-[:MERGING]->(s)
+        MATCH (s {CMID: stackID})-[r:MERGING]->(target)
+        OPTIONAL MATCH (m)-[:MERGING]->(s)
         RETURN
           m.CMID AS mergingID,
           m.CMName AS mergingCMName,
@@ -396,7 +420,12 @@ def get_merge_template_summary(database, cmid):
           target.CMName AS targetCMName,
           r.stack AS tieStackID,
           r.varName AS varName,
-          r.summaryStatistic AS summaryStatistic
+          r.stackTransform AS stackTransform,
+          r.datasetTransform AS datasetTransform,
+          r.variableFilter AS variableFilter,
+          r.summaryStatistic AS summaryStatistic,
+          r.summaryFilter AS summaryFilter,
+          r.summaryWeight AS summaryWeight
         ORDER BY stackID, targetCMID
         """
         merging_ties = getQuery(merging_ties_query, driver, params={"stack_ids": stack_ids}) or []
