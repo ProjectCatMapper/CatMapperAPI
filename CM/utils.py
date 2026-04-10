@@ -446,7 +446,10 @@ def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database="SocioMap"):
             # CATEGORY IDs must not collide with existing CATEGORY or DELETED CMIDs.
             label_filter = "WHERE (n:CATEGORY OR n:DELETED)"
         elif label == "DATASET":
-            label_filter = "WHERE n:DATASET"
+            # DATASET IDs also back MERGING/STACK nodes and must stay reserved
+            # after deletion, because deleteNode() preserves the old CMID on a
+            # standalone DELETED node.
+            label_filter = "WHERE (n:DATASET OR n:DELETED)"
         else:
             label_filter = ""
 
