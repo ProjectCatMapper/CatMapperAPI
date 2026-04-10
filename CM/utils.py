@@ -18,6 +18,12 @@ _last_verified = {}
 _QUERY_CANCEL_CHECKER = threading.local()
 _CYPHER_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _CYPHER_ELEMENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9:_-]+$")
+VALID_VARIABLE_CATEGORY_TYPE_VALUES = {
+    "ORDINAL",
+    "CONTINUOUS",
+    "CATEGORICAL",
+    "TEXT",
+}
 
 config = ConfigParser()
 config.read('config.ini')
@@ -25,6 +31,38 @@ config.read('config.ini')
 
 class QueryCancelledError(Exception):
     """Raised when an operation should stop due to user cancellation."""
+
+
+def validate_variable_category_type_value(value, *, allow_blank=False):
+    """
+    Validate and normalize categoryType values for VARIABLE USES ties.
+
+    Returns the canonical uppercase value when valid.
+    """
+    if value is None or pd.isna(value):
+        if allow_blank:
+            return value
+        raise ValueError(
+            "categoryType for VARIABLE must be a single term: "
+            "ORDINAL, CONTINUOUS, CATEGORICAL, or TEXT."
+        )
+
+    normalized = str(value).strip()
+    if not normalized:
+        if allow_blank:
+            return normalized
+        raise ValueError(
+            "categoryType for VARIABLE must be a single term: "
+            "ORDINAL, CONTINUOUS, CATEGORICAL, or TEXT."
+        )
+
+    normalized = normalized.upper()
+    if normalized not in VALID_VARIABLE_CATEGORY_TYPE_VALUES:
+        allowed = ", ".join(sorted(VALID_VARIABLE_CATEGORY_TYPE_VALUES))
+        raise ValueError(
+            f"Invalid categoryType '{value}'. Expected one of: {allowed}."
+        )
+    return normalized
 
 
 def set_query_cancel_checker(checker):

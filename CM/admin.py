@@ -306,6 +306,11 @@ def add_edit_delete_USES(database,user,input):
     
     # When adding or editing properties, checks to make sure CMIDs are valid and the labels are correct.
     if addOrEditNode != "delete":
+        if USES_property == "categoryType":
+            node_summary = getNodeMergeSummary(CMID, driver)
+            if node_summary.get("primaryDomain") == "VARIABLE":
+                new_property_value = validate_variable_category_type_value(new_property_value)
+
         if USES_property == "parent":
             groupLabel = getGroupLabels(CMID,driver)
             if "||" in new_property_value:

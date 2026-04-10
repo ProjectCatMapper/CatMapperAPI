@@ -1060,6 +1060,42 @@ def _resolve_group_labels(metadata_entry):
     return fallback_labels
 
 
+def _validate_variable_category_type_values(dataset, optionalProperties, driver):
+    if "categoryType" not in optionalProperties or "categoryType" not in dataset.columns:
+        return
+
+    variable_row_mask = pd.Series(False, index=dataset.index)
+
+    if "label" in dataset.columns:
+        label_values = dataset["label"].fillna("").astype(str).str.strip().str.upper()
+        variable_row_mask = label_values.eq("VARIABLE")
+        unresolved_label_mask = label_values.eq("")
+    else:
+        unresolved_label_mask = pd.Series(True, index=dataset.index)
+
+    if "CMID" in dataset.columns:
+        cmid_values = dataset["CMID"].fillna("").astype(str).str.strip()
+        lookup_mask = unresolved_label_mask & cmid_values.ne("")
+        lookup_cmids = sorted(set(cmid_values[lookup_mask].tolist()))
+        if lookup_cmids:
+            cmid_metadata = _fetch_cmid_metadata(driver, lookup_cmids)
+            for row_index, cmid_value in cmid_values[lookup_mask].items():
+                if "VARIABLE" in cmid_metadata.get(cmid_value, {}).get("labels", set()):
+                    variable_row_mask.at[row_index] = True
+
+    for row_index in dataset.index[variable_row_mask]:
+        raw_value = dataset.at[row_index, "categoryType"]
+        try:
+            dataset.at[row_index, "categoryType"] = validate_variable_category_type_value(
+                raw_value,
+                allow_blank=True,
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"Row {row_index + 1}: {exc}"
+            ) from exc
+
+
 def _build_multi_value_error_context(dataset, column_name):
     value_context = {}
     column_values = dataset[column_name].fillna("").astype(str).tolist()
@@ -1978,6 +2014,8 @@ def input_Nodes_Uses(
                 
         if "CATEGORY" in dataset["label"].values:
             raise Exception("Error: label must be more specific than CATEGORY")
+
+    _validate_variable_category_type_values(dataset, optionalProperties, driver)
                 
 
     """Numeric checks"""

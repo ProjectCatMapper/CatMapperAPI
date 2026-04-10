@@ -93,6 +93,136 @@ def test_add_node_rejects_blank_cmname(monkeypatch):
         )
 
 
+def test_validate_variable_category_type_values_normalizes_variable_rows_by_label():
+    dataset = pd.DataFrame(
+        {
+            "label": ["VARIABLE", "DISTRICT"],
+            "categoryType": ["categorical", "numeric"],
+        }
+    )
+
+    upload._validate_variable_category_type_values(
+        dataset,
+        optionalProperties=["categoryType"],
+        driver=object(),
+    )
+
+    assert dataset.loc[0, "categoryType"] == "CATEGORICAL"
+    assert dataset.loc[1, "categoryType"] == "numeric"
+
+
+def test_validate_variable_category_type_values_uses_cmid_metadata_when_label_missing(monkeypatch):
+    dataset = pd.DataFrame(
+        {
+            "CMID": ["AM1", "AM2"],
+            "categoryType": ["continuous", "numeric"],
+        }
+    )
+
+    monkeypatch.setattr(
+        upload,
+        "_fetch_cmid_metadata",
+        lambda driver, cmids, chunk_size=1500: {
+            "AM1": {"labels": {"CATEGORY", "VARIABLE"}, "groupLabels": set()},
+            "AM2": {"labels": {"CATEGORY", "DISTRICT"}, "groupLabels": set()},
+        },
+    )
+
+    upload._validate_variable_category_type_values(
+        dataset,
+        optionalProperties=["categoryType"],
+        driver=object(),
+    )
+
+    assert dataset.loc[0, "categoryType"] == "CONTINUOUS"
+    assert dataset.loc[1, "categoryType"] == "numeric"
+
+
+def test_input_nodes_uses_rejects_invalid_variable_category_type(monkeypatch):
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='node'" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='relationship'" in query:
+            return ["categoryType"]
+        if "MATCH (l:LABEL) return l.CMName as label" in query:
+            return ["VARIABLE"]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    with pytest.raises(ValueError, match="Invalid categoryType"):
+        upload.input_Nodes_Uses(
+            dataset=[
+                {
+                    "CMID": "AM1",
+                    "datasetID": "AD1",
+                    "Key": "Type == Adamana Brown",
+                    "label": "VARIABLE",
+                    "Name": "Adamana Brown",
+                    "categoryType": "numeric",
+                }
+            ],
+            database="ArchaMap",
+            uploadOption="add_uses",
+            formatKey=False,
+            optionalProperties=["categoryType"],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
+
+
+def test_input_nodes_uses_rejects_invalid_variable_category_type_without_label_column(monkeypatch):
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+    monkeypatch.setattr(
+        upload,
+        "_fetch_cmid_metadata",
+        lambda driver, cmids, chunk_size=1500: {
+            "AM1": {"labels": {"CATEGORY", "VARIABLE"}, "groupLabels": set()},
+        },
+    )
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='node'" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='relationship'" in query:
+            return ["categoryType"]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    with pytest.raises(ValueError, match="Invalid categoryType"):
+        upload.input_Nodes_Uses(
+            dataset=[
+                {
+                    "CMID": "AM1",
+                    "datasetID": "AD1",
+                    "Key": "Type == Adamana Brown",
+                    "categoryType": "numeric",
+                }
+            ],
+            database="ArchaMap",
+            uploadOption="update_replace",
+            formatKey=False,
+            optionalProperties=["categoryType"],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
+
+
 def test_is_same_update_add_value_matches_stringified_values():
     assert upload._is_same_update_add_value("alpha", "alpha") is True
     assert upload._is_same_update_add_value(10, "10") is True
