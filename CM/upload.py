@@ -1490,8 +1490,7 @@ def create_equivalence_ties(database, user, dataset):
     unwind $rows as row
     MATCH (c1:CATEGORY {CMID: row.originalID})
     MATCH (c2:CATEGORY {CMID: row.categoryID})
-    MERGE (c1)-[r:EQUIVALENT]->(c2)
-    set r += {stack: row.stackID, dataset: row.datasetID, Key: row.Key}
+    MERGE (c1)-[r:EQUIVALENT {stack: row.stackID, dataset: row.datasetID, Key: row.Key}]->(c2)
     RETURN count(*) as count
     """
     
