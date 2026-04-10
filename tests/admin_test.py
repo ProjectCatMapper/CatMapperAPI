@@ -100,6 +100,7 @@ def test_create_metadata_node_creates_in_both_databases(client, monkeypatch):
     monkeypatch.setattr(admin_routes, "getDriver", lambda database: f"driver-{database}")
 
     created_by_driver = []
+    indexed_by_driver = []
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
         if "WHERE n.CMID STARTS WITH $prefix RETURN n.CMID AS CMID" in query:
@@ -118,6 +119,9 @@ def test_create_metadata_node_creates_in_both_databases(client, monkeypatch):
                 "labels": ["METADATA", "LABEL"],
                 "props": props,
             }]
+        if "CREATE FULLTEXT INDEX New_Test_Label" in query:
+            indexed_by_driver.append(driver)
+            return []
         raise AssertionError(f"Unexpected query: {query}")
 
     monkeypatch.setattr(admin_routes, "getQuery", fake_get_query)
@@ -126,7 +130,7 @@ def test_create_metadata_node_creates_in_both_databases(client, monkeypatch):
         "/admin/metadata/create",
         headers={"Authorization": "Bearer test-token"},
         json={
-            "CMName": "New Test Label",
+            "CMName": "New_Test_Label",
             "nodeLabel": "LABEL",
             "properties": {
                 "groupLabel": "FAMILY",
@@ -141,9 +145,47 @@ def test_create_metadata_node_creates_in_both_databases(client, monkeypatch):
     assert payload["generatedCMID"] == "CL251"
     assert payload["createdIn"] == ["SocioMap", "ArchaMap"]
     assert set(created_by_driver) == {"driver-sociomap", "driver-archamap"}
+    assert set(indexed_by_driver) == {"driver-sociomap", "driver-archamap"}
     assert payload["node"]["SocioMap"]["props"]["CMID"] == "CL251"
     assert payload["node"]["SocioMap"]["props"]["groupLabel"] == "FAMILY"
     assert payload["node"]["SocioMap"]["props"]["displayName"] == "Family Label"
+
+
+def test_create_metadata_node_does_not_create_domain_index_for_non_label_nodes(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "200", "role": "admin"})
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: f"driver-{database}")
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "WHERE n.CMID STARTS WITH $prefix RETURN n.CMID AS CMID" in query:
+            return [{"CMID": "CP10"}]
+        if "RETURN count(n) AS count" in query:
+            return [{"count": 0}]
+        if "CREATE (n:METADATA:PROPERTY)" in query:
+            return [{
+                "id": f"id-{driver}",
+                "labels": ["METADATA", "PROPERTY"],
+                "props": (params or {}).get("props", {}),
+            }]
+        if "CREATE FULLTEXT INDEX" in query:
+            raise AssertionError("Non-LABEL metadata creation should not create a full-text index")
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin_routes, "getQuery", fake_get_query)
+
+    response = client.post(
+        "/admin/metadata/create",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "CMName": "new_property",
+            "nodeLabel": "PROPERTY",
+            "databaseTarget": "archamap",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["generatedCMID"] == "CP11"
+    assert payload["createdIn"] == ["ArchaMap"]
 
 
 def test_create_metadata_node_rejects_invalid_node_label(client, monkeypatch):

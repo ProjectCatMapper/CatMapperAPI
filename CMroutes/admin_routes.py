@@ -53,6 +53,17 @@ def _join_userdb_database(value):
     return "|".join(_normalize_userdb_database(value))
 
 
+def _ensure_label_fulltext_index(driver, label_name):
+    safe_label = sanitize_cypher_identifier(label_name, "label CMName")
+    query = f"""
+    CREATE FULLTEXT INDEX {safe_label}
+    IF NOT EXISTS
+    FOR (n:{safe_label})
+    ON EACH [n.normNames]
+    """
+    getQuery(query=query, driver=driver)
+
+
 def _password_meets_policy(password):
     if not isinstance(password, str):
         return False
@@ -1095,6 +1106,8 @@ def create_metadata_node():
                 raise ValueError(f"Metadata node with CMID {generated_cmid} already exists in {target}")
 
             created = getQuery(create_query, driver=driver, params={"props": props}, type="list")
+            if node_label == "LABEL":
+                _ensure_label_fulltext_index(driver, cmname)
             created_row = created[0] if isinstance(created, list) and created else {}
             db_name = "SocioMap" if target == "sociomap" else "ArchaMap"
             node_results[db_name] = created_row
