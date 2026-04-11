@@ -6,6 +6,35 @@ metadata_bp = Blueprint('metadata', __name__)
 
 ALLOWED_PROPERTY_METADATA_DATABASES = {"sociomap", "archamap"}
 
+
+def _parse_node_scope(value):
+    text = str(value or "").strip().upper()
+    if not text:
+        return "BOTH"
+
+    if "BOTH" in text or "ALL" in text or "ANY" in text:
+        return "BOTH"
+
+    has_dataset = "DATASET" in text
+    has_category = "CATEGORY" in text
+
+    if has_dataset and has_category:
+        return "BOTH"
+    if has_dataset:
+        return "DATASET"
+    if has_category:
+        return "CATEGORY"
+
+    return "BOTH"
+
+
+def _merge_node_scope(existing_scope, incoming_scope):
+    existing = _parse_node_scope(existing_scope)
+    incoming = _parse_node_scope(incoming_scope)
+    if existing == incoming:
+        return existing
+    return "BOTH"
+
 @metadata_bp.route('/metadata/domains/<database>', methods=['GET'])
 def getDomains1(database):
     domains = get_public_domains(database)
@@ -56,12 +85,23 @@ def get_upload_properties(database):
                 continue
             description = str(row.get("description") or "").strip()
             prop_type = str(row.get("type") or "").strip().lower()
-            entry = {"property": name, "description": description}
+            entry = {
+                "property": name,
+                "description": description,
+                "nodeType": _parse_node_scope(row.get("relationship")),
+            }
 
             if prop_type == "relationship":
                 uses_properties[name] = entry
             elif prop_type == "node":
-                node_properties[name] = entry
+                existing = node_properties.get(name)
+                if existing:
+                    existing_description = str(existing.get("description") or "").strip()
+                    if not existing_description and description:
+                        existing["description"] = description
+                    existing["nodeType"] = _merge_node_scope(existing.get("nodeType"), entry.get("nodeType"))
+                else:
+                    node_properties[name] = entry
 
         return jsonify({
             "database": str(database),
