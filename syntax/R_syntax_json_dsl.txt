@@ -122,17 +122,23 @@ qa_condition_mask <- function(df, step) {
   values <- as.character(unlist(values, use.names = FALSE))
   lhs <- as.character(df[[source]])
 
-  switch(
-    op,
-    equals = lhs == values[[1]],
-    in = lhs %in% values,
-    not_na = !is.na(lhs) & lhs != "",
-    gt = suppressWarnings(as.numeric(lhs)) > as.numeric(values[[1]]),
-    gte = suppressWarnings(as.numeric(lhs)) >= as.numeric(values[[1]]),
-    lt = suppressWarnings(as.numeric(lhs)) < as.numeric(values[[1]]),
-    lte = suppressWarnings(as.numeric(lhs)) <= as.numeric(values[[1]]),
+  if (op == "equals") {
+    lhs == values[[1]]
+  } else if (op == "in") {
+    lhs %in% values
+  } else if (op == "not_na") {
+    !is.na(lhs) & lhs != ""
+  } else if (op == "gt") {
+    suppressWarnings(as.numeric(lhs)) > as.numeric(values[[1]])
+  } else if (op == "gte") {
+    suppressWarnings(as.numeric(lhs)) >= as.numeric(values[[1]])
+  } else if (op == "lt") {
+    suppressWarnings(as.numeric(lhs)) < as.numeric(values[[1]])
+  } else if (op == "lte") {
+    suppressWarnings(as.numeric(lhs)) <= as.numeric(values[[1]])
+  } else {
     stop(sprintf("Unsupported if_else condition op '%s'.", op), call. = FALSE)
-  )
+  }
 }
 
 qa_apply_step <- function(df, step, transform_type) {
