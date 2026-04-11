@@ -123,6 +123,8 @@ def test_create_syntax_uses_json_runtime_and_scoped_equivalence_rows(monkeypatch
     assert "qa_apply_transform_ast" in syntax_text
     assert 'file.path(bundle_dir, "data.xlsx")' in syntax_text
     assert '[{"stepOrder":1,"op":"copy"' not in syntax_text
+    assert 'else if (op == "in")' in syntax_text
+    assert "    in =" not in syntax_text
 
     categories = pd.read_excel(tmp_path / "categories.xlsx")
     assert set(
