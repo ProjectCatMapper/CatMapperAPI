@@ -7,9 +7,9 @@ def test_upload_properties_endpoint_groups_node_and_uses_properties(client, monk
         metadata_routes,
         "getPropertiesMetadata",
         lambda driver: [
-            {"property": "CMName", "description": "Category name", "type": "node", "relationship": "CATEGORY"},
+            {"property": "CMName", "description": "Category name", "type": "node", "nodeType": "CATEGORY"},
             {"property": "country", "description": "Country tag", "type": "relationship"},
-            {"property": "CMName", "description": "Category name", "type": "node", "relationship": "DATASET"},
+            {"property": "datasetScope", "description": "Dataset-only property", "type": "node", "nodeType": "DATASET"},
             {"property": "", "description": "skip", "type": "node"},
         ],
     )
@@ -19,8 +19,11 @@ def test_upload_properties_endpoint_groups_node_and_uses_properties(client, monk
     assert response.status_code == 200
     payload = response.get_json()
     assert payload["database"] == "archamap"
-    assert payload["nodeProperties"] == [{"property": "CMName", "description": "Category name", "nodeType": "BOTH"}]
-    assert payload["usesProperties"] == [{"property": "country", "description": "Country tag", "nodeType": "BOTH"}]
+    assert payload["nodeProperties"] == [
+        {"property": "CMName", "description": "Category name", "nodeType": "CATEGORY"},
+        {"property": "datasetScope", "description": "Dataset-only property", "nodeType": "DATASET"},
+    ]
+    assert payload["usesProperties"] == [{"property": "country", "description": "Country tag", "nodeType": None}]
 
 
 def test_upload_properties_endpoint_returns_error_payload_on_exception(client, monkeypatch):

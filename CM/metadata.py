@@ -142,7 +142,8 @@ def getPropertiesMetadata(driver):
     n.relationship as relationship, n.description as description, 
     n.display as display, n.group as group,
     n.metaType as metaType, n.search as search,
-    n.translation as translation
+    n.translation as translation,
+    n.nodeType as nodeType
     """
     data = getQuery(query=query, driver=driver)
     return data

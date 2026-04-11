@@ -10,30 +10,25 @@ ALLOWED_PROPERTY_METADATA_DATABASES = {"sociomap", "archamap"}
 def _parse_node_scope(value):
     text = str(value or "").strip().upper()
     if not text:
-        return "BOTH"
-
-    if "BOTH" in text or "ALL" in text or "ANY" in text:
-        return "BOTH"
+        return None
 
     has_dataset = "DATASET" in text
     has_category = "CATEGORY" in text
 
-    if has_dataset and has_category:
-        return "BOTH"
     if has_dataset:
         return "DATASET"
     if has_category:
         return "CATEGORY"
 
-    return "BOTH"
+    return None
 
 
 def _merge_node_scope(existing_scope, incoming_scope):
-    existing = _parse_node_scope(existing_scope)
-    incoming = _parse_node_scope(incoming_scope)
-    if existing == incoming:
-        return existing
-    return "BOTH"
+    if existing_scope in {"DATASET", "CATEGORY"}:
+        return existing_scope
+    if incoming_scope in {"DATASET", "CATEGORY"}:
+        return incoming_scope
+    return "CATEGORY"
 
 @metadata_bp.route('/metadata/domains/<database>', methods=['GET'])
 def getDomains1(database):
@@ -88,7 +83,7 @@ def get_upload_properties(database):
             entry = {
                 "property": name,
                 "description": description,
-                "nodeType": _parse_node_scope(row.get("relationship")),
+                "nodeType": _parse_node_scope(row.get("nodeType")),
             }
 
             if prop_type == "relationship":
@@ -101,6 +96,8 @@ def get_upload_properties(database):
                         existing["description"] = description
                     existing["nodeType"] = _merge_node_scope(existing.get("nodeType"), entry.get("nodeType"))
                 else:
+                    if entry["nodeType"] not in {"DATASET", "CATEGORY"}:
+                        entry["nodeType"] = "CATEGORY"
                     node_properties[name] = entry
 
         return jsonify({
