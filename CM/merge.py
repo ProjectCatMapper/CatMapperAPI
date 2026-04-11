@@ -7,6 +7,7 @@ import pandas as pd
 from flask import jsonify
 import os
 import re
+import json
 from datetime import datetime
 import hashlib
 import base64
@@ -902,6 +903,77 @@ def load_r_syntax_template(filename, replacements):
         return None
 
 
+def _looks_like_json_dsl(value):
+    if value is None or pd.isna(value):
+        return False
+
+    text = str(value).strip()
+    if not text or text[0] not in ("[", "{"):
+        return False
+
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return False
+
+    return isinstance(parsed, (list, dict))
+
+
+def _uses_json_transform_runtime(variables):
+    for col in ["datasetTransform", "stackTransform", "variableFilter"]:
+        if col not in variables.columns:
+            continue
+        for value in variables[col].dropna().tolist():
+            if _looks_like_json_dsl(value):
+                return True
+    return False
+
+
+def _build_json_linkfile(driver, template, domain):
+    query = f"""
+        UNWIND $rows AS row
+        MATCH (source:{domain})-[e:EQUIVALENT {{stack: row.stackID, dataset: row.datasetID}}]->(target:{domain})
+        RETURN DISTINCT
+        row.datasetID AS datasetID,
+        row.stackID AS stackID,
+        e.Key AS Key,
+        source.CMID AS originalCMID,
+        source.CMName AS originalCMName,
+        target.CMID AS equivalentCMID,
+        target.CMName AS equivalentCMName
+    """
+    categories = getQuery(
+        query,
+        driver=driver,
+        params={"rows": template.to_dict(orient="records")},
+        type="df",
+    )
+
+    if categories.empty:
+        return pd.DataFrame(
+            columns=[
+                "datasetID",
+                "stackID",
+                "Key",
+                "originalCMID",
+                "originalCMName",
+                "equivalentCMID",
+                "equivalentCMName",
+            ]
+        )
+
+    categories = categories.astype(str).replace("None", np.nan)
+    return categories.drop_duplicates(
+        subset=[
+            "datasetID",
+            "stackID",
+            "Key",
+            "originalCMID",
+            "equivalentCMID",
+        ]
+    )
+
+
 def zip_output_files(files, dirpath, zip_filename="output.zip"):
     """ Zip all generated files into a single archive """
     zip_path = os.path.join(dirpath, zip_filename)
@@ -1007,7 +1079,6 @@ def createSyntax(template, database="SocioMap",
     if re.match(r"^[a-zA-Z]:\\\\", wd) or "\\" in wd:
         print("Detected Windows path. Converting to compatible format...")
         wd = wd.replace("\\", "/")
-        wd = wd.replace(" ", "\\ ")
 
     # Keep only actionable merge rows.
     template["mergingID"] = template["mergingID"].fillna("").astype(str).str.strip()
@@ -1118,50 +1189,61 @@ def createSyntax(template, database="SocioMap",
     data.to_excel(os.path.join(dirpath, "data.xlsx"), index=False)
 
     domain = validate_domain_label("CATEGORY", driver=driver)
-    cat_query = f"""
-        UNWIND $rows as row
-        MATCH (d:DATASET {{CMID: row.datasetID}})-[ru:USES]->(c:{domain})
-        OPTIONAL MATCH (c)-[:EQUIVALENT]->(e:{domain})
-        RETURN
-        d.CMID as datasetID,
-        ru.Key as Key,
-        c.CMID as CMID,
-        c.CMName as CMName,
-        e.CMID as equivalentCMID,
-        e.CMName as equivalentCMName
-    """
-    categories = getQuery(
-        cat_query,
-        driver=driver,
-        params={"rows": template.to_dict(orient='records')},
-        type="df",
-    )
+    use_json_runtime = _uses_json_transform_runtime(variables)
 
-    if categories.empty:
-        categories = pd.DataFrame(
-            columns=["datasetID", "Key", "CMID", "CMName", "equivalentCMID", "equivalentCMName"]
-        )
+    if use_json_runtime:
+        categories = _build_json_linkfile(driver=driver, template=template, domain=domain)
+        r_syntax_template = "syntax/R_syntax_json_dsl.txt"
+        replacements = {
+            "${wd}": wd,
+            "${database}": database,
+        }
     else:
-        category_keys = categories[["datasetID", "Key"]].drop_duplicates().copy()
-        category_keys["Key2"] = category_keys["Key"].str.split("; ")
-        category_keys = category_keys.explode("Key2").reset_index(drop=True)
-        parsed_keys = category_keys["Key2"].fillna("").astype(str).str.split(r"\s*(?:==|:)\s*", n=1, regex=True, expand=True)
-        category_keys["variable"] = parsed_keys[0]
-        category_keys["value"] = parsed_keys[1]
-        category_keys = category_keys.drop(columns=["Key2"])
+        cat_query = f"""
+            UNWIND $rows as row
+            MATCH (d:DATASET {{CMID: row.datasetID}})-[ru:USES]->(c:{domain})
+            OPTIONAL MATCH (c)-[:EQUIVALENT]->(e:{domain})
+            RETURN
+            d.CMID as datasetID,
+            ru.Key as Key,
+            c.CMID as CMID,
+            c.CMName as CMName,
+            e.CMID as equivalentCMID,
+            e.CMName as equivalentCMName
+        """
+        categories = getQuery(
+            cat_query,
+            driver=driver,
+            params={"rows": template.to_dict(orient='records')},
+            type="df",
+        )
 
-        categories = pd.merge(categories, category_keys, on=["datasetID", "Key"], how="left")
-        categories = categories.drop_duplicates(subset=["datasetID", "Key", "CMID", "variable", "value"])
-        categories["variable"] = categories["variable"].fillna("").astype(str).str.lower()
-        categories = categories.astype(str).replace("None", np.nan)
+        if categories.empty:
+            categories = pd.DataFrame(
+                columns=["datasetID", "Key", "CMID", "CMName", "equivalentCMID", "equivalentCMName"]
+            )
+        else:
+            category_keys = categories[["datasetID", "Key"]].drop_duplicates().copy()
+            category_keys["Key2"] = category_keys["Key"].str.split("; ")
+            category_keys = category_keys.explode("Key2").reset_index(drop=True)
+            parsed_keys = category_keys["Key2"].fillna("").astype(str).str.split(r"\s*(?:==|:)\s*", n=1, regex=True, expand=True)
+            category_keys["variable"] = parsed_keys[0]
+            category_keys["value"] = parsed_keys[1]
+            category_keys = category_keys.drop(columns=["Key2"])
+
+            categories = pd.merge(categories, category_keys, on=["datasetID", "Key"], how="left")
+            categories = categories.drop_duplicates(subset=["datasetID", "Key", "CMID", "variable", "value"])
+            categories["variable"] = categories["variable"].fillna("").astype(str).str.lower()
+            categories = categories.astype(str).replace("None", np.nan)
+
+        r_syntax_template = "syntax/R_syntax.txt"
+        replacements = {
+            "${f}": "\n".join(data["transform"].dropna().astype(str).tolist()),
+            "${wd}": wd,
+            "${database}": database,
+        }
+
     categories.to_excel(os.path.join(dirpath, "categories.xlsx"), index=False)
-
-    r_syntax_template = "syntax/R_syntax.txt"
-    replacements = {
-        "${f}": "\n".join(data["transform"].dropna().astype(str).tolist()),
-        "${wd}": wd,
-        "${database}": database,
-    }
 
     if syntax == "R":
         r_syntax = load_r_syntax_template(r_syntax_template, replacements)

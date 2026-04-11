@@ -1,0 +1,524 @@
+suppressPackageStartupMessages({
+  library(rio)
+  library(dplyr)
+  library(tidyr)
+  library(purrr)
+  library(jsonlite)
+})
+
+`%||%` <- function(x, y) {
+  if (is.null(x) || length(x) == 0 || (length(x) == 1 && is.na(x))) {
+    return(y)
+  }
+  x
+}
+
+qa_bundle_dir <- function() {
+  args <- commandArgs(trailingOnly = FALSE)
+  file_arg <- grep("^--file=", args, value = TRUE)
+  if (length(file_arg)) {
+    script_path <- sub("^--file=", "", file_arg[[1]])
+    return(normalizePath(dirname(script_path), winslash = "/", mustWork = FALSE))
+  }
+  normalizePath(getwd(), winslash = "/", mustWork = FALSE)
+}
+
+qa_is_blank <- function(x) {
+  is.null(x) || length(x) == 0 || all(is.na(x)) || !nzchar(trimws(as.character(x[[1]])))
+}
+
+qa_normalize_json_text <- function(x) {
+  if (qa_is_blank(x)) {
+    return(NA_character_)
+  }
+  trimws(as.character(x[[1]]))
+}
+
+qa_parse_steps <- function(json_text, transform_type) {
+  json_text <- qa_normalize_json_text(json_text)
+  if (is.na(json_text)) {
+    return(list())
+  }
+
+  parsed <- tryCatch(
+    jsonlite::fromJSON(json_text, simplifyVector = FALSE),
+    error = function(e) {
+      stop(sprintf("%s contains malformed JSON: %s", transform_type, e$message), call. = FALSE)
+    }
+  )
+
+  if (is.null(parsed)) {
+    return(list())
+  }
+  if (!is.list(parsed)) {
+    stop(sprintf("%s JSON must decode to a list of steps.", transform_type), call. = FALSE)
+  }
+  if (!length(parsed)) {
+    return(list())
+  }
+  if (!is.null(names(parsed)) && all(nzchar(names(parsed)))) {
+    parsed <- list(parsed)
+  }
+
+  orders <- vapply(
+    parsed,
+    function(step) suppressWarnings(as.numeric(step$stepOrder %||% Inf)),
+    numeric(1)
+  )
+  parsed[order(orders)]
+}
+
+qa_step_sources <- function(step) {
+  sources <- step$sources %||% character()
+  if (is.null(sources)) {
+    return(character())
+  }
+  if (is.character(sources) && length(sources) == 1) {
+    if (!nzchar(trimws(sources))) {
+      return(character())
+    }
+    if (grepl("\\|", sources)) {
+      sources <- trimws(unlist(strsplit(sources, "\\|", perl = TRUE)))
+    } else {
+      sources <- trimws(sources)
+    }
+  }
+  unique(tolower(as.character(unlist(sources, use.names = FALSE))))
+}
+
+qa_step_target <- function(step) {
+  tolower(as.character(step$target %||% ""))
+}
+
+qa_require_columns <- function(df, columns, context) {
+  missing_cols <- setdiff(columns, names(df))
+  if (length(missing_cols)) {
+    stop(sprintf("%s is missing required column(s): %s", context, paste(missing_cols, collapse = ", ")), call. = FALSE)
+  }
+}
+
+qa_coalesce_vectors <- function(vectors) {
+  if (!length(vectors)) {
+    return(rep(NA_character_, 0))
+  }
+  out <- vectors[[1]]
+  if (!length(out)) {
+    return(out)
+  }
+  for (idx in seq_along(vectors)[-1]) {
+    replace_idx <- is.na(out) | out == ""
+    out[replace_idx] <- vectors[[idx]][replace_idx]
+  }
+  out
+}
+
+qa_condition_mask <- function(df, step) {
+  options <- step$options %||% list()
+  condition <- options$condition %||% options$predicate %||% list()
+  source <- tolower(as.character(condition$source %||% qa_step_target(step)))
+  op <- tolower(as.character(condition$op %||% "equals"))
+  qa_require_columns(df, source, sprintf("if_else condition for '%s'", qa_step_target(step)))
+  values <- condition$values %||% condition$value %||% step$value %||% NA
+  values <- as.character(unlist(values, use.names = FALSE))
+  lhs <- as.character(df[[source]])
+
+  switch(
+    op,
+    equals = lhs == values[[1]],
+    in = lhs %in% values,
+    not_na = !is.na(lhs) & lhs != "",
+    gt = suppressWarnings(as.numeric(lhs)) > as.numeric(values[[1]]),
+    gte = suppressWarnings(as.numeric(lhs)) >= as.numeric(values[[1]]),
+    lt = suppressWarnings(as.numeric(lhs)) < as.numeric(values[[1]]),
+    lte = suppressWarnings(as.numeric(lhs)) <= as.numeric(values[[1]]),
+    stop(sprintf("Unsupported if_else condition op '%s'.", op), call. = FALSE)
+  )
+}
+
+qa_apply_step <- function(df, step, transform_type) {
+  op <- tolower(as.character(step$op %||% ""))
+  target <- qa_step_target(step)
+  sources <- qa_step_sources(step)
+  value <- step$value %||% NA
+  options <- step$options %||% list()
+
+  if (!nzchar(op)) {
+    stop(sprintf("%s includes a step with no op.", transform_type), call. = FALSE)
+  }
+
+  if (op %in% c("keep_equals", "keep_in", "drop_equals", "drop_in", "keep_not_na", "drop_na")) {
+    qa_require_columns(df, target, sprintf("%s '%s'", transform_type, op))
+    column <- as.character(df[[target]])
+    values <- as.character(unlist(options$values %||% value %||% character(), use.names = FALSE))
+    keep_mask <- switch(
+      op,
+      keep_equals = column == values[[1]],
+      keep_in = column %in% values,
+      drop_equals = !(column == values[[1]]),
+      drop_in = !(column %in% values),
+      keep_not_na = !is.na(column) & column != "",
+      drop_na = is.na(column) | column == "",
+      stop(sprintf("Unsupported filter op '%s'.", op), call. = FALSE)
+    )
+    return(df[keep_mask, , drop = FALSE])
+  }
+
+  if (!nzchar(target)) {
+    stop(sprintf("%s op '%s' requires a target.", transform_type, op), call. = FALSE)
+  }
+
+  if (op == "literal") {
+    df[[target]] <- as.character(value)
+    return(df)
+  }
+
+  if (op %in% c("copy", "as_numeric", "as_character", "replace_na", "recode", "concat", "coalesce", "add", "subtract", "multiply", "divide", "if_else")) {
+    if (!length(sources) && op %in% c("copy", "as_numeric", "as_character", "replace_na", "recode", "concat", "coalesce", "add", "subtract", "multiply", "divide")) {
+      sources <- target
+    }
+  }
+
+  if (length(sources)) {
+    qa_require_columns(df, sources, sprintf("%s '%s'", transform_type, op))
+  }
+
+  if (op == "copy") {
+    df[[target]] <- as.character(df[[sources[[1]]]])
+    return(df)
+  }
+
+  if (op == "coalesce") {
+    vectors <- lapply(sources, function(col) as.character(df[[col]]))
+    df[[target]] <- qa_coalesce_vectors(vectors)
+    return(df)
+  }
+
+  if (op == "concat") {
+    separator <- as.character(options$sep %||% "")
+    pieces <- lapply(sources, function(col) as.character(df[[col]]))
+    df[[target]] <- do.call(paste, c(pieces, list(sep = separator)))
+    return(df)
+  }
+
+  if (op == "recode") {
+    source <- sources[[1]]
+    recode_map <- options$map %||% list()
+    default_value <- options$default %||% df[[source]]
+    current <- as.character(df[[source]])
+    out <- as.character(default_value)
+    if (!is.list(recode_map)) {
+      stop("recode options.map must be an object.", call. = FALSE)
+    }
+    for (map_key in names(recode_map)) {
+      out[current == map_key] <- as.character(recode_map[[map_key]])
+    }
+    df[[target]] <- out
+    return(df)
+  }
+
+  if (op == "as_numeric") {
+    source <- sources[[1]]
+    df[[target]] <- suppressWarnings(as.numeric(df[[source]]))
+    return(df)
+  }
+
+  if (op == "as_character") {
+    source <- sources[[1]]
+    df[[target]] <- as.character(df[[source]])
+    return(df)
+  }
+
+  if (op == "replace_na") {
+    source <- sources[[1]]
+    out <- as.character(df[[source]])
+    replace_mask <- is.na(out) | out == ""
+    out[replace_mask] <- as.character(value)
+    df[[target]] <- out
+    return(df)
+  }
+
+  if (op %in% c("add", "subtract", "multiply", "divide")) {
+    numeric_sources <- lapply(sources, function(col) suppressWarnings(as.numeric(df[[col]])))
+    base <- numeric_sources[[1]]
+    rhs <- if (length(numeric_sources) >= 2) {
+      numeric_sources[[2]]
+    } else {
+      rep(as.numeric(value), length(base))
+    }
+    df[[target]] <- switch(
+      op,
+      add = base + rhs,
+      subtract = base - rhs,
+      multiply = base * rhs,
+      divide = base / rhs
+    )
+    return(df)
+  }
+
+  if (op == "if_else") {
+    true_source <- if (length(sources)) sources[[1]] else target
+    false_source <- if (length(sources) >= 2) sources[[2]] else NULL
+    true_value <- as.character(df[[true_source]] %||% options$true %||% value)
+    false_value <- if (!is.null(false_source)) as.character(df[[false_source]]) else as.character(options$false %||% NA)
+    mask <- qa_condition_mask(df, step)
+    out <- false_value
+    out[mask] <- true_value[mask]
+    df[[target]] <- out
+    return(df)
+  }
+
+  stop(sprintf("Unsupported %s op '%s'.", transform_type, op), call. = FALSE)
+}
+
+qa_apply_transform_ast <- function(df, json_text, transform_type) {
+  steps <- qa_parse_steps(json_text, transform_type)
+  if (!length(steps)) {
+    return(df)
+  }
+
+  for (step in steps) {
+    df <- qa_apply_step(df, step, transform_type)
+  }
+  df
+}
+
+qa_parse_key_clauses <- function(key_string) {
+  key_string <- trimws(as.character(key_string))
+  if (!nzchar(key_string)) {
+    stop("Encountered a blank linkfile key.", call. = FALSE)
+  }
+
+  pieces <- trimws(unlist(strsplit(key_string, "&&", fixed = TRUE)))
+  clauses <- lapply(pieces, function(piece) {
+    parts <- trimws(unlist(strsplit(piece, "==", fixed = TRUE)))
+    if (length(parts) != 2) {
+      parts <- trimws(unlist(strsplit(piece, ":", fixed = TRUE)))
+    }
+    if (length(parts) != 2) {
+      stop(sprintf("Unsupported key clause '%s'.", piece), call. = FALSE)
+    }
+    stats::setNames(list(parts[[2]]), tolower(parts[[1]]))
+  })
+
+  out <- list()
+  for (clause in clauses) {
+    out[names(clause)] <- clause
+  }
+  out
+}
+
+qa_expand_linkfile_keys <- function(linkfile, key_col = "Key") {
+  if (!nrow(linkfile)) {
+    return(linkfile)
+  }
+
+  parsed <- lapply(linkfile[[key_col]], qa_parse_key_clauses)
+  key_names <- unique(unlist(lapply(parsed, names), use.names = FALSE))
+  for (key_name in key_names) {
+    linkfile[[key_name]] <- vapply(
+      parsed,
+      function(item) as.character(item[[key_name]] %||% NA_character_),
+      character(1)
+    )
+  }
+  linkfile
+}
+
+qa_dataset_path <- function(runtime_wd, path_value) {
+  path_value <- as.character(path_value)
+  if (grepl("^[A-Za-z]:[/\\\\]", path_value) || grepl("^/", path_value)) {
+    return(normalizePath(path_value, winslash = "/", mustWork = FALSE))
+  }
+  normalizePath(file.path(runtime_wd, path_value), winslash = "/", mustWork = FALSE)
+}
+
+qa_build_linkfile_wide <- function(link_rows, dataset_id, stack_id) {
+  scoped <- link_rows %>%
+    filter(datasetID == dataset_id, stackID == stack_id) %>%
+    distinct(datasetID, stackID, Key, equivalentCMID, equivalentCMName)
+
+  if (!nrow(scoped)) {
+    return(data.frame(
+      datasetID = character(),
+      stackID = character(),
+      Key = character(),
+      CMID = character(),
+      CMName = character(),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  expanded <- qa_expand_linkfile_keys(as.data.frame(scoped, stringsAsFactors = FALSE, check.names = FALSE))
+  names(expanded) <- ifelse(
+    names(expanded) %in% c("datasetID", "stackID", "Key", "equivalentCMID", "equivalentCMName"),
+    names(expanded),
+    tolower(names(expanded))
+  )
+  expanded %>%
+    rename(CMID = equivalentCMID, CMName = equivalentCMName) %>%
+    as.data.frame(stringsAsFactors = FALSE, check.names = FALSE)
+}
+
+qa_join_dataset_to_linkfile <- function(dataset_df, linkfile_df) {
+  join_cols <- intersect(names(dataset_df), names(linkfile_df))
+  join_cols <- setdiff(join_cols, c("CMID", "CMName", "Key", "datasetID", "stackID"))
+  if (!length(join_cols)) {
+    stop("No shared key columns were found between the dataset and linkfile.", call. = FALSE)
+  }
+  merge(dataset_df, linkfile_df, by = join_cols, all = FALSE, sort = FALSE)
+}
+
+qa_mode <- function(x) {
+  x <- x[!is.na(x) & x != ""]
+  if (!length(x)) {
+    return(NA_character_)
+  }
+  values <- unique(x)
+  values[[which.max(tabulate(match(x, values)))]]
+}
+
+qa_summarize_value <- function(x, statistic) {
+  statistic <- tolower(as.character(statistic %||% "mode"))
+  if (statistic %in% c("mean", "median", "sum", "min", "max", "count_non_missing")) {
+    numeric_x <- suppressWarnings(as.numeric(x))
+    numeric_x <- numeric_x[!is.na(numeric_x)]
+    if (!length(numeric_x)) {
+      return(NA_real_)
+    }
+    return(
+      switch(
+        statistic,
+        mean = mean(numeric_x),
+        median = stats::median(numeric_x),
+        sum = sum(numeric_x),
+        min = min(numeric_x),
+        max = max(numeric_x),
+        count_non_missing = length(numeric_x)
+      )
+    )
+  }
+
+  if (statistic == "mode") {
+    return(qa_mode(as.character(x)))
+  }
+
+  stop(sprintf("Unsupported summaryStatistic '%s'.", statistic), call. = FALSE)
+}
+
+qa_apply_summary_by_group <- function(df, group_cols, value_col, statistic) {
+  qa_require_columns(df, c(group_cols, value_col), sprintf("summary for '%s'", value_col))
+  df %>%
+    group_by(across(all_of(group_cols))) %>%
+    summarise(!!value_col := qa_summarize_value(.data[[value_col]], statistic), .groups = "drop")
+}
+
+bundle_dir <- qa_bundle_dir()
+runtime_wd <- normalizePath("${wd}", winslash = "/", mustWork = FALSE)
+temp_dir <- file.path(bundle_dir, "temp")
+dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
+
+data <- rio::import(file.path(bundle_dir, "data.xlsx")) %>%
+  as.data.frame(stringsAsFactors = FALSE, check.names = FALSE)
+categories <- rio::import(file.path(bundle_dir, "categories.xlsx")) %>%
+  as.data.frame(stringsAsFactors = FALSE, check.names = FALSE)
+
+template <- data %>%
+  select(mergingID, mergingName, stackID, stackName, datasetID, datasetName, filePath) %>%
+  distinct()
+
+dataset_outputs <- list()
+for (i in seq_len(nrow(template))) {
+  row <- template[i, , drop = FALSE]
+  dataset_id <- row$datasetID[[1]]
+  stack_id <- row$stackID[[1]]
+  dataset_path <- qa_dataset_path(runtime_wd, row$filePath[[1]])
+  if (!file.exists(dataset_path)) {
+    stop(sprintf("Dataset file does not exist: %s", dataset_path), call. = FALSE)
+  }
+
+  dataset <- rio::import(dataset_path) %>%
+    as.data.frame(stringsAsFactors = FALSE, check.names = FALSE)
+  names(dataset) <- tolower(names(dataset))
+
+  dataset_spec <- data %>%
+    filter(datasetID == dataset_id, stackID == stack_id) %>%
+    mutate(varName = tolower(varName))
+
+  for (spec_idx in seq_len(nrow(dataset_spec))) {
+    transform_json <- qa_normalize_json_text(dataset_spec$datasetTransform[[spec_idx]])
+    if (!is.na(transform_json)) {
+      dataset <- qa_apply_transform_ast(dataset, transform_json, "datasetTransform")
+    }
+  }
+
+  linkfile <- qa_build_linkfile_wide(categories, dataset_id = dataset_id, stack_id = stack_id)
+  joined <- qa_join_dataset_to_linkfile(dataset, linkfile)
+
+  keep_cols <- unique(c("CMID", "CMName", dataset_spec$varName))
+  keep_cols <- keep_cols[keep_cols %in% names(joined)]
+  if (!all(c("CMID", "CMName") %in% keep_cols)) {
+    stop(sprintf("Link file did not produce CMID/CMName for dataset %s.", dataset_id), call. = FALSE)
+  }
+
+  out <- joined[, keep_cols, drop = FALSE]
+  out$datasetID <- dataset_id
+  out$datasetName <- row$datasetName[[1]]
+  dataset_outputs[[dataset_id]] <- out
+  rio::export(out, file.path(temp_dir, sprintf("%s-%s.csv", dataset_id, stack_id)))
+}
+
+stack_outputs <- list()
+for (stack_id in unique(template$stackID)) {
+  dataset_ids <- template %>%
+    filter(stackID == stack_id) %>%
+    pull(datasetID)
+
+  stack_rows <- bind_rows(dataset_outputs[dataset_ids])
+  stack_spec <- data %>%
+    filter(stackID == stack_id) %>%
+    mutate(varName = tolower(varName))
+
+  summary_parts <- list()
+  for (spec_idx in seq_len(nrow(stack_spec))) {
+    spec <- stack_spec[spec_idx, , drop = FALSE]
+    working <- stack_rows
+
+    variable_filter_json <- qa_normalize_json_text(spec$variableFilter[[1]])
+    if (!is.na(variable_filter_json)) {
+      working <- qa_apply_transform_ast(working, variable_filter_json, "variableFilter")
+    }
+
+    stack_transform_json <- qa_normalize_json_text(spec$stackTransform[[1]])
+    if (!is.na(stack_transform_json)) {
+      working <- qa_apply_transform_ast(working, stack_transform_json, "stackTransform")
+    }
+
+    summary_stat <- qa_normalize_json_text(spec$summaryStatistic[[1]])
+    if (is.na(summary_stat)) {
+      summary_stat <- "mode"
+    }
+
+    summary_parts[[spec$varName[[1]]]] <- qa_apply_summary_by_group(
+      working,
+      group_cols = c("CMID", "CMName"),
+      value_col = spec$varName[[1]],
+      statistic = summary_stat
+    )
+  }
+
+  stack_outputs[[stack_id]] <- reduce(summary_parts, full_join, by = c("CMID", "CMName"))
+  rio::export(stack_outputs[[stack_id]], file.path(temp_dir, sprintf("stack-%s.csv", stack_id)))
+}
+
+stack_ids <- names(stack_outputs)
+output <- stack_outputs[[stack_ids[[1]]]]
+if (length(stack_ids) > 1) {
+  for (idx in seq_along(stack_ids)[-1]) {
+    output <- full_join(output, stack_outputs[[stack_ids[[idx]]]], by = c("CMID", "CMName"))
+  }
+}
+
+output_path <- file.path(bundle_dir, sprintf("%s-output.csv", template$mergingID[[1]]))
+rio::export(output, output_path)
+unlink(temp_dir, recursive = TRUE)
+message(sprintf("Wrote merged output to %s", output_path))
