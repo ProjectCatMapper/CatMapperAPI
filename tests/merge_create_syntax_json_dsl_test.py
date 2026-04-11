@@ -125,6 +125,8 @@ def test_create_syntax_uses_json_runtime_and_scoped_equivalence_rows(monkeypatch
     assert '[{"stepOrder":1,"op":"copy"' not in syntax_text
     assert 'else if (op == "in")' in syntax_text
     assert "    in =" not in syntax_text
+    assert 'drop_na = !is.na(column) & column != ""' in syntax_text
+    assert 'drop_na = is.na(column) | column == ""' not in syntax_text
 
     categories = pd.read_excel(tmp_path / "categories.xlsx")
     assert set(

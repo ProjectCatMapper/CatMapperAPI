@@ -163,7 +163,7 @@ qa_apply_step <- function(df, step, transform_type) {
       drop_equals = !(column == values[[1]]),
       drop_in = !(column %in% values),
       keep_not_na = !is.na(column) & column != "",
-      drop_na = is.na(column) | column == "",
+      drop_na = !is.na(column) & column != "",
       stop(sprintf("Unsupported filter op '%s'.", op), call. = FALSE)
     )
     return(df[keep_mask, , drop = FALSE])
