@@ -127,6 +127,20 @@ def _apply_node_colors(rows, label_metadata_map):
             row["color"] = _desaturate_hex(avg_color)
             row["legendLabel"] = ":".join(labels_with_colors)
 
+
+def _empty_network_payload(*, cmid, database, domains, relation):
+    return {
+        "node": [],
+        "relations": [],
+        "relNodes": [],
+        "params": [{
+            "cmid": cmid,
+            "database": database,
+            "domain": domains,
+            "relation": relation,
+        }],
+    }
+
 @explore_bp.route("/info/<database>/<cmid>", methods=['GET'])
 def getInfo(database, cmid):
     result = getCategoryInfo(database, cmid)
@@ -422,7 +436,11 @@ def getNetworkjs():
         # Execute the Cypher queries
         result = getQuery(
             cypher_query, driver = driver, cmid=cmid, limit=limit, domains=domains, domain_count=len(domains), type = "records")
+        if not result:
+            return _empty_network_payload(cmid=cmid, database=database, domains=domains, relation=relation)
         result = unlist(result)
+        if not result:
+            return _empty_network_payload(cmid=cmid, database=database, domains=domains, relation=relation)
         node = []
         rel = []
         end = []
@@ -451,6 +469,18 @@ def getNetworkjs():
             rel_scores.sort(key=lambda x: x["score"])
 
             rel = [i["r"] for i in rel_scores[:limit]]
+            connected_node_ids = {
+                node_row.get("id")
+                for node_row in node
+                if node_row.get("id") is not None
+            }
+            for relation_row in rel:
+                connected_node_ids.add(relation_row.get("start_node_id"))
+                connected_node_ids.add(relation_row.get("end_node_id"))
+            end = [
+                node_row for node_row in end
+                if node_row.get("id") in connected_node_ids
+            ]
 
         else:
             node = [flatten_json(entry) for entry in node]
