@@ -15,6 +15,8 @@ def _parse_node_scope(value):
     has_dataset = "DATASET" in text
     has_category = "CATEGORY" in text
 
+    if has_dataset and has_category:
+        return "DATASET/CATEGORY"
     if has_dataset:
         return "DATASET"
     if has_category:
@@ -24,11 +26,14 @@ def _parse_node_scope(value):
 
 
 def _merge_node_scope(existing_scope, incoming_scope):
-    if existing_scope in {"DATASET", "CATEGORY"}:
-        return existing_scope
-    if incoming_scope in {"DATASET", "CATEGORY"}:
-        return incoming_scope
-    return "CATEGORY"
+    existing = existing_scope if existing_scope in {"DATASET", "CATEGORY", "DATASET/CATEGORY"} else "CATEGORY"
+    incoming = incoming_scope if incoming_scope in {"DATASET", "CATEGORY", "DATASET/CATEGORY"} else "CATEGORY"
+
+    if existing == "DATASET/CATEGORY" or incoming == "DATASET/CATEGORY":
+        return "DATASET/CATEGORY"
+    if existing != incoming:
+        return "DATASET/CATEGORY"
+    return existing
 
 @metadata_bp.route('/metadata/domains/<database>', methods=['GET'])
 def getDomains1(database):
@@ -96,7 +101,7 @@ def get_upload_properties(database):
                         existing["description"] = description
                     existing["nodeType"] = _merge_node_scope(existing.get("nodeType"), entry.get("nodeType"))
                 else:
-                    if entry["nodeType"] not in {"DATASET", "CATEGORY"}:
+                    if entry["nodeType"] not in {"DATASET", "CATEGORY", "DATASET/CATEGORY"}:
                         entry["nodeType"] = "CATEGORY"
                     node_properties[name] = entry
 

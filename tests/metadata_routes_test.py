@@ -10,6 +10,8 @@ def test_upload_properties_endpoint_groups_node_and_uses_properties(client, monk
             {"property": "CMName", "description": "Category name", "type": "node", "nodeType": "CATEGORY"},
             {"property": "country", "description": "Country tag", "type": "relationship"},
             {"property": "datasetScope", "description": "Dataset-only property", "type": "node", "nodeType": "DATASET"},
+            {"property": "parent", "description": "Parent value", "type": "node", "nodeType": "DATASET"},
+            {"property": "parent", "description": "", "type": "node"},
             {"property": "", "description": "skip", "type": "node"},
         ],
     )
@@ -22,6 +24,7 @@ def test_upload_properties_endpoint_groups_node_and_uses_properties(client, monk
     assert payload["nodeProperties"] == [
         {"property": "CMName", "description": "Category name", "nodeType": "CATEGORY"},
         {"property": "datasetScope", "description": "Dataset-only property", "nodeType": "DATASET"},
+        {"property": "parent", "description": "Parent value", "nodeType": "DATASET/CATEGORY"},
     ]
     assert payload["usesProperties"] == [{"property": "country", "description": "Country tag", "nodeType": None}]
 
