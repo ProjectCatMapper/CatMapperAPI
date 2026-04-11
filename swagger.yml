@@ -342,6 +342,42 @@ paths:
                 additionalProperties: true
         '500':
           $ref: '#/components/responses/InternalError'
+
+  /entity/{database}/{cmid}.json:
+    get:
+      tags: [Explore]
+      summary: Canonical JSON for a node explore page
+      description: |
+        Returns the aggregated machine-readable payload for a single node explore page.
+        This combines the page's core info, category/sample data, geometry, available
+        network payloads, and merge-template summary when applicable.
+      parameters:
+        - name: database
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cmid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Aggregated node explore page payload
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '404':
+          description: Node not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
     post:
       tags: [Explore]
       summary: Dataset detail/query (POST)

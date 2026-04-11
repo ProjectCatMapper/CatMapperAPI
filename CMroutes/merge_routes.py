@@ -293,8 +293,7 @@ def getMergeDatasets():
     return data
 
 
-@merge_bp.route('/merge/template/summary/<database>/<cmid>', methods=['GET'])
-def get_merge_template_summary(database, cmid):
+def build_merge_template_summary_payload(database, cmid):
     driver = getDriver(database)
 
     labels_query = """
@@ -304,7 +303,7 @@ def get_merge_template_summary(database, cmid):
     """
     label_rows = getQuery(labels_query, driver, params={"cmid": cmid}) or []
     if not label_rows:
-        return jsonify({"error": "Node not found"}), 404
+        raise LookupError("Node not found")
 
     labels = label_rows[0].get("labels", [])
     node_type = "OTHER"
@@ -429,7 +428,7 @@ def get_merge_template_summary(database, cmid):
         "variableCount": sum((row.get("variableCount", 0) or 0) for row in stack_summary),
     }
 
-    return jsonify({
+    return {
         "nodeType": node_type,
         "stackSummary": stack_summary,
         "stackSummaryTotals": totals,
@@ -437,4 +436,12 @@ def get_merge_template_summary(database, cmid):
         "mergingTemplateCount": merging_template_count,
         "mergingTies": merging_ties,
         "equivalenceTies": equivalence_ties,
-    })
+    }
+
+
+@merge_bp.route('/merge/template/summary/<database>/<cmid>', methods=['GET'])
+def get_merge_template_summary(database, cmid):
+    try:
+        return jsonify(build_merge_template_summary_payload(database, cmid))
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 404
