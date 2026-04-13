@@ -90,7 +90,7 @@ def _get_dataset_children(cmid, driver):
     RETURN DISTINCT d.CMID AS CMID
     """
     result = getQuery(query=query, params={"cmid": cmid}, driver=driver, type="list")
-    return [cmid] + (result if result else [])
+    return list(cmid) + (result if result else [])
 
 
 def _build_dataset_query(cmid, domain):
@@ -111,7 +111,7 @@ def _build_dataset_query(cmid, domain):
             elementId(r) AS relID, 
             property, 
             r[property] AS value, 
-            custom.getName(r[property]) AS property_name
+            '' AS property_name
         """
     else:
         query = base_query + """
@@ -125,7 +125,7 @@ def _build_dataset_query(cmid, domain):
             elementId(r) AS relID, 
             property, 
             r[property] AS value, 
-            custom.getName(r[property]) AS property_name
+            '' AS property_name
         """
     
     return query, {"cmid": cmid, "domain": domain}

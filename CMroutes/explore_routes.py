@@ -640,11 +640,10 @@ def getDataset():
         children = unlist(params.get('children'))
 
         result = getDatasetData(database, cmid, domain, children)
-        return result
+        return current_app.response_class(result, mimetype='application/json')
 
     except Exception as e:
-        result = str(e)
-        return result, 500
+        return jsonify({"error": str(e)}), 500
 
 
 @explore_bp.route('/CMID/<database>/<cmid>', methods=['GET'])
