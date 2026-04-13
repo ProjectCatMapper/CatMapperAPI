@@ -152,6 +152,10 @@ def _process_dataset_results(data):
     
     # Pivot tables
     index_cols = [col for col in df.columns if col not in ['property', 'value', 'property_name']]
+
+    # Some USES properties can share names with index columns (e.g., "CMID").
+    # Exclude those from the pivot to avoid duplicate-column collisions on reset_index().
+    df = df[~df['property'].isin(index_cols)]
     df = df.drop('property_name', axis=1)
     
     df = df.pivot_table(

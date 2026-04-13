@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from flask import request, Blueprint, jsonify
+from flask import request, Blueprint, jsonify, current_app
 from CM import *
 from collections import defaultdict
 import colorsys
