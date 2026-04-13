@@ -643,6 +643,7 @@ def getDataset():
         return current_app.response_class(result, mimetype='application/json')
 
     except Exception as e:
+        current_app.logger.exception("dataset endpoint failed")
         return jsonify({"error": str(e)}), 500
 
 
