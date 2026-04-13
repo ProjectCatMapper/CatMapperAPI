@@ -5,8 +5,12 @@ import pandas as pd
 
 
 def getDatasetData(database, cmid, domain, children):
-         
+
     driver = getDriver(database)
+
+    # Route handlers often pass cmid as a query string, but Cypher uses
+    # UNWIND and therefore requires a list.
+    cmid = _normalize_cmid(cmid)
     
     # Normalize domain
     domain = _normalize_domain(domain, driver)
@@ -23,10 +27,42 @@ def getDatasetData(database, cmid, domain, children):
     result = _process_dataset_results(data)
     return result
 
+
+def _normalize_cmid(cmid):
+    if isinstance(cmid, list):
+        return [c for c in cmid if c]
+    if isinstance(cmid, str):
+        stripped = cmid.strip()
+        if not stripped:
+            return []
+        # Support callers passing JSON/list-style query values.
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, list):
+                    return [c for c in parsed if c]
+            except Exception:
+                pass
+        return [stripped]
+    if cmid is None:
+        return []
+    return [cmid]
+
 def _normalize_domain(domain, driver):
     """Normalize and expand domain parameters."""
     if isinstance(domain, str):
-        domain = [domain]
+        stripped = domain.strip()
+        if stripped.startswith("["):
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, list):
+                    domain = parsed
+                else:
+                    domain = [stripped]
+            except Exception:
+                domain = [stripped]
+        else:
+            domain = [stripped]
     
     if domain is None or "ANY DOMAIN" in domain:
         return ["CATEGORY"]
