@@ -51,31 +51,21 @@ def _fake_upload_query(rel_count_stack_merging=1, rel_count_stack_dataset=1):
     return fake_get_query
 
 
-def test_add_merging_to_datasets_skips_missing_tie_validation_and_calls_create(monkeypatch):
+def test_add_merging_to_datasets_still_errors_when_stack_merging_tie_missing(monkeypatch):
     monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
     monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
     monkeypatch.setattr(upload, "getDriver", lambda database: object())
     monkeypatch.setattr(upload, "getQuery", _fake_upload_query(rel_count_stack_merging=0, rel_count_stack_dataset=0))
 
-    calls = []
-
-    def fake_create_mties_stacks(database, user, dataset):
-        calls.append(dataset[["mergingID", "stackID", "datasetID"]].copy())
-        return {"result": dataset[["mergingID", "stackID", "datasetID"]].copy()}
-
-    monkeypatch.setattr(upload, "create_mties_stacks", fake_create_mties_stacks)
-
-    result = upload.input_Nodes_Uses(
-        dataset=[{"mergingID": "M1", "stackID": "S1", "datasetID": "D1"}],
-        database="ArchaMap",
-        uploadOption="add_merging",
-        optionalProperties=[],
-        user="tester",
-        mergingType="merging_ties_to_datasets",
-    )
-
-    assert result is not None
-    assert len(calls) == 1
+    with pytest.raises(ValueError, match="Missing MERGING tie between stackID and mergingID"):
+        upload.input_Nodes_Uses(
+            dataset=[{"mergingID": "M1", "stackID": "S1", "datasetID": "D1"}],
+            database="ArchaMap",
+            uploadOption="add_merging",
+            optionalProperties=[],
+            user="tester",
+            mergingType="merging_ties_to_datasets",
+        )
 
 
 def test_add_merging_to_variables_still_errors_when_stack_merging_tie_missing(monkeypatch):
