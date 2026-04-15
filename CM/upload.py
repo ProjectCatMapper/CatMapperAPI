@@ -1341,8 +1341,8 @@ def create_mties_stacks(database, user, dataset):
     # create merging ties b/w merging dataset and stackIDs    
     merging_ties_query = """
     unwind $rows as row
-    MATCH (a:DATASET {CMID: row.mergingID})
-    MATCH (b:DATASET {CMID: row.stackID})
+    MATCH (a:MERGING {CMID: row.mergingID})
+    MATCH (b:STACK {CMID: row.stackID})
     MERGE (a)-[r:MERGING]->(b)
     RETURN count(*) as count
     """
@@ -1357,7 +1357,7 @@ def create_mties_stacks(database, user, dataset):
     # create merging ties b/w stackIDs and datasetIDs
     merging_ties_query2 = """
     unwind $rows as row
-    MATCH (a:DATASET {CMID: row.stackID})
+    MATCH (a:STACK {CMID: row.stackID})
     MATCH (b:DATASET {CMID: row.datasetID})
     MERGE (a)-[r:MERGING]->(b)
     RETURN count(*) as count
@@ -2391,7 +2391,15 @@ def input_Nodes_Uses(
             )
         
     # check for merging ties b/w stackID and mergingID when they exist in input
-    if "mergingID" in dataset.columns and "stackID" in dataset.columns:
+    skip_stack_tie_validation = (
+        uploadOption == "add_merging" and mergingType == "merging_ties_to_datasets"
+    )
+
+    if (
+        "mergingID" in dataset.columns
+        and "stackID" in dataset.columns
+        and not skip_stack_tie_validation
+    ):
         updateLog(
             f"log/{user}uploadProgress.txt",
             "checking existing MERGING ties between stackID and mergingID",
@@ -2494,7 +2502,11 @@ def input_Nodes_Uses(
             )
 
     # # check for merging ties b/w stackID and datasetID when they exist in input
-    if "datasetID" in dataset.columns and "stackID" in dataset.columns:
+    if (
+        "datasetID" in dataset.columns
+        and "stackID" in dataset.columns
+        and not skip_stack_tie_validation
+    ):
         updateLog(
             f"log/{user}uploadProgress.txt",
             "checking MERGING ties between stackID and datasetID",
