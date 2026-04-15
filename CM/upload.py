@@ -2391,14 +2391,14 @@ def input_Nodes_Uses(
             )
         
     # check for merging ties b/w stackID and mergingID when they exist in input
-    allow_missing_stack_ties = (
+    skip_stack_tie_validation = (
         uploadOption == "add_merging" and mergingType == "merging_ties_to_datasets"
     )
 
     if (
         "mergingID" in dataset.columns
         and "stackID" in dataset.columns
-        and not allow_missing_stack_ties
+        and not skip_stack_tie_validation
     ):
         updateLog(
             f"log/{user}uploadProgress.txt",
@@ -2505,7 +2505,7 @@ def input_Nodes_Uses(
     if (
         "datasetID" in dataset.columns
         and "stackID" in dataset.columns
-        and not allow_missing_stack_ties
+        and not skip_stack_tie_validation
     ):
         updateLog(
             f"log/{user}uploadProgress.txt",
