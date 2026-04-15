@@ -1293,7 +1293,6 @@ def getBadRelations(database, mail=None, return_type="data"):
                 matches = getQuery(
                     f"match (p:CATEGORY)-[:{relationship}]->(c:  {group})<-[r:USES]-(d:DATASET) where not '{group}' in labels(p) unwind keys(r) as property with p.CMID as parentCMID, p.CMName as parentCMName, c.CMID as childCMID, c.CNName as childCMName, r.Key as Key, d.datasetID as datasetID, d.shortName as shortName, '{relationship}' as relationship, apoc.text.join([i in labels(p) where not i in ['CATEGORY']],'; ') as domains, property, r[property] as value where parentCMID = value or parentCMID in value return distinct parentCMID, parentCMName, childCMID, childCMName, Key, datasetID, shortName, relationship, domains, property, value", driver)
                 results.append(matches)
-                results.append(matches)
 
             matchContains = getQuery(
                 f"MATCH (p:CATEGORY)-[:CONTAINS]->(c:CATEGORY) WHERE NOT 'GENERIC' IN labels(p) WITH p, c, [x IN labels(p) WHERE x IN {groups}] AS parentLabels, [y IN labels(c) WHERE y IN {groups}] AS childLabels UNWIND parentLabels AS parentLabel UNWIND childLabels AS childLabel WITH p, c, parentLabel, childLabel WHERE NOT parentLabel = $group AND childLabel = $group RETURN DISTINCT p.CMID AS parentCMID, p.CMName AS parentCMName, parentLabel + '->' + childLabel AS domains, c.CMID AS childCMID, c.CMName AS childCMName, 'CONTAINS' AS relationship", driver, params={'group': group})
@@ -1302,6 +1301,7 @@ def getBadRelations(database, mail=None, return_type="data"):
         results = pd.concat([pd.DataFrame(item) for item in results])
         contains = pd.concat([pd.DataFrame(item) for item in contains])
         results = pd.concat([results, contains])
+        results = results.map(lambda x: '; '.join(str(v) for v in x) if isinstance(x, list) else x)
         results = results.drop_duplicates()
 
         fp1 = None
