@@ -51,21 +51,36 @@ def _fake_upload_query(rel_count_stack_merging=1, rel_count_stack_dataset=1):
     return fake_get_query
 
 
-def test_add_merging_to_datasets_still_errors_when_stack_merging_tie_missing(monkeypatch):
+def test_add_merging_to_datasets_with_explicit_stackid_calls_create_mties(monkeypatch):
+    """When stackID is explicitly provided for merging_ties_to_datasets the tie
+    pre-validation checks are skipped and create_mties_stacks is invoked instead
+    of raising a ValueError."""
     monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
     monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
     monkeypatch.setattr(upload, "getDriver", lambda database: object())
-    monkeypatch.setattr(upload, "getQuery", _fake_upload_query(rel_count_stack_merging=0, rel_count_stack_dataset=0))
+    # _fake_upload_query handles CMID-existence checks; tie checks are skipped by the fix
+    monkeypatch.setattr(upload, "getQuery", _fake_upload_query())
 
-    with pytest.raises(ValueError, match="Missing MERGING tie between stackID and mergingID"):
-        upload.input_Nodes_Uses(
-            dataset=[{"mergingID": "M1", "stackID": "S1", "datasetID": "D1"}],
-            database="ArchaMap",
-            uploadOption="add_merging",
-            optionalProperties=[],
-            user="tester",
-            mergingType="merging_ties_to_datasets",
-        )
+    called = {}
+
+    def fake_create_mties_stacks(database, user, dataset):
+        called["yes"] = True
+        return {"result": dataset}
+
+    monkeypatch.setattr(upload, "create_mties_stacks", fake_create_mties_stacks)
+
+    # Should not raise – the validation tie checks are bypassed for merging_ties_to_datasets
+    # when an explicit stackID is present, and create_mties_stacks handles the rest.
+    upload.input_Nodes_Uses(
+        dataset=[{"mergingID": "M1", "stackID": "S1", "datasetID": "D1"}],
+        database="ArchaMap",
+        uploadOption="add_merging",
+        optionalProperties=[],
+        user="tester",
+        mergingType="merging_ties_to_datasets",
+    )
+
+    assert called.get("yes"), "create_mties_stacks should have been called"
 
 
 def test_add_merging_to_variables_still_errors_when_stack_merging_tie_missing(monkeypatch):

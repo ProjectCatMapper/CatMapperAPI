@@ -2391,7 +2391,8 @@ def input_Nodes_Uses(
             )
         
     # check for merging ties b/w stackID and mergingID when they exist in input
-    if "mergingID" in dataset.columns and "stackID" in dataset.columns:
+    # skip for merging_ties_to_datasets: ties are being created, not required to pre-exist
+    if "mergingID" in dataset.columns and "stackID" in dataset.columns and mergingType != "merging_ties_to_datasets":
         updateLog(
             f"log/{user}uploadProgress.txt",
             "checking existing MERGING ties between stackID and mergingID",
@@ -2420,8 +2421,9 @@ def input_Nodes_Uses(
             )
 
     # check for non-existence of stackID that bridges datasetID and mergingID when they exist in input
-    # this only applies if the stack already exists, i.e, creating merging ties to datasets
-    if ("mergingID" in dataset.columns and "datasetID" in dataset.columns) and mergingType == "merging_ties_to_datasets":
+    # this only applies if no explicit stackID is provided; when stackID is given, the caller specifies
+    # which stack to use and we trust it (no pre-existing bridge check needed)
+    if ("mergingID" in dataset.columns and "datasetID" in dataset.columns) and mergingType == "merging_ties_to_datasets" and "stackID" not in dataset.columns:
         updateLog(
             f"log/{user}uploadProgress.txt",
             "checking for pre-existing stack bridge between datasetID and mergingID",
@@ -2494,7 +2496,8 @@ def input_Nodes_Uses(
             )
 
     # # check for merging ties b/w stackID and datasetID when they exist in input
-    if "datasetID" in dataset.columns and "stackID" in dataset.columns:
+    # skip for merging_ties_to_datasets: ties are being created, not required to pre-exist
+    if "datasetID" in dataset.columns and "stackID" in dataset.columns and mergingType != "merging_ties_to_datasets":
         updateLog(
             f"log/{user}uploadProgress.txt",
             "checking MERGING ties between stackID and datasetID",
