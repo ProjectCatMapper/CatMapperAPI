@@ -929,6 +929,67 @@ def _uses_json_transform_runtime(variables):
     return False
 
 
+def _make_copy_transform(target, source):
+    target = str(target or "").strip()
+    source = str(source or "").strip()
+    if not target or not source:
+        return np.nan
+
+    return json.dumps(
+        [
+            {
+                "stepOrder": 1,
+                "op": "copy",
+                "target": target,
+                "sources": source,
+                "value": None,
+                "options": {},
+            }
+        ],
+        separators=(",", ":"),
+    )
+
+
+def _backfill_legacy_dataset_transforms(data):
+    if data.empty or "datasetTransform" not in data.columns:
+        return data
+
+    data = data.copy()
+    source_series = (
+        data.get("value", pd.Series(index=data.index, dtype="object"))
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+    target_series = (
+        data.get("varName", pd.Series(index=data.index, dtype="object"))
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+    transform_series = (
+        data["datasetTransform"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+
+    legacy_mask = (
+        (transform_series == "")
+        & (source_series != "")
+        & (target_series != "")
+        & (source_series.str.lower() != target_series.str.lower())
+    )
+
+    if legacy_mask.any():
+        data.loc[legacy_mask, "datasetTransform"] = [
+            _make_copy_transform(target, source)
+            for target, source in zip(target_series[legacy_mask], source_series[legacy_mask])
+        ]
+
+    return data
+
+
 def _build_json_linkfile(driver, template, domain):
     query = f"""
         UNWIND $rows AS row
@@ -948,6 +1009,26 @@ def _build_json_linkfile(driver, template, domain):
         params={"rows": template.to_dict(orient="records")},
         type="df",
     )
+
+    if categories.empty:
+        fallback_query = f"""
+            UNWIND $rows AS row
+            MATCH (d:DATASET {{CMID: row.datasetID}})-[ru:USES]->(c:{domain})
+            RETURN DISTINCT
+            row.datasetID AS datasetID,
+            row.stackID AS stackID,
+            ru.Key AS Key,
+            c.CMID AS originalCMID,
+            c.CMName AS originalCMName,
+            c.CMID AS equivalentCMID,
+            c.CMName AS equivalentCMName
+        """
+        categories = getQuery(
+            fallback_query,
+            driver=driver,
+            params={"rows": template.to_dict(orient="records")},
+            type="df",
+        )
 
     if categories.empty:
         return pd.DataFrame(
@@ -1186,63 +1267,17 @@ def createSyntax(template, database="SocioMap",
     data["variable"] = data["variable"].fillna("").astype(str).str.lower()
     data = pd.merge(data, template[["datasetID", "filePath"]], on="datasetID", how="left")
     data = data.astype(str).replace("None", np.nan)
-    data.to_excel(os.path.join(dirpath, "data.xlsx"), index=False)
 
     domain = validate_domain_label("CATEGORY", driver=driver)
-    use_json_runtime = _uses_json_transform_runtime(variables)
+    data = _backfill_legacy_dataset_transforms(data)
+    data.to_excel(os.path.join(dirpath, "data.xlsx"), index=False)
 
-    if use_json_runtime:
-        categories = _build_json_linkfile(driver=driver, template=template, domain=domain)
-        r_syntax_template = "syntax/R_syntax_json_dsl.txt"
-        replacements = {
-            "${wd}": wd,
-            "${database}": database,
-        }
-    else:
-        cat_query = f"""
-            UNWIND $rows as row
-            MATCH (d:DATASET {{CMID: row.datasetID}})-[ru:USES]->(c:{domain})
-            OPTIONAL MATCH (c)-[:EQUIVALENT]->(e:{domain})
-            RETURN
-            d.CMID as datasetID,
-            ru.Key as Key,
-            c.CMID as CMID,
-            c.CMName as CMName,
-            e.CMID as equivalentCMID,
-            e.CMName as equivalentCMName
-        """
-        categories = getQuery(
-            cat_query,
-            driver=driver,
-            params={"rows": template.to_dict(orient='records')},
-            type="df",
-        )
-
-        if categories.empty:
-            categories = pd.DataFrame(
-                columns=["datasetID", "Key", "CMID", "CMName", "equivalentCMID", "equivalentCMName"]
-            )
-        else:
-            category_keys = categories[["datasetID", "Key"]].drop_duplicates().copy()
-            category_keys["Key2"] = category_keys["Key"].str.split("; ")
-            category_keys = category_keys.explode("Key2").reset_index(drop=True)
-            parsed_keys = category_keys["Key2"].fillna("").astype(str).str.split(r"\s*(?:==|:)\s*", n=1, regex=True, expand=True)
-            category_keys["variable"] = parsed_keys[0]
-            category_keys["value"] = parsed_keys[1]
-            category_keys = category_keys.drop(columns=["Key2"])
-
-            categories = pd.merge(categories, category_keys, on=["datasetID", "Key"], how="left")
-            categories = categories.drop_duplicates(subset=["datasetID", "Key", "CMID", "variable", "value"])
-            categories["variable"] = categories["variable"].fillna("").astype(str).str.lower()
-            categories = categories.astype(str).replace("None", np.nan)
-
-        r_syntax_template = "syntax/R_syntax.txt"
-        replacements = {
-            "${f}": "\n".join(data["transform"].dropna().astype(str).tolist()),
-            "${wd}": wd,
-            "${database}": database,
-        }
-
+    categories = _build_json_linkfile(driver=driver, template=template, domain=domain)
+    r_syntax_template = "syntax/R_syntax_json_dsl.txt"
+    replacements = {
+        "${wd}": wd,
+        "${database}": database,
+    }
     categories.to_excel(os.path.join(dirpath, "categories.xlsx"), index=False)
 
     if syntax == "R":

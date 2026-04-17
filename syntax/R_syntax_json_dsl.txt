@@ -34,6 +34,13 @@ qa_normalize_json_text <- function(x) {
   trimws(as.character(x[[1]]))
 }
 
+qa_standardize_name <- function(x) {
+  x <- trimws(tolower(as.character(x %||% "")))
+  x <- gsub("[^a-z0-9]+", "_", x)
+  x <- gsub("^_+|_+$", "", x)
+  x
+}
+
 qa_parse_steps <- function(json_text, transform_type) {
   json_text <- qa_normalize_json_text(json_text)
   if (is.na(json_text)) {
@@ -83,11 +90,11 @@ qa_step_sources <- function(step) {
       sources <- trimws(sources)
     }
   }
-  unique(tolower(as.character(unlist(sources, use.names = FALSE))))
+  unique(vapply(unlist(sources, use.names = FALSE), qa_standardize_name, character(1)))
 }
 
 qa_step_target <- function(step) {
-  tolower(as.character(step$target %||% ""))
+  qa_standardize_name(step$target %||% "")
 }
 
 qa_require_columns <- function(df, columns, context) {
@@ -115,7 +122,7 @@ qa_coalesce_vectors <- function(vectors) {
 qa_condition_mask <- function(df, step) {
   options <- step$options %||% list()
   condition <- options$condition %||% options$predicate %||% list()
-  source <- tolower(as.character(condition$source %||% qa_step_target(step)))
+  source <- qa_standardize_name(condition$source %||% qa_step_target(step))
   op <- tolower(as.character(condition$op %||% "equals"))
   qa_require_columns(df, source, sprintf("if_else condition for '%s'", qa_step_target(step)))
   values <- condition$values %||% condition$value %||% step$value %||% NA
@@ -303,7 +310,7 @@ qa_parse_key_clauses <- function(key_string) {
     if (length(parts) != 2) {
       stop(sprintf("Unsupported key clause '%s'.", piece), call. = FALSE)
     }
-    stats::setNames(list(parts[[2]]), tolower(parts[[1]]))
+    stats::setNames(list(parts[[2]]), qa_standardize_name(parts[[1]]))
   })
 
   out <- list()
@@ -338,8 +345,57 @@ qa_dataset_path <- function(runtime_wd, path_value) {
   normalizePath(file.path(runtime_wd, path_value), winslash = "/", mustWork = FALSE)
 }
 
-qa_build_linkfile_wide <- function(link_rows, dataset_id, stack_id) {
-  scoped <- link_rows %>%
+qa_truthy_env <- function(name) {
+  value <- Sys.getenv(name, unset = "")
+  tolower(trimws(value)) %in% c("1", "true", "yes", "y", "debug")
+}
+
+qa_build_linkfile_wide <- function(link_rows, dataset_id, stack_id, template_rows, variable_keys = character()) {
+  working <- as.data.frame(link_rows, stringsAsFactors = FALSE, check.names = FALSE)
+  legacy_mode <- !"stackID" %in% names(working)
+
+  if (legacy_mode) {
+    if ("equivalentCMID" %in% names(working)) {
+      working$legacyHasEquivalent <- !(is.na(working$equivalentCMID) | working$equivalentCMID == "")
+    } else {
+      working$legacyHasEquivalent <- TRUE
+    }
+    working <- merge(
+      working,
+      template_rows[, c("datasetID", "stackID"), drop = FALSE],
+      by = "datasetID",
+      all.x = TRUE,
+      sort = FALSE
+    )
+  }
+
+  if ("CMID" %in% names(working) && !"originalCMID" %in% names(working)) {
+    working$originalCMID <- working$CMID
+  }
+  if ("CMName" %in% names(working) && !"originalCMName" %in% names(working)) {
+    working$originalCMName <- working$CMName
+  }
+  if (!"equivalentCMID" %in% names(working)) {
+    working$equivalentCMID <- working$originalCMID
+  } else {
+    replace_idx <- is.na(working$equivalentCMID) | working$equivalentCMID == ""
+    working$equivalentCMID[replace_idx] <- working$originalCMID[replace_idx]
+  }
+  if (!"equivalentCMName" %in% names(working)) {
+    working$equivalentCMName <- working$originalCMName
+  } else {
+    replace_idx <- is.na(working$equivalentCMName) | working$equivalentCMName == ""
+    working$equivalentCMName[replace_idx] <- working$originalCMName[replace_idx]
+  }
+
+  if (length(variable_keys) && "Key" %in% names(working)) {
+    working <- working[!(working$Key %in% variable_keys), , drop = FALSE]
+  }
+  if (legacy_mode && "legacyHasEquivalent" %in% names(working) && any(working$legacyHasEquivalent)) {
+    working <- working[working$legacyHasEquivalent, , drop = FALSE]
+  }
+
+  scoped <- working %>%
     filter(datasetID == dataset_id, stackID == stack_id) %>%
     distinct(datasetID, stackID, Key, equivalentCMID, equivalentCMName)
 
@@ -358,7 +414,7 @@ qa_build_linkfile_wide <- function(link_rows, dataset_id, stack_id) {
   names(expanded) <- ifelse(
     names(expanded) %in% c("datasetID", "stackID", "Key", "equivalentCMID", "equivalentCMName"),
     names(expanded),
-    tolower(names(expanded))
+    vapply(names(expanded), qa_standardize_name, character(1))
   )
   expanded %>%
     rename(CMID = equivalentCMID, CMName = equivalentCMName) %>%
@@ -421,6 +477,7 @@ qa_apply_summary_by_group <- function(df, group_cols, value_col, statistic) {
 bundle_dir <- qa_bundle_dir()
 runtime_wd <- normalizePath("${wd}", winslash = "/", mustWork = FALSE)
 temp_dir <- file.path(bundle_dir, "temp")
+debug_keep_temp <- qa_truthy_env("CM_KEEP_TEMP") || qa_truthy_env("CM_DEBUG_MERGE")
 dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
 
 data <- rio::import(file.path(bundle_dir, "data.xlsx")) %>%
@@ -444,20 +501,34 @@ for (i in seq_len(nrow(template))) {
 
   dataset <- rio::import(dataset_path) %>%
     as.data.frame(stringsAsFactors = FALSE, check.names = FALSE)
-  names(dataset) <- tolower(names(dataset))
+  names(dataset) <- vapply(names(dataset), qa_standardize_name, character(1))
 
   dataset_spec <- data %>%
     filter(datasetID == dataset_id, stackID == stack_id) %>%
-    mutate(varName = tolower(varName))
+    mutate(
+      varName = qa_standardize_name(varName),
+      sourceColumn = qa_standardize_name(coalesce(value, varName))
+    )
 
   for (spec_idx in seq_len(nrow(dataset_spec))) {
+    target_name <- dataset_spec$varName[[spec_idx]]
+    source_name <- dataset_spec$sourceColumn[[spec_idx]]
     transform_json <- qa_normalize_json_text(dataset_spec$datasetTransform[[spec_idx]])
     if (!is.na(transform_json)) {
       dataset <- qa_apply_transform_ast(dataset, transform_json, "datasetTransform")
+    } else if (!(target_name %in% names(dataset)) && (source_name %in% names(dataset))) {
+      dataset[[target_name]] <- as.character(dataset[[source_name]])
     }
   }
 
-  linkfile <- qa_build_linkfile_wide(categories, dataset_id = dataset_id, stack_id = stack_id)
+  variable_keys <- unique(dataset_spec$variableKey[!is.na(dataset_spec$variableKey) & dataset_spec$variableKey != ""])
+  linkfile <- qa_build_linkfile_wide(
+    categories,
+    dataset_id = dataset_id,
+    stack_id = stack_id,
+    template_rows = template,
+    variable_keys = variable_keys
+  )
   joined <- qa_join_dataset_to_linkfile(dataset, linkfile)
 
   keep_cols <- unique(c("CMID", "CMName", dataset_spec$varName))
@@ -467,8 +538,8 @@ for (i in seq_len(nrow(template))) {
   }
 
   out <- joined[, keep_cols, drop = FALSE]
-  out$datasetID <- dataset_id
-  out$datasetName <- row$datasetName[[1]]
+  out$datasetID <- rep(dataset_id, nrow(out))
+  out$datasetName <- rep(row$datasetName[[1]], nrow(out))
   dataset_outputs[[dataset_id]] <- out
   rio::export(out, file.path(temp_dir, sprintf("%s-%s.csv", dataset_id, stack_id)))
 }
@@ -482,37 +553,51 @@ for (stack_id in unique(template$stackID)) {
   stack_rows <- bind_rows(dataset_outputs[dataset_ids])
   stack_spec <- data %>%
     filter(stackID == stack_id) %>%
-    mutate(varName = tolower(varName))
-
-  summary_parts <- list()
+    mutate(varName = qa_standardize_name(varName))
+  processed_stack <- stack_rows
   for (spec_idx in seq_len(nrow(stack_spec))) {
     spec <- stack_spec[spec_idx, , drop = FALSE]
-    working <- stack_rows
 
     variable_filter_json <- qa_normalize_json_text(spec$variableFilter[[1]])
     if (!is.na(variable_filter_json)) {
-      working <- qa_apply_transform_ast(working, variable_filter_json, "variableFilter")
+      processed_stack <- qa_apply_transform_ast(processed_stack, variable_filter_json, "variableFilter")
     }
 
     stack_transform_json <- qa_normalize_json_text(spec$stackTransform[[1]])
     if (!is.na(stack_transform_json)) {
-      working <- qa_apply_transform_ast(working, stack_transform_json, "stackTransform")
+      processed_stack <- qa_apply_transform_ast(processed_stack, stack_transform_json, "stackTransform")
     }
-
-    summary_stat <- qa_normalize_json_text(spec$summaryStatistic[[1]])
-    if (is.na(summary_stat)) {
-      summary_stat <- "mode"
-    }
-
-    summary_parts[[spec$varName[[1]]]] <- qa_apply_summary_by_group(
-      working,
-      group_cols = c("CMID", "CMName"),
-      value_col = spec$varName[[1]],
-      statistic = summary_stat
-    )
   }
 
-  stack_outputs[[stack_id]] <- reduce(summary_parts, full_join, by = c("CMID", "CMName"))
+  summary_stats <- vapply(
+    stack_spec$summaryStatistic,
+    function(value) !is.na(qa_normalize_json_text(value)),
+    logical(1)
+  )
+
+  if (!any(summary_stats)) {
+    keep_cols <- unique(c("CMID", "CMName", stack_spec$varName))
+    keep_cols <- keep_cols[keep_cols %in% names(processed_stack)]
+    stack_outputs[[stack_id]] <- processed_stack[, keep_cols, drop = FALSE]
+  } else {
+    summary_parts <- list()
+    for (spec_idx in seq_len(nrow(stack_spec))) {
+      spec <- stack_spec[spec_idx, , drop = FALSE]
+      summary_stat <- qa_normalize_json_text(spec$summaryStatistic[[1]])
+      if (is.na(summary_stat)) {
+        summary_stat <- "mode"
+      }
+
+      summary_parts[[spec$varName[[1]]]] <- qa_apply_summary_by_group(
+        processed_stack,
+        group_cols = c("CMID", "CMName"),
+        value_col = spec$varName[[1]],
+        statistic = summary_stat
+      )
+    }
+
+    stack_outputs[[stack_id]] <- reduce(summary_parts, full_join, by = c("CMID", "CMName"))
+  }
   rio::export(stack_outputs[[stack_id]], file.path(temp_dir, sprintf("stack-%s.csv", stack_id)))
 }
 
@@ -524,7 +609,9 @@ if (length(stack_ids) > 1) {
   }
 }
 
-output_path <- file.path(bundle_dir, sprintf("%s-output.csv", template$mergingID[[1]]))
+output_path <- file.path(bundle_dir, sprintf("%s-output.xlsx", template$mergingID[[1]]))
 rio::export(output, output_path)
-unlink(temp_dir, recursive = TRUE)
+if (!debug_keep_temp) {
+  unlink(temp_dir, recursive = TRUE)
+}
 message(sprintf("Wrote merged output to %s", output_path))

@@ -136,3 +136,106 @@ def test_create_syntax_uses_json_runtime_and_scoped_equivalence_rows(monkeypatch
 
     data = pd.read_excel(tmp_path / "data.xlsx")
     assert data.loc[0, "datasetTransform"].startswith('[{"stepOrder":1')
+
+
+def test_create_syntax_backfills_legacy_source_column_transforms(monkeypatch, tmp_path):
+    monkeypatch.setattr(merge_mod, "getDriver", lambda _database: object())
+    monkeypatch.setattr(
+        merge_mod,
+        "validate_domain_label",
+        lambda label, driver=None, aliases=None, extra_allowed=None: str(label).upper(),
+    )
+
+    def fake_get_query(query, driver=None, params=None, type=None):
+        if "MATCH (a:DATASET {CMID: cmid})" in query:
+            return pd.DataFrame(
+                [
+                    {"CMID": "AD962", "CMName": "Rosegate Merge"},
+                    {"CMID": "AD1002", "CMName": "Rosegate Stack"},
+                    {"CMID": "AD993", "CMName": "Dataset A"},
+                ]
+            )
+
+        if "MATCH (m:DATASET {CMID: row.mergingID})-[:MERGING]->(s:DATASET {CMID: row.stackID})-[rsv:MERGING]->(v:VARIABLE)<-[rdv:MERGING]-(d:DATASET {CMID: row.datasetID})" in query:
+            return pd.DataFrame(
+                [
+                    {
+                        "mergingID": "AD962",
+                        "mergingName": "Rosegate Merge",
+                        "stackID": "AD1002",
+                        "stackName": "Rosegate Stack",
+                        "datasetID": "AD993",
+                        "datasetName": "Dataset A",
+                        "varName": "Type",
+                        "variableID": "AM1362",
+                        "stackTransform": None,
+                        "variableFilter": None,
+                        "summaryStatistic": None,
+                        "summaryFilter": None,
+                        "summaryWeight": None,
+                        "datasetTransform": None,
+                        "variableKey": "Field == projectile point type",
+                    },
+                    {
+                        "mergingID": "AD962",
+                        "mergingName": "Rosegate Merge",
+                        "stackID": "AD1002",
+                        "stackName": "Rosegate Stack",
+                        "datasetID": "AD993",
+                        "datasetName": "Dataset A",
+                        "varName": "Count",
+                        "variableID": "AM354033",
+                        "stackTransform": None,
+                        "variableFilter": None,
+                        "summaryStatistic": None,
+                        "summaryFilter": None,
+                        "summaryWeight": None,
+                        "datasetTransform": None,
+                        "variableKey": "Field == count",
+                    },
+                ]
+            )
+
+        if "MATCH (source:CATEGORY)-[e:EQUIVALENT {stack: row.stackID, dataset: row.datasetID}]->(target:CATEGORY)" in query:
+            return pd.DataFrame(
+                [
+                    {
+                        "datasetID": "AD993",
+                        "stackID": "AD1002",
+                        "Key": "projectile point type == Rosegate",
+                        "originalCMID": "AM1",
+                        "originalCMName": "Rosegate",
+                        "equivalentCMID": "AM1",
+                        "equivalentCMName": "Rosegate",
+                    }
+                ]
+            )
+
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(merge_mod, "getQuery", fake_get_query)
+
+    template = [
+        {
+            "mergingID": "AD962",
+            "stackID": "AD1002",
+            "datasetID": "AD993",
+            "filePath": "pseudo_data/ROSEGATE.csv",
+        }
+    ]
+
+    merge_mod.createSyntax(
+        template=template,
+        database="ArchaMap",
+        syntax="R",
+        dirpath=str(tmp_path),
+        download=False,
+    )
+
+    data = pd.read_excel(tmp_path / "data.xlsx")
+    type_row = data.loc[data["varName"] == "Type"].iloc[0]
+    count_row = data.loc[data["varName"] == "Count"].iloc[0]
+
+    assert '"target":"Type"' in type_row["datasetTransform"]
+    assert '"sources":"projectile point type"' in type_row["datasetTransform"]
+    assert pd.isna(count_row["datasetTransform"]) or count_row["datasetTransform"] in ("", "nan")
