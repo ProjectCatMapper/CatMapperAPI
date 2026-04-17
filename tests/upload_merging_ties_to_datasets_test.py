@@ -108,6 +108,76 @@ def test_add_merging_to_variables_still_errors_when_stack_merging_tie_missing(mo
         )
 
 
+def test_add_merging_to_variables_with_explicit_stackid_skips_inferred_bridge_check(monkeypatch):
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='node'" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='relationship'" in query:
+            return []
+        if 'MATCH (n:PROPERTY) WHERE n.type="relationship" and n.metaType="string" RETURN n.CMName as n' in query:
+            return []
+        if 'MATCH (n:PROPERTY) WHERE n.type="node" and n.metaType="string" RETURN n.CMName' in query:
+            return []
+        if "OPTIONAL MATCH (n:" in query and "RETURN row.value AS value, COUNT(n) AS count" in query:
+            return [{"value": row["value"], "count": 1} for row in params["rows"]]
+        if "OPTIONAL MATCH (s:STACK {CMID: row.stackID})<-[r:MERGING]-(m:MERGING {CMID: row.mergingID})" in query:
+            return [
+                {
+                    "stackID": row["stackID"],
+                    "mergingID": row["mergingID"],
+                    "rel_count": 1,
+                }
+                for row in params["rows"]
+            ]
+        if "OPTIONAL MATCH (d:DATASET {CMID: datasetID})<-[r1:MERGING]-(s:STACK)<-[r:MERGING]-(m:MERGING {CMID: mergingID})" in query:
+            raise AssertionError("Inferred dataset/merging bridge check should be skipped when stackID is explicit")
+        if "OPTIONAL MATCH (s:STACK {CMID: row.stackID})-[r:MERGING]->(d:DATASET {CMID: row.datasetID})" in query:
+            return [
+                {
+                    "stackID": row["stackID"],
+                    "datasetID": row["datasetID"],
+                    "rel_count": 1,
+                }
+                for row in params["rows"]
+            ]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    called = {}
+
+    def fake_create_mties_variables(database, user, dataset):
+        called["yes"] = True
+        return {"result": dataset}
+
+    monkeypatch.setattr(upload, "create_mties_variables", fake_create_mties_variables)
+
+    upload.input_Nodes_Uses(
+        dataset=[
+            {
+                "mergingID": "M1",
+                "stackID": "S1",
+                "datasetID": "D1",
+                "variableID": "V1",
+                "varName": "v",
+            }
+        ],
+        database="ArchaMap",
+        uploadOption="add_merging",
+        optionalProperties=[],
+        user="tester",
+        mergingType="merging_ties_to_variables",
+    )
+
+    assert called.get("yes"), "create_mties_variables should have been called"
+
+
 def test_create_mties_stacks_uses_merge_without_properties_and_deduplicates(monkeypatch):
     monkeypatch.setattr(upload, "getDriver", lambda database: object())
     monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)

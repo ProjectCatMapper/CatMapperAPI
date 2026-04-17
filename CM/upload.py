@@ -2459,8 +2459,9 @@ def input_Nodes_Uses(
             )
 
     # check for existence of stackID that bridges datasetID and mergingID when they exist in input
-    # this only applies if the stack already exists, i.e, creating merging ties to variables and equivalence ties
-    if ("mergingID" in dataset.columns and "datasetID" in dataset.columns) and mergingType != "merging_ties_to_datasets":
+    # this only applies when stackID is not explicitly provided; when stackID is given,
+    # the caller specifies which stack to use and downstream checks validate required ties.
+    if ("mergingID" in dataset.columns and "datasetID" in dataset.columns) and mergingType != "merging_ties_to_datasets" and "stackID" not in dataset.columns:
         updateLog(
             f"log/{user}uploadProgress.txt",
             "checking unique stack bridge between datasetID and mergingID",
