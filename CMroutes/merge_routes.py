@@ -293,6 +293,118 @@ def getMergeDatasets():
     return data
 
 
+def _extract_key_names(key_expression):
+    text = str(key_expression or "").strip()
+    if not text:
+        return []
+
+    names = []
+    parts = [part.strip() for part in text.split(" && ") if part.strip()]
+    for index, part in enumerate(parts):
+        marker = " == "
+        marker_index = part.find(marker)
+        if marker_index == -1:
+            names.append(part)
+            continue
+
+        raw_name = part[:marker_index].strip() or f"KeyPart{index + 1}"
+        names.append(raw_name)
+
+    return names
+
+
+def _append_stack_id_to_key_expression(key_expression, stack_id):
+    text = str(key_expression or "").strip()
+    stack_id = str(stack_id or "").strip()
+    if not text or not stack_id:
+        return text
+
+    marker = " == "
+    transformed_parts = []
+    extracted_names = []
+
+    parts = [part.strip() for part in text.split(" && ") if part.strip()]
+    for index, part in enumerate(parts):
+        marker_index = part.find(marker)
+        if marker_index == -1:
+            key_name = part or f"KeyPart{index + 1}"
+            transformed_name = f"{key_name}_{stack_id}"
+            transformed_parts.append(transformed_name)
+            extracted_names.append(transformed_name)
+            continue
+
+        raw_name = part[:marker_index].strip() or f"KeyPart{index + 1}"
+        raw_value = part[marker_index + len(marker):].strip()
+
+        transformed_name = f"{raw_name}_{stack_id}"
+        transformed_parts.append(f"{transformed_name} == {raw_value}")
+        extracted_names.append(transformed_name)
+
+    return " && ".join(transformed_parts), " && ".join(extracted_names)
+
+
+def _group_datasets_by_stack(rows):
+    grouped = {}
+    for row in rows or []:
+        stack_id = row.get("stackID")
+        if not stack_id:
+            continue
+        entry = grouped.setdefault(
+            stack_id,
+            {
+                "stackID": stack_id,
+                "stackCMName": row.get("stackCMName", ""),
+                "datasets": [],
+            },
+        )
+        dataset_id = row.get("datasetID")
+        if not dataset_id:
+            continue
+        entry["datasets"].append(
+            {
+                "datasetID": dataset_id,
+                "datasetCMName": row.get("datasetCMName", ""),
+            }
+        )
+
+    output = []
+    for stack_id in sorted(grouped):
+        entry = grouped[stack_id]
+        seen_dataset_ids = set()
+        deduped = []
+        for dataset in sorted(entry["datasets"], key=lambda item: item.get("datasetID", "")):
+            dataset_id = dataset.get("datasetID")
+            if not dataset_id or dataset_id in seen_dataset_ids:
+                continue
+            seen_dataset_ids.add(dataset_id)
+            deduped.append(dataset)
+        entry["datasets"] = deduped
+        output.append(entry)
+
+    return output
+
+
+def _normalize_equivalence_ties_by_stack(equivalence_ties):
+    normalized_rows = []
+    for row in equivalence_ties or []:
+        row_copy = dict(row)
+        stack_id = row_copy.get("stackID")
+        key_value = row_copy.get("Key", "")
+
+        transformed = _append_stack_id_to_key_expression(key_value, stack_id)
+        if isinstance(transformed, tuple):
+            transformed_key, extracted_key = transformed
+        else:
+            transformed_key = transformed
+            extracted_key = " && ".join(_extract_key_names(key_value))
+
+        row_copy["Key"] = transformed_key
+        row_copy["extracted Key"] = extracted_key
+        normalized_rows.append(row_copy)
+
+    return normalized_rows
+
+
 def build_merge_template_summary_payload(database, cmid):
     driver = getDriver(database)
 
@@ -315,6 +427,7 @@ def build_merge_template_summary_payload(database, cmid):
     stack_ids = []
     stack_summary = []
     dataset_summary = []
+    stack_dataset_groups = []
     merging_template_count = 0
 
     if node_type == "MERGING":
@@ -343,6 +456,19 @@ def build_merge_template_summary_payload(database, cmid):
         """
         stack_summary = getQuery(stack_summary_query, driver, params={"cmid": cmid}) or []
         stack_ids = [row.get("stackID") for row in stack_summary if row.get("stackID")]
+
+        stack_group_query = """
+        MATCH (m:MERGING {CMID: $cmid})-[:MERGING]->(s:STACK)-[:MERGING]->(d:DATASET)
+        WHERE NOT d:STACK AND NOT d:MERGING
+        RETURN
+          s.CMID AS stackID,
+          s.CMName AS stackCMName,
+          d.CMID AS datasetID,
+          d.CMName AS datasetCMName
+        ORDER BY stackID, datasetID
+        """
+        stack_group_rows = getQuery(stack_group_query, driver, params={"cmid": cmid}) or []
+        stack_dataset_groups = _group_datasets_by_stack(stack_group_rows)
 
     elif node_type == "STACK":
         stack_ids = [cmid]
@@ -375,6 +501,20 @@ def build_merge_template_summary_payload(database, cmid):
         ORDER BY d.CMID
         """
         dataset_summary = getQuery(dataset_summary_query, driver, params={"cmid": cmid}) or []
+        stack_dataset_groups = [
+            {
+                "stackID": cmid,
+                "stackCMName": "",
+                "datasets": [
+                    {
+                        "datasetID": row.get("datasetID", ""),
+                        "datasetCMName": row.get("datasetCMName", ""),
+                    }
+                    for row in dataset_summary
+                    if row.get("datasetID")
+                ],
+            }
+        ]
 
     merging_ties = []
     equivalence_ties = []
@@ -420,6 +560,7 @@ def build_merge_template_summary_payload(database, cmid):
         ORDER BY stackID, datasetID, originalCMID
         """
         equivalence_ties = getQuery(equivalence_ties_query, driver, params={"stack_ids": stack_ids}) or []
+        equivalence_ties = _normalize_equivalence_ties_by_stack(equivalence_ties)
 
     totals = {
         "datasetCount": sum((row.get("datasetCount", 0) or 0) for row in stack_summary),
@@ -433,6 +574,7 @@ def build_merge_template_summary_payload(database, cmid):
         "stackSummary": stack_summary,
         "stackSummaryTotals": totals,
         "datasetSummary": dataset_summary,
+        "stackDatasetGroups": stack_dataset_groups,
         "mergingTemplateCount": merging_template_count,
         "mergingTies": merging_ties,
         "equivalenceTies": equivalence_ties,
