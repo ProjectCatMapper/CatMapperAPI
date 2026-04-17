@@ -58,3 +58,37 @@ def test_networksjs_returns_empty_payload_when_no_matching_root(client, monkeypa
         "domain": [],
         "relation": "USES",
     }]
+
+
+def test_networksjs_merging_includes_stack_to_dataset_edges(client, monkeypatch):
+    monkeypatch.setattr(explore_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(explore_routes, "serialize_node", lambda node: node)
+    monkeypatch.setattr(explore_routes, "serialize_relationship", lambda relationship: relationship)
+    monkeypatch.setattr(
+        explore_routes,
+        "flatten_json",
+        lambda entry: next(iter(entry.values())) if isinstance(entry, dict) and len(entry) == 1 else entry,
+    )
+    monkeypatch.setattr(explore_routes, "_get_label_metadata_map", lambda driver: {})
+    monkeypatch.setattr(explore_routes, "_apply_node_colors", lambda rows, label_metadata_map: None)
+
+    root_stack = {"id": "stack-1", "labels": ["DATASET", "STACK"], "CMID": "AD1002", "CMName": "Stack"}
+    linked_dataset = {"id": "ds-1", "labels": ["DATASET"], "CMID": "AD1000", "CMName": "Dataset One"}
+    stack_to_dataset = {"start_node_id": "stack-1", "end_node_id": "ds-1", "type": "MERGING"}
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        assert "OPTIONAL MATCH (a:STACK)-[r7:MERGING]->(d2:DATASET)" in query
+        return [{"a": [root_stack], "r": [stack_to_dataset], "e": [linked_dataset]}]
+
+    monkeypatch.setattr(explore_routes, "getQuery", fake_get_query)
+
+    response = client.get(
+        "/networksjs",
+        query_string={"cmid": "AD1002", "database": "archamap", "relation": "MERGING", "limit": 25},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["node"] == [root_stack]
+    assert payload["relations"] == [stack_to_dataset]
+    assert payload["relNodes"] == [linked_dataset]
