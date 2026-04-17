@@ -445,3 +445,57 @@ def get_merge_template_summary(database, cmid):
         return jsonify(build_merge_template_summary_payload(database, cmid))
     except LookupError as exc:
         return jsonify({"error": str(exc)}), 404
+
+
+@merge_bp.route('/merge/datasets/<database>/<mergingID>/<domain>', methods=['GET'])
+def get_merging_datasets_by_domain(database, mergingID, domain):
+    """
+    Return a table-ready JSON of all DATASETs and CATEGORY nodes (of the given
+    domain) reachable via:
+      (:MERGING {CMID: mergingID})-[:MERGING]->(:STACK)-[:MERGING]->(:DATASET)
+                                                                   <-[:USES]-(:domain)
+
+    Response rows contain: mergingID, datasetID, categoryID, Key
+    """
+    try:
+        driver = getDriver(database)
+        validated_domain = validate_domain_label(domain, driver=driver)
+
+        query = f"""
+        MATCH (:MERGING {{CMID: $mergingID}})-[:MERGING]->(:STACK)-[:MERGING]->(d:DATASET)
+              -[u:USES]->(cat:{validated_domain})
+        RETURN
+          $mergingID  AS mergingID,
+          d.CMID      AS datasetID,
+          cat.CMID    AS categoryID,
+          u.Key       AS Key
+        ORDER BY d.CMID, cat.CMID
+        """
+
+        rows = getQuery(query, driver, params={"mergingID": mergingID}, type="dict")
+
+        if not rows:
+            # Distinguish between node-not-found and path-not-found
+            exists_rows = getQuery(
+                "MATCH (m:MERGING {CMID: $cmid}) RETURN m.CMID AS cmid LIMIT 1",
+                driver,
+                params={"cmid": mergingID},
+                type="dict",
+            )
+            if not exists_rows:
+                return jsonify({"warning": f"No MERGING node found with CMID '{mergingID}'.", "rows": []}), 404
+            stacks_rows = getQuery(
+                "MATCH (:MERGING {CMID: $cmid})-[:MERGING]->(:STACK) RETURN 1 AS found LIMIT 1",
+                driver,
+                params={"cmid": mergingID},
+                type="dict",
+            )
+            if not stacks_rows:
+                return jsonify({"warning": f"MERGING node '{mergingID}' has no connected STACK nodes.", "rows": []}), 200
+            return jsonify({"warning": f"No {validated_domain} CATEGORY nodes connected via USES to the DATASETs under '{mergingID}'.", "rows": []}), 200
+
+        return jsonify(rows)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
