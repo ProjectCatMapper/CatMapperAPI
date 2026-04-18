@@ -1234,7 +1234,8 @@ def createSyntax(template, database="SocioMap",
         rsv.summaryFilter as summaryFilter,
         rsv.summaryWeight as summaryWeight,
         rdv.datasetTransform as datasetTransform,
-        ru.Key as variableKey
+        coalesce(rdv.Key, ru.Key) as variableKey,
+        coalesce(rdv.categoryType, ru.categoryType) as categoryType
     """
     variables = getQuery(
         variable_query,

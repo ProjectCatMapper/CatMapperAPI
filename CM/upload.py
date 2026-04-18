@@ -1374,6 +1374,221 @@ def create_mties_stacks(database, user, dataset):
         "result": dataset
     }
 
+def _hydrate_dataset_variable_merging_metadata(driver, dataset):
+    required_cols = ["datasetID", "variableID"]
+    missing = [col for col in required_cols if col not in dataset.columns]
+    if missing:
+        raise ValueError(f"Missing required column(s) for variable metadata hydration: {', '.join(missing)}")
+
+    key_col_present = "Key" in dataset.columns
+    lookup_rows = (
+        dataset[["datasetID", "variableID"] + (["Key"] if key_col_present else [])]
+        .drop_duplicates()
+        .to_dict(orient="records")
+    )
+
+    metadata_query = """
+    UNWIND $rows AS row
+    MATCH (d:DATASET {CMID: row.datasetID})
+    MATCH (v:VARIABLE {CMID: row.variableID})
+    OPTIONAL MATCH (d)-[u:USES]->(v)
+    RETURN
+      row.datasetID AS datasetID,
+      row.variableID AS variableID,
+      row.Key AS inputKey,
+      collect(DISTINCT {Key: u.Key, categoryType: u.categoryType}) AS usesMetadata
+    """
+    records = getQuery(metadata_query, driver=driver, params={"rows": lookup_rows}) or []
+
+    resolved_rows = []
+    errors = []
+
+    for record in records:
+        dataset_id = record.get("datasetID")
+        variable_id = record.get("variableID")
+        input_key = record.get("inputKey")
+        normalized_input_key = str(input_key).strip() if input_key is not None else ""
+
+        metadata = [
+            {
+                "Key": str(item.get("Key") or "").strip(),
+                "categoryType": item.get("categoryType"),
+            }
+            for item in (record.get("usesMetadata") or [])
+            if str(item.get("Key") or "").strip()
+        ]
+
+        if normalized_input_key:
+            metadata = [item for item in metadata if item["Key"] == normalized_input_key]
+
+        unique_metadata = []
+        seen_pairs = set()
+        for item in metadata:
+            pair = (item["Key"], item.get("categoryType"))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            unique_metadata.append(item)
+
+        if len(unique_metadata) == 0:
+            errors.append(
+                f"(datasetID={dataset_id}, variableID={variable_id}, Key={normalized_input_key or 'AUTO'})"
+            )
+            continue
+
+        if len(unique_metadata) > 1:
+            options = ", ".join(
+                f"Key={item['Key']}, categoryType={item.get('categoryType')}"
+                for item in unique_metadata
+            )
+            raise ValueError(
+                "Multiple USES ties match the dataset/variable pair. "
+                f"Please disambiguate with Key for datasetID={dataset_id}, variableID={variable_id}. "
+                f"Matches: {options}"
+            )
+
+        resolved = unique_metadata[0]
+        category_type = resolved.get("categoryType")
+        if category_type is not None and not pd.isna(category_type):
+            category_type = validate_variable_category_type_value(category_type, allow_blank=True)
+
+        resolved_rows.append(
+            {
+                "datasetID": dataset_id,
+                "variableID": variable_id,
+                "_inputKey": normalized_input_key,
+                "Key": resolved["Key"],
+                "categoryType": category_type,
+            }
+        )
+
+    if errors:
+        raise ValueError(
+            "No matching USES tie metadata found for dataset-variable merge rows: "
+            + ", ".join(errors)
+        )
+
+    resolved_df = pd.DataFrame(resolved_rows).drop_duplicates()
+    merge_cols = ["datasetID", "variableID"] + (["Key"] if key_col_present else [])
+
+    if key_col_present:
+        original_key_series = dataset["Key"].fillna("").astype(str).str.strip()
+        merge_source = dataset.copy()
+        merge_source["_inputKey"] = original_key_series
+        merge_source = merge_source.drop(columns=["Key"])
+        merged = merge_source.merge(
+            resolved_df,
+            on=["datasetID", "variableID", "_inputKey"],
+            how="left",
+        )
+        merged = merged.drop(columns=["_inputKey"])
+    else:
+        merged = dataset.merge(
+            resolved_df.drop(columns=["_inputKey"]),
+            on=["datasetID", "variableID"],
+            how="left",
+        )
+
+    if merged["Key"].isna().any():
+        bad_rows = merged.index[merged["Key"].isna()].tolist()
+        raise ValueError(f"Failed to resolve USES metadata for rows: {bad_rows}")
+
+    return merged
+
+def sync_dataset_variable_merging_metadata(database, user="system"):
+    driver = getDriver(database)
+
+    query = """
+    MATCH (d:DATASET)-[r:MERGING]->(v:VARIABLE)
+    OPTIONAL MATCH (d)-[u:USES]->(v)
+    WITH d, v, r, collect(DISTINCT {Key: u.Key, categoryType: u.categoryType}) AS rawMetadata
+    RETURN
+      elementId(r) AS relID,
+      d.CMID AS datasetID,
+      v.CMID AS variableID,
+      r.stack AS stackID,
+      r.Key AS existingKey,
+      r.categoryType AS existingCategoryType,
+      rawMetadata AS rawMetadata
+    """
+
+    rows = getQuery(query, driver=driver) or []
+    updates = []
+    unresolved = []
+
+    for row in rows:
+        metadata = [
+            {
+                "Key": str(item.get("Key") or "").strip(),
+                "categoryType": item.get("categoryType"),
+            }
+            for item in (row.get("rawMetadata") or [])
+            if str(item.get("Key") or "").strip()
+        ]
+
+        existing_key = str(row.get("existingKey") or "").strip()
+        if existing_key:
+            metadata = [item for item in metadata if item["Key"] == existing_key]
+
+        unique_metadata = []
+        seen_pairs = set()
+        for item in metadata:
+            pair = (item["Key"], item.get("categoryType"))
+            if pair in seen_pairs:
+                continue
+            seen_pairs.add(pair)
+            unique_metadata.append(item)
+
+        if len(unique_metadata) != 1:
+            unresolved.append(
+                {
+                    "datasetID": row.get("datasetID"),
+                    "variableID": row.get("variableID"),
+                    "stackID": row.get("stackID"),
+                    "existingKey": existing_key,
+                    "candidateCount": len(unique_metadata),
+                }
+            )
+            continue
+
+        resolved = unique_metadata[0]
+        category_type = resolved.get("categoryType")
+        if category_type is not None and not pd.isna(category_type):
+            category_type = validate_variable_category_type_value(category_type, allow_blank=True)
+
+        updates.append(
+            {
+                "relID": row.get("relID"),
+                "Key": resolved["Key"],
+                "categoryType": category_type,
+            }
+        )
+
+    if updates:
+        update_query = """
+        UNWIND $rows AS row
+        MATCH ()-[r:MERGING]->()
+        WHERE elementId(r) = row.relID
+        SET r.Key = row.Key,
+            r.categoryType = row.categoryType
+        RETURN count(*) AS count
+        """
+        result = getQuery(update_query, driver=driver, params={"rows": updates}) or [{"count": 0}]
+        updated_count = result[0].get("count", 0)
+    else:
+        updated_count = 0
+
+    updateLog(
+        f"log/{user}uploadProgress.txt",
+        f"Synchronized dataset-variable MERGING metadata for {updated_count} ties",
+        write="a",
+    )
+
+    return {
+        "updated": updated_count,
+        "unresolved": unresolved,
+    }
+
 # creates merging ties from  stack and dataset to variable.
 def create_mties_variables(database, user, dataset):
     driver = getDriver(database)
@@ -1388,6 +1603,7 @@ def create_mties_variables(database, user, dataset):
         if stacks.empty:
             raise ValueError("No stacks found for the provided mergingIDs and datasetIDs")
         dataset = dataset.merge(stacks[["mergingID","stackID","datasetID"]], on=["mergingID","datasetID"], how="left")
+    dataset = _hydrate_dataset_variable_merging_metadata(driver, dataset)
     # create merging ties between stacks and variables
     
     # create dict with ids and properties
@@ -1423,7 +1639,7 @@ def create_mties_variables(database, user, dataset):
     top_level = ["datasetID", "variableID", "Key"]
     rows = dataset.copy()
     rows.rename(columns={"stackID":"stack"}, inplace=True)
-    property_columns = ["stack","Key","datasetTransform"]
+    property_columns = ["stack","Key","categoryType","datasetTransform"]
     property_columns = [col for col in property_columns if col in rows.columns.tolist()]
     
     nested = []
@@ -1972,7 +2188,7 @@ def input_Nodes_Uses(
         elif uploadOption == "merging_add" or uploadOption == "merging_replace":
             if mergingType == "merging_ties_to_variables":
                 required = ["stackID", "variableID"]
-                if "datasetTransform" in dataset.columns:
+                if "datasetTransform" in dataset.columns or "categoryType" in dataset.columns:
                     required = ["stackID", "variableID","datasetID", "Key"]
             elif mergingType == "equivalence_ties":
                     required = ["categoryID1", "categoryID2","Key","datasetID","stackID"]
@@ -2789,7 +3005,7 @@ def input_Nodes_Uses(
         for i in string_cols:
             # only checks for properties that are selected to be added
             if i in optionalProperties:                
-                if i == "datasetTransform":
+                if i in ["datasetTransform", "categoryType"]:
                     query = """UNWIND $rows AS row
                     OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:MERGING {stack: row.stackID, Key: row.Key}]->(b:VARIABLE {CMID: row.variableID})
                     RETURN r[$column] AS existing_value, row"""

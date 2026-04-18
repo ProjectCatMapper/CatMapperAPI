@@ -22,6 +22,7 @@ def test_merge_template_summary_for_merging_node(client, monkeypatch):
                     "targetCMName": "variable one",
                     "tieStackID": "S1",
                     "Key": "Site_Num == AZ D:11:2030",
+                    "categoryType": "CONTINUOUS",
                     "varName": "value_a",
                     "stackTransform": '[{"op":"as_numeric","target":"value_a"}]',
                     "datasetTransform": '[{"op":"copy","target":"value_a","sources":["raw_a"]}]',
@@ -70,6 +71,7 @@ def test_merge_template_summary_for_merging_node(client, monkeypatch):
     assert payload["mergingTies"][0]["variableFilter"] == '[{"op":"drop_na","target":"value_a"}]'
     assert payload["mergingTies"][0]["stackTransform"] == '[{"op":"as_numeric","target":"value_a"}]'
     assert payload["mergingTies"][0]["Key"] == "Site_Num == AZ D:11:2030"
+    assert payload["mergingTies"][0]["categoryType"] == "CONTINUOUS"
 
 
 def test_merge_template_summary_for_stack_node(client, monkeypatch):
@@ -105,6 +107,7 @@ def test_merge_template_summary_for_stack_node(client, monkeypatch):
                     "targetCMName": "variable one",
                     "tieStackID": "S1",
                     "Key": "Feature == kiva",
+                    "categoryType": "CATEGORICAL",
                     "varName": "value_a",
                     "stackTransform": '[{"op":"copy","target":"value_a","sources":["raw_a"]}]',
                     "datasetTransform": None,
@@ -132,3 +135,4 @@ def test_merge_template_summary_for_stack_node(client, monkeypatch):
     assert payload["equivalenceTies"][0]["extracted Key"] == "Culture_S1"
     assert payload["mergingTies"][0]["summaryStatistic"] == "median"
     assert payload["mergingTies"][0]["Key"] == "Feature == kiva"
+    assert payload["mergingTies"][0]["categoryType"] == "CATEGORICAL"

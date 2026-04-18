@@ -538,6 +538,7 @@ def build_merge_template_summary_payload(database, cmid):
           target.CMName AS targetCMName,
           r.stack AS tieStackID,
           dr.Key AS Key,
+          dr.categoryType AS categoryType,
           r.varName AS varName,
           r.stackTransform AS stackTransform,
           dr.datasetTransform AS datasetTransform,

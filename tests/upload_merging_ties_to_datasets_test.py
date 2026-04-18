@@ -27,6 +27,21 @@ def _fake_upload_query(rel_count_stack_merging=1, rel_count_stack_dataset=1):
                 }
                 for row in params["rows"]
             ]
+        if "collect(DISTINCT {Key: u.Key, categoryType: u.categoryType}) AS usesMetadata" in query:
+            return [
+                {
+                    "datasetID": row["datasetID"],
+                    "variableID": row["variableID"],
+                    "inputKey": row.get("Key"),
+                    "usesMetadata": [
+                        {
+                            "Key": row.get("Key"),
+                            "categoryType": "CONTINUOUS",
+                        }
+                    ],
+                }
+                for row in params["rows"]
+            ]
         if "OPTIONAL MATCH (d:DATASET {CMID: datasetID})<-[r1:MERGING]-(s:STACK)<-[r:MERGING]-(m:MERGING {CMID: mergingID})" in query:
             return [
                 {
@@ -133,6 +148,21 @@ def test_add_merging_to_variables_with_explicit_stackid_skips_inferred_bridge_ch
                     "stackID": row["stackID"],
                     "mergingID": row["mergingID"],
                     "rel_count": 1,
+                }
+                for row in params["rows"]
+            ]
+        if "collect(DISTINCT {Key: u.Key, categoryType: u.categoryType}) AS usesMetadata" in query:
+            return [
+                {
+                    "datasetID": row["datasetID"],
+                    "variableID": row["variableID"],
+                    "inputKey": row.get("Key"),
+                    "usesMetadata": [
+                        {
+                            "Key": row.get("Key"),
+                            "categoryType": "CONTINUOUS",
+                        }
+                    ],
                 }
                 for row in params["rows"]
             ]
