@@ -27,6 +27,7 @@ def test_create_mties_variables_persists_filter_and_summary_properties(monkeypat
                 "mergingID": "M1",
                 "datasetID": "D1",
                 "variableID": "V1",
+                "Key": "Site_Num == AZ D:11:2030",
                 "varName": "value_a",
                 "stackTransform": '[{"op":"as_numeric","target":"value_a"}]',
                 "variableFilter": '[{"op":"drop_na","target":"value_a"}]',
@@ -45,4 +46,7 @@ def test_create_mties_variables_persists_filter_and_summary_properties(monkeypat
     assert stack_params["properties"]["variableFilter"] == '[{"op":"drop_na","target":"value_a"}]'
     assert stack_params["properties"]["summaryStatistic"] == "mean"
     dataset_params = queries[2]["params"]["rows"][0]
+    assert "{stack: row.properties.stack, Key: row.properties.Key}" in queries[2]["query"]
+    assert dataset_params["Key"] == "Site_Num == AZ D:11:2030"
+    assert dataset_params["properties"]["Key"] == "Site_Num == AZ D:11:2030"
     assert dataset_params["properties"]["datasetTransform"] == '[{"op":"copy","target":"value_a","sources":["raw_a"]}]'

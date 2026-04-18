@@ -7,6 +7,30 @@ def test_merge_template_summary_for_merging_node(client, monkeypatch):
     def fake_get_query(query, _driver=None, params=None):
         if "RETURN labels(n) AS labels" in query:
             return [{"labels": ["DATASET", "MERGING"]}]
+        if "MATCH (s:STACK {CMID: stackID})-[r:MERGING]->(target:VARIABLE)" in query:
+            return [
+                {
+                    "mergingID": "M1",
+                    "mergingCMName": "merge one",
+                    "stackID": "S1",
+                    "stackCMName": "stack test 1",
+                    "relationship": "MERGING",
+                    "targetLabels": ["VARIABLE"],
+                    "datasetID": "D1",
+                    "datasetCMName": "dataset one",
+                    "targetCMID": "V1",
+                    "targetCMName": "variable one",
+                    "tieStackID": "S1",
+                    "Key": "Site_Num == AZ D:11:2030",
+                    "varName": "value_a",
+                    "stackTransform": '[{"op":"as_numeric","target":"value_a"}]',
+                    "datasetTransform": '[{"op":"copy","target":"value_a","sources":["raw_a"]}]',
+                    "variableFilter": '[{"op":"drop_na","target":"value_a"}]',
+                    "summaryStatistic": "mean",
+                    "summaryFilter": None,
+                    "summaryWeight": None,
+                }
+            ]
         if "OPTIONAL MATCH (s)-[:MERGING]->(d:DATASET)" in query:
             return [
                 {
@@ -27,27 +51,6 @@ def test_merge_template_summary_for_merging_node(client, monkeypatch):
                     "datasetCMName": "dataset one",
                 }
             ]
-        if "MATCH (s:STACK {CMID: stackID})-[r:MERGING]->(target)" in query:
-            return [
-                {
-                    "mergingID": "M1",
-                    "mergingCMName": "merge one",
-                    "stackID": "S1",
-                    "stackCMName": "stack test 1",
-                    "relationship": "MERGING",
-                    "targetLabels": ["VARIABLE"],
-                    "targetCMID": "V1",
-                    "targetCMName": "variable one",
-                    "tieStackID": "S1",
-                    "varName": "value_a",
-                    "stackTransform": '[{"op":"as_numeric","target":"value_a"}]',
-                    "datasetTransform": '[{"op":"copy","target":"value_a","sources":["raw_a"]}]',
-                    "variableFilter": '[{"op":"drop_na","target":"value_a"}]',
-                    "summaryStatistic": "mean",
-                    "summaryFilter": None,
-                    "summaryWeight": None,
-                }
-            ]
         if "MATCH (c1:CATEGORY)-[e:EQUIVALENT {stack: stackID}]->(c2:CATEGORY)" in query:
             return [{"stackID": "S1", "datasetID": "D1", "Key": "Site == Red Rock && Region == Southwest"}]
         return []
@@ -66,6 +69,7 @@ def test_merge_template_summary_for_merging_node(client, monkeypatch):
     assert payload["equivalenceTies"][0]["extracted Key"] == "Site_S1 && Region_S1"
     assert payload["mergingTies"][0]["variableFilter"] == '[{"op":"drop_na","target":"value_a"}]'
     assert payload["mergingTies"][0]["stackTransform"] == '[{"op":"as_numeric","target":"value_a"}]'
+    assert payload["mergingTies"][0]["Key"] == "Site_Num == AZ D:11:2030"
 
 
 def test_merge_template_summary_for_stack_node(client, monkeypatch):
@@ -86,7 +90,7 @@ def test_merge_template_summary_for_stack_node(client, monkeypatch):
                     "variableCount": 15,
                 }
             ]
-        if "MATCH (s:STACK {CMID: stackID})-[r:MERGING]->(target)" in query:
+        if "MATCH (s:STACK {CMID: stackID})-[r:MERGING]->(target:VARIABLE)" in query:
             return [
                 {
                     "mergingID": "M1",
@@ -95,9 +99,12 @@ def test_merge_template_summary_for_stack_node(client, monkeypatch):
                     "stackCMName": "stack one",
                     "relationship": "MERGING",
                     "targetLabels": ["VARIABLE"],
+                    "datasetID": "D1",
+                    "datasetCMName": "dataset one",
                     "targetCMID": "V1",
                     "targetCMName": "variable one",
                     "tieStackID": "S1",
+                    "Key": "Feature == kiva",
                     "varName": "value_a",
                     "stackTransform": '[{"op":"copy","target":"value_a","sources":["raw_a"]}]',
                     "datasetTransform": None,
@@ -124,3 +131,4 @@ def test_merge_template_summary_for_stack_node(client, monkeypatch):
     assert payload["equivalenceTies"][0]["Key"] == "Culture_S1 == Pueblo"
     assert payload["equivalenceTies"][0]["extracted Key"] == "Culture_S1"
     assert payload["mergingTies"][0]["summaryStatistic"] == "median"
+    assert payload["mergingTies"][0]["Key"] == "Feature == kiva"

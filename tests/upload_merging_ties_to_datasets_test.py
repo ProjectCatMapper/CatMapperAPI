@@ -97,6 +97,7 @@ def test_add_merging_to_variables_still_errors_when_stack_merging_tie_missing(mo
                     "stackID": "S1",
                     "datasetID": "D1",
                     "variableID": "V1",
+                    "Key": "Site_Num == AZ D:11:2030",
                     "varName": "v",
                 }
             ],
@@ -165,6 +166,7 @@ def test_add_merging_to_variables_with_explicit_stackid_skips_inferred_bridge_ch
                 "stackID": "S1",
                 "datasetID": "D1",
                 "variableID": "V1",
+                "Key": "Site_Num == AZ D:11:2030",
                 "varName": "v",
             }
         ],

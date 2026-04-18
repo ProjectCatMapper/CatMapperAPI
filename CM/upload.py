@@ -1378,7 +1378,7 @@ def create_mties_stacks(database, user, dataset):
 def create_mties_variables(database, user, dataset):
     driver = getDriver(database)
     mergingID = dataset["mergingID"].unique().tolist()
-    required_cols = ["mergingID","variableID","varName","datasetID"]
+    required_cols = ["mergingID","variableID","varName","datasetID","Key"]
     for col in required_cols:
         if col not in dataset.columns:
             raise ValueError(f"Missing required column: {col}")
@@ -1420,10 +1420,10 @@ def create_mties_variables(database, user, dataset):
         raise ValueError(f"Expected to create {len(nested)} MERGING ties, but created {results[0]['count']}")
     
     # create merging ties between variables and datasets
-    top_level = ["datasetID", "variableID"]
+    top_level = ["datasetID", "variableID", "Key"]
     rows = dataset.copy()
     rows.rename(columns={"stackID":"stack"}, inplace=True)
-    property_columns = ["stack","datasetTransform"]
+    property_columns = ["stack","Key","datasetTransform"]
     property_columns = [col for col in property_columns if col in rows.columns.tolist()]
     
     nested = []
@@ -1436,7 +1436,7 @@ def create_mties_variables(database, user, dataset):
     unwind $rows as row
     MATCH (d:DATASET {CMID: row.datasetID})
     MATCH (v:VARIABLE {CMID: row.variableID})
-    MERGE (d)-[r:MERGING]->(v)
+    MERGE (d)-[r:MERGING {stack: row.properties.stack, Key: row.properties.Key}]->(v)
     SET r += row.properties
     RETURN count(*) AS count
     """
@@ -1560,12 +1560,12 @@ def updateMergeProperty(df,optionalProperties, database, user, mergingType, requ
         props = ", ".join(props)
       
         if mergingType == "merging_ties_to_variables":
-            if required == ["datasetID", "stackID", "variableID"]:
+            if set(required) == {"datasetID", "stackID", "variableID", "Key"}:
                 get_old_vals_query = f"""
                 UNWIND $rows AS row
                 MATCH (a:DATASET)-[r:MERGING]->(b:VARIABLE)
-                WHERE elementId(r) = row.relID AND a.CMID = row.datasetID AND b.CMID = row.variableID AND r.stack = row.stackID
-                RETURN elementId(r) AS relID, row.datasetID AS datasetID, row.stackID AS stackID, row.variableID AS variableID,
+                WHERE elementId(r) = row.relID AND a.CMID = row.datasetID AND b.CMID = row.variableID AND r.stack = row.stackID AND r.Key = row.Key
+                RETURN elementId(r) AS relID, row.datasetID AS datasetID, row.stackID AS stackID, row.variableID AS variableID, row.Key AS Key,
                     {{ {old_props} }} AS oldVals
                 """
             elif required == ["stackID", "variableID"]:
@@ -1603,14 +1603,14 @@ def updateMergeProperty(df,optionalProperties, database, user, mergingType, requ
         )
 
         if mergingType == "merging_ties_to_variables":
-            if required == ["datasetID", "stackID", "variableID"]:
+            if set(required) == {"datasetID", "stackID", "variableID", "Key"}:
                 q = f"""
                 UNWIND $rows AS row
                 MATCH (a:DATASET)-[r:MERGING]->(b:VARIABLE)
-                WHERE elementId(r) = row.relID AND a.CMID = row.datasetID AND b.CMID = row.variableID AND r.stack = row.stackID
+                WHERE elementId(r) = row.relID AND a.CMID = row.datasetID AND b.CMID = row.variableID AND r.stack = row.stackID AND r.Key = row.Key
                 WITH row, r
                 SET {props}
-                RETURN elementId(r) AS relID, row.datasetID AS datasetID, row.stackID AS stackID, row.variableID AS variableID,
+                RETURN elementId(r) AS relID, row.datasetID AS datasetID, row.stackID AS stackID, row.variableID AS variableID, row.Key AS Key,
                     {return_props}
                 """
             elif required == ["stackID", "variableID"]:
@@ -1966,14 +1966,14 @@ def input_Nodes_Uses(
             if mergingType == "merging_ties_to_datasets":
                 required = ["mergingID", "datasetID"]
             elif mergingType == "merging_ties_to_variables":
-                required = ["mergingID", "datasetID", "variableID", "varName"]
+                required = ["mergingID", "datasetID", "variableID", "varName", "Key"]
             elif mergingType == "equivalence_ties":
                 required = ["mergingID", "categoryID","Key","datasetID"]
         elif uploadOption == "merging_add" or uploadOption == "merging_replace":
             if mergingType == "merging_ties_to_variables":
                 required = ["stackID", "variableID"]
                 if "datasetTransform" in dataset.columns:
-                    required = ["stackID", "variableID","datasetID"]
+                    required = ["stackID", "variableID","datasetID", "Key"]
             elif mergingType == "equivalence_ties":
                     required = ["categoryID1", "categoryID2","Key","datasetID","stackID"]
         else:
@@ -2791,13 +2791,13 @@ def input_Nodes_Uses(
             if i in optionalProperties:                
                 if i == "datasetTransform":
                     query = """UNWIND $rows AS row
-                    OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:MERGING {stack: row.stackID}]->(b:VARIABLE {CMID: row.variableID})
+                    OPTIONAL MATCH (a:DATASET {CMID: row.datasetID})-[r:MERGING {stack: row.stackID, Key: row.Key}]->(b:VARIABLE {CMID: row.variableID})
                     RETURN r[$column] AS existing_value, row"""
 
                     result = getQuery(
                     query,
                     driver,
-                    params={"rows": dataset[["stackID","variableID","datasetID",i]].to_dict(orient="records"),"column":i},
+                    params={"rows": dataset[["stackID","variableID","datasetID","Key",i]].to_dict(orient="records"),"column":i},
                     type="dict",
                     )
 
@@ -2805,7 +2805,8 @@ def input_Nodes_Uses(
                         if j.get("existing_value") is not None:
                             raise ValueError(
                                 f"Property '{i}' already exists for MERGING tie between "
-                                f"DATASET {j['row']['datasetID']} and VARIABLE {j['row']['CMID']} with stackID {j['row']['stack']}"
+                                f"DATASET {j['row']['datasetID']} and VARIABLE {j['row']['variableID']} "
+                                f"with stackID {j['row']['stackID']} and Key {j['row']['Key']}"
                             )
                 else:
                     query = """UNWIND $rows AS row

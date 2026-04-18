@@ -522,8 +522,9 @@ def build_merge_template_summary_payload(database, cmid):
     if stack_ids:
         merging_ties_query = """
         UNWIND $stack_ids AS stackID
-        MATCH (s:STACK {CMID: stackID})-[r:MERGING]->(target)
+        MATCH (s:STACK {CMID: stackID})-[r:MERGING]->(target:VARIABLE)
         OPTIONAL MATCH (m:MERGING)-[:MERGING]->(s)
+        OPTIONAL MATCH (s)-[:MERGING]->(d:DATASET)-[dr:MERGING {stack: s.CMID}]->(target)
         RETURN
           m.CMID AS mergingID,
           m.CMName AS mergingCMName,
@@ -531,17 +532,20 @@ def build_merge_template_summary_payload(database, cmid):
           s.CMName AS stackCMName,
           type(r) AS relationship,
           labels(target) AS targetLabels,
+          d.CMID AS datasetID,
+          d.CMName AS datasetCMName,
           target.CMID AS targetCMID,
           target.CMName AS targetCMName,
           r.stack AS tieStackID,
+          dr.Key AS Key,
           r.varName AS varName,
           r.stackTransform AS stackTransform,
-          r.datasetTransform AS datasetTransform,
+          dr.datasetTransform AS datasetTransform,
           r.variableFilter AS variableFilter,
           r.summaryStatistic AS summaryStatistic,
           r.summaryFilter AS summaryFilter,
           r.summaryWeight AS summaryWeight
-        ORDER BY stackID, targetCMID
+        ORDER BY stackID, datasetID, targetCMID, Key
         """
         merging_ties = getQuery(merging_ties_query, driver, params={"stack_ids": stack_ids}) or []
 
