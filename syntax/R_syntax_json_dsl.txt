@@ -350,6 +350,10 @@ qa_truthy_env <- function(name) {
   tolower(trimws(value)) %in% c("1", "true", "yes", "y", "debug")
 }
 
+qa_log <- function(...) {
+  message(sprintf(...))
+}
+
 qa_build_linkfile_wide <- function(link_rows, dataset_id, stack_id, template_rows, variable_keys = character()) {
   working <- as.data.frame(link_rows, stringsAsFactors = FALSE, check.names = FALSE)
   legacy_mode <- !"stackID" %in% names(working)
@@ -474,20 +478,30 @@ qa_apply_summary_by_group <- function(df, group_cols, value_col, statistic) {
     summarise(!!value_col := qa_summarize_value(.data[[value_col]], statistic), .groups = "drop")
 }
 
-bundle_dir <- qa_bundle_dir()
 runtime_wd <- normalizePath("${wd}", winslash = "/", mustWork = FALSE)
+bundle_dir <- runtime_wd
 temp_dir <- file.path(bundle_dir, "temp")
 debug_keep_temp <- qa_truthy_env("CM_KEEP_TEMP") || qa_truthy_env("CM_DEBUG_MERGE")
-dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
 
+qa_log("Starting CatMapper merge runtime")
+qa_log("Bundle directory: %s", bundle_dir)
+qa_log("Working directory from template: %s", runtime_wd)
+setwd(runtime_wd)
+qa_log("Working directory set")
+dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
+qa_log("Temp directory ready: %s", temp_dir)
+
+qa_log("Loading merge workbook files")
 data <- rio::import(file.path(bundle_dir, "data.xlsx")) %>%
   as.data.frame(stringsAsFactors = FALSE, check.names = FALSE)
 categories <- rio::import(file.path(bundle_dir, "categories.xlsx")) %>%
   as.data.frame(stringsAsFactors = FALSE, check.names = FALSE)
+qa_log("Loaded %s variable-mapping row(s) and %s category/link row(s)", nrow(data), nrow(categories))
 
 template <- data %>%
   select(mergingID, mergingName, stackID, stackName, datasetID, datasetName, filePath) %>%
   distinct()
+qa_log("Prepared template with %s dataset row(s) across %s stack(s)", nrow(template), length(unique(template$stackID)))
 
 dataset_outputs <- list()
 for (i in seq_len(nrow(template))) {
@@ -495,6 +509,8 @@ for (i in seq_len(nrow(template))) {
   dataset_id <- row$datasetID[[1]]
   stack_id <- row$stackID[[1]]
   dataset_path <- qa_dataset_path(runtime_wd, row$filePath[[1]])
+  qa_log("Loading dataset %s (%s) for stack %s", dataset_id, row$datasetName[[1]], stack_id)
+  qa_log("Resolved dataset path: %s", dataset_path)
   if (!file.exists(dataset_path)) {
     stop(sprintf("Dataset file does not exist: %s", dataset_path), call. = FALSE)
   }
@@ -520,6 +536,7 @@ for (i in seq_len(nrow(template))) {
       dataset[[target_name]] <- as.character(dataset[[source_name]])
     }
   }
+  qa_log("Applied dataset-level transforms for %s", dataset_id)
 
   variable_keys <- unique(dataset_spec$variableKey[!is.na(dataset_spec$variableKey) & dataset_spec$variableKey != ""])
   linkfile <- qa_build_linkfile_wide(
@@ -529,7 +546,9 @@ for (i in seq_len(nrow(template))) {
     template_rows = template,
     variable_keys = variable_keys
   )
+  qa_log("Prepared %s link row(s) for dataset %s", nrow(linkfile), dataset_id)
   joined <- qa_join_dataset_to_linkfile(dataset, linkfile)
+  qa_log("Joined dataset %s to canonical categories: %s row(s)", dataset_id, nrow(joined))
 
   keep_cols <- unique(c("CMID", "CMName", dataset_spec$varName))
   keep_cols <- keep_cols[keep_cols %in% names(joined)]
@@ -542,10 +561,12 @@ for (i in seq_len(nrow(template))) {
   out$datasetName <- rep(row$datasetName[[1]], nrow(out))
   dataset_outputs[[dataset_id]] <- out
   rio::export(out, file.path(temp_dir, sprintf("%s-%s.csv", dataset_id, stack_id)))
+  qa_log("Saved processed dataset output for %s", dataset_id)
 }
 
 stack_outputs <- list()
 for (stack_id in unique(template$stackID)) {
+  qa_log("Building stack %s", stack_id)
   dataset_ids <- template %>%
     filter(stackID == stack_id) %>%
     pull(datasetID)
@@ -568,6 +589,7 @@ for (stack_id in unique(template$stackID)) {
       processed_stack <- qa_apply_transform_ast(processed_stack, stack_transform_json, "stackTransform")
     }
   }
+  qa_log("Applied stack-level filters/transforms for stack %s", stack_id)
 
   summary_stats <- vapply(
     stack_spec$summaryStatistic,
@@ -579,6 +601,7 @@ for (stack_id in unique(template$stackID)) {
     keep_cols <- unique(c("CMID", "CMName", stack_spec$varName))
     keep_cols <- keep_cols[keep_cols %in% names(processed_stack)]
     stack_outputs[[stack_id]] <- processed_stack[, keep_cols, drop = FALSE]
+    qa_log("Stack %s kept rowwise output with %s row(s)", stack_id, nrow(stack_outputs[[stack_id]]))
   } else {
     summary_parts <- list()
     for (spec_idx in seq_len(nrow(stack_spec))) {
@@ -597,11 +620,14 @@ for (stack_id in unique(template$stackID)) {
     }
 
     stack_outputs[[stack_id]] <- reduce(summary_parts, full_join, by = c("CMID", "CMName"))
+    qa_log("Stack %s summarized to %s row(s)", stack_id, nrow(stack_outputs[[stack_id]]))
   }
   rio::export(stack_outputs[[stack_id]], file.path(temp_dir, sprintf("stack-%s.csv", stack_id)))
+  qa_log("Saved stack output for %s", stack_id)
 }
 
 stack_ids <- names(stack_outputs)
+qa_log("Combining %s stack(s) into final output", length(stack_ids))
 output <- stack_outputs[[stack_ids[[1]]]]
 if (length(stack_ids) > 1) {
   for (idx in seq_along(stack_ids)[-1]) {
@@ -610,8 +636,12 @@ if (length(stack_ids) > 1) {
 }
 
 output_path <- file.path(bundle_dir, sprintf("%s-output.xlsx", template$mergingID[[1]]))
+qa_log("Writing final output to %s", output_path)
 rio::export(output, output_path)
 if (!debug_keep_temp) {
+  qa_log("Removing temp directory")
   unlink(temp_dir, recursive = TRUE)
+} else {
+  qa_log("Keeping temp directory because debug preservation is enabled")
 }
 message(sprintf("Wrote merged output to %s", output_path))

@@ -122,6 +122,9 @@ def test_create_syntax_uses_json_runtime_and_scoped_equivalence_rows(monkeypatch
     syntax_text = syntax_path.read_text(encoding="utf-8")
     assert "qa_apply_transform_ast" in syntax_text
     assert 'file.path(bundle_dir, "data.xlsx")' in syntax_text
+    assert "bundle_dir <- runtime_wd" in syntax_text
+    assert "setwd(runtime_wd)" in syntax_text
+    assert 'qa_log("Loading dataset %s (%s) for stack %s"' in syntax_text
     assert '[{"stepOrder":1,"op":"copy"' not in syntax_text
     assert 'else if (op == "in")' in syntax_text
     assert "    in =" not in syntax_text
