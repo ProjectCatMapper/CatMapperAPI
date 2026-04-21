@@ -1692,7 +1692,12 @@ def create_equivalence_ties(database, user, dataset):
     for col in required_cols:
         if col not in dataset.columns:
             raise ValueError(f"Missing required column: {col}")
-        
+
+    # Filter out rows with NaN or blank Key values
+    dataset = dataset[~(dataset['Key'].isna() | (dataset['Key'].astype(str).str.strip() == ''))].copy()
+    if dataset.empty:
+        raise ValueError("All rows have invalid or missing Key values. Cannot proceed.")
+
     # add stack ids if missing
     if not "stackID" in dataset.columns:
         updateLog(f"log/{user}uploadProgress.txt", "Finding missing stackIDs", write="a")
@@ -1700,7 +1705,7 @@ def create_equivalence_ties(database, user, dataset):
         if stacks.empty:
             raise ValueError("No stacks found for the provided mergingIDs and datasetIDs")
         dataset = dataset.merge(stacks[["mergingID","stackID","datasetID"]], on=["mergingID","datasetID"], how="left")
-        
+
     # return original CMIDs for dataset and Key
     original_cmids_query = """
     unwind $rows as row
@@ -1713,7 +1718,7 @@ def create_equivalence_ties(database, user, dataset):
     if original_cmids.empty:
         raise ValueError("No USES ties found for the provided datasetIDs and Keys")
     dataset = dataset.merge(original_cmids, on=["stackID","datasetID","Key"], how="left")
-        
+
     equivalence_ties_query = """
     unwind $rows as row
     MATCH (c1:CATEGORY {CMID: row.originalID})
