@@ -1706,18 +1706,10 @@ def create_equivalence_ties(database, user, dataset):
             raise ValueError("No stacks found for the provided mergingIDs and datasetIDs")
         dataset = dataset.merge(stacks[["mergingID","stackID","datasetID"]], on=["mergingID","datasetID"], how="left")
 
-    # return original CMIDs for dataset and Key
-    original_cmids_query = """
-    unwind $rows as row
-    MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
-    WHERE d.CMID = row.datasetID AND r.Key = row.Key
-    RETURN row.stackID as stackID,d.CMID AS datasetID, c.CMID AS originalID, r.Key as Key
-    """
-    original_cmids = getQuery(query=original_cmids_query, driver=driver, params={"rows": dataset[["stackID","datasetID","Key"]].to_dict(orient="records")}, type="df")
-    # Only necessary for pure API call
-    if original_cmids.empty:
-        raise ValueError("No USES ties found for the provided datasetIDs and Keys")
-    dataset = dataset.merge(original_cmids, on=["stackID","datasetID","Key"], how="left")
+
+    # Use the Key from the uploaded dataset directly, not from the USES tie
+    # Assume 'originalID' is the same as 'categoryID' from the uploaded dataset
+    dataset['originalID'] = dataset['categoryID']
 
     equivalence_ties_query = """
     unwind $rows as row
