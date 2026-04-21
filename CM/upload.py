@@ -1374,7 +1374,7 @@ def create_mties_stacks(database, user, dataset):
         "result": dataset
     }
 
-def _hydrate_dataset_variable_merging_metadata(driver, dataset):
+def _hydrate_dataset_variable_merging_metadata(driver, dataset, skip_missing_uses_error=False):
     required_cols = ["datasetID", "variableID"]
     missing = [col for col in required_cols if col not in dataset.columns]
     if missing:
@@ -1462,7 +1462,7 @@ def _hydrate_dataset_variable_merging_metadata(driver, dataset):
             }
         )
 
-    if errors:
+    if errors and not skip_missing_uses_error:
         raise ValueError(
             "No matching USES tie metadata found for dataset-variable merge rows: "
             + ", ".join(errors)
@@ -1491,7 +1491,8 @@ def _hydrate_dataset_variable_merging_metadata(driver, dataset):
 
     if merged["Key"].isna().any():
         bad_rows = merged.index[merged["Key"].isna()].tolist()
-        raise ValueError(f"Failed to resolve USES metadata for rows: {bad_rows}")
+        if not skip_missing_uses_error:
+            raise ValueError(f"Failed to resolve USES metadata for rows: {bad_rows}")
 
     return merged
 
@@ -1603,7 +1604,18 @@ def create_mties_variables(database, user, dataset):
         if stacks.empty:
             raise ValueError("No stacks found for the provided mergingIDs and datasetIDs")
         dataset = dataset.merge(stacks[["mergingID","stackID","datasetID"]], on=["mergingID","datasetID"], how="left")
-    dataset = _hydrate_dataset_variable_merging_metadata(driver, dataset)
+    # Determine if we should skip missing USES error based on caller context
+    import inspect
+    skip_missing_uses_error = False
+    stack = inspect.stack()
+    for frame in stack:
+        if frame.function == "input_Nodes_Uses":
+            uploadOption = frame.frame.f_locals.get("uploadOption")
+            mergingType = frame.frame.f_locals.get("mergingType")
+            if uploadOption == "add_merging":
+                skip_missing_uses_error = True
+            break
+    dataset = _hydrate_dataset_variable_merging_metadata(driver, dataset, skip_missing_uses_error=skip_missing_uses_error)
     # create merging ties between stacks and variables
     
     # create dict with ids and properties
