@@ -253,7 +253,7 @@ def updateContains(database, CMID=None):
         WITH rC, eventType, eventDate, range(0, size(eventType)-1) AS idxs
         UNWIND idxs AS i
         WITH rC, eventType[i] AS et,
-            CASE WHEN size(tostring(eventDate)) <= i THEN NULL ELSE eventDate[i] END AS ed
+            CASE WHEN size(eventDate) <= i THEN NULL ELSE eventDate[i] END AS ed
         WHERE et IS NOT NULL
 
         WITH rC,collect([et,ed]) AS eventPairs
