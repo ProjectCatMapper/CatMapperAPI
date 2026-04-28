@@ -74,6 +74,21 @@ def test_add_edit_delete_uses_raises_when_no_rows_are_updated(monkeypatch):
         admin.add_edit_delete_USES("sociomap", "tester", _base_input())
 
 
+def test_validate_parent_context_list_accepts_string_event_date(monkeypatch):
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        assert params == {"CMID": "AM27636"}
+        return [{"cmidExists": True}]
+
+    monkeypatch.setattr(admin, "getQuery", fake_get_query)
+
+    errors = admin.validate_parent_context_list(
+        object(),
+        ['{"parent":"AM27636","eventDate":"420","eventType":"FOLLOWS"}'],
+    )
+
+    assert errors == []
+
+
 def test_add_edit_delete_uses_handles_list_population_meta_type(monkeypatch):
     captured = {}
 

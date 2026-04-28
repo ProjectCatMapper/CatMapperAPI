@@ -269,11 +269,15 @@ def validate_parent_context_list(driver,parent_context_list):
                 errors.append((idx, "eventType is required when eventDate exists."))
                 continue
 
-            if not isinstance(event_date, int):
-                errors.append((idx, "eventDate must be an integer year"))
+            if isinstance(event_date, int):
+                event_year = event_date
+            elif isinstance(event_date, str) and re.fullmatch(r"-?\d+", event_date.strip()):
+                event_year = int(event_date.strip())
+            else:
+                errors.append((idx, "eventDate must be an integer year string"))
                 continue
 
-            if event_date > CURRENT_YEAR:
+            if event_year > CURRENT_YEAR:
                 errors.append((idx, f"eventDate out of range: {event_date}"))
                 continue
 
