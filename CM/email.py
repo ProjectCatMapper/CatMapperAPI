@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 from configparser import ConfigParser
 from flask_mail import Mail, Message
+from .brevo import brevo_enabled, send_transactional_email
 
 _config = ConfigParser()
 _config.read("config.ini")
@@ -66,6 +67,18 @@ def _build_mail_audit(sender: str, recipients: List[str]) -> Dict[str, Any]:
     }
 
 
+def _text_fallback(body: str) -> str:
+    text_body = re.sub(r"<\s*br\s*/?\s*>", "\n", body, flags=re.IGNORECASE)
+    text_body = re.sub(r"</\s*(p|tr|table|h[1-6])\s*>", "\n", text_body, flags=re.IGNORECASE)
+    text_body = re.sub(r"<[^>]+>", "", text_body)
+    return text_body
+
+
+def _sender_name() -> str:
+    value = str(os.getenv("MAIL_SENDER_NAME", "") or "").strip()
+    return value or "CatMapper"
+
+
 def _log_mail_audit(audit: Dict[str, Any], status: str, error: Optional[str] = None) -> None:
     recipients = ",".join(audit.get("recipients", []))
     msg = (
@@ -111,6 +124,31 @@ def sendEmail(
     """
     audit = _build_mail_audit(sender, recipients)
     try:
+        if brevo_enabled():
+            send_result = send_transactional_email(
+                sender_email=sender,
+                sender_name=_sender_name(),
+                recipients=recipients,
+                subject=subject,
+                text_content=_text_fallback(body) if html else body,
+                html_content=body if html else None,
+                attachments=attachments,
+                headers={
+                    "X-CatMapper-Message-ID": audit["message_id"],
+                    "X-CatMapper-Trace-ID": audit["trace_id"],
+                    "X-CatMapper-Sent-At": audit["sent_at_utc"],
+                },
+                tags=["catmapper"],
+            )
+            if isinstance(send_result, dict):
+                audit["provider"] = "brevo"
+                audit["provider_message_id"] = send_result.get("messageId") or ""
+            status = "Email sent successfully"
+            _log_mail_audit(audit, "success")
+            if return_metadata:
+                return {**audit, "status": status}
+            return status
+
         # Create the email message
         msg = Message(subject, recipients=recipients, sender=sender)
         if msg.extra_headers is None:
@@ -121,10 +159,7 @@ def sendEmail(
 
         if html:
             # Keep a plain-text fallback for clients that do not render HTML.
-            text_body = re.sub(r"<\s*br\s*/?\s*>", "\n", body, flags=re.IGNORECASE)
-            text_body = re.sub(r"</\s*(p|tr|table|h[1-6])\s*>", "\n", text_body, flags=re.IGNORECASE)
-            text_body = re.sub(r"<[^>]+>", "", text_body)
-            msg.body = text_body
+            msg.body = _text_fallback(body)
             msg.html = body
         else:
             msg.body = body

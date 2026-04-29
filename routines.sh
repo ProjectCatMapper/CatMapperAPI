@@ -1,6 +1,15 @@
 #!/bin/bash
 set -uo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+
+if [ -f "$repo_root/.brevo.env" ]; then
+    set -a
+    . "$repo_root/.brevo.env"
+    set +a
+fi
+
 mkdir -p /mnt/storage/app/CatMapperAPI/log
 
 api_url="${CATMAPPER_ROUTINES_URL:-https://127.0.0.1/runRoutines/all}"
@@ -116,7 +125,17 @@ fi
 body="${body}<br>Last routine output lines:<br><pre>${output_tail}</pre><br>\
 Last curl stderr lines:<br><pre>${error_tail}</pre>"
 
-if command -v sendmail >/dev/null 2>&1; then
+if [ -n "${BREVO_API_KEY:-${API_KEY:-}}" ] && command -v python3 >/dev/null 2>&1; then
+    python3 "$script_dir/send_transactional_email.py" \
+        --to "$recipient" \
+        --sender "admin@catmapper.org" \
+        --sender-name "${MAIL_SENDER_NAME:-CatMapper}" \
+        --subject "$subject" \
+        --html "$body" \
+        --text "CatMapper nightly routines wrapper detected a failure." \
+        --tag "catmapper" \
+        --tag "routines-failure"
+elif command -v sendmail >/dev/null 2>&1; then
     {
         echo "To: $recipient"
         echo "Subject: $subject"

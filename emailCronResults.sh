@@ -1,5 +1,16 @@
 #!/bin/bash
 
+set -uo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+
+if [ -f "$repo_root/.brevo.env" ]; then
+    set -a
+    . "$repo_root/.brevo.env"
+    set +a
+fi
+
 log_file="${1:-}"
 if [ -n "$log_file" ]; then
     mkdir -p "$(dirname "$log_file")"
@@ -42,5 +53,16 @@ fi
 # Email body
 body="Archamap last backed up: $archamap_last_modified<br>Sociomap last backed up: $sociomap_last_modified<br>GIS database last backed up: $gis_last_modified<br>User database last backed up: $user_last_modified<br>\nPlease check the logs for more details."
 
-# Send the email
-echo -e "$body" | mail -a "Content-Type: text/html" -s "$subject" admin@catmapper.org
+if [ -n "${BREVO_API_KEY:-${API_KEY:-}}" ] && command -v python3 >/dev/null 2>&1; then
+    python3 "$script_dir/send_transactional_email.py" \
+        --to "admin@catmapper.org" \
+        --sender "admin@catmapper.org" \
+        --sender-name "${MAIL_SENDER_NAME:-CatMapper}" \
+        --subject "$subject" \
+        --html "$body" \
+        --text "Please review the CatMapper backup timestamps." \
+        --tag "catmapper" \
+        --tag "backup-status"
+else
+    echo -e "$body" | mail -a "Content-Type: text/html" -s "$subject" admin@catmapper.org
+fi
