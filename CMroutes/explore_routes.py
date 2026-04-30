@@ -176,7 +176,9 @@ def _network_dataset_filter_clause(rel_variable):
     return f"""
         AND (
             $dataset_count = 0
-            OR ANY(dataset_filter IN $datasets WHERE toString({rel_variable}.referenceKey) CONTAINS dataset_filter)
+            OR ANY(dataset_filter IN $datasets WHERE ANY(reference_key IN apoc.convert.toStringList(coalesce({rel_variable}.referenceKey, []))
+                WHERE reference_key CONTAINS dataset_filter
+            ))
         )
     """
 
