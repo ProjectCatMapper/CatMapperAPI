@@ -44,6 +44,7 @@ def create_app():
     allowed_origins = [
     "https://catmapper.org",
     "https://test.catmapper.org",
+    "https://dev.catmapper.org",
     r"http://localhost:\d+"
     ]
 

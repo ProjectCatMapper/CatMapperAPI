@@ -209,23 +209,19 @@ def _get_crossdomain_matches(
     query = f"""
     UNWIND $datasets AS dataset
     MATCH (d:DATASET {{CMID: dataset}})-[r:USES]->(src:{source_domain})
-    CALL {{
-        WITH src
+    CALL (src) {{
         RETURN src AS srcExpanded, 0 AS sourceTie
         UNION
-        WITH src
         MATCH p=(src)-[rc:CONTAINS*1..{max_hops}]-(srcExpanded:{source_domain})
         WHERE isEmpty([rel IN rc WHERE rel.generic = true])
         RETURN srcExpanded, length(p) AS sourceTie
     }}
     MATCH (srcExpanded)-[:{of_relationship}]-(tgt:{target_domain})
-    CALL {{
-        WITH tgt
+    CALL (tgt) {{
         MATCH (outNode:{return_domain})
         WHERE elementId(outNode) = elementId(tgt)
         RETURN outNode, 0 AS targetTie
         UNION
-        WITH tgt
         MATCH p2=(tgt)-[tc:CONTAINS*1..{max_hops}]-(outNode:{return_domain})
         WHERE isEmpty([rel IN tc WHERE rel.generic = true])
         RETURN outNode, length(p2) AS targetTie

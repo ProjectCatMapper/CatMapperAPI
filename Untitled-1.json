@@ -1,6 +1,6 @@
 ["\"\n            match (a:ETHNICITY) where tolower(a.CMID) = tolower($term)\n            with a, a.CMID as matching, 0 as score\n            ",
     " where 'ETHNICITY' in labels(a) ",
-    "\n        with a, collect(matching) as matchingL, collect(score) as scores call {with matchingL, scores unwind matchingL as matching unwind scores as score return distinct matching, score order by score limit 1}\n        with a, matching, score\n        ",
+    "\n        with a, collect(matching) as matchingL, collect(score) as scores call (matchingL, scores) {unwind matchingL as matching unwind scores as score return distinct matching, score order by score limit 1}\n        with a, matching, score\n        ",
     " ",
     " ",
     "with distinct a, matching, score order by score limit 10 ",

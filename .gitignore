@@ -11,7 +11,7 @@ aws_credentials.*
 api_env/*
 lib/*
 lib64/*
-.gpg
+*.gpg
 pyvenv.cfg
 tmp/*
 *.pyc

@@ -457,7 +457,7 @@ def getBadCMID(database, mail=None, return_type="data"):
             query = f"""
             MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
             with apoc.coll.toSet([x in apoc.coll.flatten(collect(distinct coalesce(r.{property}, [])), true) where x is not null and not x = ""]) as val
-            call {{with val match (c:CATEGORY) where c.CMID in val return collect(c.CMID) as val2}}
+            call (val) {{match (c:CATEGORY) where c.CMID in val return collect(c.CMID) as val2}}
             with [i in val where not i in val2] as badlist
             unwind badlist as bad
             with bad
