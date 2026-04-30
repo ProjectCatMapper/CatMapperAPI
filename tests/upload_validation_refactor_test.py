@@ -5,11 +5,88 @@ import CM.upload as upload
 
 
 def test_collect_unique_column_values_for_multi_value_column():
-    dataset = pd.DataFrame({"language": ["AM1; AM2", "AM2;AM3", "", None, " AM1 "]})
+    dataset = pd.DataFrame({"language": ["AM1; AM2", "AM2;AM3", "", None, " AM1 ", "['AM4']"]})
 
     values = upload._collect_unique_column_values(dataset, "language", {"language"})
 
-    assert set(values) == {"AM1", "AM2", "AM3"}
+    assert set(values) == {"AM1", "AM2", "AM3", "AM4"}
+
+
+def test_normalize_semicolon_value_list_handles_stringified_lists():
+    assert upload._normalize_semicolon_value_list("['AM22269']") == ["AM22269"]
+    assert upload._normalize_semicolon_value_list('["AM22269", "AM22270"]') == [
+        "AM22269",
+        "AM22270",
+    ]
+    assert upload._normalize_semicolon_value_list("AM22269; AM22270") == [
+        "AM22269",
+        "AM22270",
+    ]
+
+
+def test_create_uses_normalizes_stringified_district_lists(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+    monkeypatch.setattr(upload, "getPropertiesMetadata", lambda driver: [
+        {"property": "Name", "metaType": "string"},
+        {"property": "district", "metaType": "CMID"},
+        {"property": "label", "metaType": "string"},
+    ])
+    monkeypatch.setattr(upload, "updateAltNames", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "createLog", lambda *args, **kwargs: None)
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (p:PROPERTY)" in query:
+            return [
+                {"property": "datasetID"},
+                {"property": "CMID"},
+                {"property": "Key"},
+                {"property": "Name"},
+                {"property": "district"},
+                {"property": "label"},
+            ]
+        if "RETURN count(*) AS count" in query:
+            return [0]
+        if params and "rows" in params:
+            captured["rows"] = params["rows"]
+            return [
+                {
+                    "nodeID": "node-1",
+                    "relID": "rel-1",
+                    "Key": "Type == Alpha",
+                    "datasetID": "AD1",
+                    "CMID": "AM1",
+                    "CMName": "Alpha",
+                    "Name": "Alpha",
+                    "district": ["AM22269"],
+                    "label": "DIALECT",
+                }
+            ]
+        return [1]
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    result = upload.createUSES(
+        pd.DataFrame(
+            [
+                {
+                    "datasetID": "AD1",
+                    "CMID": "AM1",
+                    "Key": "Type == Alpha",
+                    "Name": "Alpha",
+                    "district": "['AM22269']",
+                    "label": "DIALECT",
+                }
+            ]
+        ),
+        database="ArchaMap",
+        user="tester",
+    )
+
+    assert captured["rows"][0]["district"] == "AM22269"
+    assert result["links"][0]["district"] == "AM22269"
 
 
 def test_input_nodes_uses_formats_key_before_key_validation(monkeypatch):

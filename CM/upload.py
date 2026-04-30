@@ -9,6 +9,7 @@ from .metadata import getPropertiesMetadata
 
 import json
 import os
+import ast
 import pandas as pd
 import numpy as np
 import time
@@ -296,6 +297,23 @@ def createUSES(links, database, user):
             raise Exception(
                 f"Error: The following columns are not in properties: {', '.join(missing_cols)}"
             )
+
+        multi_value_columns = [
+            "language",
+            "district",
+            "District",
+            "country",
+            "religion",
+            "parent",
+            "period",
+            "culture",
+            "polity",
+        ]
+        for column_name in multi_value_columns:
+            if column_name in links.columns:
+                links[column_name] = links[column_name].apply(
+                    _normalize_semicolon_value_string
+                )
 
         # Convert all values to strings and replace NaN with empty strings
         links = links.fillna("").astype(str)
@@ -938,7 +956,18 @@ def _normalize_semicolon_value_list(value):
     else:
         if pd.isna(value):
             return tokens
-        iterable_values = [value]
+        raw_value = str(value).strip()
+        if raw_value.startswith("[") and raw_value.endswith("]"):
+            try:
+                parsed_value = ast.literal_eval(raw_value)
+                if isinstance(parsed_value, (list, tuple, set)):
+                    iterable_values = parsed_value
+                else:
+                    iterable_values = [value]
+            except (ValueError, SyntaxError):
+                iterable_values = [value]
+        else:
+            iterable_values = [value]
 
     for item in iterable_values:
         if item is None:
@@ -955,14 +984,20 @@ def _normalize_semicolon_value_list(value):
     return list(dict.fromkeys(tokens))
 
 
+def _normalize_semicolon_value_string(value):
+    return ";".join(_normalize_semicolon_value_list(value))
+
+
 def _collect_unique_column_values(dataset, column_name, multi_value_columns):
     if column_name not in dataset.columns:
         return []
 
-    values = dataset[column_name].fillna("").astype(str)
     if column_name in multi_value_columns:
-        values = values.str.split(";").explode()
+        values = dataset[column_name].apply(_normalize_semicolon_value_list).explode()
+    else:
+        values = dataset[column_name].fillna("").astype(str)
 
+    values = values.dropna()
     values = values.astype(str).str.strip()
     values = values[values != ""]
     if values.empty:
