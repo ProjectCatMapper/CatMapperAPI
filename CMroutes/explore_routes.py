@@ -172,11 +172,12 @@ def _normalize_dataset_filters(value):
     return _unique_preserve_order([item for item in values if item != "All"])
 
 
-def _network_dataset_filter_clause(rel_variable):
+def _network_dataset_filter_clause(rel_variable, has_dataset_filter):
+    if not has_dataset_filter:
+        return ""
     return f"""
         AND (
-            $dataset_count = 0
-            OR ANY(dataset_filter IN $datasets WHERE ANY(reference_key IN apoc.convert.toStringList(coalesce({rel_variable}.referenceKey, []))
+            ANY(dataset_filter IN $datasets WHERE ANY(reference_key IN coalesce({rel_variable}.referenceKey, [])
                 WHERE reference_key CONTAINS dataset_filter
             ))
         )
@@ -187,6 +188,7 @@ def _get_networkjs_payload(*, cmid, database, relation=None, domain=None, datase
     cmid_values = _split_csv_values(cmid)
     domains = _normalize_domains_value(domain)
     datasets = _normalize_dataset_filters(dataset)
+    has_dataset_filter = len(datasets) > 0
 
     relation_value = unlist(relation)
     if relation_value is None:
@@ -203,7 +205,7 @@ def _get_networkjs_payload(*, cmid, database, relation=None, domain=None, datase
         MATCH (a:DATASET {CMID: cmid})
         OPTIONAL MATCH (a)-[r:USES]->(e:CATEGORY)
         WHERE ($domain_count = 0 OR ANY(label IN labels(e) WHERE label IN $domains))
-        """ + _network_dataset_filter_clause("r") + """
+        """ + _network_dataset_filter_clause("r", has_dataset_filter) + """
         WITH a, collect({e: e, r: r})[0..$limit] AS pairs
         RETURN
             collect(distinct a) AS a,
@@ -242,7 +244,7 @@ def _get_networkjs_payload(*, cmid, database, relation=None, domain=None, datase
         MATCH (a:CATEGORY|DATASET {{CMID: cmid}})
         optional match (a)-[r:{relation_value}]-(e:CATEGORY|DATASET)
         WHERE (e IS NULL OR $domain_count = 0 OR ANY(label IN labels(e) WHERE label IN $domains))
-        {_network_dataset_filter_clause("r")}
+        {_network_dataset_filter_clause("r", has_dataset_filter)}
         with a, collect(distinct r)[0..$limit] as r, collect(distinct e)[0..$limit] as e
         return collect(distinct a) as a, r, e
         """

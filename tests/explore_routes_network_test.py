@@ -147,7 +147,7 @@ def test_networksjs_accepts_dataset_filter(client, monkeypatch):
     rel = {"start_node_id": "root-1", "end_node_id": "adm0-1", "type": "CONTAINS"}
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
-        assert "$dataset_count = 0" in query
+        assert "ANY(dataset_filter IN $datasets" in query
         assert kwargs["datasets"] == ["Dataset One"]
         assert kwargs["dataset_count"] == 1
         return [{"a": [root_node], "r": [rel], "e": [adm0_node]}]
