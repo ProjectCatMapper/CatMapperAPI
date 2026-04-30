@@ -167,9 +167,26 @@ def _normalize_domains_value(value):
     return _unique_preserve_order(domains)
 
 
-def _get_networkjs_payload(*, cmid, database, relation=None, domain=None, limit=10):
+def _normalize_dataset_filters(value):
+    values = _split_csv_values(value)
+    return _unique_preserve_order([item for item in values if item != "All"])
+
+
+def _network_dataset_filter_clause(rel_variable):
+    return f"""
+        AND (
+            $dataset_count = 0
+            OR ANY(dataset_filter IN $datasets WHERE ANY(reference_key IN custom.anytoList({rel_variable}.referenceKey, true)
+                WHERE toString(reference_key) CONTAINS dataset_filter
+            ))
+        )
+    """
+
+
+def _get_networkjs_payload(*, cmid, database, relation=None, domain=None, dataset=None, limit=10):
     cmid_values = _split_csv_values(cmid)
     domains = _normalize_domains_value(domain)
+    datasets = _normalize_dataset_filters(dataset)
 
     relation_value = unlist(relation)
     if relation_value is None:
@@ -185,7 +202,8 @@ def _get_networkjs_payload(*, cmid, database, relation=None, domain=None, limit=
         unwind $cmid as cmid
         MATCH (a:DATASET {CMID: cmid})
         OPTIONAL MATCH (a)-[r:USES]->(e:CATEGORY)
-        WHERE $domain_count = 0 OR ANY(label IN labels(e) WHERE label IN $domains)
+        WHERE ($domain_count = 0 OR ANY(label IN labels(e) WHERE label IN $domains))
+        """ + _network_dataset_filter_clause("r") + """
         WITH a, collect({e: e, r: r})[0..$limit] AS pairs
         RETURN
             collect(distinct a) AS a,
@@ -223,7 +241,8 @@ def _get_networkjs_payload(*, cmid, database, relation=None, domain=None, limit=
         unwind $cmid as cmid
         MATCH (a:CATEGORY|DATASET {{CMID: cmid}})
         optional match (a)-[r:{relation_value}]-(e:CATEGORY|DATASET)
-        WHERE e IS NULL OR $domain_count = 0 OR ANY(label IN labels(e) WHERE label IN $domains)
+        WHERE (e IS NULL OR $domain_count = 0 OR ANY(label IN labels(e) WHERE label IN $domains))
+        {_network_dataset_filter_clause("r")}
         with a, collect(distinct r)[0..$limit] as r, collect(distinct e)[0..$limit] as e
         return collect(distinct a) as a, r, e
         """
@@ -235,6 +254,8 @@ def _get_networkjs_payload(*, cmid, database, relation=None, domain=None, limit=
         limit=int(limit),
         domains=domains,
         domain_count=len(domains),
+        datasets=datasets,
+        dataset_count=len(datasets),
         type="records",
     )
     if not result:
@@ -295,6 +316,93 @@ def _get_networkjs_payload(*, cmid, database, relation=None, domain=None, limit=
             "cmid": cmid_values,
             "database": database,
             "domain": domains,
+            "dataset": datasets,
+            "relation": relation_value,
+        }],
+    }
+
+
+def _get_network_options_payload(*, cmid, database, relation=None):
+    cmid_values = _split_csv_values(cmid)
+    relation_value = unlist(relation)
+    if relation_value:
+        relation_value = sanitize_cypher_identifier(relation_value, "relationship")
+
+    driver = getDriver(database)
+
+    bad_relations = ["HAS_LOG", "IS", "HAS_VECTOR"]
+    rel_rows = getQuery(
+        """
+        UNWIND $cmid AS cmid
+        MATCH (a {CMID: cmid})-[r]-()
+        WITH DISTINCT type(r) AS relationship
+        WHERE NOT relationship IN $bad_relations
+        RETURN relationship
+        """,
+        driver=driver,
+        cmid=cmid_values,
+        bad_relations=bad_relations,
+        type="records",
+    )
+    relationships = _unique_preserve_order(
+        sorted(
+            [row.get("relationship") for row in rel_rows if row.get("relationship") and row.get("relationship") not in bad_relations],
+            key=custom_sort,
+        )
+    )
+
+    if not relation_value and relationships:
+        relation_value = relationships[0]
+    if not relation_value:
+        relation_value = "USES"
+
+    domain_rows = getQuery(
+        """
+        UNWIND $cmid AS cmid
+        MATCH (a {CMID: cmid})-[r]-(e)
+        WHERE type(r) = $relation
+        UNWIND labels(e) AS domain
+        WITH DISTINCT domain
+        WHERE domain <> 'CATEGORY'
+        RETURN domain
+        ORDER BY domain
+        """,
+        driver=driver,
+        cmid=cmid_values,
+        relation=relation_value,
+        type="records",
+    )
+    domains = [row.get("domain") for row in domain_rows if row.get("domain")]
+
+    dataset_rows = getQuery(
+        """
+        UNWIND $cmid AS cmid
+        MATCH (a {CMID: cmid})-[r]-(e)
+        WHERE type(r) = $relation AND r.referenceKey IS NOT NULL
+        UNWIND custom.anytoList(r.referenceKey, true) AS referenceKey
+        WITH CASE
+            WHEN toString(referenceKey) CONTAINS ' Key:' THEN split(toString(referenceKey), ' Key:')[0]
+            ELSE toString(referenceKey)
+        END AS dataset
+        WITH DISTINCT trim(dataset) AS dataset
+        WHERE dataset <> ''
+        RETURN dataset
+        ORDER BY dataset
+        """,
+        driver=driver,
+        cmid=cmid_values,
+        relation=relation_value,
+        type="records",
+    )
+    datasets = ["All"] + [row.get("dataset") for row in dataset_rows if row.get("dataset")]
+
+    return {
+        "relationships": relationships,
+        "domains": domains,
+        "datasets": datasets,
+        "params": [{
+            "cmid": cmid_values,
+            "database": database,
             "relation": relation_value,
         }],
     }
@@ -583,6 +691,7 @@ def getNetworkjs():
     try:
         cmid = request.args.get('cmid')
         domain = request.args.get('domain')
+        dataset = request.args.get('dataset')
         limit = int(request.args.get('limit'))
         relation = request.args.get('relation')
         database = request.args.get('database')
@@ -592,7 +701,24 @@ def getNetworkjs():
             database=database,
             relation=relation,
             domain=domain,
+            dataset=dataset,
             limit=limit,
+        )
+    except Exception as e:
+        return str(e), 500
+
+
+@explore_bp.route('/networkOptions', methods=['GET'])
+def getNetworkOptions():
+    try:
+        cmid = request.args.get('cmid')
+        relation = request.args.get('relation')
+        database = request.args.get('database')
+
+        return _get_network_options_payload(
+            cmid=cmid,
+            database=database,
+            relation=relation,
         )
     except Exception as e:
         return str(e), 500

@@ -128,3 +128,78 @@ def test_networksjs_merging_root_includes_dataset_edges(client, monkeypatch):
     assert payload["node"] == [root_merging]
     assert payload["relations"] == [merging_to_stack, stack_to_dataset]
     assert payload["relNodes"] == [linked_stack, linked_dataset]
+
+
+def test_networksjs_accepts_dataset_filter(client, monkeypatch):
+    monkeypatch.setattr(explore_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(explore_routes, "serialize_node", lambda node: node)
+    monkeypatch.setattr(explore_routes, "serialize_relationship", lambda relationship: relationship)
+    monkeypatch.setattr(
+        explore_routes,
+        "flatten_json",
+        lambda entry: next(iter(entry.values())) if isinstance(entry, dict) and len(entry) == 1 else entry,
+    )
+    monkeypatch.setattr(explore_routes, "_get_label_metadata_map", lambda driver: {})
+    monkeypatch.setattr(explore_routes, "_apply_node_colors", lambda rows, label_metadata_map: None)
+
+    root_node = {"id": "root-1", "labels": ["CATEGORY"], "CMID": "AM1", "CMName": "Root"}
+    adm0_node = {"id": "adm0-1", "labels": ["CATEGORY", "ADM0"], "CMID": "AM2", "CMName": "Country"}
+    rel = {"start_node_id": "root-1", "end_node_id": "adm0-1", "type": "CONTAINS"}
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        assert "$dataset_count = 0" in query
+        assert kwargs["datasets"] == ["Dataset One"]
+        assert kwargs["dataset_count"] == 1
+        return [{"a": [root_node], "r": [rel], "e": [adm0_node]}]
+
+    monkeypatch.setattr(explore_routes, "getQuery", fake_get_query)
+
+    response = client.get(
+        "/networksjs",
+        query_string={
+            "cmid": "AM1",
+            "database": "archamap",
+            "relation": "CONTAINS",
+            "domain": "ADM0",
+            "dataset": "Dataset One",
+            "limit": 500,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["node"] == [root_node]
+    assert payload["relations"] == [rel]
+    assert payload["relNodes"] == [adm0_node]
+
+
+def test_network_options_returns_unlimited_filter_options(client, monkeypatch):
+    monkeypatch.setattr(explore_routes, "getDriver", lambda database: object())
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "RETURN relationship" in query:
+            return [
+                {"relationship": "CONTAINS"},
+                {"relationship": "VARIABLE_OF"},
+                {"relationship": "HAS_LOG"},
+            ]
+        if "UNWIND labels(e) AS domain" in query:
+            assert kwargs["relation"] == "VARIABLE_OF"
+            return [{"domain": "ADM0"}, {"domain": "VARIABLE"}]
+        if "RETURN dataset" in query:
+            assert kwargs["relation"] == "VARIABLE_OF"
+            return [{"dataset": "Dataset One"}, {"dataset": "Dataset Two"}]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(explore_routes, "getQuery", fake_get_query)
+
+    response = client.get(
+        "/networkOptions",
+        query_string={"cmid": "AM1", "database": "archamap", "relation": "VARIABLE_OF"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["relationships"] == ["CONTAINS", "VARIABLE_OF"]
+    assert payload["domains"] == ["ADM0", "VARIABLE"]
+    assert payload["datasets"] == ["All", "Dataset One", "Dataset Two"]
