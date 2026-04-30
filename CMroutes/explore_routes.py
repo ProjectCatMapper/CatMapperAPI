@@ -201,6 +201,7 @@ def _get_networkjs_payload(*, cmid, database, relation=None, domain=None, limit=
         // (:MERGING)-[:MERGING]->(:STACK)-[:MERGING]->(:VARIABLE)
         OPTIONAL MATCH (a)-[r1:MERGING]->(s:STACK)
         OPTIONAL MATCH (s)-[r2:MERGING]->(v:VARIABLE)
+        OPTIONAL MATCH (s)-[r8:MERGING]->(d:DATASET)
         // Include upstream path for dataset-centered view:
         // (:STACK)-[:MERGING]->(:DATASET) and (:MERGING)-[:MERGING]->(:STACK)
         OPTIONAL MATCH (s2:STACK)-[r5:MERGING]->(a)
@@ -213,8 +214,8 @@ def _get_networkjs_payload(*, cmid, database, relation=None, domain=None, limit=
            // (:STACK)-[:MERGING]->(:DATASET)
            OPTIONAL MATCH (a:STACK)-[r7:MERGING]->(d2:DATASET)
         WITH a,
-               [x IN collect(distinct r1) + collect(distinct r2) + collect(distinct r5) + collect(distinct r6) + collect(distinct r3) + collect(distinct r4) + collect(distinct r7) WHERE x IS NOT NULL][0..$limit] AS r,
-               [x IN collect(distinct s) + collect(distinct v) + collect(distinct s2) + collect(distinct m2) + collect(distinct m) + collect(distinct v2) + collect(distinct d2)
+               [x IN collect(distinct r1) + collect(distinct r2) + collect(distinct r8) + collect(distinct r5) + collect(distinct r6) + collect(distinct r3) + collect(distinct r4) + collect(distinct r7) WHERE x IS NOT NULL][0..$limit] AS r,
+               [x IN collect(distinct s) + collect(distinct v) + collect(distinct d) + collect(distinct s2) + collect(distinct m2) + collect(distinct m) + collect(distinct v2) + collect(distinct d2)
               WHERE x IS NOT NULL AND ($domain_count = 0 OR ANY(label IN labels(x) WHERE label IN $domains))][0..$limit] AS e
         RETURN collect(distinct a) AS a, r, e
         """

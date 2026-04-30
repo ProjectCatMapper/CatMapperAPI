@@ -92,3 +92,39 @@ def test_networksjs_merging_includes_stack_to_dataset_edges(client, monkeypatch)
     assert payload["node"] == [root_stack]
     assert payload["relations"] == [stack_to_dataset]
     assert payload["relNodes"] == [linked_dataset]
+
+
+def test_networksjs_merging_root_includes_dataset_edges(client, monkeypatch):
+    monkeypatch.setattr(explore_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(explore_routes, "serialize_node", lambda node: node)
+    monkeypatch.setattr(explore_routes, "serialize_relationship", lambda relationship: relationship)
+    monkeypatch.setattr(
+        explore_routes,
+        "flatten_json",
+        lambda entry: next(iter(entry.values())) if isinstance(entry, dict) and len(entry) == 1 else entry,
+    )
+    monkeypatch.setattr(explore_routes, "_get_label_metadata_map", lambda driver: {})
+    monkeypatch.setattr(explore_routes, "_apply_node_colors", lambda rows, label_metadata_map: None)
+
+    root_merging = {"id": "merging-1", "labels": ["DATASET", "MERGING"], "CMID": "AD1004", "CMName": "Merging"}
+    linked_stack = {"id": "stack-1", "labels": ["DATASET", "STACK"], "CMID": "AD1002", "CMName": "Stack"}
+    linked_dataset = {"id": "ds-1", "labels": ["DATASET"], "CMID": "AD1000", "CMName": "Dataset One"}
+    merging_to_stack = {"start_node_id": "merging-1", "end_node_id": "stack-1", "type": "MERGING"}
+    stack_to_dataset = {"start_node_id": "stack-1", "end_node_id": "ds-1", "type": "MERGING"}
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        assert "OPTIONAL MATCH (s)-[r8:MERGING]->(d:DATASET)" in query
+        return [{"a": [root_merging], "r": [merging_to_stack, stack_to_dataset], "e": [linked_stack, linked_dataset]}]
+
+    monkeypatch.setattr(explore_routes, "getQuery", fake_get_query)
+
+    response = client.get(
+        "/networksjs",
+        query_string={"cmid": "AD1004", "database": "archamap", "relation": "MERGING", "limit": 25},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["node"] == [root_merging]
+    assert payload["relations"] == [merging_to_stack, stack_to_dataset]
+    assert payload["relNodes"] == [linked_stack, linked_dataset]
