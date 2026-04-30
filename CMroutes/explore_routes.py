@@ -66,9 +66,8 @@ def _unique_preserve_order(values):
 
 def _get_effective_labels(labels, label_metadata_map):
     # Exclude generic structural labels from legend/color selection.
-    cleaned = _unique_preserve_order(
-        [lbl for lbl in labels if lbl and lbl not in ["CATEGORY", "DISTRICT"]]
-    )
+    labels = _unique_preserve_order([lbl for lbl in labels if lbl and lbl != "CATEGORY"])
+    cleaned = [lbl for lbl in labels if lbl != "DISTRICT"] or labels
     if not cleaned:
         return []
 

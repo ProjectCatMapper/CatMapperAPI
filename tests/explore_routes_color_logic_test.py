@@ -26,6 +26,31 @@ def test_apply_node_colors_keeps_group_when_no_subdomain_present():
     assert rows[0]["color"] == "#843c39"
 
 
+def test_apply_node_colors_keeps_district_label_when_it_is_only_domain():
+    rows = [{"labels": ["CATEGORY", "DISTRICT"]}]
+    label_metadata = {
+        "DISTRICT": {"color": "#1f77b4", "groupLabel": "DISTRICT"},
+    }
+
+    explore_routes._apply_node_colors(rows, label_metadata)
+
+    assert rows[0]["legendLabel"] == "DISTRICT"
+    assert rows[0]["color"] == "#1f77b4"
+
+
+def test_apply_node_colors_hides_district_when_other_domain_exists():
+    rows = [{"labels": ["CATEGORY", "DISTRICT", "ADM1"]}]
+    label_metadata = {
+        "DISTRICT": {"color": "#1f77b4", "groupLabel": "DISTRICT"},
+        "ADM1": {"color": "#2ca02c", "groupLabel": "ADM1"},
+    }
+
+    explore_routes._apply_node_colors(rows, label_metadata)
+
+    assert rows[0]["legendLabel"] == "ADM1"
+    assert rows[0]["color"] == "#2ca02c"
+
+
 def test_apply_node_colors_averages_distinct_top_level_labels():
     rows = [{"labels": ["CATEGORY", "ADM0", "ADM1"]}]
     label_metadata = {
