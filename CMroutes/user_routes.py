@@ -83,11 +83,30 @@ def _send_verification_email(email, verification_code, action_label, username=No
         raise Exception(result)
 
 
+def _registration_frontend_origin():
+    configured_origin = (os.getenv("CATMAPPER_FRONTEND_URL") or "").strip().rstrip("/")
+    if configured_origin:
+        return configured_origin
+
+    request_origin = (request.headers.get("Origin") or "").strip().rstrip("/")
+    allowed_origins = {
+        "https://catmapper.org",
+        "https://test.catmapper.org",
+        "https://dev.catmapper.org",
+    }
+    if request_origin in allowed_origins or request_origin.startswith("http://localhost:"):
+        return request_origin
+
+    host = (request.host or "").split(":", 1)[0].lower()
+    if host == "dev-api.catmapper.org":
+        return "https://dev.catmapper.org"
+    if host == "test-api.catmapper.org":
+        return "https://test.catmapper.org"
+    return "https://catmapper.org"
+
+
 def _registration_verify_base_url(database):
-    origin = (request.headers.get("Origin") or "").rstrip("/")
-    if origin:
-        return f"{origin}/{database}/register/verify"
-    return f"https://catmapper.org/{database}/register/verify"
+    return f"{_registration_frontend_origin()}/{database}/register/verify"
 
 
 def _send_registration_verification_email(email, verification_code, request_id, database, username=None):
