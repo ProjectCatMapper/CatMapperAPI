@@ -336,7 +336,7 @@ def _get_network_options_payload(*, cmid, database, relation=None):
     rel_rows = getQuery(
         """
         UNWIND $cmid AS cmid
-        MATCH (a {CMID: cmid})-[r]-()
+        MATCH (a:CATEGORY|DATASET {CMID: cmid})-[r]-()
         WITH DISTINCT type(r) AS relationship
         WHERE NOT relationship IN $bad_relations
         RETURN relationship
@@ -361,7 +361,7 @@ def _get_network_options_payload(*, cmid, database, relation=None):
     domain_rows = getQuery(
         """
         UNWIND $cmid AS cmid
-        MATCH (a {CMID: cmid})-[r]-(e)
+        MATCH (a:CATEGORY|DATASET {CMID: cmid})-[r]-(e)
         WHERE type(r) = $relation
         UNWIND labels(e) AS domain
         WITH DISTINCT domain
@@ -379,7 +379,7 @@ def _get_network_options_payload(*, cmid, database, relation=None):
     dataset_rows = getQuery(
         """
         UNWIND $cmid AS cmid
-        MATCH (a {CMID: cmid})-[r]-(e)
+        MATCH (a:CATEGORY {CMID: cmid})-[r]-(e)
         WHERE type(r) = $relation AND r.referenceKey IS NOT NULL
         UNWIND custom.anytoList(r.referenceKey, true) AS referenceKey
         WITH CASE
