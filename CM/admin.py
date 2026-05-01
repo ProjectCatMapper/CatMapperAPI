@@ -393,7 +393,7 @@ def add_edit_delete_USES(database,user,input):
                 if result:
                     raise ValueError(
                         f"Error: {result}"
-                    )
+                    )        
 
             data = {
                     'CMID': CMID,
@@ -602,6 +602,12 @@ def add_edit_delete_Node(database,user,input):
                 
     if changeNodeProperty == "District":
         validatePropertyCMID(changeNodeValue,changeNodeProperty,"DISTRICT",driver)
+    
+    if changeNodeProperty == "glottocode":
+        node_summary = getNodeMergeSummary(changeNodeID, driver)
+        if "LANGUOID" not in node_summary.get("labels", []):
+            raise Exception("Only nodes with a LANGUOID label can have a glottocode property")
+    
 
     if not changeNodeID or not addOrEditNode:
         return "CMID is empty or choice of add/edit/delete is empty"
