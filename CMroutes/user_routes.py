@@ -83,6 +83,69 @@ def _send_verification_email(email, verification_code, action_label, username=No
         raise Exception(result)
 
 
+def _registration_verify_base_url(database):
+    origin = (request.headers.get("Origin") or "").rstrip("/")
+    if origin:
+        return f"{origin}/{database}/register/verify"
+    return f"https://catmapper.org/{database}/register/verify"
+
+
+def _send_registration_verification_email(email, verification_code, request_id, database, username=None):
+    if not email:
+        raise Exception("User email is missing; cannot send verification code.")
+
+    from urllib.parse import urlencode
+
+    sender = get_default_sender()
+    verify_link = f"{_registration_verify_base_url(database)}?{urlencode({
+        'email': email,
+        'requestId': request_id,
+        'code': verification_code,
+    })}"
+    username_line = f"Username: {username}\n\n" if username else ""
+    body = (
+        "Hello,\n\n"
+        "Thanks for registering for CatMapper.\n"
+        f"{username_line}"
+        f"Your verification code is: {verification_code}\n\n"
+        f"You can also verify your email by opening this link:\n{verify_link}\n\n"
+        f"This code expires in {REQUEST_TTL_MINUTES} minutes.\n\n"
+        "After your email is verified, your registration will be sent for admin approval.\n\n"
+        "CatMapper Team"
+    )
+    result = sendEmail(
+        mail=mail,
+        subject="CatMapper Registration Email Verification",
+        recipients=[email],
+        body=body,
+        sender=sender,
+    )
+    if isinstance(result, str) and result.lower().startswith("error"):
+        raise Exception(result)
+
+
+def _send_new_registration_admin_email(first_name, last_name, email, database, intended_use):
+    mail_default = get_default_sender()
+    alert_recipients = get_alert_recipients()
+    if not alert_recipients:
+        return
+    body = f"""
+            Hello,
+            A new user has just requested registration.
+            Name: {first_name} {last_name}
+            email: {email}
+            database: {database}
+            description: {intended_use}
+            """
+    sendEmail(
+        mail,
+        subject="New registered user",
+        recipients=alert_recipients,
+        body=body,
+        sender=mail_default,
+    )
+
+
 def _cleanup_requests():
     now = datetime.utcnow()
     with REQUEST_LOCK:
@@ -295,6 +358,39 @@ def _load_user_by_identifier(identifier):
     return user_row
 
 
+def _load_any_user_by_identifier(identifier):
+    lookup = str(identifier or "").strip()
+    if not lookup:
+        raise Exception("Missing user identifier")
+
+    driver = getDriver("userdb")
+    query = """
+    MATCH (u:USER)
+    WHERE toString(u.userid) = toString($lookup)
+       OR toLower(u.username) = toLower($lookup)
+       OR toLower(u.email) = toLower($lookup)
+    RETURN
+      u.userid as userid,
+      u.first as first,
+      u.last as last,
+      u.username as username,
+      u.email as email,
+      u.database as database,
+      u.intendedUse as intendedUse,
+      u.createdAt as createdAt,
+      u.updatedAt as updatedAt,
+      u.passwordLastChangedAt as passwordLastChangedAt,
+      u.password as password,
+      coalesce(u.access, '') as access,
+      coalesce(u.pendingRegistrationVerificationRequests, []) as pendingRegistrationVerificationRequests
+    LIMIT 1
+    """
+    rows = getQuery(query, driver=driver, params={"lookup": lookup})
+    if not rows:
+        raise Exception("User not found")
+    return rows[0]
+
+
 def _verify_profile_credentials(userid, credentials):
     bearer_claims = verify_bearer_auth(required_userid=userid, req=request)
     if bearer_claims:
@@ -347,19 +443,36 @@ def _verify_profile_credentials(userid, credentials):
 def getnewuser():
     try:
 
-        mail_default = get_default_sender()
-        alert_recipients = get_alert_recipients()
         support_email = get_support_email() or "the configured support email"
-        data = request.get_data()
-        data = json.loads(data)
+        data = _read_json_payload()
         database = _normalize_database(data.get("database"))
-        firstName = data.get("firstName")
-        lastName = data.get("lastName")
-        email = data.get("email")
-        username = data.get("username")
-        password = data.get("password")
-        password = password_hash(password)
-        intendedUse = data.get("intendedUse")
+        firstName = str(data.get("firstName") or "").strip()
+        lastName = str(data.get("lastName") or "").strip()
+        email = str(data.get("email") or "").strip()
+        username = str(data.get("username") or "").strip()
+        raw_password = data.get("password")
+        intendedUse = str(data.get("intendedUse") or "").strip()
+
+        missing = [
+            field
+            for field, value in {
+                "database": database,
+                "firstName": firstName,
+                "lastName": lastName,
+                "email": email,
+                "username": username,
+                "password": raw_password,
+                "intendedUse": intendedUse,
+            }.items()
+            if not value
+        ]
+        if missing:
+            raise Exception(f"Missing required fields: {', '.join(missing)}")
+        if not _password_meets_policy(str(raw_password)):
+            raise Exception("Password must be at least 6 characters.")
+        password = password_hash(str(raw_password))
+        if not isinstance(password, str) or password.startswith("password hash failed"):
+            raise Exception("Unable to process password.")
 
         if database not in {"sociomap", "archamap"}:
             raise Exception("database must be 'sociomap' or 'archamap'")
@@ -367,66 +480,124 @@ def getnewuser():
         driver = getDriver("userdb")
 
         queryExists = """
-        MATCH (u:USER {username: $username})
-        return true as exists
+        MATCH (u:USER)
+        WHERE toLower(u.username) = toLower($username)
+           OR toLower(u.email) = toLower($email)
+        RETURN u.userid as userid, u.username as username, u.email as email, coalesce(u.access, '') as access
         """
-        data = getQuery(
-            queryExists, driver = driver, username=username, database=database)
+        existing_rows = getQuery(
+            queryExists, driver=driver, params={"username": username, "email": email}
+        )
+        existing_rows = existing_rows if isinstance(existing_rows, list) else []
+        blocking = [
+            row for row in existing_rows
+            if str(row.get("access") or "").lower() != "email_unverified"
+        ]
+        if blocking:
+            if any(str(row.get("username") or "").lower() == username.lower() for row in blocking):
+                raise Exception("Username already exists. Please try another username.")
+            raise Exception(f"Account with this email already exists. Please contact {support_email} to reset password.")
+        existing_userids = {
+            str(row.get("userid") or "")
+            for row in existing_rows
+            if row.get("userid")
+        }
+        if len(existing_userids) > 1:
+            raise Exception("Username or email already exists. Please use the original registration details or contact support.")
+        existing = existing_rows[0] if existing_rows else None
 
-        if isinstance(data, list) and data and data[0].get("exists") is not None:
-            raise Exception(
-                "Username already exists. Please try another username.")
+        request_id = f"register_{uuid.uuid4().hex[:12]}"
+        verification_code = f"{secrets.randbelow(900000) + 100000}"
+        verification_entries = [{
+            "request_id": request_id,
+            "verification_code": verification_code,
+            "expires_at": (datetime.utcnow() + timedelta(minutes=REQUEST_TTL_MINUTES)).isoformat() + "Z",
+        }]
 
-        queryExists = """
-        MATCH (u:USER {email: $email})
-        return true as exists
-        """
-        data = getQuery(
-            queryExists, driver = driver, email=email, database=database)
-
-        if isinstance(data, list) and data and data[0].get("exists") is not None:
-            raise Exception(
-                f"Account with this email already exists. Please contact {support_email} to reset password.")
-
-        query = """
+        if existing:
+            query = """
+                match (u:USER {userid: toString($userid)})
+                set u.username = $username,
+                u.first = $firstName,
+                u.last = $lastName,
+                u.email = $email,
+                u.access = "email_unverified",
+                u.log = coalesce(u.log, []) + [toString(datetime()) + ": resent registration email verification"],
+                u.password = $password,
+                u.role = coalesce(u.role, 'user'),
+                u.intendedUse = $intendedUse,
+                u.database = split($database,"|"),
+                u.pendingRegistrationVerificationRequests = $verificationRequests,
+                u.updatedAt = $updatedAt
+                return u.userid as userid
+                """
+            query_params = {
+                "userid": existing.get("userid"),
+                "firstName": firstName,
+                "lastName": lastName,
+                "email": email,
+                "password": password,
+                "username": username,
+                "intendedUse": intendedUse,
+                "database": database,
+                "verificationRequests": _serialize_entries(verification_entries),
+                "updatedAt": _now_iso(),
+            }
+        else:
+            query = """
                 match (p:USER) with toInteger(p.userid) + 1 as id order by id desc limit 1
                 merge (u:USER {username: $username})
                 on create set u.username = $username,
                 u.first = $firstName,
                 u.last = $lastName,
                 u.email = $email,
-                u.access = "pending",
-                u.log = [toString(datetime()) + ": created user via API", toString(datetime()) + \
-                                ": created autoapproved via API during workshop registration"],
+                u.access = "email_unverified",
+                u.log = [toString(datetime()) + ": created user via API", toString(datetime()) + ": sent registration email verification"],
                 u.password = $password,
                 u.userid = toString(id),
                 u.role = 'user',
                 u.intendedUse = $intendedUse,
-                u.database = split($database,"|")
+                u.database = split($database,"|"),
+                u.pendingRegistrationVerificationRequests = $verificationRequests,
+                u.createdAt = $createdAt,
+                u.updatedAt = $createdAt,
+                u.passwordLastChangedAt = $createdAt
                 return u.userid as userid
                 """
+            query_params = {
+                "firstName": firstName,
+                "lastName": lastName,
+                "email": email,
+                "password": password,
+                "username": username,
+                "intendedUse": intendedUse,
+                "database": database,
+                "verificationRequests": _serialize_entries(verification_entries),
+                "createdAt": _now_iso(),
+            }
 
-        data = getQuery(query, driver = driver, firstName=firstName, lastName=lastName, email=email,
-                                 password=password, username=username, intendedUse=intendedUse, database=database)
+        saved = getQuery(query, driver=driver, params=query_params)
+        if not saved:
+            raise Exception("Unable to create registration request.")
 
-        body = f"""
-                Hello,
-                A new user has just requested registration.
-                Name: {firstName} {lastName}
-                email: {email}
-                database: {database}
-                description: {intendedUse}
-                """
-
-        sendEmail(
-            mail,
-            subject="New registered user",
-            recipients=alert_recipients,
-            body=body,
-            sender=mail_default,
+        _send_registration_verification_email(
+            email=email,
+            verification_code=verification_code,
+            request_id=request_id,
+            database=database,
+            username=username,
         )
 
-        return jsonify({"message": "Success"}), 200
+        response = {
+            "message": "Verification email sent. Enter the code to continue registration.",
+            "requestId": request_id,
+            "maskedEmail": _mask_email(email),
+            "status": "email_unverified",
+        }
+        if _include_debug_verification_code():
+            response["debugVerificationCode"] = verification_code
+
+        return jsonify(response), 200
 
     except Exception as e:
         # Check for specific error messages
@@ -444,6 +615,97 @@ def getnewuser():
             # Default error message
             support_email = get_support_email() or "the configured support email"
             return jsonify({"error": "please contact " + support_email + ". Error:" + error_message}), 500
+
+
+@user_bp.route('/newuser/confirm-email', methods=['POST'])
+def confirm_newuser_email():
+    try:
+        data = _read_json_payload()
+        lookup_identifier = unlist(data.get("email")) or unlist(data.get("username"))
+        request_id = unlist(data.get("requestId"))
+        verification_code = str(unlist(data.get("verificationCode")) or "").strip()
+
+        if not lookup_identifier or not request_id or not verification_code:
+            raise Exception("Missing required confirmation fields")
+
+        existing = _load_any_user_by_identifier(lookup_identifier)
+        access = str(existing.get("access") or "").lower()
+        if access == "pending":
+            return jsonify({
+                "message": "Email is already verified. Your registration is awaiting admin approval.",
+                "status": "pending",
+            }), 200
+        if access == "enabled":
+            return jsonify({
+                "message": "Email is already verified and your account is enabled.",
+                "status": "enabled",
+            }), 200
+        if access != "email_unverified":
+            raise Exception("Registration is not awaiting email verification.")
+
+        pending_requests = _cleanup_persistent_requests(
+            _deserialize_entries(existing.get("pendingRegistrationVerificationRequests", []))
+        )
+        pending = None
+        remaining = []
+        for entry in pending_requests:
+            if str(entry.get("request_id") or "") == str(request_id):
+                pending = entry
+            else:
+                remaining.append(entry)
+        if not pending:
+            raise Exception("Registration verification request not found. Please request a new verification email.")
+        if pending.get("verification_code") != verification_code:
+            raise Exception("Invalid verification code.")
+
+        userid = str(existing.get("userid"))
+        updated_at = _now_iso()
+        driver = getDriver("userdb")
+        query = """
+        MATCH (u:USER {userid: toString($userid)})
+        SET
+          u.access = "pending",
+          u.pendingRegistrationVerificationRequests = $verificationRequests,
+          u.updatedAt = $updatedAt,
+          u.log = coalesce(u.log, []) + [toString(datetime()) + ": registration email verified"]
+        RETURN
+          u.userid as userid,
+          u.first as first,
+          u.last as last,
+          u.email as email,
+          u.database as database,
+          u.intendedUse as intendedUse,
+          u.access as access
+        """
+        saved = getQuery(
+            query,
+            driver=driver,
+            params={
+                "userid": userid,
+                "verificationRequests": _serialize_entries(remaining),
+                "updatedAt": updated_at,
+            },
+        )
+        if not saved:
+            raise Exception("User not found")
+
+        user = saved[0]
+        user_database = _normalize_database(user.get("database"))
+        _send_new_registration_admin_email(
+            user.get("first", ""),
+            user.get("last", ""),
+            user.get("email", ""),
+            user_database,
+            user.get("intendedUse", ""),
+        )
+
+        return jsonify({
+            "message": "Email verified. Your registration is now awaiting admin approval.",
+            "status": "pending",
+            "userId": userid,
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 @user_bp.route('/login', methods=['POST'])
 def getLogin():
