@@ -850,14 +850,28 @@ def getMergeUSESties():
         rows = data.get("rows")
         if isinstance(rows, list):
             merged = []
+            failed = []
             for row in rows:
-                merged.append(mergeUSESties(
-                    database,
-                    row.get("CMID"),
-                    row.get("Key"),
-                    row.get("datasetID"),
-                ))
-            return jsonify({"merged": merged, "count": len(merged)})
+                row_context = {
+                    "CMID": row.get("CMID"),
+                    "Key": row.get("Key"),
+                    "datasetID": row.get("datasetID"),
+                }
+                try:
+                    merged.append(mergeUSESties(
+                        database,
+                        row_context["CMID"],
+                        row_context["Key"],
+                        row_context["datasetID"],
+                    ))
+                except Exception as merge_error:
+                    failed.append({
+                        **row_context,
+                        "error": str(merge_error),
+                        "details": getattr(merge_error, "details", None),
+                    })
+            status_code = 207 if failed and merged else 400 if failed else 200
+            return jsonify({"merged": merged, "failed": failed, "count": len(merged)}), status_code
 
         result = mergeUSESties(
             database,

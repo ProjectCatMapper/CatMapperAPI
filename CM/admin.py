@@ -1671,6 +1671,34 @@ def _format_uses_conflict_value(value):
     return repr(value)
 
 
+def _uses_conflict_details(conflicts, CMID, Key, datasetID):
+    return {
+        "CMID": CMID,
+        "Key": Key,
+        "datasetID": datasetID,
+        "conflicts": conflicts,
+    }
+
+
+def _format_uses_conflict_message(error_details):
+    row_prefix = (
+        "Cannot merge duplicate USES ties for "
+        f"CMID {error_details['CMID']}, "
+        f"Key {error_details['Key']}, "
+        f"datasetID {error_details['datasetID']}."
+    )
+    conflict_parts = []
+    for conflict in error_details.get("conflicts", []):
+        values = "; ".join(
+            f"{item['relID']}: {_format_uses_conflict_value(item['value'])}"
+            for item in conflict.get("values", [])
+        )
+        conflict_parts.append(f"property {conflict.get('property')} has values [{values}]")
+    if conflict_parts:
+        return f"{row_prefix} Conflicting scalar properties: " + "; ".join(conflict_parts)
+    return row_prefix
+
+
 def _merge_uses_relationship_properties(relationships, CMID, Key, datasetID):
     props_by_name = {}
     for rel in relationships:
@@ -1717,19 +1745,10 @@ def _merge_uses_relationship_properties(relationships, CMID, Key, datasetID):
             merged_props[prop] = unique_values[0]
 
     if conflicts:
-        details = []
-        for conflict in conflicts:
-            values = "; ".join(
-                f"{item['relID']}: {_format_uses_conflict_value(item['value'])}"
-                for item in conflict["values"]
-            )
-            details.append(f"{conflict['property']} ({values})")
-        raise ValueError(
-            "Cannot merge duplicate USES ties for "
-            f"CMID {CMID}, Key {Key}, datasetID {datasetID}. "
-            "Conflicting scalar properties: "
-            + "; ".join(details)
-        )
+        error_details = _uses_conflict_details(conflicts, CMID, Key, datasetID)
+        error = ValueError(_format_uses_conflict_message(error_details))
+        error.details = error_details
+        raise error
 
     return merged_props
 

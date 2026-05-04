@@ -364,3 +364,59 @@ def test_merge_usesties_route_accepts_selected_rows(client, monkeypatch):
             "datasetID": "AD354481",
         }
     ]
+
+
+def test_merge_usesties_route_returns_informative_row_failures(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "200", "role": "admin"})
+
+    def fake_merge(database, CMID, Key, datasetID):
+        error = ValueError(
+            "Cannot merge duplicate USES ties for "
+            f"CMID {CMID}, Key {Key}, datasetID {datasetID}. "
+            "Conflicting scalar properties: property recordStart has values [rel-1: '2025'; rel-2: '2024']"
+        )
+        error.details = {
+            "CMID": CMID,
+            "Key": Key,
+            "datasetID": datasetID,
+            "conflicts": [
+                {
+                    "property": "recordStart",
+                    "values": [
+                        {"relID": "rel-1", "value": "2025"},
+                        {"relID": "rel-2", "value": "2024"},
+                    ],
+                }
+            ],
+        }
+        raise error
+
+    monkeypatch.setattr(admin_routes, "mergeUSESties", fake_merge)
+
+    response = client.post(
+        "/mergeUSESties",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "database": "ArchaMap",
+            "rows": [
+                {
+                    "CMID": "AM354486",
+                    "Key": "Name == Bolen Side Notch",
+                    "datasetID": "AD354481",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 400
+    payload = response.get_json()
+    assert payload["count"] == 0
+    assert payload["merged"] == []
+    assert payload["failed"][0]["CMID"] == "AM354486"
+    assert payload["failed"][0]["Key"] == "Name == Bolen Side Notch"
+    assert payload["failed"][0]["datasetID"] == "AD354481"
+    assert payload["failed"][0]["details"]["conflicts"][0]["property"] == "recordStart"
+    assert payload["failed"][0]["details"]["conflicts"][0]["values"] == [
+        {"relID": "rel-1", "value": "2025"},
+        {"relID": "rel-2", "value": "2024"},
+    ]
