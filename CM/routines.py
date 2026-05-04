@@ -2259,7 +2259,7 @@ def get_empty_nodeprops(database, mail=None, return_type="data"):
         result = str(e)
         return result, 500
 
-def get_duplicate_triplets(database, mail=None, return_type="data"):
+def get_duplicate_triplets(database, mail=None, return_type="data", send_email=True):
     try:
         driver = getDriver(database)
         query = """
@@ -2280,7 +2280,7 @@ def get_duplicate_triplets(database, mail=None, return_type="data"):
             with tempfile.NamedTemporaryFile(delete=False, prefix=f"duplicate_triplets_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
                 fp1 = tmpfile.name
                 results.to_excel(fp1, index=False)
-            if isinstance(mail, Mail):
+            if send_email and isinstance(mail, Mail):
                 sendEmail(mail, subject=f"Duplicate Triplets for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
         if return_type == "data":
             return {"Total": len(results), "Duplicate Triplets": results.to_dict(orient="records")}

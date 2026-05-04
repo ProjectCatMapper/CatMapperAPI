@@ -61,10 +61,11 @@ def test_routines_updateuses_runs_single_cmid_when_provided(client, monkeypatch)
 def test_routines_admin_endpoint_does_not_pass_mail_object(client, monkeypatch):
     captured = {}
 
-    def fake_routine(database, mail=None, return_type="info"):
+    def fake_routine(database, mail=None, return_type="info", send_email=True):
         captured["database"] = database
         captured["mail"] = mail
         captured["return_type"] = return_type
+        captured["send_email"] = send_email
         return "ok-no-mail"
 
     monkeypatch.setattr(routine_routes.routines_module, "fakeRoutine", fake_routine, raising=False)
@@ -81,4 +82,5 @@ def test_routines_admin_endpoint_does_not_pass_mail_object(client, monkeypatch):
         "database": "archamap",
         "mail": None,
         "return_type": "data",
+        "send_email": False,
     }

@@ -37,6 +37,7 @@ def get_routines(routine, database):
             # The scheduled/nightly `/runRoutines/<databases>` route still
             # receives the configured Mail object below.
             'mail': None,
+            'send_email': False,
             'CMID': request.args.get('CMID'),
             'datasetID': request.args.get('datasetID'),
             'Key': request.args.get('Key'),

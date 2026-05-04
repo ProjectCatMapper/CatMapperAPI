@@ -82,3 +82,39 @@ def test_getBadComplexProperties_allows_negative_eventDate(monkeypatch):
 
     assert result["invalid_parentContext_json_shape_count"] == 0
     assert result["invalid_parentContext_json_shape"] == []
+
+
+def test_get_duplicate_triplets_suppresses_email_when_send_email_false(monkeypatch):
+    class FakeMail:
+        pass
+
+    monkeypatch.setattr(routines, "Mail", FakeMail)
+    monkeypatch.setattr(routines, "getDriver", lambda _database: object())
+
+    def fake_get_query(query, driver, type=None, **kwargs):
+        if type == "df":
+            return pd.DataFrame([
+                {
+                    "datasetID": "AD354481",
+                    "CMID": "AM354486",
+                    "Key": "Name == Bolen Side Notch",
+                    "rel_count": 2,
+                }
+            ])
+        return []
+
+    def fake_send_email(*args, **kwargs):
+        raise AssertionError("Admin duplicate triplet routine should not send email")
+
+    monkeypatch.setattr(routines, "getQuery", fake_get_query)
+    monkeypatch.setattr(routines, "sendEmail", fake_send_email)
+
+    result = routines.get_duplicate_triplets(
+        database="ArchaMap",
+        mail=FakeMail(),
+        return_type="data",
+        send_email=False,
+    )
+
+    assert result["Total"] == 1
+    assert result["Duplicate Triplets"][0]["CMID"] == "AM354486"
