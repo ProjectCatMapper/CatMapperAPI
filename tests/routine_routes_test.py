@@ -56,3 +56,29 @@ def test_routines_updateuses_runs_single_cmid_when_provided(client, monkeypatch)
     assert response.status_code == 200
     assert response.get_data(as_text=True) == "ok-single"
     assert captured == {"database": "archamap", "CMID": "AM123"}
+
+
+def test_routines_admin_endpoint_does_not_pass_mail_object(client, monkeypatch):
+    captured = {}
+
+    def fake_routine(database, mail=None, return_type="info"):
+        captured["database"] = database
+        captured["mail"] = mail
+        captured["return_type"] = return_type
+        return "ok-no-mail"
+
+    monkeypatch.setattr(routine_routes.routines_module, "fakeRoutine", fake_routine, raising=False)
+    monkeypatch.setattr(routine_routes, "mail", object())
+
+    response = client.get(
+        "/routines/fakeRoutine/archamap",
+        query_string={"mail": "force-mail", "return_type": "data"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "ok-no-mail"
+    assert captured == {
+        "database": "archamap",
+        "mail": None,
+        "return_type": "data",
+    }

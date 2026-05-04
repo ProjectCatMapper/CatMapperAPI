@@ -33,7 +33,10 @@ def get_routines(routine, database):
         available_args = {
             'database': database,
             'databases': database or "all",
-            'mail': request.args.get('mail') or globals().get('mail'), 
+            # Admin-triggered routine runs should never send routine emails.
+            # The scheduled/nightly `/runRoutines/<databases>` route still
+            # receives the configured Mail object below.
+            'mail': None,
             'CMID': request.args.get('CMID'),
             'datasetID': request.args.get('datasetID'),
             'Key': request.args.get('Key'),
