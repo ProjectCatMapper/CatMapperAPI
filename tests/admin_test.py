@@ -1,4 +1,5 @@
 import CMroutes.admin_routes as admin_routes
+import CM.admin as admin_module
 
 
 class FakeRelationship:
@@ -231,3 +232,135 @@ def test_metadata_properties_by_label_returns_distinct_properties(client, monkey
     payload = response.get_json()
     assert payload["nodeLabel"] == "LABEL"
     assert payload["properties"] == ["CMID", "CMName", "color", "description", "groupLabel"]
+
+
+def test_merge_usesties_combines_lists_and_keeps_matching_scalars(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(admin_module, "getDriver", lambda database: f"driver-{database}")
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "RETURN elementId(r) AS relID, properties(r) AS props" in query:
+            return [
+                {
+                    "relID": "rel-1",
+                    "props": {
+                        "Key": "Name == Bolen Side Notch",
+                        "recordStart": "2025",
+                        "source": ["A", "B"],
+                    },
+                },
+                {
+                    "relID": "rel-2",
+                    "props": {
+                        "Key": "Name == Bolen Side Notch",
+                        "recordStart": "2025",
+                        "source": ["B", "C"],
+                        "recordEnd": None,
+                    },
+                },
+            ]
+        if "SET keep = $mergedProps" in query:
+            captured["params"] = params
+            return [{"relID": "rel-1", "originalCount": 2, "mergedCount": 1}]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin_module, "getQuery", fake_get_query)
+
+    result = admin_module.mergeUSESties(
+        "ArchaMap",
+        "AM354486",
+        "Name == Bolen Side Notch",
+        "AD354481",
+    )
+
+    assert result["originalCount"] == 2
+    merged_props = captured["params"]["mergedProps"]
+    assert merged_props["Key"] == "Name == Bolen Side Notch"
+    assert merged_props["recordStart"] == "2025"
+    assert merged_props["source"] == ["A", "B", "C"]
+    assert "recordEnd" not in merged_props
+
+
+def test_merge_usesties_rejects_conflicting_scalar_values(monkeypatch):
+    monkeypatch.setattr(admin_module, "getDriver", lambda database: f"driver-{database}")
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "RETURN elementId(r) AS relID, properties(r) AS props" in query:
+            return [
+                {
+                    "relID": "rel-1",
+                    "props": {
+                        "Key": "Name == Bolen Side Notch",
+                        "recordStart": "2025",
+                    },
+                },
+                {
+                    "relID": "rel-2",
+                    "props": {
+                        "Key": "Name == Bolen Side Notch",
+                        "recordStart": "2024",
+                    },
+                },
+            ]
+        if "SET keep = $mergedProps" in query:
+            raise AssertionError("Conflicting values should abort before merge query")
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin_module, "getQuery", fake_get_query)
+
+    try:
+        admin_module.mergeUSESties(
+            "ArchaMap",
+            "AM354486",
+            "Name == Bolen Side Notch",
+            "AD354481",
+        )
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("Expected conflicting scalar values to raise ValueError")
+
+    assert "recordStart" in message
+    assert "rel-1: '2025'" in message
+    assert "rel-2: '2024'" in message
+    assert "AM354486" in message
+    assert "AD354481" in message
+
+
+def test_merge_usesties_route_accepts_selected_rows(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "200", "role": "admin"})
+
+    calls = []
+
+    def fake_merge(database, CMID, Key, datasetID):
+        calls.append({"database": database, "CMID": CMID, "Key": Key, "datasetID": datasetID})
+        return {"CMID": CMID, "Key": Key, "datasetID": datasetID, "mergedCount": 1}
+
+    monkeypatch.setattr(admin_routes, "mergeUSESties", fake_merge)
+
+    response = client.post(
+        "/mergeUSESties",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "database": "ArchaMap",
+            "rows": [
+                {
+                    "CMID": "AM354486",
+                    "Key": "Name == Bolen Side Notch",
+                    "datasetID": "AD354481",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["count"] == 1
+    assert calls == [
+        {
+            "database": "ArchaMap",
+            "CMID": "AM354486",
+            "Key": "Name == Bolen Side Notch",
+            "datasetID": "AD354481",
+        }
+    ]

@@ -830,21 +830,46 @@ def getUpdateWaitingUSES():
 
 @admin_bp.route('/mergeUSESties', methods=['GET','POST'])
 def getMergeUSESties():
-    if request.method == 'GET':
-        database = request.args.get('database')
-        CMID = request.args.get('CMID')
-        Key = request.args.get('Key')
-        datasetID = request.args.get('datasetID')
-    else:
-        data = request.get_data()
-        data = json.loads(data)
+    try:
+        if request.method == 'GET':
+            database = request.args.get('database')
+            CMID = request.args.get('CMID')
+            Key = request.args.get('Key')
+            datasetID = request.args.get('datasetID')
+            result = mergeUSESties(database, CMID, Key, datasetID)
+            return jsonify(result)
+
+        data = request.get_json(silent=True)
+        if data is None:
+            data = json.loads(request.get_data() or "{}")
+
+        credentials = _parse_credentials(data.get("cred")) if isinstance(data, dict) else None
+        verify_request_auth(credentials=credentials, required_role="admin", req=request)
+
         database = data.get("database")
-        CMID = data.get("CMID")
-        Key = data.get("Key")
-        datasetID = data.get("datasetID")
-    
-    result = mergeUSESties(database, CMID, Key, datasetID)
-    return result
+        rows = data.get("rows")
+        if isinstance(rows, list):
+            merged = []
+            for row in rows:
+                merged.append(mergeUSESties(
+                    database,
+                    row.get("CMID"),
+                    row.get("Key"),
+                    row.get("datasetID"),
+                ))
+            return jsonify({"merged": merged, "count": len(merged)})
+
+        result = mergeUSESties(
+            database,
+            data.get("CMID"),
+            data.get("Key"),
+            data.get("datasetID"),
+        )
+        return jsonify(result)
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message}), status_code
 
 @admin_bp.route('/admin/saveMetadata', methods=['POST'])
 def saveMetadata():

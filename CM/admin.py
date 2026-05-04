@@ -1646,6 +1646,94 @@ def createLabel(database,user,input):
     return "done"
 
 
+def _uses_value_key(value):
+    if isinstance(value, list):
+        return tuple(_uses_value_key(item) for item in value)
+    if isinstance(value, dict):
+        return tuple(sorted((key, _uses_value_key(val)) for key, val in value.items()))
+    return value
+
+
+def _dedupe_uses_values(values):
+    deduped = []
+    seen = set()
+    for value in values:
+        key = repr(_uses_value_key(value))
+        if key not in seen:
+            seen.add(key)
+            deduped.append(value)
+    return deduped
+
+
+def _format_uses_conflict_value(value):
+    if value is None:
+        return "NULL"
+    return repr(value)
+
+
+def _merge_uses_relationship_properties(relationships, CMID, Key, datasetID):
+    props_by_name = {}
+    for rel in relationships:
+        rel_id = rel.get("relID")
+        props = rel.get("props") or {}
+        for prop, value in props.items():
+            props_by_name.setdefault(prop, []).append({
+                "relID": rel_id,
+                "value": value,
+            })
+
+    merged_props = {}
+    conflicts = []
+    for prop, entries in props_by_name.items():
+        non_null_entries = [entry for entry in entries if entry["value"] is not None]
+        if not non_null_entries:
+            continue
+
+        values = [entry["value"] for entry in non_null_entries]
+        has_list = any(isinstance(value, list) for value in values)
+        if has_list:
+            combined_values = []
+            for value in values:
+                if isinstance(value, list):
+                    combined_values.extend([item for item in value if item is not None])
+                else:
+                    combined_values.append(value)
+            merged_props[prop] = _dedupe_uses_values(combined_values)
+            continue
+
+        unique_values = _dedupe_uses_values(values)
+        if len(unique_values) > 1:
+            conflicts.append({
+                "property": prop,
+                "values": [
+                    {
+                        "relID": entry["relID"],
+                        "value": entry["value"],
+                    }
+                    for entry in non_null_entries
+                ],
+            })
+        else:
+            merged_props[prop] = unique_values[0]
+
+    if conflicts:
+        details = []
+        for conflict in conflicts:
+            values = "; ".join(
+                f"{item['relID']}: {_format_uses_conflict_value(item['value'])}"
+                for item in conflict["values"]
+            )
+            details.append(f"{conflict['property']} ({values})")
+        raise ValueError(
+            "Cannot merge duplicate USES ties for "
+            f"CMID {CMID}, Key {Key}, datasetID {datasetID}. "
+            "Conflicting scalar properties: "
+            + "; ".join(details)
+        )
+
+    return merged_props
+
+
 def mergeUSESties(database, CMID, Key, datasetID):
     """
     Merge all `USES` relationships between a CATEGORY node and a DATASET node 
@@ -1678,54 +1766,38 @@ def mergeUSESties(database, CMID, Key, datasetID):
     # Obtain a Neo4j driver connection for the specified database.
     driver = getDriver(database)
 
-    # Query for properties that cannot be combined when merging relationships.
-    props_query = """
-    MATCH (p:PROPERTY)
-    WHERE p.type = "relationship" AND p.metaType = "string"
-    RETURN p.CMName AS property
-    """
-    non_combinable_props = getQuery(props_query, driver=driver)
-
-    # Query for all existing USES relationships matching the given identifiers,
-    # and extract property-value pairs for the non-combinable properties.
     existing_query = """
-    MATCH (:CATEGORY {CMID: $cmid})<-[r:USES {Key: $key}]-(:DATASET {CMID: $datasetID})
-    UNWIND keys(r) AS prop
-    WITH prop, r
-    WHERE prop IN $props AND r[prop] IS NOT NULL
-    RETURN DISTINCT prop AS property, r[prop] AS value
+    MATCH (:DATASET {CMID: $datasetID})-[r:USES {Key: $key}]->(:CATEGORY {CMID: $cmid})
+    WITH r
+    ORDER BY elementId(r)
+    RETURN elementId(r) AS relID, properties(r) AS props
     """
-    existing_props = getQuery(
+    relationships = getQuery(
         existing_query,
         driver=driver,
         params={
             "cmid": CMID,
             "key": Key,
-            "datasetID": datasetID,
-            "props": [row['property'] for row in non_combinable_props]
+            "datasetID": datasetID
         }
     )
 
-    # Check for any non-combinable properties that have conflicting values.
-    # If found, merging is aborted to prevent data loss or inconsistency.
-    for row in existing_props:
-        if isinstance(row['value'], list) and len(set(row['value'])) > 1:
-            raise Exception(
-                f"Cannot merge USES ties for CMID {CMID} with Key {Key} in Dataset {datasetID} "
-                f"due to multiple distinct values for property {row['property']}"
-            )
+    if len(relationships) < 2:
+        raise Exception(
+            f"No duplicate USES ties found to merge for CMID {CMID} with Key {Key} in Dataset {datasetID}"
+        )
 
-    # Construct a property merge map defining which properties to combine or discard.
-    # Non-combinable properties are discarded; all others are combined.
-    properties_map = {row['property']: 'discard' for row in non_combinable_props}
-    properties_map[".*"] = 'combine'  # Default: combine all unspecified properties.
+    merged_props = _merge_uses_relationship_properties(relationships, CMID, Key, datasetID)
 
-    # Execute the merge operation using APOC's refactor.mergeRelationships procedure.
     merge_query = """
-    MATCH (:CATEGORY {CMID: $cmid})<-[r:USES {Key: $key}]-(:DATASET {CMID: $datasetID})
+    MATCH (:DATASET {CMID: $datasetID})-[r:USES {Key: $key}]->(:CATEGORY {CMID: $cmid})
+    WITH r
+    ORDER BY elementId(r)
     WITH collect(r) AS rels
-    CALL apoc.refactor.mergeRelationships(rels, {properties: $propsMap}) YIELD rel
-    RETURN count(rel) AS mergedCount
+    WITH rels[0] AS keep, rels[1..] AS discard, size(rels) AS originalCount
+    SET keep = $mergedProps
+    FOREACH (rel IN discard | DELETE rel)
+    RETURN elementId(keep) AS relID, originalCount, 1 AS mergedCount
     """
     result = getQuery(
         merge_query,
@@ -1734,18 +1806,18 @@ def mergeUSESties(database, CMID, Key, datasetID):
             "cmid": CMID,
             "key": Key,
             "datasetID": datasetID,
-            "propsMap": properties_map
+            "mergedProps": merged_props
         }
     )
 
-    # Raise an error if no relationships were merged (indicating a mismatch or missing ties).
-    if result[0]['mergedCount'] == 0:
-        raise Exception(
-            f"No USES ties found to merge for CMID {CMID} with Key {Key} in Dataset {datasetID}"
-        )
-
-    # Return success confirmation.
-    return f"Merged USES ties successfully for CMID {CMID} with Key {Key} in Dataset {datasetID}"
+    return {
+        "CMID": CMID,
+        "Key": Key,
+        "datasetID": datasetID,
+        "originalCount": result[0].get("originalCount", len(relationships)),
+        "mergedCount": result[0].get("mergedCount", 1),
+        "relID": result[0].get("relID"),
+    }
 
 
 
