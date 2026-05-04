@@ -870,8 +870,12 @@ def getMergeUSESties():
                         "error": str(merge_error),
                         "details": getattr(merge_error, "details", None),
                     })
-            status_code = 207 if failed and merged else 400 if failed else 200
-            return jsonify({"merged": merged, "failed": failed, "count": len(merged)}), status_code
+            return jsonify({
+                "ok": not failed,
+                "merged": merged,
+                "failed": failed,
+                "count": len(merged),
+            }), 200
 
         result = mergeUSESties(
             database,

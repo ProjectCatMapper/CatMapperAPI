@@ -408,8 +408,9 @@ def test_merge_usesties_route_returns_informative_row_failures(client, monkeypat
         },
     )
 
-    assert response.status_code == 400
+    assert response.status_code == 200
     payload = response.get_json()
+    assert payload["ok"] is False
     assert payload["count"] == 0
     assert payload["merged"] == []
     assert payload["failed"][0]["CMID"] == "AM354486"
