@@ -376,6 +376,22 @@ def _filter_wide_crossdomain_by_selected_keyvariables(result, selectedKeyvariabl
             filtered = filtered[filtered[col].fillna("").astype(str).str.startswith(prefix, na=False)]
     return filtered
 
+
+def _filter_long_matches_by_selected_keyvariables(matches, selectedKeyvariables):
+    if matches.empty:
+        return matches
+    selectedKeyvariables = _normalize_selected_key_variables(selectedKeyvariables)
+    if not selectedKeyvariables:
+        return matches
+
+    filtered = matches.copy()
+    for dataset_id, prefix in selectedKeyvariables.items():
+        mask = filtered["datasetID"].astype(str).str.strip().eq(dataset_id)
+        if mask.any():
+            key_mask = filtered["Key"].fillna("").astype(str).str.startswith(prefix, na=False)
+            filtered = filtered[~mask | key_mask]
+    return filtered
+
 # joins two datasets that have previously been translated into CatMapper’s database.Each dataset must include two columns: datasetiD and the Key pointing to a category.
 # It returns a single spreadsheet with: 1) datasetIDs, 2) data columns from the original dataset (renamed with _left and _right suffixes if overlapping.  Rows with keys pointing to the same category are aligned in the output spreadsheet.
 # When keys point to a CatMapper category, standardized identifiers are also returned (CMID, CMName).
@@ -712,6 +728,10 @@ def proposeMerge(
 
             if merged.empty:
                 return jsonify({"message": "No data found"}), 404
+
+            merged = _filter_long_matches_by_selected_keyvariables(merged, selectedKeyvariables)
+            if merged.empty:
+                return jsonify({"message": "No data found for selected key variables"}), 404
             
             if resultFormat == "key-to-category":
                 cols = ['CMID', 'CMName', 'datasetID', 'Key', 'Name']
@@ -757,6 +777,12 @@ def proposeMerge(
             cols = merged_df.columns.tolist()
             cols = ["CMID", "CMName"] + [col for col in cols if col not in ["CMID", "CMName"]]
             merged_df = merged_df[cols]
+
+            selectedKeyvariables = _normalize_selected_key_variables(selectedKeyvariables)
+            for dataset_id, prefix in selectedKeyvariables.items():
+                col = f"Key_{dataset_id}"
+                if col in merged_df.columns:
+                    merged_df = merged_df[merged_df[col].fillna("").astype(str).str.startswith(prefix, na=False)]
 
             # filter keys if intersection is off
             if intersection:

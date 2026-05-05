@@ -362,3 +362,61 @@ def test_standard_key_to_key_returns_friendly_warning_when_dataset_has_no_rows(m
     assert "could not find any matches" in payload["error"]
     assert "AD2" in payload["error"]
     assert "CATEGORY" in payload["error"]
+
+
+def test_standard_key_to_key_filters_selected_key_variables(monkeypatch):
+    _setup_merge_domain_validation(monkeypatch)
+
+    def fake_get_query(_query, driver=None, params=None, type=None):
+        if type == "df":
+            return pd.DataFrame(
+                [
+                    {
+                        "datasetID": "SD1",
+                        "CMName": "Keep Category",
+                        "CMID": "AM123",
+                        "Key": "lang == english",
+                        "Name": "English",
+                    },
+                    {
+                        "datasetID": "SD1",
+                        "CMName": "Drop Category",
+                        "CMID": "AM456",
+                        "Key": "region == north",
+                        "Name": "North",
+                    },
+                    {
+                        "datasetID": "AD2",
+                        "CMName": "Keep Category",
+                        "CMID": "AM123",
+                        "Key": "period == early",
+                        "Name": "Early",
+                    },
+                    {
+                        "datasetID": "AD2",
+                        "CMName": "Drop Category",
+                        "CMID": "AM456",
+                        "Key": "period == late",
+                        "Name": "Late",
+                    },
+                ]
+            )
+        raise AssertionError("Unexpected query type")
+
+    monkeypatch.setattr(merge_mod, "getQuery", fake_get_query)
+
+    result = merge_mod.proposeMerge(
+        dataset_choices=["SD1", "AD2"],
+        category_label="CATEGORY",
+        criteria="standard",
+        database="ArchaMap",
+        intersection=False,
+        selectedKeyvariables={"SD1": "lang"},
+        ncontains=2,
+        resultFormat="key-to-key",
+    )
+
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert result[0]["CMID"] == "AM123"
+    assert result[0]["Key_SD1"] == "lang == english"

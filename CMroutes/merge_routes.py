@@ -193,24 +193,29 @@ def getvalidKeysForDataset():
     data = json.loads(data)
     database = unlist(data.get("database", ""))
     subdomain = unlist(data.get("subdomain", ""))
-    names = data.get("names").split(",")
+    names = [name.strip() for name in data.get("names", "").split(",") if name.strip()]
 
     driver = getDriver(database)
     
     result_map={}
     
-    if subdomain == "ANY DOMAIN":
-        subdomain = "CATEGORY"
-    elif subdomain == "AREA":
+    if subdomain == "AREA":
         subdomain = "DISTRICT"
 
-    subdomain = validate_domain_label(subdomain, driver=driver)
+    if subdomain != "ANY DOMAIN":
+        subdomain = validate_domain_label(subdomain, driver=driver)
         
     for i in names:
-        q = f"""
-        MATCH (c:{subdomain})<-[r:USES]-(d:DATASET {{CMID: $datasetID}})
-        RETURN r.Key as Key
-        """
+        if subdomain == "ANY DOMAIN":
+            q = """
+            MATCH (d:DATASET {CMID: $datasetID})-[r:USES]->()
+            RETURN r.Key as Key
+            """
+        else:
+            q = f"""
+            MATCH (c:{subdomain})<-[r:USES]-(d:DATASET {{CMID: $datasetID}})
+            RETURN r.Key as Key
+            """
         result = getQuery(q,driver,params={
                               'datasetID': i.strip()})
                 
@@ -219,20 +224,22 @@ def getvalidKeysForDataset():
             continue
             #return jsonify({"success": False, "message": f"{i} does not have ties to nodes with the selected subdomain","keysByDataset": result_map})
         
-        keys = [row["Key"] for row in result]
+        keys = [row.get("Key") for row in result if row.get("Key")]
 
         first_parts = []
 
         for key in keys:
+            key = str(key)
             # Split by ' && ' in case there are multiple pairs
             pairs = key.split(" && ")
             for pair in pairs:
                 # Split by ' == ' and take the first part, stripping whitespace
                 first_part = pair.split(" == ")[0].strip()
-                first_parts.append(first_part)
+                if first_part:
+                    first_parts.append(first_part)
 
         # Remove duplicates if needed
-        key_variables = list(set(first_parts))
+        key_variables = sorted(set(first_parts))
 
         result_map[i] = key_variables
             

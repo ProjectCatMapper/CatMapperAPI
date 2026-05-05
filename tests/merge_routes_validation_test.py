@@ -170,6 +170,40 @@ def test_submit_merge_crossdomain_passes_new_fields_to_propose_merge(client, mon
     assert merged_payload["max_hops"] == 4
 
 
+def test_get_keys_any_domain_queries_all_uses_ties(client, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(merge_routes, "getDriver", lambda _database: object())
+
+    def fake_validate_domain_label(label, driver=None):
+        raise AssertionError(f"ANY DOMAIN should not be validated as a label: {label}")
+
+    def fake_get_query(query, driver=None, params=None):
+        seen["query"] = query
+        seen["params"] = params
+        return [
+            {"Key": "lang == english"},
+            {"Key": "period == early && phase == a"},
+            {"Key": "lang == spanish"},
+        ]
+
+    monkeypatch.setattr(merge_routes, "validate_domain_label", fake_validate_domain_label)
+    monkeypatch.setattr(merge_routes, "getQuery", fake_get_query)
+
+    response = client.post(
+        "/getKeys",
+        json={
+            "names": "SD1",
+            "database": "ArchaMap",
+            "subdomain": "ANY DOMAIN",
+        },
+    )
+
+    assert response.status_code == 200
+    assert "MATCH (d:DATASET {CMID: $datasetID})-[r:USES]->()" in seen["query"]
+    assert seen["params"] == {"datasetID": "SD1"}
+    assert response.get_json()["keysByDataset"]["SD1"] == ["lang", "period", "phase"]
+
+
 def test_merge_syntax_route_accepts_dict_result(client, monkeypatch):
     monkeypatch.setattr(
         merge_module,
