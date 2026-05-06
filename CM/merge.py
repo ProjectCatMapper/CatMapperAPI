@@ -135,16 +135,13 @@ def _select_best_extended_rows(result, dataset_choices, ncontains, intersection)
     if tie_cols:
         tie_values = result[tie_cols].apply(pd.to_numeric, errors="coerce")
         max_pairwise_distance = _calculate_max_pairwise_distance(tie_values)
-        max_tie = tie_values.max(axis=1, skipna=True).fillna(0)
     else:
         max_pairwise_distance = pd.Series(0, index=result.index)
-        max_tie = pd.Series(0, index=result.index)
 
     result["_matchedDatasetCount"] = matched_count
     result["maxPairwiseDistance"] = max_pairwise_distance
 
-    # Keep unmatched rows for key coverage, but enforce tie radius when all datasets are matched.
-    result = result[(result["_matchedDatasetCount"] < total_datasets) | (max_tie <= ncontains)]
+    result = result[result["maxPairwiseDistance"] <= ncontains]
 
     if intersection:
         result = result[result["_matchedDatasetCount"] == total_datasets]

@@ -295,7 +295,7 @@ def test_extended_key_to_key_supports_three_datasets(monkeypatch):
                         "datasetID": "SD3",
                         "LCA_CMName": "Ancestor Name",
                         "LCA_CMID": "AM123",
-                        "tie": 3,
+                        "tie": 2,
                         "Key": "varC: value3",
                         "Name": "Term C",
                     },
@@ -312,7 +312,7 @@ def test_extended_key_to_key_supports_three_datasets(monkeypatch):
         database="ArchaMap",
         intersection=True,
         selectedKeyvariables={},
-        ncontains=3,
+        ncontains=4,
         resultFormat="key-to-key",
     )
 
@@ -323,8 +323,34 @@ def test_extended_key_to_key_supports_three_datasets(monkeypatch):
     assert result[0]["datasetCMName_SD1"] == "Dataset One"
     assert result[0]["datasetCMName_AD2"] == "Dataset Two"
     assert result[0]["datasetCMName_SD3"] == "Dataset Three"
-    assert result[0]["maxPairwiseDistance"] == 5
+    assert result[0]["maxPairwiseDistance"] == 4
     assert "nTie" not in result[0]
+
+
+def test_extended_filters_by_max_pairwise_distance_not_individual_tie():
+    result = pd.DataFrame(
+        [
+            {
+                "LCA_CMID": "AM123",
+                "LCA_CMName": "Ancestor Name",
+                "Key_SD1": "varA: value1",
+                "Name_SD1": "Term A",
+                "tie_SD1": 2,
+                "Key_AD2": "varB: value2",
+                "Name_AD2": "Term B",
+                "tie_AD2": 3,
+            }
+        ]
+    )
+
+    filtered = merge_mod._select_best_extended_rows(
+        result=result,
+        dataset_choices=["SD1", "AD2"],
+        ncontains=4,
+        intersection=True,
+    )
+
+    assert filtered.empty
 
 
 def test_standard_key_to_key_returns_friendly_warning_when_dataset_has_no_rows(monkeypatch):
