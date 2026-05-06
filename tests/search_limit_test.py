@@ -84,3 +84,24 @@ def test_search_rejects_year_range_when_start_after_end(monkeypatch):
             query="true",
             dataset=None,
         )
+
+
+def test_search_key_dataset_filter_requires_matching_uses_key(monkeypatch):
+    monkeypatch.setattr(search_module, "getDriver", lambda database: object())
+    monkeypatch.setattr(search_module, "validate_domain_label", lambda domain, **kwargs: domain)
+
+    result = search_module.search(
+        database="SocioMap",
+        term="V024 == 6",
+        property="Key",
+        domain="CATEGORY",
+        yearStart=None,
+        yearEnd=None,
+        context=None,
+        country=None,
+        query="true",
+        dataset="SD468368",
+    )
+
+    query = " ".join(result["query"].split())
+    assert "match (a)<-[r:USES]-(:DATASET {CMID: $dataset}) where r.Key = matching" in query

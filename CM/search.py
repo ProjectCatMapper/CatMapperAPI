@@ -222,7 +222,14 @@ def search(
 
     # filter by dataset
     if dataset is not None:
-        qDataset = """
+        if property == "Key":
+            qDataset = """
+    match (a)<-[r:USES]-(:DATASET {CMID: $dataset})
+    where r.Key = matching
+    with a, matching, score
+    """
+        else:
+            qDataset = """
     where (a)<-[:USES]-({CMID: $dataset})
     with a, matching, score
     """
