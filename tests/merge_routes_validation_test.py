@@ -93,6 +93,31 @@ def test_submit_merge_allows_two_datasets_for_extended(client, monkeypatch):
     assert response.get_json()["ok"] is True
 
 
+def test_submit_merge_passes_extended_ancestor_only(client, monkeypatch):
+    monkeypatch.setattr(merge_routes, "getDriver", lambda _database: object())
+    monkeypatch.setattr(merge_routes, "validate_domain_label", lambda label, driver=None: label)
+    monkeypatch.setattr(merge_routes, "proposeMerge", lambda **kwargs: {"ok": True, "payload": kwargs})
+
+    response = client.post(
+        "/proposeMergeSubmit",
+        json={
+            "datasetChoices": "SD1,AD2",
+            "mergelevel": 2,
+            "ancestorOnly": True,
+            "categoryLabel": "CATEGORY",
+            "intersection": True,
+            "database": "ArchaMap",
+            "equivalence": "Extended",
+            "resultFormat": "key-to-key",
+            "selectedKeyvariable": {},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()["payload"]
+    assert payload["ancestor_only"] is True
+
+
 def test_submit_merge_crossdomain_requires_source_and_target(client, monkeypatch):
     monkeypatch.setattr(merge_routes, "getDriver", lambda _database: object())
 

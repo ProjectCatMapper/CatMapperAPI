@@ -62,6 +62,7 @@ def submit_merge():
     criteria = str.lower(str(unlist(data.get('equivalence', 'standard'))))
     resultFormat = unlist(data.get('resultFormat', 'key-to-key'))
     selectedKeyvariables = data.get('selectedKeyvariable')
+    ancestor_only = bool(data.get("ancestorOnly", False))
 
     invalid_dataset_ids = [cmid for cmid in dataset_choices if re.match(r"^(SD|AD)\d+$", cmid, re.IGNORECASE) is None]
     if invalid_dataset_ids:
@@ -126,7 +127,7 @@ def submit_merge():
     category_label = validate_domain_label(category_label, driver=driver)
 
     result = proposeMerge(dataset_choices=dataset_choices, category_label=category_label,
-                          criteria=criteria, database=database, intersection=intersection, selectedKeyvariables=selectedKeyvariables, ncontains=ncontains,resultFormat = resultFormat)
+                          criteria=criteria, database=database, intersection=intersection, selectedKeyvariables=selectedKeyvariables, ncontains=ncontains,resultFormat = resultFormat, ancestor_only=ancestor_only)
 
     return result
 

@@ -360,6 +360,44 @@ def test_extended_filters_by_max_pairwise_distance_not_individual_tie():
     assert filtered.empty
 
 
+def test_extended_ancestor_only_keeps_rows_where_lca_is_matched_node():
+    result = pd.DataFrame(
+        [
+            {
+                "LCA_CMID": "SM462198",
+                "LCA_CMName": "Mid Eastern",
+                "Key_SD1": "V024 == 6",
+                "matchedCMID_SD1": "SM9227",
+                "tie_SD1": 1,
+                "Key_AD2": "V024 == 5",
+                "matchedCMID_AD2": "SM462198",
+                "tie_AD2": 0,
+            },
+            {
+                "LCA_CMID": "SM462198",
+                "LCA_CMName": "Mid Eastern",
+                "Key_SD1": "V024 == 6",
+                "matchedCMID_SD1": "SM9227",
+                "tie_SD1": 1,
+                "Key_AD2": "V024 == 8",
+                "matchedCMID_AD2": "SM9999",
+                "tie_AD2": 1,
+            },
+        ]
+    )
+
+    filtered = merge_mod._select_best_extended_rows(
+        result=result,
+        dataset_choices=["SD1", "AD2"],
+        ncontains=2,
+        intersection=True,
+        ancestor_only=True,
+    )
+
+    assert len(filtered) == 1
+    assert filtered.iloc[0]["matchedCMID_AD2"] == "SM462198"
+
+
 def test_extended_pairwise_distance_deduplicates_shared_matched_nodes(monkeypatch):
     _setup_merge_domain_validation(monkeypatch)
 

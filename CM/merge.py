@@ -138,7 +138,37 @@ def _calculate_max_pairwise_distance(result, dataset_choices):
     return result.apply(longest_pairwise_distance, axis=1)
 
 
-def _select_best_extended_rows(result, dataset_choices, ncontains, intersection):
+def _extended_matched_cmids(row, dataset_choices):
+    matched_cmids = []
+    for dataset_id in dataset_choices:
+        matched_cmid_col = f"matchedCMID_{dataset_id}"
+        if matched_cmid_col not in row.index:
+            continue
+        matched_cmid = row.get(matched_cmid_col)
+        if pd.isna(matched_cmid):
+            continue
+        matched_cmid = str(matched_cmid).strip()
+        if matched_cmid:
+            matched_cmids.append(matched_cmid)
+    return matched_cmids
+
+
+def _filter_extended_ancestor_matches(result, dataset_choices):
+    if result.empty:
+        return result
+
+    def has_matched_ancestor(row):
+        lca_cmid = row.get("LCA_CMID")
+        if pd.isna(lca_cmid) or str(lca_cmid).strip() == "":
+            return False
+        lca_cmid = str(lca_cmid).strip()
+        unique_matched_cmids = set(_extended_matched_cmids(row, dataset_choices))
+        return lca_cmid in unique_matched_cmids and len(unique_matched_cmids) > 1
+
+    return result[result.apply(has_matched_ancestor, axis=1)]
+
+
+def _select_best_extended_rows(result, dataset_choices, ncontains, intersection, ancestor_only=False):
     if result.empty:
         return result
 
@@ -162,6 +192,9 @@ def _select_best_extended_rows(result, dataset_choices, ncontains, intersection)
 
     if intersection:
         result = result[result["_matchedDatasetCount"] == total_datasets]
+
+    if ancestor_only:
+        result = _filter_extended_ancestor_matches(result, dataset_choices)
 
     if result.empty:
         return result
@@ -620,6 +653,7 @@ def proposeMerge(
     return_domain=None,
     primary_dataset=None,
     max_hops=3,
+    ancestor_only=False,
 ):
 
     try:
@@ -870,6 +904,7 @@ def proposeMerge(
                 dataset_choices=dataset_choices,
                 ncontains=ncontains,
                 intersection=intersection,
+                ancestor_only=ancestor_only,
             )
 
             if result.empty:
