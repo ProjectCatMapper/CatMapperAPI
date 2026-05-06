@@ -33,6 +33,7 @@ def test_extended_key_to_key_includes_dataset_cmnames(monkeypatch):
                         "datasetID": "SD1",
                         "LCA_CMName": "Ancestor Name",
                         "LCA_CMID": "AM123",
+                        "CMID": "AM123",
                         "tie": 0,
                         "Key": "varA: value1",
                         "Name": "Term A",
@@ -41,6 +42,7 @@ def test_extended_key_to_key_includes_dataset_cmnames(monkeypatch):
                         "datasetID": "AD2",
                         "LCA_CMName": "Ancestor Name",
                         "LCA_CMID": "AM123",
+                        "CMID": "AM123",
                         "tie": 0,
                         "Key": "varB: value2",
                         "Name": "Term B",
@@ -68,6 +70,8 @@ def test_extended_key_to_key_includes_dataset_cmnames(monkeypatch):
     assert seen["driver"] is fake_driver
     assert result[0]["datasetCMName_SD1"] == "Dataset One"
     assert result[0]["datasetCMName_AD2"] == "Dataset Two"
+    assert result[0]["matchedCMID_SD1"] == "AM123"
+    assert result[0]["matchedCMID_AD2"] == "AM123"
 
 
 def test_extended_key_to_category_includes_dataset_cmname(monkeypatch):
@@ -86,6 +90,7 @@ def test_extended_key_to_category_includes_dataset_cmname(monkeypatch):
                         "datasetID": "SD1",
                         "LCA_CMName": "Ancestor Name",
                         "LCA_CMID": "AM123",
+                        "CMID": "AM123",
                         "tie": 0,
                         "Key": "varA: value1",
                         "Name": "Term A",
@@ -94,6 +99,7 @@ def test_extended_key_to_category_includes_dataset_cmname(monkeypatch):
                         "datasetID": "AD2",
                         "LCA_CMName": "Ancestor Name",
                         "LCA_CMID": "AM123",
+                        "CMID": "AM123",
                         "tie": 0,
                         "Key": "varB: value2",
                         "Name": "Term B",
@@ -119,6 +125,7 @@ def test_extended_key_to_category_includes_dataset_cmname(monkeypatch):
     assert len(result) == 2
     assert seen["domain"] == "CATEGORY"
     assert seen["driver"] is fake_driver
+    assert result[0]["CMID"] == "AM123"
     assert result[0]["datasetCMName"] == "Dataset One"
     assert result[1]["datasetCMName"] == "Dataset Two"
 
@@ -351,6 +358,72 @@ def test_extended_filters_by_max_pairwise_distance_not_individual_tie():
     )
 
     assert filtered.empty
+
+
+def test_extended_pairwise_distance_deduplicates_shared_matched_nodes(monkeypatch):
+    _setup_merge_domain_validation(monkeypatch)
+
+    def fake_get_query(query, driver=None, params=None, type=None):
+        if "RETURN d.CMID AS datasetID, d.CMName AS datasetName" in query:
+            return [
+                {"datasetID": "SD1", "datasetName": "Dataset One"},
+                {"datasetID": "AD2", "datasetName": "Dataset Two"},
+                {"datasetID": "SD3", "datasetName": "Dataset Three"},
+            ]
+        if type == "df":
+            return pd.DataFrame(
+                [
+                    {
+                        "datasetID": "SD1",
+                        "LCA_CMName": "Mid Eastern",
+                        "LCA_CMID": "SM462198",
+                        "CMID": "SM9227",
+                        "tie": 1,
+                        "Key": "V024 == 6",
+                        "Name": "Bugisu",
+                    },
+                    {
+                        "datasetID": "AD2",
+                        "LCA_CMName": "Mid Eastern",
+                        "LCA_CMID": "SM462198",
+                        "CMID": "SM9227",
+                        "tie": 1,
+                        "Key": "V024 == 7",
+                        "Name": "Bugishu",
+                    },
+                    {
+                        "datasetID": "SD3",
+                        "LCA_CMName": "Mid Eastern",
+                        "LCA_CMID": "SM462198",
+                        "CMID": "SM462198",
+                        "tie": 0,
+                        "Key": "V024 == 5",
+                        "Name": "Mid Eastern",
+                    },
+                ]
+            )
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(merge_mod, "getQuery", fake_get_query)
+
+    result = merge_mod.proposeMerge(
+        dataset_choices=["SD1", "AD2", "SD3"],
+        category_label="CATEGORY",
+        criteria="extended",
+        database="SocioMap",
+        intersection=True,
+        selectedKeyvariables={},
+        ncontains=1,
+        resultFormat="key-to-key",
+    )
+
+    assert isinstance(result, list)
+    assert len(result) == 1
+    row = result[0]
+    assert row["maxPairwiseDistance"] == 1
+    assert row["matchedCMID_SD1"] == "SM9227"
+    assert row["matchedCMID_AD2"] == "SM9227"
+    assert row["matchedCMID_SD3"] == "SM462198"
 
 
 def test_standard_key_to_key_returns_friendly_warning_when_dataset_has_no_rows(monkeypatch):

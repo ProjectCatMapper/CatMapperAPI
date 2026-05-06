@@ -74,6 +74,9 @@ def _build_extended_wide_frame(matches, dataset_choices, intersection):
         if "Name" in dataset_rows.columns:
             rename_map["Name"] = f"Name_{dataset_id}"
             dataset_cols.append(f"Name_{dataset_id}")
+        if "CMID" in dataset_rows.columns:
+            rename_map["CMID"] = f"matchedCMID_{dataset_id}"
+            dataset_cols.append(f"matchedCMID_{dataset_id}")
         if "tie" in dataset_rows.columns:
             rename_map["tie"] = f"tie_{dataset_id}"
             dataset_cols.append(f"tie_{dataset_id}")
@@ -99,19 +102,40 @@ def _build_extended_wide_frame(matches, dataset_choices, intersection):
     return wide.drop_duplicates()
 
 
-def _calculate_max_pairwise_distance(tie_values):
-    if tie_values.empty:
-        return pd.Series(0, index=tie_values.index)
-
-    numeric_ties = tie_values.apply(pd.to_numeric, errors="coerce")
+def _calculate_max_pairwise_distance(result, dataset_choices):
+    if result.empty:
+        return pd.Series(0, index=result.index)
 
     def longest_pairwise_distance(row):
-        distances = sorted(row.dropna().tolist(), reverse=True)
+        node_distances = {}
+
+        for dataset_id in dataset_choices:
+            tie_col = f"tie_{dataset_id}"
+            if tie_col not in row.index:
+                continue
+
+            distance = pd.to_numeric(pd.Series([row[tie_col]]), errors="coerce").iloc[0]
+            if pd.isna(distance):
+                continue
+
+            matched_cmid_col = f"matchedCMID_{dataset_id}"
+            matched_cmid = row.get(matched_cmid_col)
+            if pd.isna(matched_cmid) or str(matched_cmid).strip() == "":
+                matched_cmid = f"__dataset_{dataset_id}"
+            else:
+                matched_cmid = str(matched_cmid).strip()
+
+            node_distances[matched_cmid] = min(
+                distance,
+                node_distances.get(matched_cmid, distance),
+            )
+
+        distances = sorted(node_distances.values(), reverse=True)
         if len(distances) < 2:
             return 0
         return distances[0] + distances[1]
 
-    return numeric_ties.apply(longest_pairwise_distance, axis=1)
+    return result.apply(longest_pairwise_distance, axis=1)
 
 
 def _select_best_extended_rows(result, dataset_choices, ncontains, intersection):
@@ -120,7 +144,6 @@ def _select_best_extended_rows(result, dataset_choices, ncontains, intersection)
 
     total_datasets = len(dataset_choices)
     key_cols = [f"Key_{dataset_id}" for dataset_id in dataset_choices if f"Key_{dataset_id}" in result.columns]
-    tie_cols = [f"tie_{dataset_id}" for dataset_id in dataset_choices if f"tie_{dataset_id}" in result.columns]
 
     result = result.copy()
 
@@ -132,14 +155,8 @@ def _select_best_extended_rows(result, dataset_choices, ncontains, intersection)
     else:
         matched_count = pd.Series(0, index=result.index)
 
-    if tie_cols:
-        tie_values = result[tie_cols].apply(pd.to_numeric, errors="coerce")
-        max_pairwise_distance = _calculate_max_pairwise_distance(tie_values)
-    else:
-        max_pairwise_distance = pd.Series(0, index=result.index)
-
     result["_matchedDatasetCount"] = matched_count
-    result["maxPairwiseDistance"] = max_pairwise_distance
+    result["maxPairwiseDistance"] = _calculate_max_pairwise_distance(result, dataset_choices)
 
     result = result[result["maxPairwiseDistance"] <= ncontains]
 
@@ -815,7 +832,7 @@ def proposeMerge(
                 return jsonify({"message": "No data found"}), 404
             
             if resultFormat == "key-to-category":
-                cols = ['LCA_CMID', 'LCA_CMName', 'datasetID', 'tie', 'Key', 'Name']
+                cols = ['LCA_CMID', 'LCA_CMName', 'CMID', 'datasetID', 'tie', 'Key', 'Name']
                 result = matches[cols].copy()
                 result["datasetCMName"] = result["datasetID"].map(dataset_name_map).fillna("")
                 result = result.fillna("")
@@ -823,6 +840,7 @@ def proposeMerge(
             
             if resultFormat == "category-to-category":
                 matches = matches.groupby(['datasetID', 'LCA_CMName', 'LCA_CMID']).agg({
+                    'CMID': lambda x: list(x),
                     'Key': lambda x: list(x),
                     'Name': lambda x: list(x),
                     'tie': 'min',
