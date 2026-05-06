@@ -99,6 +99,21 @@ def _build_extended_wide_frame(matches, dataset_choices, intersection):
     return wide.drop_duplicates()
 
 
+def _calculate_max_pairwise_distance(tie_values):
+    if tie_values.empty:
+        return pd.Series(0, index=tie_values.index)
+
+    numeric_ties = tie_values.apply(pd.to_numeric, errors="coerce")
+
+    def longest_pairwise_distance(row):
+        distances = sorted(row.dropna().tolist(), reverse=True)
+        if len(distances) < 2:
+            return 0
+        return distances[0] + distances[1]
+
+    return numeric_ties.apply(longest_pairwise_distance, axis=1)
+
+
 def _select_best_extended_rows(result, dataset_choices, ncontains, intersection):
     if result.empty:
         return result
@@ -119,15 +134,14 @@ def _select_best_extended_rows(result, dataset_choices, ncontains, intersection)
 
     if tie_cols:
         tie_values = result[tie_cols].apply(pd.to_numeric, errors="coerce")
-        tie_sum = tie_values.sum(axis=1, skipna=True)
+        max_pairwise_distance = _calculate_max_pairwise_distance(tie_values)
         max_tie = tie_values.max(axis=1, skipna=True).fillna(0)
     else:
-        tie_sum = pd.Series(0, index=result.index)
+        max_pairwise_distance = pd.Series(0, index=result.index)
         max_tie = pd.Series(0, index=result.index)
 
-    infinity = 1000
     result["_matchedDatasetCount"] = matched_count
-    result["nTie"] = tie_sum + (total_datasets - matched_count) * infinity
+    result["maxPairwiseDistance"] = max_pairwise_distance
 
     # Keep unmatched rows for key coverage, but enforce tie radius when all datasets are matched.
     result = result[(result["_matchedDatasetCount"] < total_datasets) | (max_tie <= ncontains)]
@@ -149,7 +163,7 @@ def _select_best_extended_rows(result, dataset_choices, ncontains, intersection)
         candidates["_row_idx"] = candidates.index
         best_rows = (
             candidates.sort_values(
-                by=[key_col, "_matchedDatasetCount", "nTie", "LCA_CMID"],
+                by=[key_col, "_matchedDatasetCount", "maxPairwiseDistance", "LCA_CMID"],
                 ascending=[True, False, True, True],
                 kind="mergesort",
             )
@@ -846,11 +860,14 @@ def proposeMerge(
             if result.empty:
                 return jsonify({"message": "No common ancestors found"}), 404
 
-            result["nTie"] = pd.to_numeric(result["nTie"], errors="coerce").fillna(0).astype(int)
+            result["maxPairwiseDistance"] = pd.to_numeric(
+                result["maxPairwiseDistance"],
+                errors="coerce",
+            ).fillna(0).astype(int)
 
-            cols = ["LCA_CMID", "LCA_CMName", "nTie"] + \
+            cols = ["LCA_CMID", "LCA_CMName", "maxPairwiseDistance"] + \
                 [col for col in result.columns if col not in [
-                    "LCA_CMID", "LCA_CMName", "nTie"]]
+                    "LCA_CMID", "LCA_CMName", "maxPairwiseDistance"]]
             result = result[cols].copy()
             for dataset_id in dataset_choices:
                 result[f"datasetCMName_{dataset_id}"] = dataset_name_map.get(dataset_id, "")

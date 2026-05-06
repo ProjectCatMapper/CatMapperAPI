@@ -60,6 +60,9 @@ def getID(id_value, property, driver):
     return result[0]["id"] if result else None
 
 def getGroupLabels(CMID,driver):
+    cmid = str(CMID or "").strip()
+    if not cmid:
+        raise ValueError("CMID is required to validate group labels.")
 
     query = """
     UNWIND $cmid AS cmid
@@ -67,7 +70,10 @@ def getGroupLabels(CMID,driver):
     WHERE n.CMID = cmid
     RETURN labels(n)
     """
-    result = getQuery(query=query, params={"cmid": [CMID]}, driver=driver,type="list")
+    result = getQuery(query=query, params={"cmid": [cmid]}, driver=driver,type="list")
+
+    if not result:
+        raise ValueError(f"{cmid} is invalid")
 
     result = result[0]
     if "CATEGORY" in result:
@@ -85,9 +91,41 @@ def getGroupLabels(CMID,driver):
     RETURN m.groupLabel AS groupLabel
     """
     result = getQuery(query=query, params={"label": result}, driver=driver)
+    if not result or not result[0].get("groupLabel"):
+        raise ValueError(f"{cmid} has no group label metadata, unable to validate parent property.")
+
     result = result[0]['groupLabel']
 
     return result
+
+
+def _selected_admin_relation(input_payload, relation_type="USES"):
+    index_value = input_payload.get('s1_7')
+    relations = input_payload.get('s1_4') or []
+
+    try:
+        selected_index = int(index_value) - 1
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid {relation_type} tie selection index.")
+
+    if (
+        not isinstance(relations, list)
+        or selected_index < 0
+        or selected_index >= len(relations)
+    ):
+        raise ValueError(f"Selected {relation_type} tie is invalid or no longer available.")
+
+    selected_relation = relations[selected_index]
+    if not isinstance(selected_relation, list) or len(selected_relation) < 3:
+        raise ValueError(f"Selected {relation_type} tie payload is invalid.")
+
+    relation_props = selected_relation[1] if isinstance(selected_relation[1], dict) else {}
+    dataset_props = selected_relation[2] if isinstance(selected_relation[2], dict) else {}
+    dataset_id = dataset_props.get("CMID")
+    if not dataset_id:
+        raise ValueError(f"Selected {relation_type} tie is missing its dataset CMID.")
+
+    return selected_relation, relation_props, dataset_id
 
 
 def _resolve_primary_domain_from_labels(labels, driver):
@@ -287,16 +325,13 @@ def validate_parent_context_list(driver,parent_context_list):
 #section for add, edit, delete USES ties
 #Function for editing USES tie properties.
 def add_edit_delete_USES(database,user,input):
-    CMID = input.get('s1_2')
+    CMID = (input.get('s1_2') or "").strip()
     USES_property = input.get('s1_8')
-    new_property_value = input.get('s1_3').strip()
+    new_property_value = (input.get('s1_3') or "").strip()
     addOrEditNode = input.get('s1_1')
-    indexValue = input.get('s1_7')
-    selected_index = int(indexValue) - 1
-    selected_relation = input.get('s1_4')[selected_index]
-    key = selected_relation[1].get("Key")
-    relID = selected_relation[1].get("id")
-    datasetID = selected_relation[2]["CMID"]
+    selected_relation, relation_props, datasetID = _selected_admin_relation(input, "USES")
+    key = relation_props.get("Key")
+    relID = relation_props.get("id")
     integer_constrained_properties = {
         "yearStart", "yearEnd", "recordStart", 
         "recordEnd", "sampleSize", "yearPublished"
@@ -330,7 +365,7 @@ def add_edit_delete_USES(database,user,input):
                     RETURN n.groupLabel as groupLabel
                     """
             groupLabel = getQuery(query=query, params={"prop": USES_property}, driver=driver)
-            groupLabel = groupLabel[0]['groupLabel']
+            groupLabel = groupLabel[0].get('groupLabel') if groupLabel else None
             if groupLabel:
                 validatePropertyCMID(new_property_value,USES_property,groupLabel,driver)
         
@@ -389,6 +424,11 @@ def add_edit_delete_USES(database,user,input):
         
         else:
             if USES_property == "parentContext":
+                if isinstance(new_property_value, str):
+                    if "||" in new_property_value:
+                        new_property_value = [part.strip() for part in new_property_value.split("||") if part.strip()]
+                    else:
+                        new_property_value = [new_property_value]
                 result = validate_parent_context_list(driver,new_property_value)
                 if result:
                     raise ValueError(

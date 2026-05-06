@@ -5,6 +5,10 @@ import re
 
 merge_bp = Blueprint('merge', __name__)
 
+
+def parse_dataset_choices(value):
+    return [choice.strip() for choice in re.split(r"[\s,;|]+", str(value or "")) if choice.strip()]
+
 @merge_bp.route('/merge/syntax/<database>', methods=['POST'])
 def get_merge_syntax_route(database):
     try:
@@ -50,7 +54,7 @@ def get_merge_template(database, datasetID):
 def submit_merge():
     data = request.get_json(silent=True) or {}
     dataset_choices_raw = data.get("datasetChoices", "")
-    dataset_choices = [choice.strip() for choice in str(dataset_choices_raw).split(",") if choice.strip()]
+    dataset_choices = parse_dataset_choices(dataset_choices_raw)
     ncontains = data.get("mergelevel")
     category_label = unlist(data.get("categoryLabel", ""))
     intersection = unlist(data.get("intersection", False))
@@ -154,7 +158,7 @@ def submitvalidateDatasets():
     data = json.loads(data)
     database = unlist(data.get("database", ""))
     names_raw = data.get("names", "")
-    names = [name.strip() for name in names_raw.split(",") if name.strip()]
+    names = parse_dataset_choices(names_raw)
 
     driver = getDriver(database)
 
@@ -193,7 +197,7 @@ def getvalidKeysForDataset():
     data = json.loads(data)
     database = unlist(data.get("database", ""))
     subdomain = unlist(data.get("subdomain", ""))
-    names = [name.strip() for name in data.get("names", "").split(",") if name.strip()]
+    names = parse_dataset_choices(data.get("names", ""))
 
     driver = getDriver(database)
     

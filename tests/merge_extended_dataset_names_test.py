@@ -279,7 +279,7 @@ def test_extended_key_to_key_supports_three_datasets(monkeypatch):
                         "datasetID": "SD1",
                         "LCA_CMName": "Ancestor Name",
                         "LCA_CMID": "AM123",
-                        "tie": 0,
+                        "tie": 1,
                         "Key": "varA: value1",
                         "Name": "Term A",
                     },
@@ -287,7 +287,7 @@ def test_extended_key_to_key_supports_three_datasets(monkeypatch):
                         "datasetID": "AD2",
                         "LCA_CMName": "Ancestor Name",
                         "LCA_CMID": "AM123",
-                        "tie": 1,
+                        "tie": 2,
                         "Key": "varB: value2",
                         "Name": "Term B",
                     },
@@ -295,7 +295,7 @@ def test_extended_key_to_key_supports_three_datasets(monkeypatch):
                         "datasetID": "SD3",
                         "LCA_CMName": "Ancestor Name",
                         "LCA_CMID": "AM123",
-                        "tie": 1,
+                        "tie": 3,
                         "Key": "varC: value3",
                         "Name": "Term C",
                     },
@@ -312,7 +312,7 @@ def test_extended_key_to_key_supports_three_datasets(monkeypatch):
         database="ArchaMap",
         intersection=True,
         selectedKeyvariables={},
-        ncontains=2,
+        ncontains=3,
         resultFormat="key-to-key",
     )
 
@@ -323,6 +323,8 @@ def test_extended_key_to_key_supports_three_datasets(monkeypatch):
     assert result[0]["datasetCMName_SD1"] == "Dataset One"
     assert result[0]["datasetCMName_AD2"] == "Dataset Two"
     assert result[0]["datasetCMName_SD3"] == "Dataset Three"
+    assert result[0]["maxPairwiseDistance"] == 5
+    assert "nTie" not in result[0]
 
 
 def test_standard_key_to_key_returns_friendly_warning_when_dataset_has_no_rows(monkeypatch):

@@ -636,7 +636,7 @@ paths:
               properties:
                 datasetChoices:
                   type: string
-                  description: Comma-separated dataset CMIDs.
+                  description: Dataset CMIDs separated by commas, spaces, semicolons, newlines, tabs, pipes, or other whitespace.
                 categoryLabel:
                   type: string
                 mergelevel:

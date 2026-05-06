@@ -46,6 +46,30 @@ def test_submit_merge_allows_more_than_two_for_extended(client, monkeypatch):
     assert payload["datasets"] == ["SD1", "SD2", "AD3"]
 
 
+def test_submit_merge_accepts_common_dataset_separators(client, monkeypatch):
+    monkeypatch.setattr(merge_routes, "getDriver", lambda _database: object())
+    monkeypatch.setattr(merge_routes, "validate_domain_label", lambda label, driver=None: label)
+    monkeypatch.setattr(merge_routes, "proposeMerge", lambda **kwargs: {"ok": True, "datasets": kwargs["dataset_choices"]})
+
+    response = client.post(
+        "/proposeMergeSubmit",
+        json={
+            "datasetChoices": "SD1 AD2\nSD3\tAD4;SD5|AD6",
+            "mergelevel": 2,
+            "categoryLabel": "CATEGORY",
+            "intersection": True,
+            "database": "ArchaMap",
+            "equivalence": "Extended",
+            "resultFormat": "key-to-key",
+            "selectedKeyvariable": {},
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["datasets"] == ["SD1", "AD2", "SD3", "AD4", "SD5", "AD6"]
+
+
 def test_submit_merge_allows_two_datasets_for_extended(client, monkeypatch):
     monkeypatch.setattr(merge_routes, "getDriver", lambda _database: object())
     monkeypatch.setattr(merge_routes, "validate_domain_label", lambda label, driver=None: label)
@@ -202,6 +226,35 @@ def test_get_keys_any_domain_queries_all_uses_ties(client, monkeypatch):
     assert "MATCH (d:DATASET {CMID: $datasetID})-[r:USES]->()" in seen["query"]
     assert seen["params"] == {"datasetID": "SD1"}
     assert response.get_json()["keysByDataset"]["SD1"] == ["lang", "period", "phase"]
+
+
+def test_get_keys_accepts_common_dataset_separators(client, monkeypatch):
+    seen = []
+    monkeypatch.setattr(merge_routes, "getDriver", lambda _database: object())
+
+    def fake_get_query(query, driver=None, params=None):
+        seen.append(params["datasetID"])
+        return [{"Key": "lang == english"}]
+
+    monkeypatch.setattr(merge_routes, "getQuery", fake_get_query)
+
+    response = client.post(
+        "/getKeys",
+        json={
+            "names": "SD1 AD2\nSD3\tAD4;SD5|AD6",
+            "database": "ArchaMap",
+            "subdomain": "ANY DOMAIN",
+        },
+    )
+
+    assert response.status_code == 200
+    assert seen == ["SD1", "AD2", "SD3", "AD4", "SD5", "AD6"]
+
+
+def test_dataset_choice_parser_accepts_non_breaking_spaces():
+    raw = "SD468368 SD785\u00a0\u00a0\u00a0\u00a0 SD787\u00a0\u00a0"
+
+    assert merge_routes.parse_dataset_choices(raw) == ["SD468368", "SD785", "SD787"]
 
 
 def test_merge_syntax_route_accepts_dict_result(client, monkeypatch):
