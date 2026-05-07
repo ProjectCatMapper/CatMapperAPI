@@ -138,6 +138,39 @@ def _calculate_max_pairwise_distance(result, dataset_choices):
     return result.apply(longest_pairwise_distance, axis=1)
 
 
+def _calculate_lca_distance(result, dataset_choices):
+    if result.empty:
+        return pd.Series(0, index=result.index)
+
+    def summed_lca_distance(row):
+        node_distances = {}
+
+        for dataset_id in dataset_choices:
+            tie_col = f"tie_{dataset_id}"
+            if tie_col not in row.index:
+                continue
+
+            distance = pd.to_numeric(pd.Series([row[tie_col]]), errors="coerce").iloc[0]
+            if pd.isna(distance):
+                continue
+
+            matched_cmid_col = f"matchedCMID_{dataset_id}"
+            matched_cmid = row.get(matched_cmid_col)
+            if pd.isna(matched_cmid) or str(matched_cmid).strip() == "":
+                matched_cmid = f"__dataset_{dataset_id}"
+            else:
+                matched_cmid = str(matched_cmid).strip()
+
+            node_distances[matched_cmid] = min(
+                distance,
+                node_distances.get(matched_cmid, distance),
+            )
+
+        return sum(node_distances.values())
+
+    return result.apply(summed_lca_distance, axis=1)
+
+
 def _extended_matched_cmids(row, dataset_choices):
     matched_cmids = []
     for dataset_id in dataset_choices:
@@ -186,9 +219,10 @@ def _select_best_extended_rows(result, dataset_choices, ncontains, intersection,
         matched_count = pd.Series(0, index=result.index)
 
     result["_matchedDatasetCount"] = matched_count
-    result["maxPairwiseDistance"] = _calculate_max_pairwise_distance(result, dataset_choices)
+    result["_maxPairwiseDistance"] = _calculate_max_pairwise_distance(result, dataset_choices)
+    result["LCADistance"] = _calculate_lca_distance(result, dataset_choices)
 
-    result = result[result["maxPairwiseDistance"] <= ncontains]
+    result = result[result["LCADistance"] <= ncontains]
 
     if intersection:
         result = result[result["_matchedDatasetCount"] == total_datasets]
@@ -210,7 +244,7 @@ def _select_best_extended_rows(result, dataset_choices, ncontains, intersection,
         candidates["_row_idx"] = candidates.index
         best_rows = (
             candidates.sort_values(
-                by=[key_col, "_matchedDatasetCount", "maxPairwiseDistance", "LCA_CMID"],
+                by=[key_col, "_matchedDatasetCount", "LCADistance", "LCA_CMID"],
                 ascending=[True, False, True, True],
                 kind="mergesort",
             )
@@ -221,7 +255,7 @@ def _select_best_extended_rows(result, dataset_choices, ncontains, intersection,
     if rows_to_keep.any():
         result = result[rows_to_keep == 1]
 
-    return result.drop(columns=["_matchedDatasetCount"], errors="ignore")
+    return result.drop(columns=["_matchedDatasetCount", "_maxPairwiseDistance"], errors="ignore")
 
 
 def _discover_crossdomain_of_relationship(driver, source_domain, target_domain):
@@ -910,14 +944,14 @@ def proposeMerge(
             if result.empty:
                 return jsonify({"message": "No common ancestors found"}), 404
 
-            result["maxPairwiseDistance"] = pd.to_numeric(
-                result["maxPairwiseDistance"],
+            result["LCADistance"] = pd.to_numeric(
+                result["LCADistance"],
                 errors="coerce",
             ).fillna(0).astype(int)
 
-            cols = ["LCA_CMID", "LCA_CMName", "maxPairwiseDistance"] + \
+            cols = ["LCA_CMID", "LCA_CMName", "LCADistance"] + \
                 [col for col in result.columns if col not in [
-                    "LCA_CMID", "LCA_CMName", "maxPairwiseDistance"]]
+                    "LCA_CMID", "LCA_CMName", "LCADistance"]]
             result = result[cols].copy()
             for dataset_id in dataset_choices:
                 result[f"datasetCMName_{dataset_id}"] = dataset_name_map.get(dataset_id, "")

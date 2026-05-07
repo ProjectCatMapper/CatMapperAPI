@@ -290,14 +290,14 @@ def test_extended_key_to_key_supports_three_datasets(monkeypatch):
                         "Key": "varA: value1",
                         "Name": "Term A",
                     },
-                    {
-                        "datasetID": "AD2",
-                        "LCA_CMName": "Ancestor Name",
-                        "LCA_CMID": "AM123",
-                        "tie": 2,
-                        "Key": "varB: value2",
-                        "Name": "Term B",
-                    },
+                        {
+                            "datasetID": "AD2",
+                            "LCA_CMName": "Ancestor Name",
+                            "LCA_CMID": "AM123",
+                            "tie": 1,
+                            "Key": "varB: value2",
+                            "Name": "Term B",
+                        },
                     {
                         "datasetID": "SD3",
                         "LCA_CMName": "Ancestor Name",
@@ -330,11 +330,12 @@ def test_extended_key_to_key_supports_three_datasets(monkeypatch):
     assert result[0]["datasetCMName_SD1"] == "Dataset One"
     assert result[0]["datasetCMName_AD2"] == "Dataset Two"
     assert result[0]["datasetCMName_SD3"] == "Dataset Three"
-    assert result[0]["maxPairwiseDistance"] == 4
+    assert result[0]["LCADistance"] == 4
+    assert "maxPairwiseDistance" not in result[0]
     assert "nTie" not in result[0]
 
 
-def test_extended_filters_by_max_pairwise_distance_not_individual_tie():
+def test_extended_filters_by_lca_distance_not_individual_tie():
     result = pd.DataFrame(
         [
             {
@@ -458,7 +459,8 @@ def test_extended_pairwise_distance_deduplicates_shared_matched_nodes(monkeypatc
     assert isinstance(result, list)
     assert len(result) == 1
     row = result[0]
-    assert row["maxPairwiseDistance"] == 1
+    assert row["LCADistance"] == 1
+    assert "maxPairwiseDistance" not in row
     assert row["matchedCMID_SD1"] == "SM9227"
     assert row["matchedCMID_AD2"] == "SM9227"
     assert row["matchedCMID_SD3"] == "SM462198"
