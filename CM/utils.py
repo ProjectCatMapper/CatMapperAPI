@@ -331,7 +331,7 @@ def get_valid_domain_labels(driver):
     base_labels = {
         "CATEGORY",
         "DATASET",
-        "DISTRICT",
+        "AREA",
         "ADM0",
         "METADATA",
         "LABEL",
@@ -529,7 +529,7 @@ def flatten_json(json_obj, parent_key='', sep='_'):
 def custom_sort(elem):
     if elem == 'CONTAINS':
         return 0
-    elif elem == 'DISTRICT_OF':
+    elif elem == 'AREA_OF':
         return 1
     elif elem == 'USES':
         return 2

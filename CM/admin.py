@@ -641,7 +641,7 @@ def add_edit_delete_Node(database,user,input):
         validatePropertyCMID(changeNodeValue,changeNodeProperty,"DATASET",driver)
                 
     if changeNodeProperty == "District":
-        validatePropertyCMID(changeNodeValue,changeNodeProperty,"DISTRICT",driver)
+        validatePropertyCMID(changeNodeValue,changeNodeProperty,"AREA",driver)
     
     if changeNodeProperty == "glottocode":
         node_summary = getNodeMergeSummary(changeNodeID, driver)
@@ -674,7 +674,7 @@ def add_edit_delete_Node(database,user,input):
         if label == "DATASET" and changeNodeProperty in ["District", "parent"]:
             if changeNodeProperty == "District":
                 q = f"""
-                    MATCH (a {{CMID: '{changeNodeID}'}})<-[r:DISTRICT_OF]-(c:DISTRICT)
+                    MATCH (a {{CMID: '{changeNodeID}'}})<-[r:AREA_OF]-(c:AREA)
                     DELETE r
                 """
                 #CMCypherQuery(con=con, query=q)

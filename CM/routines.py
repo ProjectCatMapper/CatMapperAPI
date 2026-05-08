@@ -1987,7 +1987,7 @@ def getBadContextual(database, mail=None, return_type="data"):
                 sendEmail(mail, subject=f"Invalid short names for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
         query = """
         MATCH (n)-[r]->(m)
-        WHERE type(r) IN ["CONTAINS", "LANGUOID_OF", "RELIGION_OF", "DISTRICT_OF"]
+        WHERE type(r) IN ["CONTAINS", "LANGUOID_OF", "RELIGION_OF", "AREA_OF"]
         WITH n, m, type(r) AS relType, COUNT(r) AS relCount
         WHERE relCount > 1
         RETURN n.CMID AS CMID,

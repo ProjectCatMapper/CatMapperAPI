@@ -67,7 +67,7 @@ def _unique_preserve_order(values):
 def _get_effective_labels(labels, label_metadata_map):
     # Exclude generic structural labels from legend/color selection.
     labels = _unique_preserve_order([lbl for lbl in labels if lbl and lbl != "CATEGORY"])
-    cleaned = [lbl for lbl in labels if lbl != "DISTRICT"] or labels
+    cleaned = [lbl for lbl in labels if lbl != "AREA"] or labels
     if not cleaned:
         return []
 
@@ -559,10 +559,10 @@ def getExplore():
     '''
             qCategories = """
             UNWIND $cmid AS cmid
-            MATCH (:ADM0 {CMID: cmid})-[:DISTRICT_OF]->(c:CATEGORY)
+            MATCH (:ADM0 {CMID: cmid})-[:AREA_OF]->(c:CATEGORY)
             WITH c
             UNWIND labels(c) AS Domain
-            WITH Domain, count(DISTRICT c) AS Count
+            WITH Domain, count(c) AS Count
             WHERE Domain <> 'CATEGORY' // Optional: filter out the base label if needed
             RETURN Domain, Count 
             ORDER BY Domain

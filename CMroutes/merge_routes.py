@@ -90,13 +90,6 @@ def submit_merge():
         if max_hops < 1 or max_hops > 6:
             return jsonify({"error": "maxHops must be between 1 and 6"}), 400
 
-        if source_domain == "AREA":
-            source_domain = "DISTRICT"
-        if target_domain == "AREA":
-            target_domain = "DISTRICT"
-        if return_domain == "AREA":
-            return_domain = "DISTRICT"
-
         source_domain = validate_domain_label(source_domain, driver=driver)
         target_domain = validate_domain_label(target_domain, driver=driver)
         if return_domain:
@@ -121,9 +114,6 @@ def submit_merge():
 
     if category_label == "ANY DOMAIN":
         category_label = "CATEGORY"
-    elif category_label == "AREA":
-        category_label = "DISTRICT"
-
     category_label = validate_domain_label(category_label, driver=driver)
 
     result = proposeMerge(dataset_choices=dataset_choices, category_label=category_label,
@@ -204,9 +194,6 @@ def getvalidKeysForDataset():
     
     result_map={}
     
-    if subdomain == "AREA":
-        subdomain = "DISTRICT"
-
     if subdomain != "ANY DOMAIN":
         subdomain = validate_domain_label(subdomain, driver=driver)
         

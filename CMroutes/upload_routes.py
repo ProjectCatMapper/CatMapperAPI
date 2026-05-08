@@ -184,7 +184,7 @@ def _prepare_upload_job(data, acting_user):
     if label_upper == "ANY DOMAIN":
         label = "CATEGORY"
     if label_upper == "AREA":
-        label = "DISTRICT"
+        label = "AREA"
 
     datasetID = formData["datasetID"]
     CMName = formData["cmNameColumn"]

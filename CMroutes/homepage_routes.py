@@ -24,7 +24,7 @@ where d.foci is not null
 optional match (d)-[:USES]->(c:CATEGORY)
 with d, c unwind labels(c) as label
 with d,c, label
-where label in ["DISTRICT","LANGUOID","ETHNICITY","RELIGION"]
+where label in ["AREA","LANGUOID","ETHNICITY","RELIGION"]
 unwind d.foci as foci with foci, label, count(distinct c) as n
 return custom.getName(foci) as Focus, custom.getDisplayName(label) as domain, n order by Focus, domain
 """
@@ -103,7 +103,7 @@ def gethomepageCount(database):
                 "ETHNICITY": "Ethnicities",
                 "RELIGION": "Religions",
                 "LANGUOID": "Languages",
-                "DISTRICT": "Districts"
+                "AREA": "Areas"
             }
         elif database_lower == "archamap":
             mapping = {

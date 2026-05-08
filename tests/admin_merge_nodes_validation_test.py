@@ -7,7 +7,7 @@ def test_merge_nodes_rejects_mismatched_primary_domains(monkeypatch):
     monkeypatch.setattr(admin_module, "isValidCMID", lambda _cmid, _driver: ["ok"])
 
     summaries = {
-        "AM1": {"CMID": "AM1", "CMName": "District Node", "primaryDomain": "DISTRICT"},
+        "AM1": {"CMID": "AM1", "CMName": "District Node", "primaryDomain": "AREA"},
         "AM2": {"CMID": "AM2", "CMName": "Ethnicity Node", "primaryDomain": "ETHNICITY"},
     }
     monkeypatch.setattr(admin_module, "getNodeMergeSummary", lambda cmid, _driver: summaries[cmid])
@@ -28,7 +28,7 @@ def test_admin_node_summary_returns_cmid_name_and_primary_domain(client, monkeyp
             "CMID": cmid,
             "CMName": "Example Node",
             "labels": ["CATEGORY", "ADM1"],
-            "primaryDomain": "DISTRICT",
+            "primaryDomain": "AREA",
         },
     )
 
@@ -41,7 +41,7 @@ def test_admin_node_summary_returns_cmid_name_and_primary_domain(client, monkeyp
     payload = response.get_json()
     assert payload["CMID"] == "AM123"
     assert payload["CMName"] == "Example Node"
-    assert payload["primaryDomain"] == "DISTRICT"
+    assert payload["primaryDomain"] == "AREA"
 
 
 def test_resolve_primary_domain_accepts_variable_label(monkeypatch):

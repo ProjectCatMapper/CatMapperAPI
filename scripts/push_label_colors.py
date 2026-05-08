@@ -54,7 +54,7 @@ COLOR_ROWS: List[Dict[str, str]] = [
     {"CMName": "ADML", "color": "#e377c2"},
     {"CMName": "ADMX", "color": "#7f7f7f"},
     {"CMName": "REGION", "color": "#bcbd22"},
-    {"CMName": "DISTRICT", "color": "#17becf"},
+    {"CMName": "AREA", "color": "#17becf"},
     {"CMName": "PERIOD", "color": "#393b79"},
     {"CMName": "DIALECT", "color": "#637939"},
     {"CMName": "LANGUAGE", "color": "#8c6d31"},

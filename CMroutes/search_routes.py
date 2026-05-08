@@ -258,7 +258,7 @@ def getSearch():
           in: query
           type: string
           required: false
-          enum: ['DISTRICT','ETHNICITY','STONE']
+          enum: ['AREA','ETHNICITY','STONE']
           default: CATEGORY
           description: Domain containing the category
         - name: yearStart
@@ -275,7 +275,7 @@ def getSearch():
           in: query
           type: string
           required: false
-          description: CMID of ADM0 node with DISTRICT_OF tie
+          description: CMID of ADM0 node with AREA_OF tie
         - name: context
           in: query
           type: string
@@ -326,7 +326,7 @@ def getSearch():
                         type: array
                         items:
                             type: string
-                        example: ["DISTRICT","FEATURE"]
+                        example: ["AREA","FEATURE"]
                     matching:
                         type: string
                         example: Afghanistan

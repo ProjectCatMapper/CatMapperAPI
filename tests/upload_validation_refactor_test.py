@@ -173,7 +173,7 @@ def test_add_node_rejects_blank_cmname(monkeypatch):
 def test_validate_variable_category_type_values_normalizes_variable_rows_by_label():
     dataset = pd.DataFrame(
         {
-            "label": ["VARIABLE", "DISTRICT"],
+            "label": ["VARIABLE", "AREA"],
             "categoryType": ["categorical", "numeric"],
         }
     )
@@ -201,7 +201,7 @@ def test_validate_variable_category_type_values_uses_cmid_metadata_when_label_mi
         "_fetch_cmid_metadata",
         lambda driver, cmids, chunk_size=1500: {
             "AM1": {"labels": {"CATEGORY", "VARIABLE"}, "groupLabels": set()},
-            "AM2": {"labels": {"CATEGORY", "DISTRICT"}, "groupLabels": set()},
+            "AM2": {"labels": {"CATEGORY", "AREA"}, "groupLabels": set()},
         },
     )
 
@@ -317,7 +317,7 @@ def test_validate_non_parent_multi_value_columns_raises_for_wrong_label():
     column_map = {"language": ["AM1", "AM2"]}
     cmid_metadata = {
         "AM1": {"labels": {"CATEGORY", "LANGUOID"}, "groupLabels": set()},
-        "AM2": {"labels": {"CATEGORY", "DISTRICT"}, "groupLabels": set()},
+        "AM2": {"labels": {"CATEGORY", "AREA"}, "groupLabels": set()},
     }
 
     with pytest.raises(ValueError) as err:
@@ -338,7 +338,7 @@ def test_validate_parent_label_compatibility_raises_on_mismatch(monkeypatch):
     )
     cmid_metadata = {
         "AM100": {"labels": {"CATEGORY", "LANGUOID"}, "groupLabels": {"LANGUAGE"}},
-        "AM200": {"labels": {"CATEGORY", "DISTRICT"}, "groupLabels": {"DISTRICT"}},
+        "AM200": {"labels": {"CATEGORY", "AREA"}, "groupLabels": {"AREA"}},
     }
 
     monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
@@ -348,7 +348,7 @@ def test_validate_parent_label_compatibility_raises_on_mismatch(monkeypatch):
         "getQuery",
         lambda query, driver, type="dict", **kwargs: [
             {"groupLabel": "LANGUAGE"},
-            {"groupLabel": "DISTRICT"},
+            {"groupLabel": "AREA"},
             {"groupLabel": "GENERIC"},
         ],
     )

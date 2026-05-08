@@ -44,7 +44,7 @@ def seeded_realdb_graph(realdb_driver, realdb_database):
       recordEnd: '2005',
       testRunId: $run_id
     })
-    CREATE (dist:DISTRICT:TEST_TMP {
+    CREATE (dist:AREA:TEST_TMP {
       CMID: $district_cmid,
       CMName: $district_cmid,
       names: [$district_cmid],

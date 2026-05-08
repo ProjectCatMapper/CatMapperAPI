@@ -219,7 +219,7 @@ def _get_queries_for_label(label, database):
             
             'categories': """
                 UNWIND $cmid AS cmid
-                MATCH (a:ADM0 {CMID: cmid})-[r:DISTRICT_OF]-(c)
+                MATCH (a:ADM0 {CMID: cmid})-[r:AREA_OF]-(c)
                 UNWIND labels(c) AS Domain 
                 RETURN Domain, size(collect(DISTINCT c)) AS Count, sum(size(r.referenceKey)) AS TotalUses
                 ORDER BY Domain

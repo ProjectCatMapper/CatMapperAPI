@@ -27,21 +27,21 @@ def test_apply_node_colors_keeps_group_when_no_subdomain_present():
 
 
 def test_apply_node_colors_keeps_district_label_when_it_is_only_domain():
-    rows = [{"labels": ["CATEGORY", "DISTRICT"]}]
+    rows = [{"labels": ["CATEGORY", "AREA"]}]
     label_metadata = {
-        "DISTRICT": {"color": "#1f77b4", "groupLabel": "DISTRICT"},
+        "AREA": {"color": "#1f77b4", "groupLabel": "AREA"},
     }
 
     explore_routes._apply_node_colors(rows, label_metadata)
 
-    assert rows[0]["legendLabel"] == "DISTRICT"
+    assert rows[0]["legendLabel"] == "AREA"
     assert rows[0]["color"] == "#1f77b4"
 
 
 def test_apply_node_colors_hides_district_when_other_domain_exists():
-    rows = [{"labels": ["CATEGORY", "DISTRICT", "ADM1"]}]
+    rows = [{"labels": ["CATEGORY", "AREA", "ADM1"]}]
     label_metadata = {
-        "DISTRICT": {"color": "#1f77b4", "groupLabel": "DISTRICT"},
+        "AREA": {"color": "#1f77b4", "groupLabel": "AREA"},
         "ADM1": {"color": "#2ca02c", "groupLabel": "ADM1"},
     }
 

@@ -41,7 +41,7 @@ class FakeSession:
         if "p.type='relationship'" in query:
             return FakeCursor([{"property": "Key"}, {"property": "year"}])
         if "MATCH (p:LABEL)" in query:
-            return [{"p.CMName": "DISTRICT"}, {"p.CMName": "ALL NODES"}, {"p.CMName": "LANGUOID"}]
+            return [{"p.CMName": "AREA"}, {"p.CMName": "ALL NODES"}, {"p.CMName": "LANGUOID"}]
         return FakeCursor([])
 
     def __enter__(self):
@@ -93,7 +93,7 @@ def test_create_label_helper_excludes_internal_labels(client, monkeypatch):
 
     assert response.status_code == 200
     payload = response.get_json()
-    assert payload["res"] == ["DISTRICT", "LANGUOID"]
+    assert payload["res"] == ["AREA", "LANGUOID"]
 
 
 def test_create_metadata_node_creates_in_both_databases(client, monkeypatch):

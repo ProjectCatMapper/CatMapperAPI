@@ -650,20 +650,20 @@ def processDATASETs(database, CMID=None, user="0"):
         query = f"""
         {q1}
         MATCH (d:DATASET {q2})
-        OPTIONAL MATCH (d)<-[:DISTRICT_OF]-(c:DISTRICT)
+        OPTIONAL MATCH (d)<-[:AREA_OF]-(c:AREA)
         WITH d, coalesce(d.District, []) AS desiredDistricts, collect(c.CMID) AS linkedDistricts
         WITH d,
              [cm IN desiredDistricts WHERE NOT cm IN linkedDistricts] AS missing,
              [cm IN linkedDistricts WHERE NOT cm IN desiredDistricts] AS extra
         CALL (d, missing) {{
             UNWIND missing AS cm
-            MERGE (c:DISTRICT {{CMID: cm}})
-            MERGE (d)<-[:DISTRICT_OF]-(c)
+            MERGE (c:AREA {{CMID: cm}})
+            MERGE (d)<-[:AREA_OF]-(c)
             RETURN count(*) AS mergedDistrictRels
         }}
         CALL (d, extra) {{
             UNWIND extra AS cm
-            OPTIONAL MATCH (d)<-[rel:DISTRICT_OF]-(:DISTRICT {{CMID: cm}})
+            OPTIONAL MATCH (d)<-[rel:AREA_OF]-(:AREA {{CMID: cm}})
             DELETE rel
             RETURN count(*) AS deletedDistrictRels
         }}

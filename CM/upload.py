@@ -1075,7 +1075,7 @@ def _fetch_cmid_metadata(driver, cmids, chunk_size=1500):
 
 def _required_label_for_column(column_name):
     if column_name == "country":
-        return "DISTRICT"
+        return "AREA"
     if column_name == "language":
         return "LANGUOID"
     return column_name.upper()
@@ -3145,7 +3145,7 @@ def input_Nodes_Uses(
         )
         matches = getQuery(
             params={"rows": dataset[["datasetID"]]},
-            q="DISTRICT QUERY",
+            q="AREA QUERY",
             database=database,
             user="1",
         )

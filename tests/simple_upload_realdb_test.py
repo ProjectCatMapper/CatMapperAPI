@@ -87,8 +87,8 @@ def test_simple_upload_realdb_forces_add_uses_and_maps_columns(simple_upload_see
             }
         ],
         "formData": {
-            "domain": "DISTRICT",
-            "subdomain": "DISTRICT",
+            "domain": "AREA",
+            "subdomain": "AREA",
             "datasetID": dataset_cmid,
             "cmNameColumn": "col_cmname",
             "categoryNamesColumn": "col_name",
@@ -115,7 +115,7 @@ def test_simple_upload_realdb_forces_add_uses_and_maps_columns(simple_upload_see
     simple_upload_seed["upload_cmnames"] = [cmname]
 
     verify_query = """
-    MATCH (d:DATASET {CMID: $dataset_cmid})-[r:USES]->(c:DISTRICT {CMName: $cmname})
+    MATCH (d:DATASET {CMID: $dataset_cmid})-[r:USES]->(c:AREA {CMName: $cmname})
     RETURN r.Key AS keyValue, c.CMID AS cmid
     """
     rows = getQuery(
@@ -166,8 +166,8 @@ def test_simple_upload_realdb_multiple_key_columns_with_sparse_values(simple_upl
         "optionalProperties": [],
         "df": rows_in,
         "formData": {
-            "domain": "DISTRICT",
-            "subdomain": "DISTRICT",
+            "domain": "AREA",
+            "subdomain": "AREA",
             "datasetID": dataset_cmid,
             "cmNameColumn": "col_cmname",
             "categoryNamesColumn": "col_name",
@@ -196,7 +196,7 @@ def test_simple_upload_realdb_multiple_key_columns_with_sparse_values(simple_upl
     simple_upload_seed["upload_cmnames"] = cmnames
 
     verify_query = """
-    MATCH (d:DATASET {CMID: $dataset_cmid})-[r:USES]->(c:DISTRICT)
+    MATCH (d:DATASET {CMID: $dataset_cmid})-[r:USES]->(c:AREA)
     WHERE c.CMName IN $cmnames
     RETURN c.CMName AS cmname, r.Key AS keyValue
     """

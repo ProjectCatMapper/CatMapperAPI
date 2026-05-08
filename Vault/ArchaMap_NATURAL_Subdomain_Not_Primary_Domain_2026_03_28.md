@@ -2,7 +2,7 @@
 
 Issue:
 - `NATURAL` appeared as a top-level Explore domain in ArchaMap after the label metadata copy.
-- It should only appear as a subdomain under `DISTRICT` / Areas.
+- It should only appear as a subdomain under `AREA` / Areas.
 
 Cause:
 - ArchaMap already had a separate top-level label node:
@@ -13,12 +13,12 @@ Cause:
 - The copied subdomain node was correct:
   - `CL50`
   - `CMName = NATURAL`
-  - `groupLabel = DISTRICT`
+  - `groupLabel = AREA`
 
 Fix:
 - Set `CL99.public = 'FALSE'` in ArchaMap.
 - Restarted the `api` container to clear cached domain metadata.
 
 Verification:
-- `/api/metadata/domains/ArchaMap` returns `DISTRICT` but not `NATURAL`
-- `/api/metadata/subdomains/ArchaMap` returns `NATURAL` under `DISTRICT`
+- `/api/metadata/domains/ArchaMap` returns `AREA` but not `NATURAL`
+- `/api/metadata/subdomains/ArchaMap` returns `NATURAL` under `AREA`

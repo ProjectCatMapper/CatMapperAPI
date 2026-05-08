@@ -83,9 +83,6 @@ def search(
 
     if domain == "ANY DOMAIN":
         domain = "CATEGORY"
-    if domain == "AREA":
-        domain = "DISTRICT"
-
     print("check0")
 
     driver = getDriver(database)
@@ -237,7 +234,7 @@ def search(
     # filter by country
     if country is not None:
         qCountryFilter = """
-    where (a)<-[:DISTRICT_OF]-(:ADM0 {CMID: $country})
+    where (a)<-[:AREA_OF]-(:ADM0 {CMID: $country})
     with a, matching, score
     """
     else:
@@ -301,7 +298,7 @@ def search(
 
     # get country
     qCountry = """
-    optional match (a)<-[:DISTRICT_OF]-(c:ADM0)
+    optional match (a)<-[:AREA_OF]-(c:ADM0)
     with a, matching, apoc.coll.toSet(collect(c.CMName)) as country, score
     """
 
@@ -362,8 +359,6 @@ def translate(
 
     if domain in ["ANY DOMAIN", "GENERIC"]:
         domain = "CATEGORY"
-    if domain == "AREA":
-        domain = "DISTRICT"
     if not key is None:
         if str.lower(key) != 'true':
             key = None
@@ -474,7 +469,7 @@ def translate(
     # filter by country
     if 'country' in rows[0]:
         qCountryFilter = """
-    where (a)<-[:DISTRICT_OF]-(:ADM0 {CMID: row.country})
+    where (a)<-[:AREA_OF]-(:ADM0 {CMID: row.country})
     with row, a, matching, score
     """
     else:
@@ -563,7 +558,7 @@ def translate(
 
     # get country
     qCountry = """
-    optional match (a)<-[:DISTRICT_OF]-(c:ADM0)
+    optional match (a)<-[:AREA_OF]-(c:ADM0)
     with row, a, matching, collect(c.CMName) as country, score
     """
 
