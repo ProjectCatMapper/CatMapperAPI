@@ -53,8 +53,6 @@ def test_getBadComplexProperties_allows_negative_eventDate(monkeypatch):
         if type == "df":
             if "parentList AS parentValues" in query:
                 return pd.DataFrame()
-            if "pc AS parentContextEntry" in query:
-                raise Exception("force fallback for schema check")
             if "parentCMID AS missingParent" in query:
                 return pd.DataFrame()
             return pd.DataFrame()
@@ -80,8 +78,8 @@ def test_getBadComplexProperties_allows_negative_eventDate(monkeypatch):
 
     result = routines.getBadComplexProperties(database="ArchaMap", return_type="data")
 
-    assert result["invalid_parentContext_json_shape_count"] == 0
-    assert result["invalid_parentContext_json_shape"] == []
+    assert "invalid_parentContext_json_shape_count" not in result
+    assert "invalid_parentContext_json_shape" not in result
 
 
 def test_get_duplicate_triplets_suppresses_email_when_send_email_false(monkeypatch):
@@ -93,11 +91,15 @@ def test_get_duplicate_triplets_suppresses_email_when_send_email_false(monkeypat
 
     def fake_get_query(query, driver, type=None, **kwargs):
         if type == "df":
+            assert "l.groupLabel AS groupLabel" in query
+            assert "COUNT(DISTINCT r) AS rel_count" in query
+            assert "l.CMName <> 'CATEGORY'" in query
             return pd.DataFrame([
                 {
                     "datasetID": "AD354481",
-                    "CMID": "AM354486",
+                    "groupLabel": "OBJECT",
                     "Key": "Name == Bolen Side Notch",
+                    "CMIDs": ["AM354486", "AM354487"],
                     "rel_count": 2,
                 }
             ])
@@ -117,4 +119,35 @@ def test_get_duplicate_triplets_suppresses_email_when_send_email_false(monkeypat
     )
 
     assert result["Total"] == 1
-    assert result["Duplicate Triplets"][0]["CMID"] == "AM354486"
+    assert result["Duplicate Triplets"][0]["groupLabel"] == "OBJECT"
+    assert result["Duplicate Triplets"][0]["CMIDs"] == ["AM354486", "AM354487"]
+
+
+def test_getInappropriateprops_Nodes_Rels_includes_uses_key(monkeypatch):
+    queries = []
+
+    monkeypatch.setattr(routines, "getDriver", lambda _database: object())
+
+    def fake_get_query(query, driver, type=None, **kwargs):
+        queries.append(query)
+        if "MATCH (p:PROPERTY)" in query and "p.type = \"relationship\"" in query:
+            return pd.DataFrame([
+                {
+                    "n": "SM1",
+                    "d": "SD1",
+                    "Key": "Name == example",
+                    "invalidProps": ["badProp"],
+                }
+            ])
+        return pd.DataFrame()
+
+    monkeypatch.setattr(routines, "getQuery", fake_get_query)
+
+    result = routines.getInappropriateprops_Nodes_Rels(
+        database="SocioMap",
+        return_type="data",
+    )
+
+    invalid_uses = result["USES with invalid props"]
+    assert invalid_uses[0]["Key"] == "Name == example"
+    assert any("r.Key AS Key" in query for query in queries)

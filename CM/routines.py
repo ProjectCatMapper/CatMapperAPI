@@ -778,36 +778,6 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
             parent_context_fallback_cache = parsed_rows
             return parent_context_fallback_cache
 
-        def _fallback_parent_context_schema_check():
-            """
-            Fallback for results10 if APOC map conversion fails in Cypher.
-            """
-            rows = _load_parent_context_rows_for_fallback()
-            fallback_results = []
-
-            for row in rows:
-                ctx = row["parentContextMap"]
-                parent_val = ctx.get("parent")
-                event_type_val = ctx.get("eventType")
-
-                parent_str = None if parent_val is None else str(parent_val).strip()
-                event_type_str = None if event_type_val is None else str(event_type_val).strip()
-
-                if (
-                    parent_str is None
-                    or event_type_str is None
-                    or (parent_str is not None and "," in parent_str)
-                    or (event_type_str is not None and "," in event_type_str)
-                ):
-                    fallback_results.append({
-                        "datasetID": row["datasetID"],
-                        "CMID": row["CMID"],
-                        "Key": row["Key"],
-                        "parentContextEntry": row["parentContextEntry"],
-                    })
-
-            return pd.DataFrame(fallback_results)
-
         def _fallback_parent_cmid_check():
             """
             Fallback for results11 using indexed CMID lookups on known labels.
@@ -888,45 +858,6 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                     fallback_notes.append(f"{check_name}: fallback failed")
                     return pd.DataFrame()
 
-        query = """
-                MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
-                WHERE r.parentContext IS NOT NULL
-                WITH d, c, r,
-                    CASE
-                        WHEN valueType(r.parentContext) STARTS WITH 'LIST<STRING'
-                            THEN r.parentContext
-                        WHEN valueType(r.parentContext) STARTS WITH 'STRING'
-                            THEN [r.parentContext]
-                        WHEN valueType(r.parentContext) STARTS WITH 'LIST<MAP'
-                            THEN [pc IN r.parentContext | apoc.convert.toJson(pc)]
-                        WHEN valueType(r.parentContext) STARTS WITH 'MAP'
-                            THEN [apoc.convert.toJson(r.parentContext)]
-                        ELSE []
-                    END AS parentContexts
-                UNWIND parentContexts AS pc
-                WITH d, c, r, trim(toString(pc)) AS pc
-                WHERE pc <> ""
-                WITH d, c, r, pc, apoc.convert.fromJsonMap(pc) AS m
-                WITH d, c, r, pc, m,
-                    CASE WHEN m.parent IS NULL THEN NULL ELSE trim(toString(m.parent)) END AS parentValue,
-                    CASE WHEN m.eventType IS NULL THEN NULL ELSE trim(toString(m.eventType)) END AS eventTypeValue
-                WHERE
-                parentValue IS NULL
-                OR eventTypeValue IS NULL
-                OR parentValue CONTAINS ","
-                OR eventTypeValue CONTAINS ","
-                RETURN
-                    d.CMID AS datasetID,
-                    c.CMID AS CMID,
-                    r.Key AS Key,
-                    pc AS parentContextEntry
-                """
-        results10 = _run_df_query_with_fallback(
-            query,
-            _fallback_parent_context_schema_check,
-            "parentContext schema validation",
-        )
-
         query = """MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
                 WHERE r.parentContext IS NOT NULL
                 WITH d, c, r,
@@ -975,7 +906,7 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
             if len(results2) > 1:
                 sendEmail(mail, subject=f"Invalid parentContext properties for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp2])
                 mailSent = "True"
-        fp3, fp4, fp5, fp6, fp7, fp8, fp9, fp10, fp11 = None, None, None, None, None, None, None, None, None
+        fp3, fp4, fp5, fp6, fp7, fp8, fp9, fp11 = None, None, None, None, None, None, None, None
         if isinstance(results3, pd.DataFrame) and not results3.empty:
             with tempfile.NamedTemporaryFile(delete=False, prefix=f"CMID_in_parentContext_not_in_parent_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
                 fp3 = tmpfile.name
@@ -1025,13 +956,6 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
             if isinstance(mail, Mail):
                 sendEmail(mail, subject=f"Valid eventDate in {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp9])
                 mailSent = "True"
-        if isinstance(results10, pd.DataFrame) and not results10.empty:
-            with tempfile.NamedTemporaryFile(delete=False, prefix=f"Single_parentContext_json_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
-                fp10 = tmpfile.name
-                results10.to_excel(fp10, index=False)
-            if isinstance(mail, Mail):
-                sendEmail(mail, subject=f"Not more than one parent, eventDate and eventType are in a single json in {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp10])
-                mailSent = "True"
         if isinstance(results11, pd.DataFrame) and not results11.empty:
             with tempfile.NamedTemporaryFile(delete=False, prefix=f"Valid_parent_CMID_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
                 fp11 = tmpfile.name
@@ -1044,12 +968,10 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                 "invalid_geoCoords_count": len(results1),
                 "invalid_parentContext_count": len(results2),
                 "parentContext_parent_not_in_parent_count": len(results3),
-                "invalid_parentContext_json_shape_count": len(results10),
                 "invalid_parentContext_parent_cmid_count": len(results11),
                 "invalid_geoCoords": results1,
                 "invalid_parentContext": results2,
                 "parentContext_parent_not_in_parent": results3.to_dict(orient="records"),
-                "invalid_parentContext_json_shape": results10.to_dict(orient="records"),
                 "invalid_parentContext_parent_cmid": results11.to_dict(orient="records"),
                 "emailSent": mailSent,
             }
@@ -1066,11 +988,10 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                     f"Invalid geoCoords: {len(results1)}; "
                     f"Invalid parentContext: {len(results2)}; "
                     f"CMID in parentContext but not in parent: {len(results3)}; "
-                    f"Invalid parentContext JSON shape: {len(results10)}; "
                     f"Invalid parentContext parent CMID: {len(results11)}"
                     f"{fallback_info}"
                 ),
-                "filepath": [fp1, fp2, fp3, fp10, fp11],
+                "filepath": [fp1, fp2, fp3, fp11],
             }
     except Exception as e:
         result = str(e)
@@ -2264,14 +2185,20 @@ def get_duplicate_triplets(database, mail=None, return_type="data", send_email=T
         driver = getDriver(database)
         query = """
         MATCH (a:DATASET)-[r:USES]->(b:CATEGORY)
-        WITH a, b, r.Key AS Key, COUNT(r) AS rel_count
+        MATCH (l:LABEL)
+        WHERE l.CMName IN labels(b)
+            AND l.CMName <> 'CATEGORY'
+        WITH a, l.groupLabel AS groupLabel, r.Key AS Key,
+            collect(DISTINCT b.CMID) AS CMIDs,
+            COUNT(DISTINCT r) AS rel_count
         WHERE rel_count > 1
         RETURN 
             a.CMID AS datasetID,
-            b.CMID AS CMID,
+            groupLabel,
             Key,
+            CMIDs,
             rel_count
-        ORDER BY datasetID, CMID, Key;
+        ORDER BY datasetID, groupLabel, Key;
                 """
         results = getQuery(query, driver, type="df")
 
@@ -2322,7 +2249,7 @@ def getInappropriateprops_Nodes_Rels(database, mail=None, return_type="data"):
         WITH n.CMID as n,r,d.CMID as d, allowedRelProps,
             [k IN keys(r) WHERE NOT k IN allowedRelProps] AS invalidProps
         WHERE size(invalidProps) > 0
-        RETURN n,d, invalidProps;
+        RETURN n,d, r.Key AS Key, invalidProps;
         """
         results2 = getQuery(query, driver, type="df")
 
