@@ -26,11 +26,11 @@ class MergingTieVariable:
     datasetTransform: Optional[str]
 
 @dataclass
-class EquivalenceTie:
-    mergingID: str
+class CategoryMergingTie:
+    stackID: str
     categoryID: str
     key: str
-    datasetID: Optional[str] 
+    datasetID: str
 
 
 def require(value, message):
@@ -54,7 +54,7 @@ def create_new_stack_id():
 def validate_merging_template_inputs(
     merging_stack_dataset: List[MergingTieStackDataset],
     merging_variables: List[MergingTieVariable],
-    equivalence_ties: List[EquivalenceTie],
+    category_merging_ties: List[CategoryMergingTie],
     database_ids: Dict[str, set]
 ):
     """
@@ -98,17 +98,15 @@ def validate_merging_template_inputs(
         if mv.stackID:
             validate_exists(mv.stackID, database_ids["stackIDs"], f"Unknown stackID '{mv.stackID}'")
 
-    for eq in equivalence_ties:
-        require(eq.mergingID, "mergingID required in equivalence tie")
-        require(eq.categoryID, "categoryID required in equivalence tie")
-        require(eq.key, "key required in equivalence tie")
+    for cm in category_merging_ties:
+        require(cm.stackID, "stackID required in category merging tie")
+        require(cm.categoryID, "categoryID required in category merging tie")
+        require(cm.key, "key required in category merging tie")
+        require(cm.datasetID, "datasetID required in category merging tie")
 
-        validate_exists(eq.mergingID, database_ids["mergingIDs"], f"Unknown mergingID '{eq.mergingID}'")
-        validate_exists(eq.categoryID, database_ids["categoryIDs"], f"Unknown categoryID '{eq.categoryID}'")
-
-        # Type2: datasetID exists
-        if eq.datasetID:
-            validate_exists(eq.datasetID, database_ids["datasetIDs"], f"Unknown datasetID '{eq.datasetID}'")
+        validate_exists(cm.stackID, database_ids["stackIDs"], f"Unknown stackID '{cm.stackID}'")
+        validate_exists(cm.categoryID, database_ids["categoryIDs"], f"Unknown categoryID '{cm.categoryID}'")
+        validate_exists(cm.datasetID, database_ids["datasetIDs"], f"Unknown datasetID '{cm.datasetID}'")
 
     return True
 
@@ -147,7 +145,7 @@ def process_type1_updates(
 def process_merging_template(
     merging_stack_dataset: List[MergingTieStackDataset],
     merging_variables: List[MergingTieVariable],
-    equivalence_ties: List[EquivalenceTie],
+    category_merging_ties: List[CategoryMergingTie],
     database_ids: Dict[str, set],
     db_insert_stack,
     db_insert_merging_stack,
@@ -161,7 +159,7 @@ def process_merging_template(
     validate_merging_template_inputs(
         merging_stack_dataset,
         merging_variables,
-        equivalence_ties,
+        category_merging_ties,
         database_ids
     )
 
@@ -205,15 +203,15 @@ if __name__ == "__main__":
         MergingTieVariable("m1", "s1", "d1", "v1", "k1", "test", None, None, "mean", None, None, None)
     ]
 
-    eq_ties = [
-        EquivalenceTie("m1", "c2", "k1", "d1"),
-        EquivalenceTie("m1", "c3", "k5", None) 
+    category_merging_ties = [
+        CategoryMergingTie("s1", "c2", "k1", "d1"),
+        CategoryMergingTie("s1", "c3", "k5", "d2")
     ]
 
     process_merging_template(
         merging_stack_ds,
         variables,
-        eq_ties,
+        category_merging_ties,
         db_ids,
         mock_insert_stack,
         mock_insert_merging_stack,

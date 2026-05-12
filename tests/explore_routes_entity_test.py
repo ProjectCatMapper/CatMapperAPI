@@ -29,7 +29,7 @@ def test_entity_json_aggregates_node_page_payload(client, monkeypatch):
         "datasetSummary": [],
         "mergingTemplateCount": 0,
         "mergingTies": [],
-        "equivalenceTies": [],
+        "categoryMergingTies": [],
     }
 
     monkeypatch.setattr(explore_routes, "getCategoryInfo", lambda database, cmid: info_payload)

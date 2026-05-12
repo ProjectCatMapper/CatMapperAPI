@@ -184,7 +184,7 @@ def getProgress(database):
         CALL apoc.meta.stats() YIELD relTypesCount
         UNWIND keys(relTypesCount) AS relType
         WITH relType, relTypesCount[relType] AS current
-        WHERE NOT relType IN ["USES","IS", "MERGING","CONTAINS","HAS_LOG","EQUIVALENT"]
+        WHERE NOT relType IN ["USES","IS", "MERGING","CONTAINS","HAS_LOG"]
         RETURN 
             replace(relType,"_OF","") AS label, 
             current, 

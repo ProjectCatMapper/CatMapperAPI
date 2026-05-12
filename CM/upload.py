@@ -1718,15 +1718,17 @@ def create_mties_variables(database, user, dataset):
 # user = "1"
 # dataset = pd.read_excel("tmp/BecomingHopiMergingTemplate.xlsx")
 # dataset = pd.read_excel("tmp/BecomingHopiMergingVariables.xlsx")
-# dataset = pd.read_excel("tmp/BecomingHopiEquivalenceTies.xlsx")
+# dataset = pd.read_excel("tmp/BecomingHopiCategoryMergingTies.xlsx")
 
-# creates equivalence ties from  category to another category or self.
-def create_equivalence_ties(database, user, dataset):
+# creates category merging ties from datasets to categories.
+def create_category_merging_ties(database, user, dataset):
     driver = getDriver(database)
-    required_cols = ["mergingID","categoryID","Key","datasetID"]
+    required_cols = ["categoryID", "Key", "datasetID"]
     for col in required_cols:
         if col not in dataset.columns:
             raise ValueError(f"Missing required column: {col}")
+    if "stackID" not in dataset.columns and "mergingID" not in dataset.columns:
+        raise ValueError("Missing required column: stackID")
 
     # Filter out rows with NaN or blank Key values
     dataset = dataset[~(dataset['Key'].isna() | (dataset['Key'].astype(str).str.strip() == ''))].copy()
@@ -1740,25 +1742,25 @@ def create_equivalence_ties(database, user, dataset):
         if stacks.empty:
             raise ValueError("No stacks found for the provided mergingIDs and datasetIDs")
         dataset = dataset.merge(stacks[["mergingID","stackID","datasetID"]], on=["mergingID","datasetID"], how="left")
+        if dataset["stackID"].isna().any():
+            missing = dataset[dataset["stackID"].isna()][["mergingID", "datasetID"]].drop_duplicates()
+            raise ValueError(f"No stackID found for some mergingID/datasetID pairs:\n{missing}")
 
+    rows = dataset[["categoryID", "stackID", "datasetID", "Key"]].to_dict(orient="records")
 
-    # Use the Key from the uploaded dataset directly, not from the USES tie
-    # Assume 'originalID' is the same as 'categoryID' from the uploaded dataset
-    dataset['originalID'] = dataset['categoryID']
-
-    equivalence_ties_query = """
+    category_merging_ties_query = """
     unwind $rows as row
-    MATCH (c1:CATEGORY {CMID: row.originalID})
-    MATCH (c2:CATEGORY {CMID: row.categoryID})
-    MERGE (c1)-[r:EQUIVALENT {stack: row.stackID, dataset: row.datasetID, Key: row.Key}]->(c2)
+    MATCH (d:DATASET {CMID: row.datasetID})
+    MATCH (c:CATEGORY {CMID: row.categoryID})
+    MERGE (d)-[r:MERGING {stack: row.stackID, Key: row.Key}]->(c)
     RETURN count(*) as count
     """
     
-    results = getQuery(query=equivalence_ties_query, driver=driver, params={"rows": dataset[["originalID","categoryID","stackID","datasetID","Key"]].to_dict(orient="records")}, type = "df")
+    results = getQuery(query=category_merging_ties_query, driver=driver, params={"rows": rows}, type = "df")
     if results['count'].iloc[0] == len(dataset):
-        updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results['count'].iloc[0]} EQUIVALENT ties", write="a")
+        updateLog(f"log/{user}uploadProgress.txt", f"Successfully created {results['count'].iloc[0]} category MERGING ties", write="a")
     else:
-        raise ValueError(f"Expected to create {len(dataset)} EQUIVALENT ties, but created {results['count'].iloc[0]}")
+        raise ValueError(f"Expected to create {len(dataset)} category MERGING ties, but created {results['count'].iloc[0]}")
     
     return {
         "result": dataset
@@ -1776,7 +1778,7 @@ def updateMergeProperty(df,optionalProperties, database, user, mergingType, requ
 
         driver = getDriver(database)
 
-        if mergingType == "merging_ties_to_variables" or mergingType == "equivalence_ties" :
+        if mergingType == "merging_ties_to_variables":
             requiredCols = required
         else:
             raise Exception("Invalid propertyType")
@@ -1836,15 +1838,6 @@ def updateMergeProperty(df,optionalProperties, database, user, mergingType, requ
                 RETURN elementId(r) AS relID, row.stackID AS stackID, row.variableID AS variableID,
                     {{ {old_props} }} AS oldVals
                 """
-        elif (mergingType == "equivalence_ties"):
-
-            get_old_vals_query = f"""
-            UNWIND $rows AS row
-            MATCH (a:CATEGORY)-[r:EQUIVALENT]->(b:CATEGORY)
-            WHERE elementId(r) = row.relID
-            RETURN elementId(r) AS relID, row.categoryID1 AS categoryID1, row.categoryID2 AS categoryID2,
-                {{ {old_props} }} AS oldVals
-            """
         
         old_values = getQuery(
             query=get_old_vals_query,
@@ -1883,18 +1876,6 @@ def updateMergeProperty(df,optionalProperties, database, user, mergingType, requ
                 RETURN elementId(r) AS relID, row.stackID AS stackID, row.variableID AS variableID,
                     {return_props}
                 """
-        elif (mergingType == "equivalence_ties"):
-
-            q = f"""
-            UNWIND $rows AS row
-            MATCH (a:CATEGORY)-[r:EQUIVALENT]->(b:CATEGORY)
-            WHERE elementId(r) = row.relID
-            WITH row, r
-            SET {props}
-            RETURN elementId(r) AS relID, row.categoryID1 AS categoryID1, row.categoryID2 AS categoryID2,
-                {return_props}
-            """
-
         df_dict = df.to_dict(orient="records")
 
         result = getQuery(query=q, driver=driver, params={"rows": df_dict})
@@ -2080,22 +2061,8 @@ def input_Nodes_Uses(
         if "Name" in dataset.columns and "CMName" not in dataset.columns:
             dataset["CMName"] = dataset["Name"]
 
-    # When dealing with equivalence ties, if there in a wide format, convert to long format    
     if mergingType == "equivalence_ties":
-        key_cols = [c for c in dataset.columns if c.startswith("Key_")]
-        if key_cols and len(key_cols) == 2:
-            # melt into long form
-            long_df = (
-                dataset.melt(id_vars=["mergingID", "categoryID"],value_vars=key_cols,var_name="key_col", value_name="Key",).dropna(subset=["Key"])
-            )
-
-            # extract datasetID from column name (Key_d1 -> d1)
-            long_df["datasetID"] = long_df["key_col"].str.replace("Key_", "", regex=False)
-
-            long_df = long_df.assign(Key=long_df["Key"].replace(r'^\s*$', pd.NA, regex=True)).dropna(subset=["Key"])
-
-            # keep only required columns
-            dataset = long_df[["mergingID", "categoryID", "Key", "datasetID"]]
+        raise ValueError("equivalence_ties is no longer supported. Use merging_ties_to_categories.")
     
     """............................"""
     """ Error checking starts here """
@@ -2146,8 +2113,7 @@ def input_Nodes_Uses(
     #pattern = re.compile(r"^\s*[^=&&]+?\s*==\s*[^=&&]+?(?:\s*&&\s*[^=&&]+?\s*==\s*[^=&&]+?)*\s*$")
     pattern = re.compile(r"^.+?\s==\s.+?(?:\s&&\s.+?\s==\s.+?)*$")
 
-    # currently we do not permit function 8 or 9 for equivalence ties, but added check for future reference
-    if (uploadOption == "add_node" and not isDataset) or uploadOption == "add_uses" or mergingType == "equivalence_ties" :
+    if (uploadOption == "add_node" and not isDataset) or uploadOption == "add_uses" or mergingType == "merging_ties_to_categories" :
         invalid_rows = dataset.index[~dataset["Key"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].map(lambda x:x+1).tolist()
 
         if invalid_rows:
@@ -2227,15 +2193,13 @@ def input_Nodes_Uses(
                 required = ["mergingID", "datasetID"]
             elif mergingType == "merging_ties_to_variables":
                 required = ["mergingID", "datasetID", "variableID", "varName", "Key"]
-            elif mergingType == "equivalence_ties":
-                required = ["mergingID", "categoryID","Key","datasetID"]
+            elif mergingType == "merging_ties_to_categories":
+                required = ["datasetID", "categoryID", "Key"]
         elif uploadOption == "merging_add" or uploadOption == "merging_replace":
             if mergingType == "merging_ties_to_variables":
                 required = ["stackID", "variableID"]
                 if "datasetTransform" in dataset.columns or "categoryType" in dataset.columns:
                     required = ["stackID", "variableID","datasetID", "Key"]
-            elif mergingType == "equivalence_ties":
-                    required = ["categoryID1", "categoryID2","Key","datasetID","stackID"]
         else:
             raise ValueError("Invalid upload option")
     column_names = required + nodeProperties + linkProperties
@@ -2252,6 +2216,10 @@ def input_Nodes_Uses(
     if len(errors) > 0:
         updateLog(f"log/{user}uploadProgress.txt", "\n".join(errors), write="a")
         raise ValueError("\n".join(errors))
+
+    if uploadOption == "add_merging" and mergingType == "merging_ties_to_categories":
+        if "stackID" not in dataset.columns and "mergingID" not in dataset.columns:
+            raise ValueError("stackID must be in dataset, or mergingID must be provided to infer stackID")
         
     #checking label validity
     if "label" in column_names:
@@ -2624,30 +2592,34 @@ def input_Nodes_Uses(
                 f"Error: Invalid CMID or Key or datasetID for {missing}"
             )
 
-    # checks for the existence of Key and datasetID in the database for mergingType equivalence_ties
-    if uploadOption == "add_merging" and mergingType == "equivalence_ties":
+    # checks for the existence of categoryID and datasetID in the database for category merging ties
+    if uploadOption == "add_merging" and mergingType == "merging_ties_to_categories":
         updateLog(
             f"log/{user}uploadProgress.txt",
-            "checking datasetID and Key existence for equivalence ties",
+            "checking datasetID and categoryID existence for category merging ties",
             write="a",
         )
         error_query = """
             UNWIND $rows AS row
-            OPTIONAL MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
-            WHERE d.CMID = row.datasetID AND r.Key = row.Key
-            RETURN row.datasetID AS datasetID, row.Key AS Key, count(r) AS rel_count
+            OPTIONAL MATCH (d:DATASET {CMID: row.datasetID})
+            OPTIONAL MATCH (c:CATEGORY {CMID: row.categoryID})
+            RETURN
+              row.datasetID AS datasetID,
+              row.categoryID AS categoryID,
+              count(d) AS dataset_count,
+              count(c) AS category_count
                 """
 
         results = getQuery(error_query, driver, params={"rows": data_dict})
         missing = [
-            (r["datasetID"], r["Key"])
+            (r["datasetID"], r["categoryID"])
             for r in results
-            if r["rel_count"] == 0
+            if r["dataset_count"] == 0 or r["category_count"] == 0
         ]
 
         if missing:
             raise ValueError(
-                f"Error: Invalid categoryID or Key or datasetID for {missing}"
+                f"Error: Invalid categoryID or datasetID for {missing}"
             )
         
     # check for merging ties b/w stackID and mergingID when they exist in input
@@ -2786,14 +2758,27 @@ def input_Nodes_Uses(
                 f"Missing MERGING tie between stackID and datasetID: {missing_stack_dataset}"
             )
     
-    if mergingType == "equivalence_ties":
+    if mergingType == "merging_ties_to_categories":
         updateLog(
             f"log/{user}uploadProgress.txt",
-            "validating equivalence_ties datasetID/mergingID/Key uniqueness",
+            "validating category merging tie datasetID/stackID/Key uniqueness",
             write="a",
         )
 
-        grouped = dataset.groupby(["datasetID", "mergingID", "Key"])["categoryID"].nunique()
+        if "stackID" not in dataset.columns:
+            stack_lookup = getQuery(
+                """
+                UNWIND $rows AS row
+                MATCH (m:MERGING {CMID: row.mergingID})-[:MERGING]->(s:STACK)-[:MERGING]->(d:DATASET {CMID: row.datasetID})
+                RETURN DISTINCT row.mergingID AS mergingID, row.datasetID AS datasetID, s.CMID AS stackID
+                """,
+                driver,
+                params={"rows": dataset[["mergingID", "datasetID"]].drop_duplicates().to_dict(orient="records")},
+                type="df",
+            )
+            dataset = dataset.merge(stack_lookup, on=["mergingID", "datasetID"], how="left")
+
+        grouped = dataset.groupby(["datasetID", "stackID", "Key"])["categoryID"].nunique()
 
         # Check for any groups with more than 1 unique categoryID
         conflicts = grouped[grouped > 1]
@@ -2801,61 +2786,33 @@ def input_Nodes_Uses(
         if not conflicts.empty:
             # Optional: show conflicting rows
             conflicting_rows = dataset.merge(
-                conflicts.reset_index()[["datasetID", "mergingID", "Key"]],
-                on=["datasetID", "mergingID", "Key"]
+                conflicts.reset_index()[["datasetID", "stackID", "Key"]],
+                on=["datasetID", "stackID", "Key"]
             )
 
             lines = [
-                f"(datasetID={r.datasetID}, mergingID={r.mergingID}, Key: {r.Key}, categoryID={r.categoryID})"
+                f"(datasetID={r.datasetID}, stackID={r.stackID}, Key: {r.Key}, categoryID={r.categoryID})"
                 for r in conflicting_rows.itertuples()
             ]
 
             msg = ",\n".join(lines)
 
-            raise ValueError(f"Duplicate datasetID + mergingID + Key with different categoryID found:\n{msg}")
+            raise ValueError(f"Duplicate datasetID + stackID + Key with different categoryID found:\n{msg}")
         
         query_check_ties = """
         UNWIND $rows AS row
-        MATCH (m:MERGING {CMID: row.mergingID})-[:MERGING]->(s:STACK)-[:MERGING]->(d:DATASET {CMID: row.datasetID})
-        OPTIONAL MATCH (x1:CATEGORY)-[r:EQUIVALENT {Key: row.Key, stack: s.CMID, dataset: row.datasetID}]->(x2:CATEGORY)
+        MATCH (d:DATASET {CMID: row.datasetID})
+        OPTIONAL MATCH (d)-[r:MERGING {Key: row.Key, stack: row.stackID}]->(existing:CATEGORY)
+        WHERE existing.CMID <> row.categoryID
         WITH row, COUNT(r) AS existingCount
         WHERE existingCount > 0
-        RETURN row.mergingID AS mergingID, row.Key AS Key, row.datasetID AS datasetID
+        RETURN row.stackID AS stackID, row.Key AS Key, row.datasetID AS datasetID
         """
 
         conflicts = getQuery(query_check_ties, driver=driver, params={"rows": dataset.to_dict("records")}, type="df")
 
         if not conflicts.empty:
-            raise ValueError(f"Equivalence ties with given dataset, key and inferred stack already go to a different CMID:\n{conflicts}")
-
-    # for functions 8 and 9, for type equivalence_ties, we need to make sure equivalent tie exists
-    if (uploadOption == "merging_add" or uploadOption == "merging_replace") and mergingType == "equivalence_ties":
-        updateLog(
-            f"log/{user}uploadProgress.txt",
-            "checking required EQUIVALENT ties for merging upload",
-            write="a",
-        )
-        query_equivalence_check = """
-                UNWIND $rows AS row
-                OPTIONAL MATCH (a:CATEGORY {CMID: row.categoryID1})-[r:EQUIVALENT]->(b:CATEGORY {CMID: row.categoryID2})
-                RETURN
-                row.categoryID1   AS categoryID1,
-                row.categoryID2 AS categoryID2,
-                count(r) AS rel_count
-                """
-
-        res = getQuery(query_equivalence_check, driver, params={"rows": data_dict})
-
-        missing_equivalence = [
-            (r["categoryID1"], r["categoryID2"])
-            for r in res
-            if r["rel_count"] == 0
-        ]
-        
-        if missing_equivalence:
-            raise ValueError(
-                f"Missing EQUIVALENT tie between categoryID1 and categoryID2: {missing_equivalence}"
-            )
+            raise ValueError(f"Category merging ties with given dataset, key, and stack already go to a different CMID:\n{conflicts}")
             
     if uploadOption == "add_node" or "label" in dataset.columns:
         pass
@@ -3488,15 +3445,15 @@ def input_Nodes_Uses(
                 )
 
             #####################################################   
-            # For function 7, to create merging and equivalence ties
+            # For function 7, to create merging ties
             # if you need to create stacks for function 7 do it
             #####################################################
             if uploadOption == "add_merging" and mergingType == "merging_ties_to_datasets":
                 result = create_mties_stacks(database, user, sub_dataset)
             if uploadOption == "add_merging" and mergingType == "merging_ties_to_variables":
                 result = create_mties_variables(database, user, sub_dataset)
-            elif uploadOption == "add_merging" and (mergingType == "equivalence_ties"):
-                result = create_equivalence_ties(database, user, sub_dataset)
+            elif uploadOption == "add_merging" and (mergingType == "merging_ties_to_categories"):
+                result = create_category_merging_ties(database, user, sub_dataset)
             
             #For function 8 and 9. Categories and Datasets
             if uploadOption in ["merging_add","merging_replace"]:

@@ -5,7 +5,7 @@ import pandas as pd
 import CM.merge as merge_mod
 
 
-def test_create_syntax_uses_json_runtime_and_scoped_equivalence_rows(monkeypatch, tmp_path):
+def test_create_syntax_uses_json_runtime_and_scoped_category_merging_rows(monkeypatch, tmp_path):
     monkeypatch.setattr(merge_mod, "getDriver", lambda _database: object())
     monkeypatch.setattr(
         merge_mod,
@@ -65,26 +65,22 @@ def test_create_syntax_uses_json_runtime_and_scoped_equivalence_rows(monkeypatch
                 ]
             )
 
-        if "MATCH (source:CATEGORY)-[e:EQUIVALENT {stack: row.stackID, dataset: row.datasetID}]->(target:CATEGORY)" in query:
+        if "MATCH (d:DATASET {CMID: row.datasetID})-[cm:MERGING {stack: row.stackID}]->(category:CATEGORY)" in query:
             return pd.DataFrame(
                 [
                     {
                         "datasetID": "AD354274",
                         "stackID": "AD958",
                         "Key": "site_num == AM1142",
-                        "originalCMID": "AM1142",
-                        "originalCMName": "Shared Site",
-                        "equivalentCMID": "AM1142",
-                        "equivalentCMName": "Shared Site",
+                        "categoryCMID": "AM1142",
+                        "categoryCMName": "Shared Site",
                     },
                     {
                         "datasetID": "AD354275",
                         "stackID": "AD959",
                         "Key": "Site_Num == AM1142",
-                        "originalCMID": "AM1142",
-                        "originalCMName": "Shared Site",
-                        "equivalentCMID": "AM1142",
-                        "equivalentCMName": "Shared Site",
+                        "categoryCMID": "AM1142",
+                        "categoryCMName": "Shared Site",
                     },
                 ]
             )
@@ -122,7 +118,7 @@ def test_create_syntax_uses_json_runtime_and_scoped_equivalence_rows(monkeypatch
     syntax_text = syntax_path.read_text(encoding="utf-8")
     assert "qa_apply_transform_ast" in syntax_text
     assert 'file.path(bundle_dir, "data.xlsx")' in syntax_text
-    assert "bundle_dir <- runtime_wd" in syntax_text
+    assert "bundle_dir <- qa_bundle_dir()" in syntax_text
     assert "setwd(runtime_wd)" in syntax_text
     assert 'qa_log("Loading dataset %s (%s) for stack %s"' in syntax_text
     assert '[{"stepOrder":1,"op":"copy"' not in syntax_text
@@ -133,7 +129,7 @@ def test_create_syntax_uses_json_runtime_and_scoped_equivalence_rows(monkeypatch
 
     categories = pd.read_excel(tmp_path / "categories.xlsx")
     assert set(
-        ["datasetID", "stackID", "Key", "originalCMID", "equivalentCMID"]
+        ["datasetID", "stackID", "Key", "categoryCMID", "categoryCMName"]
     ).issubset(categories.columns)
     assert len(categories) == 2
 
@@ -199,17 +195,15 @@ def test_create_syntax_backfills_legacy_source_column_transforms(monkeypatch, tm
                 ]
             )
 
-        if "MATCH (source:CATEGORY)-[e:EQUIVALENT {stack: row.stackID, dataset: row.datasetID}]->(target:CATEGORY)" in query:
+        if "MATCH (d:DATASET {CMID: row.datasetID})-[cm:MERGING {stack: row.stackID}]->(category:CATEGORY)" in query:
             return pd.DataFrame(
                 [
                     {
                         "datasetID": "AD993",
                         "stackID": "AD1002",
                         "Key": "projectile point type == Rosegate",
-                        "originalCMID": "AM1",
-                        "originalCMName": "Rosegate",
-                        "equivalentCMID": "AM1",
-                        "equivalentCMName": "Rosegate",
+                        "categoryCMID": "AM1",
+                        "categoryCMName": "Rosegate",
                     }
                 ]
             )

@@ -38,8 +38,8 @@ def test_merge_template_summary_for_merging_node(client, monkeypatch):
                     "stackID": "S1",
                     "stackCMName": "stack test 1",
                     "datasetCount": 5,
-                    "equivalenceTieCount": 100,
-                    "keyReassignmentCount": 10,
+                    "categoryMergingTieCount": 100,
+                    "keyReassignmentCount": 7,
                     "variableCount": 15,
                 }
             ]
@@ -52,8 +52,8 @@ def test_merge_template_summary_for_merging_node(client, monkeypatch):
                     "datasetCMName": "dataset one",
                 }
             ]
-        if "MATCH (c1:CATEGORY)-[e:EQUIVALENT {stack: stackID}]->(c2:CATEGORY)" in query:
-            return [{"stackID": "S1", "datasetID": "D1", "Key": "Site == Red Rock && Region == Southwest"}]
+        if "MATCH (d:DATASET)-[cm:MERGING {stack: stackID}]->(c:CATEGORY)" in query:
+            return [{"stackID": "S1", "datasetID": "D1", "Key": "Site == Red Rock && Region == Southwest", "categoryCMID": "C1", "categoryCMName": "Red Rock"}]
         return []
 
     monkeypatch.setattr(merge_routes, "getQuery", fake_get_query)
@@ -64,10 +64,11 @@ def test_merge_template_summary_for_merging_node(client, monkeypatch):
     assert payload["nodeType"] == "MERGING"
     assert payload["stackSummary"][0]["stackID"] == "S1"
     assert payload["stackSummaryTotals"]["datasetCount"] == 5
+    assert payload["stackSummaryTotals"]["keyReassignmentCount"] == 7
     assert payload["stackDatasetGroups"][0]["stackID"] == "S1"
     assert payload["stackDatasetGroups"][0]["datasets"][0]["datasetID"] == "D1"
-    assert payload["equivalenceTies"][0]["Key"] == "Site_S1 == Red Rock && Region_S1 == Southwest"
-    assert payload["equivalenceTies"][0]["extracted Key"] == "Site_S1 && Region_S1"
+    assert payload["categoryMergingTies"][0]["Key"] == "Site_S1 == Red Rock && Region_S1 == Southwest"
+    assert payload["categoryMergingTies"][0]["extracted Key"] == "Site_S1 && Region_S1"
     assert payload["mergingTies"][0]["variableFilter"] == '[{"op":"drop_na","target":"value_a"}]'
     assert payload["mergingTies"][0]["stackTransform"] == '[{"op":"as_numeric","target":"value_a"}]'
     assert payload["mergingTies"][0]["Key"] == "Site_Num == AZ D:11:2030"
@@ -87,8 +88,8 @@ def test_merge_template_summary_for_stack_node(client, monkeypatch):
                 {
                     "datasetID": "D1",
                     "datasetCMName": "dataset one",
-                    "equivalenceTieCount": 100,
-                    "keyReassignmentCount": 10,
+                    "categoryMergingTieCount": 100,
+                    "keyReassignmentCount": 9,
                     "variableCount": 15,
                 }
             ]
@@ -117,8 +118,8 @@ def test_merge_template_summary_for_stack_node(client, monkeypatch):
                     "summaryWeight": None,
                 }
             ]
-        if "MATCH (c1:CATEGORY)-[e:EQUIVALENT {stack: stackID}]->(c2:CATEGORY)" in query:
-            return [{"stackID": "S1", "datasetID": "D1", "Key": "Culture == Pueblo"}]
+        if "MATCH (d:DATASET)-[cm:MERGING {stack: stackID}]->(c:CATEGORY)" in query:
+            return [{"stackID": "S1", "datasetID": "D1", "Key": "Culture == Pueblo", "categoryCMID": "C1", "categoryCMName": "Pueblo"}]
         return []
 
     monkeypatch.setattr(merge_routes, "getQuery", fake_get_query)
@@ -129,10 +130,11 @@ def test_merge_template_summary_for_stack_node(client, monkeypatch):
     assert payload["nodeType"] == "STACK"
     assert payload["mergingTemplateCount"] == 3
     assert payload["datasetSummary"][0]["datasetID"] == "D1"
+    assert payload["datasetSummary"][0]["keyReassignmentCount"] == 9
     assert payload["stackDatasetGroups"][0]["stackID"] == "S1"
     assert payload["stackDatasetGroups"][0]["datasets"][0]["datasetID"] == "D1"
-    assert payload["equivalenceTies"][0]["Key"] == "Culture_S1 == Pueblo"
-    assert payload["equivalenceTies"][0]["extracted Key"] == "Culture_S1"
+    assert payload["categoryMergingTies"][0]["Key"] == "Culture_S1 == Pueblo"
+    assert payload["categoryMergingTies"][0]["extracted Key"] == "Culture_S1"
     assert payload["mergingTies"][0]["summaryStatistic"] == "median"
     assert payload["mergingTies"][0]["Key"] == "Feature == kiva"
     assert payload["mergingTies"][0]["categoryType"] == "CATEGORICAL"

@@ -561,20 +561,20 @@ def admin_usesproperties():
     }
 
 
-@admin_bp.route("/admin_add_edit_delete_equivalentproperties", methods=['GET'])
-def admin_equivalentproperties():
+@admin_bp.route("/admin_add_edit_delete_category_merging_properties", methods=['GET'])
+def admin_category_merging_properties():
     CMID = request.args.get('CMID')
     database = request.args.get('database')
 
     driver = getDriver(database)
 
     q = """
-        MATCH (n:CATEGORY {CMID: $cmid})-[r:EQUIVALENT]-(d:CATEGORY)
+        MATCH (d:DATASET)-[r:MERGING]->(n:CATEGORY {CMID: $cmid})
         RETURN {CMName: n.CMName, CMID: n.CMID, elementId: elementId(n)} AS n, r,
                {CMName: d.CMName, CMID: d.CMID, elementId: elementId(d)} AS d
     """
 
-    allowed_props = ["stack", "dataset", "Key"]
+    allowed_props = ["stack", "Key"]
 
     with driver.session() as session:
         result = session.run(q, cmid=CMID)
@@ -591,7 +591,6 @@ def admin_equivalentproperties():
         temp_list.sort(
             key=lambda x: (
                 x[2].get("CMName", ""),
-                x[1].get("dataset", ""),
                 x[1].get("stack", ""),
                 x[1].get("Key", ""),
             )
@@ -747,8 +746,8 @@ def getAdminEdit():
         elif fun == "add/edit/delete USES property":
             result = add_edit_delete_USES(
                 database, acting_user, input)
-        elif fun == "add/edit/delete EQUIVALENT property":
-            result = add_edit_delete_EQUIVALENT(
+        elif fun == "add/edit/delete CATEGORY MERGING property":
+            result = add_edit_delete_CATEGORY_MERGING(
                 database, acting_user, input)
         elif fun == "merge nodes":
             result = mergeNodes(input.get('s1_2'), input.get(
@@ -759,14 +758,14 @@ def getAdminEdit():
             result = deleteNode(database, acting_user, input)
         elif fun == "delete USES relation":
             result = deleteUSES(database, acting_user, input)
-        elif fun == "delete EQUIVALENT relation":
-            result = deleteEQUIVALENT(database, acting_user, input)
+        elif fun == "delete CATEGORY MERGING relation":
+            result = deleteCATEGORYMERGING(database, acting_user, input)
         elif fun == "move USES tie":
             tabledata = data.get("tabledata")
             dataset = data.get("datasetID")
             result = moveUSESties(database, acting_user, input,dataset,tabledata)
-        elif fun == "move EQUIVALENT tie":
-            result = moveEQUIVALENTties(database, acting_user, input)
+        elif fun == "move CATEGORY MERGING tie":
+            result = moveCATEGORYMERGINGties(database, acting_user, input)
         else:
             raise Exception("Function does not exist")
         return result

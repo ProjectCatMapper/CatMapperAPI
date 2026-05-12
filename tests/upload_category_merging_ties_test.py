@@ -3,7 +3,7 @@ import pandas as pd
 import CM.upload as upload
 
 
-def test_create_equivalence_ties_preserves_distinct_self_reference_rows(monkeypatch):
+def test_create_category_merging_ties_infers_distinct_stacks(monkeypatch):
     queries = []
 
     monkeypatch.setattr(upload, "getDriver", lambda database: object())
@@ -18,25 +18,16 @@ def test_create_equivalence_ties_preserves_distinct_self_reference_rows(monkeypa
                     {"mergingID": "M1", "stackID": "S2", "datasetID": "D2"},
                 ]
             )
-        if "RETURN row.stackID as stackID,d.CMID AS datasetID, c.CMID AS originalID, r.Key as Key" in query:
-            return pd.DataFrame(
-                [
-                    {"stackID": "S1", "datasetID": "D1", "originalID": "C_SHARED", "Key": "Site == A"},
-                    {"stackID": "S2", "datasetID": "D2", "originalID": "C_SHARED", "Key": "Site == B"},
-                ]
-            )
-        if "MERGE (c1)-[r:EQUIVALENT {stack: row.stackID, dataset: row.datasetID, Key: row.Key}]->(c2)" in query:
+        if "MERGE (d)-[r:MERGING {stack: row.stackID, Key: row.Key}]->(c)" in query:
             assert params is not None
             assert params["rows"] == [
                 {
-                    "originalID": "C_SHARED",
                     "categoryID": "C_SHARED",
                     "stackID": "S1",
                     "datasetID": "D1",
                     "Key": "Site == A",
                 },
                 {
-                    "originalID": "C_SHARED",
                     "categoryID": "C_SHARED",
                     "stackID": "S2",
                     "datasetID": "D2",
@@ -65,12 +56,11 @@ def test_create_equivalence_ties_preserves_distinct_self_reference_rows(monkeypa
         ]
     )
 
-    result = upload.create_equivalence_ties(database="ArchaMap", user="tester", dataset=dataset)
+    result = upload.create_category_merging_ties(database="ArchaMap", user="tester", dataset=dataset)
 
-    assert result["result"]["originalID"].tolist() == ["C_SHARED", "C_SHARED"]
     assert result["result"]["stackID"].tolist() == ["S1", "S2"]
     assert any(
-        "MERGE (c1)-[r:EQUIVALENT {stack: row.stackID, dataset: row.datasetID, Key: row.Key}]->(c2)"
+        "MERGE (d)-[r:MERGING {stack: row.stackID, Key: row.Key}]->(c)"
         in item["query"]
         for item in queries
     )

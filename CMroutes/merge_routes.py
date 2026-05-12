@@ -383,9 +383,9 @@ def _group_datasets_by_stack(rows):
     return output
 
 
-def _normalize_equivalence_ties_by_stack(equivalence_ties):
+def _normalize_category_merging_ties_by_stack(category_merging_ties):
     normalized_rows = []
-    for row in equivalence_ties or []:
+    for row in category_merging_ties or []:
         row_copy = dict(row)
         stack_id = row_copy.get("stackID")
         key_value = row_copy.get("Key", "")
@@ -437,18 +437,32 @@ def build_merge_template_summary_payload(database, cmid):
         WITH s, collect(DISTINCT d) AS datasets
         OPTIONAL MATCH (s)-[:MERGING]->(v:VARIABLE)
         WITH s, size(datasets) AS datasetCount, count(DISTINCT v) AS variableCount
-        OPTIONAL MATCH (c1:CATEGORY)-[e:EQUIVALENT {stack: s.CMID}]->(c2:CATEGORY)
+        OPTIONAL MATCH (s)-[:MERGING]->(mappedDataset:DATASET)
+        WITH s, datasetCount, variableCount, mappedDataset
+        WHERE mappedDataset IS NULL OR (NOT mappedDataset:STACK AND NOT mappedDataset:MERGING)
+        OPTIONAL MATCH (mappedDataset)-[rawCm:MERGING {stack: s.CMID}]->(mappedCategory:CATEGORY)
         WITH
           s,
           datasetCount,
           variableCount,
-          count(DISTINCT e) AS equivalenceTieCount,
-          count(DISTINCT CASE WHEN c1.CMID <> c2.CMID THEN e END) AS keyReassignmentCount
+          mappedDataset,
+          mappedCategory,
+          CASE
+            WHEN mappedCategory IS NOT NULL AND NOT mappedCategory:VARIABLE THEN rawCm
+            ELSE NULL
+          END AS cm
+        OPTIONAL MATCH (mappedDataset)-[u:USES {Key: cm.Key}]->(mappedCategory)
+        WITH
+          s,
+          datasetCount,
+          variableCount,
+          count(DISTINCT cm) AS categoryMergingTieCount,
+          count(DISTINCT CASE WHEN u IS NULL THEN cm END) AS keyReassignmentCount
         RETURN
           s.CMID AS stackID,
           s.CMName AS stackCMName,
           datasetCount,
-          equivalenceTieCount,
+          categoryMergingTieCount,
           keyReassignmentCount,
           variableCount
         ORDER BY s.CMID
@@ -485,16 +499,25 @@ def build_merge_template_summary_payload(database, cmid):
         WHERE NOT d:STACK AND NOT d:MERGING
         OPTIONAL MATCH (d)-[:MERGING {stack: $cmid}]->(v:VARIABLE)
         WITH d, count(DISTINCT v) AS variableCount
-        OPTIONAL MATCH (c1:CATEGORY)-[e:EQUIVALENT {stack: $cmid, dataset: d.CMID}]->(c2:CATEGORY)
+        OPTIONAL MATCH (d)-[rawCm:MERGING {stack: $cmid}]->(mappedCategory:CATEGORY)
         WITH
           d,
           variableCount,
-          count(DISTINCT e) AS equivalenceTieCount,
-          count(DISTINCT CASE WHEN c1.CMID <> c2.CMID THEN e END) AS keyReassignmentCount
+          mappedCategory,
+          CASE
+            WHEN mappedCategory IS NOT NULL AND NOT mappedCategory:VARIABLE THEN rawCm
+            ELSE NULL
+          END AS cm
+        OPTIONAL MATCH (d)-[u:USES {Key: cm.Key}]->(mappedCategory)
+        WITH
+          d,
+          variableCount,
+          count(DISTINCT cm) AS categoryMergingTieCount,
+          count(DISTINCT CASE WHEN u IS NULL THEN cm END) AS keyReassignmentCount
         RETURN
           d.CMID AS datasetID,
           d.CMName AS datasetCMName,
-          equivalenceTieCount,
+          categoryMergingTieCount,
           keyReassignmentCount,
           variableCount
         ORDER BY d.CMID
@@ -516,7 +539,7 @@ def build_merge_template_summary_payload(database, cmid):
         ]
 
     merging_ties = []
-    equivalence_ties = []
+    category_merging_ties = []
 
     if stack_ids:
         merging_ties_query = """
@@ -549,26 +572,24 @@ def build_merge_template_summary_payload(database, cmid):
         """
         merging_ties = getQuery(merging_ties_query, driver, params={"stack_ids": stack_ids}) or []
 
-        equivalence_ties_query = """
+        category_merging_ties_query = """
         UNWIND $stack_ids AS stackID
-        MATCH (c1:CATEGORY)-[e:EQUIVALENT {stack: stackID}]->(c2:CATEGORY)
+        MATCH (d:DATASET)-[cm:MERGING {stack: stackID}]->(c:CATEGORY)
+        WHERE NOT c:VARIABLE
         RETURN
           stackID AS stackID,
-          e.dataset AS datasetID,
-          e.Key AS `Key`,
-          c1.CMID AS originalCMID,
-          c1.CMName AS originalCMName,
-          c2.CMID AS equivalentCMID,
-          c2.CMName AS equivalentCMName,
-          CASE WHEN c1.CMID = c2.CMID THEN true ELSE false END AS selfReference
-        ORDER BY stackID, datasetID, originalCMID
+          d.CMID AS datasetID,
+          cm.Key AS `Key`,
+          c.CMID AS categoryCMID,
+          c.CMName AS categoryCMName
+        ORDER BY stackID, datasetID, categoryCMID
         """
-        equivalence_ties = getQuery(equivalence_ties_query, driver, params={"stack_ids": stack_ids}) or []
-        equivalence_ties = _normalize_equivalence_ties_by_stack(equivalence_ties)
+        category_merging_ties = getQuery(category_merging_ties_query, driver, params={"stack_ids": stack_ids}) or []
+        category_merging_ties = _normalize_category_merging_ties_by_stack(category_merging_ties)
 
     totals = {
         "datasetCount": sum((row.get("datasetCount", 0) or 0) for row in stack_summary),
-        "equivalenceTieCount": sum((row.get("equivalenceTieCount", 0) or 0) for row in stack_summary),
+        "categoryMergingTieCount": sum((row.get("categoryMergingTieCount", 0) or 0) for row in stack_summary),
         "keyReassignmentCount": sum((row.get("keyReassignmentCount", 0) or 0) for row in stack_summary),
         "variableCount": sum((row.get("variableCount", 0) or 0) for row in stack_summary),
     }
@@ -581,7 +602,7 @@ def build_merge_template_summary_payload(database, cmid):
         "stackDatasetGroups": stack_dataset_groups,
         "mergingTemplateCount": merging_template_count,
         "mergingTies": merging_ties,
-        "equivalenceTies": equivalence_ties,
+        "categoryMergingTies": category_merging_ties,
     }
 
 

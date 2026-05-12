@@ -507,29 +507,29 @@ def add_edit_delete_USES(database,user,input):
     return "done"
 
 
-def add_edit_delete_EQUIVALENT(database, user, input):
+def add_edit_delete_CATEGORY_MERGING(database, user, input):
     CMID = (input.get('s1_2') or "").strip()
-    EQUIV_property = input.get('s1_8')
+    MERGING_property = input.get('s1_8')
     new_property_value = (input.get('s1_3') or "").strip()
     addOrEditNode = input.get('s1_1')
     indexValue = input.get('s1_7')
     selected_relations = input.get('s1_4') or []
-    allowed_properties = {"stack", "dataset", "Key"}
+    allowed_properties = {"stack", "Key"}
 
-    if EQUIV_property not in allowed_properties:
-        raise ValueError("Only stack, dataset, and Key can be edited on EQUIVALENT ties.")
+    if MERGING_property not in allowed_properties:
+        raise ValueError("Only stack and Key can be edited on category MERGING ties.")
 
     try:
         selected_index = int(indexValue) - 1
     except (ValueError, TypeError):
-        raise ValueError("Invalid EQUIVALENT tie selection index.")
+        raise ValueError("Invalid category MERGING tie selection index.")
 
     if not isinstance(selected_relations, list) or selected_index < 0 or selected_index >= len(selected_relations):
-        raise ValueError("Selected EQUIVALENT tie is invalid or no longer available.")
+        raise ValueError("Selected category MERGING tie is invalid or no longer available.")
 
     selected_relation = selected_relations[selected_index]
     if not isinstance(selected_relation, list) or len(selected_relation) < 2:
-        raise ValueError("Selected EQUIVALENT tie payload is invalid.")
+        raise ValueError("Selected category MERGING tie payload is invalid.")
 
     relID = selected_relation[1].get("id")
     safe_rel_id = sanitize_cypher_element_id(relID, "relationship elementId")
@@ -537,37 +537,37 @@ def add_edit_delete_EQUIVALENT(database, user, input):
 
     if addOrEditNode == "edit" or addOrEditNode == "add":
         q = """
-            MATCH ()-[r:EQUIVALENT]-()
+            MATCH (:DATASET)-[r:MERGING]->(:CATEGORY)
             WHERE elementId(r) = $relID
             SET r[$prop] = $value
             RETURN elementId(r) as relID
         """
-        result = getQuery(q, driver=driver, params={"relID": safe_rel_id, "prop": EQUIV_property, "value": new_property_value})
+        result = getQuery(q, driver=driver, params={"relID": safe_rel_id, "prop": MERGING_property, "value": new_property_value})
         rel_ids = [row["relID"] for row in result] if isinstance(result, list) else []
         if not rel_ids:
-            raise Exception("No EQUIVALENT ties were updated. Verify the selected relation still exists.")
+            raise Exception("No category MERGING ties were updated. Verify the selected relation still exists.")
         createLog(
             id=rel_ids,
             type="relation",
-            log=[f"updated EQUIVALENT property {EQUIV_property} to {new_property_value} for {CMID}"] * len(rel_ids),
+            log=[f"updated category MERGING property {MERGING_property} to {new_property_value} for {CMID}"] * len(rel_ids),
             user=user,
             driver=driver,
         )
     elif addOrEditNode == "delete":
         q = """
-            MATCH ()-[r:EQUIVALENT]-()
+            MATCH (:DATASET)-[r:MERGING]->(:CATEGORY)
             WHERE elementId(r) = $relID
             REMOVE r[$prop]
             RETURN elementId(r) as relID
         """
-        result = getQuery(q, driver=driver, params={"relID": safe_rel_id, "prop": EQUIV_property})
+        result = getQuery(q, driver=driver, params={"relID": safe_rel_id, "prop": MERGING_property})
         rel_ids = [row["relID"] for row in result] if isinstance(result, list) else []
         if not rel_ids:
-            raise Exception("No EQUIVALENT ties were updated. Verify the selected relation still exists.")
+            raise Exception("No category MERGING ties were updated. Verify the selected relation still exists.")
         createLog(
             id=rel_ids,
             type="relation",
-            log=[f"deleted EQUIVALENT property {EQUIV_property} for {CMID}"] * len(rel_ids),
+            log=[f"deleted category MERGING property {MERGING_property} for {CMID}"] * len(rel_ids),
             user=user,
             driver=driver,
         )
@@ -577,7 +577,7 @@ def add_edit_delete_EQUIVALENT(database, user, input):
     return "done"
 
 
-def moveEQUIVALENTties(database, user, input):
+def moveCATEGORYMERGINGties(database, user, input):
     driver = getDriver(database)
     CMID_from = (input.get('s1_2') or "").strip()
     CMID_to = (input.get('s1_3') or "").strip()
@@ -589,17 +589,17 @@ def moveEQUIVALENTties(database, user, input):
     try:
         selected_relation = json.loads(selected_relation)
     except Exception:
-        raise ValueError("Invalid EQUIVALENT tie payload.")
+        raise ValueError("Invalid category MERGING tie payload.")
 
     rel_id = selected_relation[1].get("id")
     safe_rel_id = sanitize_cypher_element_id(rel_id, "relationship elementId")
 
     query_move_rel = """
-        MATCH (from:CATEGORY {CMID: $CMID_from})-[r:EQUIVALENT]-(oldTo:CATEGORY)
+        MATCH (from:DATASET)-[r:MERGING]->(oldTo:CATEGORY {CMID: $CMID_from})
         WHERE elementId(r) = $rel_id
         MATCH (newTo:CATEGORY {CMID: $CMID_to})
         WITH from, oldTo, r, newTo, properties(r) AS relProps
-        CREATE (from)-[newR:EQUIVALENT]->(newTo)
+        CREATE (from)-[newR:MERGING]->(newTo)
         SET newR = relProps
         WITH r, newR, oldTo
         DELETE r
@@ -612,14 +612,14 @@ def moveEQUIVALENTties(database, user, input):
     )
 
     if not move_result:
-        raise ValueError("No EQUIVALENT tie was moved. Verify the selected tie and destination CMID.")
+        raise ValueError("No category MERGING tie was moved. Verify the selected tie and destination CMID.")
 
     new_rel_id = move_result[0]["relID"]
     old_to_cmid = move_result[0]["oldToCMID"]
     createLog(
         id=[new_rel_id],
         type="relation",
-        log=[f"moved EQUIVALENT tie from {CMID_from}->{old_to_cmid} to {CMID_from}->{CMID_to}"],
+        log=[f"moved category MERGING tie from {old_to_cmid} to {CMID_to}"],
         user=user,
         driver=driver,
     )
@@ -858,11 +858,10 @@ def mergeNodes(keepcmid,deletecmid,user,database):
         
         if domain == "CATEGORY":
             query = f"""
-            MATCH (c)-[e1:EQUIVALENT]->(k {{CMID: $keepcmid}})
-            MATCH (c)-[e2:EQUIVALENT]->(d {{CMID: $deletecmid}})
+            MATCH (c:DATASET)-[e1:MERGING]->(k:CATEGORY {{CMID: $keepcmid}})
+            MATCH (c)-[e2:MERGING]->(d:CATEGORY {{CMID: $deletecmid}})
             WHERE e1.stack     = e2.stack
-            AND e1.datasetID = e2.datasetID
-            AND e1.key       = e2.key
+            AND e1.Key       = e2.Key
 
             WITH e2
 
@@ -872,11 +871,10 @@ def mergeNodes(keepcmid,deletecmid,user,database):
             getQuery(query, driver, keepcmid=keepcmid, deletecmid=deletecmid)
 
             query = f"""
-            MATCH (c)<-[e1:EQUIVALENT]-(k {{CMID: $keepcmid}})
-            MATCH (c)<-[e2:EQUIVALENT]-(d {{CMID: $deletecmid}})
+            MATCH (c:DATASET)-[e1:MERGING]->(k:CATEGORY {{CMID: $keepcmid}})
+            MATCH (c)-[e2:MERGING]->(d:CATEGORY {{CMID: $deletecmid}})
             WHERE e1.stack     = e2.stack
-            AND e1.datasetID = e2.datasetID
-            AND e1.key       = e2.key
+            AND e1.Key       = e2.Key
 
             WITH  e2
 
@@ -1121,30 +1119,30 @@ def moveUSESties(database,user,input,dataset,tabledata):
                 MATCH (d1)-[r:USES]->(c1)
                 WHERE c1.CMID = $CMID_from AND elementId(r) = $rel_id
 
-                WITH c1, r.Key as Key, d1.CMID as datasetID
+                WITH c1, d1, r.Key as Key, d1.CMID as datasetID
 
                 OPTIONAL MATCH (s:STACK)-[:MERGING]->(d1)
                 WHERE d1.CMID = datasetID
 
-                WITH c1, Key, datasetID, s.CMID as stackID
+                WITH c1, d1, Key, datasetID, s.CMID as stackID
 
-                OPTIONAL MATCH (c1)-[e:EQUIVALENT]->(c3)
-                WHERE e.stack = stackID AND e.dataset = datasetID AND e.Key = Key
+                OPTIONAL MATCH (d1)-[e:MERGING]->(c1)
+                WHERE e.stack = stackID AND e.Key = Key
 
-                WITH c1, e, c3, $CMID_to AS c2CMID
+                WITH c1, d1, e, $CMID_to AS c2CMID
                 WHERE e IS NOT NULL
 
                 MATCH (c2:CATEGORY)
                 WHERE c2.CMID = c2CMID
-                CREATE (c2)-[newEq:EQUIVALENT {stack: e.stack,dataset: e.dataset,Key: e.Key}]->(c3)
+                CREATE (d1)-[newEq:MERGING {stack: e.stack, Key: e.Key}]->(c2)
                 DELETE e
-                RETURN 'Moved equivalence', c1.CMID AS oldCategory, c2.CMID AS newCategory, c3.CMID AS target
+                RETURN 'Moved category merging tie', c1.CMID AS oldCategory, c2.CMID AS newCategory
                 """
                     
             result = getQuery(query,driver,params = {"CMID_from": CMID_from, "rel_id": rel_id, "CMID_to": CMID_to})
             
         except Exception as e:
-            return "Error occurred while moving equivalence ties."
+            return "Error occurred while moving category merging ties."
         
         try:
             query_update_parents = """
@@ -1320,9 +1318,8 @@ def deleteNode(database,user,input):
 
             query = """
                     unwind $cmid as cmid
-                    MATCH ()-[r:EQUIVALENT]->()
-                    WHERE r.datasetID = $cmid
-                    RETURN DISTINCT r.stackID AS stackID
+                    MATCH (:DATASET {CMID: cmid})-[r:MERGING]->(:CATEGORY)
+                    RETURN DISTINCT r.stack AS stackID
                     """
 
             result = getQuery(query, driver=driver, params={"cmid": input.get('s1_2')})
@@ -1330,11 +1327,11 @@ def deleteNode(database,user,input):
             if result:
                 raise ValueError(f"this dataset can't be deleted, because it is used by an existing stack for a merge(stackID={result}).")
 
-            # if a merging template is being deleted, need to remove references to that merging template from all equivalence ties.            
+            # if a stack node is being deleted, remove category merging ties scoped to that stack.
             if "STACK" in label:
                 query = """
                     unwind $cmid as cmid
-                    MATCH ()-[r:EQUIVALENT]->()
+                    MATCH (:DATASET)-[r:MERGING]->(:CATEGORY)
                     WHERE r.stack = $cmid
                     DELETE r
                     """
@@ -1406,12 +1403,11 @@ def deleteNode(database,user,input):
 
                     WITH c.CMID as cmid, r.Key as Key, d.CMID as datasetID
 
-                    MATCH ()-[e:EQUIVALENT]->()
-                    WHERE e.key = Key
-                    AND e.datasetID = datasetID
+                    MATCH (:DATASET {CMID: datasetID})-[e:MERGING]->(:CATEGORY {CMID: cmid})
+                    WHERE e.Key = Key
                     
                     RETURN DISTINCT
-                    e.stackID as stackID
+                    e.stack as stackID
                     """
 
             result = getQuery(query, driver=driver, params={"cmid": input.get('s1_2')})
@@ -1551,9 +1547,9 @@ def deleteUSES(database,user,input):
             WHERE elementId(r) = $id
 
             WITH d.CMID as datasetID,a.CMID as CMID, r.Key as Key
-            OPTIONAL MATCH (a)-[e:EQUIVALENT]->(target)
-            WHERE e.key = Key AND e.datasetID = datasetID
-            WITH CMID, Key, datasetID, e.stackID as stackID
+            OPTIONAL MATCH (d)-[e:MERGING]->(a)
+            WHERE e.Key = Key
+            WITH CMID, Key, datasetID, e.stack as stackID
 
             WHERE e IS NOT NULL
 
@@ -1577,22 +1573,22 @@ def deleteUSES(database,user,input):
     return "done"
 
 
-def deleteEQUIVALENT(database, user, input):
+def deleteCATEGORYMERGING(database, user, input):
     driver = getDriver(database)
     selected_tie = input.get('s1_7')
 
     try:
         selected_tie = json.loads(selected_tie)
     except Exception:
-        raise ValueError("Invalid EQUIVALENT tie payload.")
+        raise ValueError("Invalid category MERGING tie payload.")
 
     rel_id = sanitize_cypher_element_id(selected_tie[1]["id"], "relationship elementId")
-    q = "MATCH ()-[r:EQUIVALENT]->() WHERE elementId(r) = $id DELETE r RETURN count(*) AS count"
+    q = "MATCH (:DATASET)-[r:MERGING]->(:CATEGORY) WHERE elementId(r) = $id DELETE r RETURN count(*) AS count"
     result = getQuery(q, driver=driver, params={"id": rel_id})
 
     deleted_count = result[0]["count"] if result and "count" in result[0] else 0
     if deleted_count == 0:
-        raise ValueError("No EQUIVALENT tie was deleted. Verify the selected relation still exists.")
+        raise ValueError("No category MERGING tie was deleted. Verify the selected relation still exists.")
 
     return "done"
 

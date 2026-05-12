@@ -105,8 +105,8 @@ for(i in 1:nrow(template)){
     }
   } else {
     join_categories = row_categories %>% 
-      mutate(CMID = coalesce(equivalentCMID,CMID),
-             CMName = coalesce(equivalentCMName, CMName)) %>%
+      mutate(CMID = coalesce(categoryCMID, CMID),
+             CMName = coalesce(categoryCMName, CMName)) %>%
       select(CMName, CMID, variable,value) %>% 
       filter(variable != "variable") %>% 
       pivot_wider(names_from = "variable", values_from = "value") %>% 
@@ -183,4 +183,3 @@ rio::export(output,glue::glue('{template$mergingID[1]}-output.csv'))
 # cleanup
 unlink('temp',recursive = T)
 toc()
-

@@ -359,10 +359,10 @@ qa_build_linkfile_wide <- function(link_rows, dataset_id, stack_id, template_row
   legacy_mode <- !"stackID" %in% names(working)
 
   if (legacy_mode) {
-    if ("equivalentCMID" %in% names(working)) {
-      working$legacyHasEquivalent <- !(is.na(working$equivalentCMID) | working$equivalentCMID == "")
+    if ("categoryCMID" %in% names(working)) {
+      working$legacyHasCategoryMapping <- !(is.na(working$categoryCMID) | working$categoryCMID == "")
     } else {
-      working$legacyHasEquivalent <- TRUE
+      working$legacyHasCategoryMapping <- TRUE
     }
     working <- merge(
       working,
@@ -373,35 +373,23 @@ qa_build_linkfile_wide <- function(link_rows, dataset_id, stack_id, template_row
     )
   }
 
-  if ("CMID" %in% names(working) && !"originalCMID" %in% names(working)) {
-    working$originalCMID <- working$CMID
+  if ("CMID" %in% names(working) && !"categoryCMID" %in% names(working)) {
+    working$categoryCMID <- working$CMID
   }
-  if ("CMName" %in% names(working) && !"originalCMName" %in% names(working)) {
-    working$originalCMName <- working$CMName
-  }
-  if (!"equivalentCMID" %in% names(working)) {
-    working$equivalentCMID <- working$originalCMID
-  } else {
-    replace_idx <- is.na(working$equivalentCMID) | working$equivalentCMID == ""
-    working$equivalentCMID[replace_idx] <- working$originalCMID[replace_idx]
-  }
-  if (!"equivalentCMName" %in% names(working)) {
-    working$equivalentCMName <- working$originalCMName
-  } else {
-    replace_idx <- is.na(working$equivalentCMName) | working$equivalentCMName == ""
-    working$equivalentCMName[replace_idx] <- working$originalCMName[replace_idx]
+  if ("CMName" %in% names(working) && !"categoryCMName" %in% names(working)) {
+    working$categoryCMName <- working$CMName
   }
 
   if (length(variable_keys) && "Key" %in% names(working)) {
     working <- working[!(working$Key %in% variable_keys), , drop = FALSE]
   }
-  if (legacy_mode && "legacyHasEquivalent" %in% names(working) && any(working$legacyHasEquivalent)) {
-    working <- working[working$legacyHasEquivalent, , drop = FALSE]
+  if (legacy_mode && "legacyHasCategoryMapping" %in% names(working) && any(working$legacyHasCategoryMapping)) {
+    working <- working[working$legacyHasCategoryMapping, , drop = FALSE]
   }
 
   scoped <- working %>%
     filter(datasetID == dataset_id, stackID == stack_id) %>%
-    distinct(datasetID, stackID, Key, equivalentCMID, equivalentCMName)
+    distinct(datasetID, stackID, Key, categoryCMID, categoryCMName)
 
   if (!nrow(scoped)) {
     return(data.frame(
@@ -416,12 +404,12 @@ qa_build_linkfile_wide <- function(link_rows, dataset_id, stack_id, template_row
 
   expanded <- qa_expand_linkfile_keys(as.data.frame(scoped, stringsAsFactors = FALSE, check.names = FALSE))
   names(expanded) <- ifelse(
-    names(expanded) %in% c("datasetID", "stackID", "Key", "equivalentCMID", "equivalentCMName"),
+    names(expanded) %in% c("datasetID", "stackID", "Key", "categoryCMID", "categoryCMName"),
     names(expanded),
     vapply(names(expanded), qa_standardize_name, character(1))
   )
   expanded %>%
-    rename(CMID = equivalentCMID, CMName = equivalentCMName) %>%
+    rename(CMID = categoryCMID, CMName = categoryCMName) %>%
     as.data.frame(stringsAsFactors = FALSE, check.names = FALSE)
 }
 
@@ -479,7 +467,7 @@ qa_apply_summary_by_group <- function(df, group_cols, value_col, statistic) {
 }
 
 runtime_wd <- normalizePath("${wd}", winslash = "/", mustWork = FALSE)
-bundle_dir <- runtime_wd
+bundle_dir <- qa_bundle_dir()
 temp_dir <- file.path(bundle_dir, "temp")
 debug_keep_temp <- qa_truthy_env("CM_KEEP_TEMP") || qa_truthy_env("CM_DEBUG_MERGE")
 

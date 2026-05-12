@@ -1015,8 +1015,11 @@ def generate_cypher_query(domain, nContains):
 
 def load_r_syntax_template(filename, replacements):
     """ Reads R syntax template and replaces placeholders """
+    path = filename
+    if not os.path.isabs(path) and not os.path.exists(path):
+        path = os.path.join(os.path.dirname(os.path.dirname(__file__)), filename)
     try:
-        with open(filename, "r") as file:
+        with open(path, "r") as file:
             content = file.read()
         for key, value in replacements.items():
             content = content.replace(key, value)
@@ -1116,15 +1119,14 @@ def _backfill_legacy_dataset_transforms(data):
 def _build_json_linkfile(driver, template, domain):
     query = f"""
         UNWIND $rows AS row
-        MATCH (source:{domain})-[e:EQUIVALENT {{stack: row.stackID, dataset: row.datasetID}}]->(target:{domain})
+        MATCH (d:DATASET {{CMID: row.datasetID}})-[cm:MERGING {{stack: row.stackID}}]->(category:{domain})
+        WHERE NOT category:VARIABLE
         RETURN DISTINCT
         row.datasetID AS datasetID,
         row.stackID AS stackID,
-        e.Key AS Key,
-        source.CMID AS originalCMID,
-        source.CMName AS originalCMName,
-        target.CMID AS equivalentCMID,
-        target.CMName AS equivalentCMName
+        cm.Key AS Key,
+        category.CMID AS categoryCMID,
+        category.CMName AS categoryCMName
     """
     categories = getQuery(
         query,
@@ -1141,10 +1143,8 @@ def _build_json_linkfile(driver, template, domain):
             row.datasetID AS datasetID,
             row.stackID AS stackID,
             ru.Key AS Key,
-            c.CMID AS originalCMID,
-            c.CMName AS originalCMName,
-            c.CMID AS equivalentCMID,
-            c.CMName AS equivalentCMName
+            c.CMID AS categoryCMID,
+            c.CMName AS categoryCMName
         """
         categories = getQuery(
             fallback_query,
@@ -1159,10 +1159,8 @@ def _build_json_linkfile(driver, template, domain):
                 "datasetID",
                 "stackID",
                 "Key",
-                "originalCMID",
-                "originalCMName",
-                "equivalentCMID",
-                "equivalentCMName",
+                "categoryCMID",
+                "categoryCMName",
             ]
         )
 
@@ -1172,8 +1170,7 @@ def _build_json_linkfile(driver, template, domain):
             "datasetID",
             "stackID",
             "Key",
-            "originalCMID",
-            "equivalentCMID",
+            "categoryCMID",
         ]
     )
 
@@ -1274,11 +1271,16 @@ def createSyntax(template, database="SocioMap",
         if col not in template.columns:
             raise ValueError(f"Required column '{col}' is missing from the template.")
 
-    # Use the first non-empty filePath as the R working directory.
+    # Use the directory containing the first input file as the R working
+    # directory. The generated bundle itself lives in dirpath.
     filepaths = template["filePath"].fillna("").astype(str).str.strip()
-    wd = next((p for p in filepaths if p), "")
-    if not wd:
+    first_filepath = next((p for p in filepaths if p), "")
+    if not first_filepath:
         raise ValueError("Template must include at least one non-empty filePath value.")
+
+    wd = first_filepath
+    if os.path.isfile(first_filepath):
+        wd = os.path.dirname(os.path.abspath(first_filepath))
 
     if re.match(r"^[a-zA-Z]:\\\\", wd) or "\\" in wd:
         print("Detected Windows path. Converting to compatible format...")
