@@ -466,6 +466,81 @@ def test_extended_pairwise_distance_deduplicates_shared_matched_nodes(monkeypatc
     assert row["matchedCMID_SD3"] == "SM462198"
 
 
+def test_extended_key_to_key_preserves_multiple_uses_tie_key_pairs(monkeypatch):
+    _setup_merge_domain_validation(monkeypatch)
+
+    def fake_get_query(query, driver=None, params=None, type=None):
+        if "RETURN d.CMID AS datasetID, d.CMName AS datasetName" in query:
+            return [
+                {"datasetID": "SD1", "datasetName": "Dataset One"},
+                {"datasetID": "AD2", "datasetName": "Dataset Two"},
+            ]
+        if type == "df":
+            return pd.DataFrame(
+                [
+                    {
+                        "datasetID": "SD1",
+                        "LCA_CMName": "Shared Category",
+                        "LCA_CMID": "AM123",
+                        "CMID": "AM123",
+                        "tie": 0,
+                        "Key": "type == bowl",
+                        "Name": "Bowl",
+                    },
+                    {
+                        "datasetID": "SD1",
+                        "LCA_CMName": "Shared Category",
+                        "LCA_CMID": "AM123",
+                        "CMID": "AM123",
+                        "tie": 0,
+                        "Key": "type == jar",
+                        "Name": "Jar",
+                    },
+                    {
+                        "datasetID": "AD2",
+                        "LCA_CMName": "Shared Category",
+                        "LCA_CMID": "AM123",
+                        "CMID": "AM123",
+                        "tie": 0,
+                        "Key": "form == open",
+                        "Name": "Open",
+                    },
+                    {
+                        "datasetID": "AD2",
+                        "LCA_CMName": "Shared Category",
+                        "LCA_CMID": "AM123",
+                        "CMID": "AM123",
+                        "tie": 0,
+                        "Key": "form == closed",
+                        "Name": "Closed",
+                    },
+                ]
+            )
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(merge_mod, "getQuery", fake_get_query)
+
+    result = merge_mod.proposeMerge(
+        dataset_choices=["SD1", "AD2"],
+        category_label="CATEGORY",
+        criteria="extended",
+        database="ArchaMap",
+        intersection=True,
+        selectedKeyvariables={},
+        ncontains=2,
+        resultFormat="key-to-key",
+    )
+
+    key_pairs = {(row["Key_SD1"], row["Key_AD2"]) for row in result}
+
+    assert key_pairs == {
+        ("type == bowl", "form == open"),
+        ("type == bowl", "form == closed"),
+        ("type == jar", "form == open"),
+        ("type == jar", "form == closed"),
+    }
+
+
 def test_standard_key_to_key_returns_friendly_warning_when_dataset_has_no_rows(monkeypatch):
     seen, fake_driver = _setup_merge_domain_validation(monkeypatch)
 

@@ -233,29 +233,26 @@ def _select_best_extended_rows(result, dataset_choices, ncontains, intersection,
     if result.empty:
         return result
 
-    rows_to_keep = np.zeros(len(result), dtype=int)
-    for key_col in key_cols:
-        key_series = result[key_col].fillna("").astype(str).str.strip()
-        has_key = key_series.ne("")
-        if not has_key.any():
-            continue
-
-        candidates = result[has_key].copy()
-        candidates["_row_idx"] = candidates.index
-        best_rows = (
-            candidates.sort_values(
-                by=[key_col, "_matchedDatasetCount", "LCADistance", "LCA_CMID"],
-                ascending=[True, False, True, True],
+    if key_cols:
+        result["_keyTuple"] = list(
+            zip(
+                *[
+                    result[key_col].fillna("").astype(str).str.strip()
+                    for key_col in key_cols
+                ]
+            )
+        )
+        result = (
+            result.sort_values(
+                by=["_matchedDatasetCount", "LCADistance", "LCA_CMID"],
+                ascending=[False, True, True],
                 kind="mergesort",
             )
-            .drop_duplicates(subset=[key_col], keep="first")
+            .drop_duplicates(subset=["_keyTuple"], keep="first")
+            .sort_index(kind="mergesort")
         )
-        rows_to_keep[result.index.isin(best_rows["_row_idx"])] = 1
 
-    if rows_to_keep.any():
-        result = result[rows_to_keep == 1]
-
-    return result.drop(columns=["_matchedDatasetCount", "_maxPairwiseDistance"], errors="ignore")
+    return result.drop(columns=["_matchedDatasetCount", "_maxPairwiseDistance", "_keyTuple"], errors="ignore")
 
 
 def _discover_crossdomain_of_relationship(driver, source_domain, target_domain):
