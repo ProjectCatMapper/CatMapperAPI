@@ -3,8 +3,10 @@ from flask import Blueprint
 
 logs_bp = Blueprint('logs', __name__)
 
+@logs_bp.route('/api/databases/<database>/nodes/<CMID>/logs', methods=['GET'])
 @logs_bp.route('/logs/<database>/<CMID>', methods=['GET'])
 def getLogs(database, CMID):
+    """Return audit log rows for a node and its USES relationships."""
     if not isinstance(CMID, str):
         return "Invalid CMID format. It should be a string."
     driver = getDriver(database)

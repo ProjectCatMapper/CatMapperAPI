@@ -5,6 +5,10 @@ info:
   description: |
     Public and authenticated endpoints for CatMapper (SocioMap and ArchaMap).
 
+    Canonical REST endpoints are now exposed under `/api`. Existing unprefixed
+    routes remain available as deprecated compatibility aliases during the
+    migration.
+
     Notes on auth:
     - Most read endpoints do not require authentication.
     - Write/task endpoints support either:
@@ -12,22 +16,144 @@ info:
       2) `X-API-Key: <key>` (or `Authorization: ApiKey <key>`)
       3) Backward-compatible body credentials in `cred` (`{ userid, key }`).
 servers:
-  - url: https://api.catmapper.org
-    description: Production
-  - url: http://localhost:5000
-    description: Local development
+  - url: https://api.catmapper.org/api
+    description: Production canonical REST API
+  - url: http://localhost:5000/api
+    description: Local development canonical REST API
 
 tags:
   - name: Docs
   - name: Search
   - name: Explore
   - name: Metadata
+  - name: Download
   - name: Merge
   - name: Translate
   - name: Upload
+  - name: Users
   - name: Admin
 
 paths:
+  /databases/{database}/nodes/{cmid}:
+    get:
+      tags: [Explore]
+      summary: CMID node details
+      description: 'Canonical REST endpoint. Deprecated compatibility alias: `/CMID/{database}/{cmid}`.'
+      parameters:
+        - $ref: '#/components/parameters/databasePath'
+        - $ref: '#/components/parameters/cmidPath'
+      responses:
+        '200':
+          description: Node and USES tie property details
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /databases/{database}/metadata/domains:
+    get:
+      tags: [Metadata]
+      summary: List public domains
+      description: 'Canonical REST endpoint. Deprecated compatibility alias: `/metadata/domains/{database}`.'
+      parameters:
+        - $ref: '#/components/parameters/databasePath'
+      responses:
+        '200':
+          description: Domain rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  additionalProperties: true
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /databases/{database}/downloads/csv-urls:
+    get:
+      tags: [Download]
+      summary: List CSV backup URLs
+      description: 'Canonical REST endpoint. Deprecated compatibility alias: `/CSVURLs/{database}`.'
+      parameters:
+        - $ref: '#/components/parameters/databasePath'
+        - name: mostRecent
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          description: CSV backup URLs
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /uploads/input-nodes:
+    post:
+      tags: [Upload]
+      summary: Queue an input-node upload
+      description: 'Canonical REST endpoint. Deprecated compatibility alias: `/uploadInputNodes`.'
+      security:
+        - bearerAuth: []
+        - apiKeyAuth: []
+      responses:
+        '202':
+          description: Upload task queued
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /merge/proposals:
+    post:
+      tags: [Merge]
+      summary: Create a merge proposal
+      description: 'Canonical REST endpoint. Deprecated compatibility alias: `/proposeMergeSubmit`.'
+      responses:
+        '200':
+          description: Merge proposal payload
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /translation-tasks:
+    post:
+      tags: [Translate]
+      summary: Start an asynchronous translation task
+      description: 'Canonical REST endpoint. Deprecated compatibility alias: `/translate/start`.'
+      responses:
+        '200':
+          description: Translation task state
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /users/{userid}/profile:
+    get:
+      tags: [Users]
+      summary: Get an authenticated user profile
+      description: 'Canonical REST endpoint. Deprecated compatibility alias: `/profile/{userid}`.'
+      parameters:
+        - name: userid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User profile
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
   /docs:
     get:
       tags: [Docs]
@@ -60,6 +186,8 @@ paths:
       summary: Search categories/entities
       description: |
         Searches a CatMapper database for matching categories/entities.
+        This is the canonical REST path when used with the `/api` server base;
+        the unprefixed `/search` route remains as a deprecated compatibility alias.
 
         Multi-context filtering:
         - `contexts` can be passed as comma-separated values and/or repeated params.

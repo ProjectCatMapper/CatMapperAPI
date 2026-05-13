@@ -231,6 +231,7 @@ def _run_translate_task(task_id, translate_kwargs, batch_size):
             finishedAt=_utc_now_iso(),
         )
     
+@search_bp.route('/api/search', methods=['GET'])
 @search_bp.route('/search', methods=['GET'])
 def getSearch():
     """Search endpoint for explore page
@@ -377,8 +378,10 @@ def getSearch():
     except Exception as e:
         return str(e), 500    
 
+@search_bp.route('/api/translations', methods=['POST'])
 @search_bp.route('/translate', methods=['POST'])
 def getTranslate2():
+    """Run a synchronous translation request and return file rows."""
     try:
         payload = request.get_data()
         payload = json.loads(payload)
@@ -407,8 +410,10 @@ def getTranslate2():
         return str(e), 500
 
 
+@search_bp.route('/api/translation-tasks', methods=['POST'])
 @search_bp.route('/translate/start', methods=['POST'])
 def start_translate_task():
+    """Start an asynchronous translation task."""
     try:
         payload = request.get_data()
         payload = json.loads(payload)
@@ -458,8 +463,10 @@ def start_translate_task():
         return jsonify({"error": str(e)}), 500
 
 
+@search_bp.route('/api/translation-tasks/status', methods=['POST'])
 @search_bp.route('/translate/status', methods=['POST'])
 def get_translate_task_status():
+    """Return status and result data for an asynchronous translation task."""
     try:
         payload = request.get_data()
         payload = json.loads(payload)
@@ -481,8 +488,10 @@ def get_translate_task_status():
         return jsonify({"error": str(e)}), 500
 
 
+@search_bp.route('/api/translation-tasks/cancel', methods=['POST'])
 @search_bp.route('/translate/cancel', methods=['POST'])
 def cancel_translate_task():
+    """Request cancellation for an asynchronous translation task."""
     try:
         payload = request.get_data()
         payload = json.loads(payload)
@@ -508,8 +517,10 @@ def cancel_translate_task():
         return jsonify({"error": str(e)}), 500
 
 
+@search_bp.route('/api/nlp/parse-log', methods=['POST'])
 @search_bp.route('/nlp/parse-log', methods=['POST'])
 def save_nlp_parse_log():
+    """Persist an NLP parse request audit record."""
     try:
         payload = request.get_json(silent=True)
         if not isinstance(payload, dict):

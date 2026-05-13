@@ -449,7 +449,7 @@ def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database="SocioMap"):
             # DATASET IDs also back MERGING/STACK nodes and must stay reserved
             # after deletion, because deleteNode() preserves the old CMID on a
             # standalone DELETED node.
-            label_filter = "WHERE (n:DATASET OR n:DELETED)"
+            label_filter = "// WHERE n:DATASET scope includes deleted reservations\n    WHERE (n:DATASET OR n:DELETED)"
         else:
             label_filter = ""
 

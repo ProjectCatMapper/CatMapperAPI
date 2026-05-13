@@ -386,8 +386,10 @@ def _cancel_upload_task(task_id, task):
         store.append_upload_event(task_id, "Stop signal sent to worker.")
 
 
+@upload_bp.route("/api/uploads/waiting-uses/status", methods=["POST"])
 @upload_bp.route("/uploadWaitingUSESStatus", methods=["POST"])
 def upload_waiting_uses_status():
+    """Return status for a waiting-USES task owned by the authenticated user."""
     try:
         data = _request_json_payload()
         credentials = unlist(data.get("cred"))
@@ -417,8 +419,10 @@ def upload_waiting_uses_status():
         return jsonify({"error": error_message}), status_code
 
 
+@upload_bp.route("/api/uploads/input-nodes/status", methods=["POST"])
 @upload_bp.route("/uploadInputNodesStatus", methods=["POST"])
 def upload_input_nodes_status():
+    """Return status for an input-node upload task owned by the authenticated user."""
     try:
         data = _request_json_payload()
         acting_user = _request_acting_user(data)
@@ -443,8 +447,10 @@ def upload_input_nodes_status():
         return jsonify({"error": error_message}), status_code
 
 
+@upload_bp.route("/api/uploads/input-nodes/cancel", methods=["POST"])
 @upload_bp.route("/uploadInputNodesCancel", methods=["POST"])
 def upload_input_nodes_cancel():
+    """Request cancellation for an input-node upload task."""
     try:
         data = _request_json_payload()
         acting_user = _request_acting_user(data)
@@ -471,8 +477,10 @@ def upload_input_nodes_cancel():
         return jsonify({"error": error_message}), status_code
 
 
+@upload_bp.route("/api/uploads/input-nodes", methods=['GET', 'POST'])
 @upload_bp.route("/uploadInputNodes", methods=['GET', 'POST'])
 def upload_API():
+    """Queue a tabular input-node upload task."""
     acting_user = "unknown"
     try:
         data = _request_json_payload()

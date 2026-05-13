@@ -461,19 +461,25 @@ def _build_node_page_payload(database, cmid, *, host_url=None):
         "mergeTemplateSummary": merge_template_summary,
     }
 
+@explore_bp.route("/api/databases/<database>/nodes/<cmid>/info", methods=['GET'])
 @explore_bp.route("/info/<database>/<cmid>", methods=['GET'])
 def getInfo(database, cmid):
+    """Return the summary information panel for a node."""
     result = getCategoryInfo(database, cmid)
     return jsonify(result)
 
 # gets samples and categories
+@explore_bp.route("/api/databases/<database>/nodes/<cmid>/category-page", methods=['GET'])
 @explore_bp.route("/category/<database>/<cmid>", methods=['GET'])
 def catm(database, cmid):
+    """Return category-page sample/category tables for a node."""
     result = getCategoryPage(database, cmid)
     return jsonify(result)
 
+@explore_bp.route("/api/databases/<database>/nodes/<cmid>/explore-geometry", methods=['GET'])
 @explore_bp.route("/exploreGeometry/<database>/<cmid>", methods=['GET'])
 def getPointGeometry(database, cmid):
+    """Return explore-page geometry for a node."""
     try:
         results = exploreGeometry(database, cmid)
         return jsonify(results)
@@ -481,8 +487,10 @@ def getPointGeometry(database, cmid):
     except Exception as e:
         return "Error returning results: " + str(", ".join(map(str, e.args))), 500
 
+@explore_bp.route("/api/network", methods=['GET'])
 @explore_bp.route("/network", methods=['GET'])
 def net():
+    """Return raw network relationships for a CMID and relationship type."""
     p0 = request.args.get('value')
     p1 = request.args.get('cmid')
     p2 = request.args.get('relation')
@@ -501,8 +509,10 @@ def net():
     return resultnet
 
 
+@explore_bp.route("/api/explore", methods=['GET'])
 @explore_bp.route("/explore", methods=['GET'])
 def getExplore():
+    """Return the legacy combined explore payload for a node."""
 
     try:
         cmid = request.args.get('cmid')
@@ -621,8 +631,10 @@ def getExplore():
     except Exception as e:
         return "Error returning results: " + str(e), 500
 
+@explore_bp.route('/api/networks', methods=['GET'])
 @explore_bp.route('/networks', methods=['GET'])
 def getNetwork():
+    """Return a compact network payload for selected CMIDs and relation filters."""
     try:
         cmid = request.args.get('cmid')
         cmid = re.split(",", cmid)
@@ -688,8 +700,10 @@ def getNetwork():
     except Exception as e:
         return str(e), 500
 
+@explore_bp.route('/api/networksjs', methods=['GET'])
 @explore_bp.route('/networksjs', methods=['GET'])
 def getNetworkjs():
+    """Return the interactive JS network payload for the Explore node page."""
     try:
         cmid = request.args.get('cmid')
         domain = request.args.get('domain')
@@ -710,8 +724,10 @@ def getNetworkjs():
         return str(e), 500
 
 
+@explore_bp.route('/api/network-options', methods=['GET'])
 @explore_bp.route('/networkOptions', methods=['GET'])
 def getNetworkOptions():
+    """Return relation/domain/dataset options for a node network view."""
     try:
         cmid = request.args.get('cmid')
         relation = request.args.get('relation')
@@ -726,8 +742,10 @@ def getNetworkOptions():
         return str(e), 500
 
 
+@explore_bp.route("/api/databases/<database>/nodes/<cmid>/page.json", methods=['GET'])
 @explore_bp.route("/entity/<database>/<cmid>.json", methods=['GET'])
 def get_node_page_json(database, cmid):
+    """Return canonical public JSON for a CatMapper node page."""
     try:
         payload = _build_node_page_payload(database, cmid, host_url=request.host_url)
         response = jsonify(payload)
@@ -741,8 +759,10 @@ def get_node_page_json(database, cmid):
         return jsonify({"error": str(exc)}), 500
 
     
+@explore_bp.route('/api/geometry', methods=['GET'])
 @explore_bp.route('/geometry', methods=['GET'])
 def getGeometry():
+    """Return polygon and point geometry for a CMID."""
     database = request.args.get('database')
     cmid = request.args.get('cmid')
     simple = request.args.get('simple')
@@ -755,8 +775,10 @@ def getGeometry():
     points = getPoints(cmid, driver)
     return jsonify({"polygons": polygons, "points": points})
 
+@explore_bp.route('/api/dataset', methods=['GET', 'POST'])
 @explore_bp.route('/dataset', methods=['GET', 'POST'])
 def getDataset():
+    """Return category rows used by a dataset, preserving legacy payload semantics."""
     try:
         if request.method == 'GET':
             params = request.args
@@ -778,8 +800,10 @@ def getDataset():
         return jsonify({"error": str(e)}), 500
 
 
+@explore_bp.route('/api/databases/<database>/nodes/<cmid>', methods=['GET'])
 @explore_bp.route('/CMID/<database>/<cmid>', methods=['GET'])
 def getCMID(database, cmid):
+    """Return raw node and USES relationship properties for a CMID."""
     try:
         database = database
         cmid = cmid
@@ -827,8 +851,10 @@ return elementId(r) as relID, relProperties, r[relProperties] as relValues
         result = str(e)
         return result, 500
 
+@explore_bp.route('/api/network-nodes', methods=['POST'])
 @explore_bp.route('/networknodes', methods=['POST'])
 def getnetworknodes():
+    """Return neighboring node labels for network expansion controls."""
     try:
 
         data = request.get_data()

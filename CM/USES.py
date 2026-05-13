@@ -172,8 +172,8 @@ def updateLabels(database, CMID=None):
         match (c:CATEGORY {match})<-[r:USES]-(:DATASET)
         where r.label is not null
         WITH c, apoc.coll.toSet(apoc.coll.flatten(collect(distinct [r.label,"CATEGORY"]), true)) AS labels
-        CALL apoc.create.setLabels(c, labels) YIELD node
-        RETURN count(distinct node) AS count
+        SET c:$(labels)
+        RETURN count(distinct c) AS count
         """
         if CMID is not None:
             label_results = getQuery(query=query, driver=driver,

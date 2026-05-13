@@ -458,8 +458,10 @@ def _verify_profile_credentials(userid, credentials):
 
     raise Exception("User is not verified")
 
+@user_bp.route('/api/users/registrations', methods=['POST'])
 @user_bp.route('/newuser', methods=['POST'])
 def getnewuser():
+    """Create or resend a registration email-verification request."""
     try:
 
         support_email = get_support_email() or "the configured support email"
@@ -636,8 +638,10 @@ def getnewuser():
             return jsonify({"error": "please contact " + support_email + ". Error:" + error_message}), 500
 
 
+@user_bp.route('/api/users/registrations/confirm-email', methods=['POST'])
 @user_bp.route('/newuser/confirm-email', methods=['POST'])
 def confirm_newuser_email():
+    """Confirm a registration email-verification request."""
     try:
         data = _read_json_payload()
         lookup_identifier = unlist(data.get("email")) or unlist(data.get("username"))
@@ -726,8 +730,10 @@ def confirm_newuser_email():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
+@user_bp.route('/api/auth/login', methods=['POST'])
 @user_bp.route('/login', methods=['POST'])
 def getLogin():
+    """Authenticate a user and return a bearer token."""
     try:
         data = request.get_data()
         data = json.loads(data)
@@ -757,8 +763,10 @@ def getLogin():
         return jsonify({"error": result}), 500
 
 
+@user_bp.route('/api/password-reset-requests', methods=['POST'])
 @user_bp.route('/forgot-password/request', methods=['POST'])
 def request_forgot_password():
+    """Request a password-reset verification code."""
     try:
         _cleanup_requests()
         data = _read_json_payload()
@@ -823,8 +831,10 @@ def request_forgot_password():
         return jsonify({"error": str(e)}), 400
 
 
+@user_bp.route('/api/password-reset-confirmations', methods=['POST'])
 @user_bp.route('/forgot-password/confirm', methods=['POST'])
 def confirm_forgot_password():
+    """Confirm a password reset with a verification code."""
     try:
         _cleanup_requests()
         data = _read_json_payload()
@@ -876,8 +886,10 @@ def confirm_forgot_password():
         return jsonify({"error": str(e)}), 400
 
 
+@user_bp.route('/api/users/<userid>/profile', methods=['GET'])
 @user_bp.route('/profile/<userid>', methods=['GET'])
 def get_profile(userid):
+    """Return profile details for an authenticated user."""
     try:
         credentials_raw = request.args.get("credentials")
         credentials = json.loads(credentials_raw) if credentials_raw else None
@@ -888,8 +900,10 @@ def get_profile(userid):
         return jsonify({"error": str(e)}), 400
 
 
+@user_bp.route('/api/profile-update-requests', methods=['POST'])
 @user_bp.route('/profile/request-update', methods=['POST'])
 def request_profile_update():
+    """Request email verification before profile updates are applied."""
     try:
         _cleanup_requests()
         data = _read_json_payload()
@@ -968,8 +982,10 @@ def request_profile_update():
         return jsonify({"error": str(e)}), 400
 
 
+@user_bp.route('/api/profile-update-confirmations', methods=['POST'])
 @user_bp.route('/profile/confirm-update', methods=['POST'])
 def confirm_profile_update():
+    """Confirm and apply a pending profile update."""
     try:
         _cleanup_requests()
         data = _read_json_payload()
@@ -1035,8 +1051,10 @@ def confirm_profile_update():
         return jsonify({"error": str(e)}), 400
 
 
+@user_bp.route('/api/password-change-requests', methods=['POST'])
 @user_bp.route('/profile/request-password-change', methods=['POST'])
 def request_password_change():
+    """Request email verification before changing a logged-in user's password."""
     try:
         _cleanup_requests()
         data = _read_json_payload()
@@ -1089,8 +1107,10 @@ def request_password_change():
         return jsonify({"error": str(e)}), 400
 
 
+@user_bp.route('/api/password-change-confirmations', methods=['POST'])
 @user_bp.route('/profile/confirm-password-change', methods=['POST'])
 def confirm_password_change():
+    """Confirm and apply a logged-in password change."""
     try:
         _cleanup_requests()
         data = _read_json_payload()
@@ -1133,8 +1153,10 @@ def confirm_password_change():
         return jsonify({"error": str(e)}), 400
 
 
+@user_bp.route('/api/api-key-requests', methods=['POST'])
 @user_bp.route('/profile/request-api-key', methods=['POST'])
 def request_api_key_creation():
+    """Request email verification before creating a user API key."""
     try:
         _cleanup_requests()
         data = _read_json_payload()
@@ -1191,8 +1213,10 @@ def request_api_key_creation():
         return jsonify({"error": str(e)}), 400
 
 
+@user_bp.route('/api/api-key-confirmations', methods=['POST'])
 @user_bp.route('/profile/confirm-api-key', methods=['POST'])
 def confirm_api_key_creation():
+    """Confirm and create a user API key."""
     try:
         _cleanup_requests()
         data = _read_json_payload()
@@ -1245,8 +1269,10 @@ def confirm_api_key_creation():
         return jsonify({"error": str(e)}), 400
 
 
+@user_bp.route('/api/users/<userid>/activity', methods=['GET'])
 @user_bp.route('/profile/activity/<userid>', methods=['GET'])
 def get_profile_activity(userid):
+    """Return activity counters for a user in a database."""
     try:
         credentials_raw = request.args.get("credentials")
         credentials = json.loads(credentials_raw) if credentials_raw else None
@@ -1291,8 +1317,10 @@ def get_profile_activity(userid):
         return jsonify({"error": str(e)}), 400
 
 
+@user_bp.route('/api/users/<userid>/bookmarks', methods=['GET'])
 @user_bp.route('/profile/bookmarks/<userid>', methods=['GET'])
 def get_profile_bookmarks(userid):
+    """Return saved bookmarks for a user."""
     try:
         credentials_raw = request.args.get("credentials")
         credentials = json.loads(credentials_raw) if credentials_raw else None
@@ -1303,8 +1331,10 @@ def get_profile_bookmarks(userid):
         return jsonify({"error": str(e)}), 400
 
 
+@user_bp.route('/api/users/bookmarks', methods=['POST'])
 @user_bp.route('/profile/bookmarks/add', methods=['POST'])
 def add_profile_bookmark():
+    """Add or refresh a user bookmark."""
     try:
         data = _read_json_payload()
         userid = unlist(data.get("userId"))
@@ -1338,8 +1368,10 @@ def add_profile_bookmark():
         return jsonify({"error": str(e)}), 400
 
 
+@user_bp.route('/api/users/bookmarks/remove', methods=['POST'])
 @user_bp.route('/profile/bookmarks/remove', methods=['POST'])
 def remove_profile_bookmark():
+    """Remove one or more user bookmarks."""
     try:
         data = _read_json_payload()
         userid = unlist(data.get("userId"))
@@ -1363,8 +1395,10 @@ def remove_profile_bookmark():
         return jsonify({"error": str(e)}), 400
 
 
+@user_bp.route('/api/users/<userid>/history', methods=['GET'])
 @user_bp.route('/profile/history/<userid>', methods=['GET'])
 def get_profile_history(userid):
+    """Return recently viewed node history for a user."""
     try:
         credentials_raw = request.args.get("credentials")
         credentials = json.loads(credentials_raw) if credentials_raw else None
@@ -1375,8 +1409,10 @@ def get_profile_history(userid):
         return jsonify({"error": str(e)}), 400
 
 
+@user_bp.route('/api/users/history', methods=['POST'])
 @user_bp.route('/profile/history/add', methods=['POST'])
 def add_profile_history():
+    """Add or refresh a user history item."""
     try:
         data = _read_json_payload()
         userid = unlist(data.get("userId"))
@@ -1410,8 +1446,10 @@ def add_profile_history():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
+@user_bp.route('/api/admin/users/registrations', methods=['POST'])
 @user_bp.route('/updateNewUsers', methods=['POST'])
 def updateNewUsers():
+    """Approve or reject pending user registrations."""
     try:
         data = request.get_data()
         data = json.loads(data)
