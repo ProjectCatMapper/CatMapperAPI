@@ -541,6 +541,68 @@ def test_extended_key_to_key_preserves_multiple_uses_tie_key_pairs(monkeypatch):
     }
 
 
+def test_standard_key_to_key_preserves_same_category_duplicate_key_pairs(monkeypatch):
+    _setup_merge_domain_validation(monkeypatch)
+
+    def fake_get_query(_query, driver=None, params=None, type=None):
+        if type == "df":
+            return pd.DataFrame(
+                [
+                    {
+                        "datasetID": "SD275",
+                        "CMName": "Dime",
+                        "CMID": "SM253185",
+                        "Key": "V131 == 23",
+                        "Name": "Dimi",
+                    },
+                    {
+                        "datasetID": "SD275",
+                        "CMName": "Dime",
+                        "CMID": "SM253185",
+                        "Key": "V131 == 26",
+                        "Name": "Dime",
+                    },
+                    {
+                        "datasetID": "SD272",
+                        "CMName": "Dime",
+                        "CMID": "SM253185",
+                        "Key": "V131 == 26",
+                        "Name": "Dime",
+                    },
+                    {
+                        "datasetID": "SD272",
+                        "CMName": "Dime",
+                        "CMID": "SM253185",
+                        "Key": "V131 == 23",
+                        "Name": "Dimi",
+                    },
+                ]
+            )
+        raise AssertionError("Unexpected query type")
+
+    monkeypatch.setattr(merge_mod, "getQuery", fake_get_query)
+
+    result = merge_mod.proposeMerge(
+        dataset_choices=["SD275", "SD272"],
+        category_label="ETHNICITY",
+        criteria="standard",
+        database="SocioMap",
+        intersection=True,
+        selectedKeyvariables={"SD275": "V131", "SD272": "V131"},
+        ncontains=1,
+        resultFormat="key-to-key",
+    )
+
+    key_pairs = {(row["Key_SD275"], row["Key_SD272"]) for row in result}
+
+    assert key_pairs == {
+        ("V131 == 23", "V131 == 26"),
+        ("V131 == 26", "V131 == 26"),
+        ("V131 == 23", "V131 == 23"),
+        ("V131 == 26", "V131 == 23"),
+    }
+
+
 def test_standard_key_to_key_returns_friendly_warning_when_dataset_has_no_rows(monkeypatch):
     seen, fake_driver = _setup_merge_domain_validation(monkeypatch)
 
