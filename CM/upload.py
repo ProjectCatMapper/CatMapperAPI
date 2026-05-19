@@ -2109,19 +2109,16 @@ def input_Nodes_Uses(
             raise ValueError("Key column is required when formatKey is True")
         dataset = createKey(dataset, "Key").copy()
 
-    # When uploading keys or new keys, need to make sure they follow the standard convention
-    #pattern = re.compile(r"^\s*[^=&&]+?\s*==\s*[^=&&]+?(?:\s*&&\s*[^=&&]+?\s*==\s*[^=&&]+?)*\s*$")
-    pattern = re.compile(r"^.+?\s==\s.+?(?:\s&&\s.+?\s==\s.+?)*$")
-
+    # When uploading keys or new keys, make sure they follow the standard convention.
     if (uploadOption == "add_node" and not isDataset) or uploadOption == "add_uses" or mergingType == "merging_ties_to_categories" :
-        invalid_rows = dataset.index[~dataset["Key"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].map(lambda x:x+1).tolist()
+        invalid_rows = invalid_key_row_numbers(dataset["Key"])
 
         if invalid_rows:
             raise ValueError(f"Invalid 'Key' format in rows:\n{invalid_rows}. Must be of form VARIABLE == VALUE")
           
     if uploadOption == "update_replace":
         if "NewKey" in dataset.columns:
-            invalid_rows = dataset.index[~dataset["NewKey"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].tolist()
+            invalid_rows = invalid_key_row_numbers(dataset["NewKey"])
 
             if invalid_rows:
                 raise ValueError(f"Invalid 'NewKey' format in rows:\n{invalid_rows}. Must be of form VARIABLE == VALUE")

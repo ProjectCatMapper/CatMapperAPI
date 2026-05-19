@@ -1,6 +1,43 @@
 import pandas as pd
 
 
+def is_valid_key_format(value):
+    """Return True when value follows CatMapper's Key segment format."""
+    if not isinstance(value, str):
+        return False
+
+    text = value.strip()
+    if not text:
+        return False
+
+    segments = text.split(" && ")
+    if any(not segment.strip() for segment in segments):
+        return False
+
+    for segment in segments:
+        if segment.count(" == ") != 1:
+            return False
+        key_name, key_value = segment.split(" == ", 1)
+        if not key_name.strip() or not key_value.strip():
+            return False
+        if "==" in key_name or "==" in key_value:
+            return False
+        if "&&" in key_name or "&&" in key_value:
+            return False
+
+    return True
+
+
+def invalid_key_row_numbers(values):
+    """Return 1-based row numbers for values that are not valid Keys."""
+    series = pd.Series(values)
+    return [
+        position + 1
+        for position, value in enumerate(series.tolist())
+        if not is_valid_key_format(value)
+    ]
+
+
 def createKey(nodes, cols):
     """
     Create a new 'Key' column by concatenating specified columns with their values.

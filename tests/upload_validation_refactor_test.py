@@ -2,6 +2,43 @@ import pandas as pd
 import pytest
 
 import CM.upload as upload
+from CM.keys import invalid_key_row_numbers, is_valid_key_format
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "Type == Adamana Brown",
+        "Type == Adamana Brown && Period == Archaic",
+    ],
+)
+def test_key_format_validator_accepts_standard_keys(key):
+    assert is_valid_key_format(key) is True
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "",
+        None,
+        "Type==Adamana Brown",
+        "Type == ",
+        " == Adamana Brown",
+        "Type == Alpha &&",
+        "Type == Alpha && Period",
+        "Type == Alpha == Beta",
+        "Type == Alpha && Period == Early == Late",
+        "Type == Alpha&&Period == Early",
+    ],
+)
+def test_key_format_validator_rejects_malformed_keys(key):
+    assert is_valid_key_format(key) is False
+
+
+def test_invalid_key_row_numbers_are_one_based():
+    rows = ["Type == Alpha", "Type == Alpha &&", "Type == Beta == Gamma"]
+
+    assert invalid_key_row_numbers(rows) == [2, 3]
 
 
 def test_collect_unique_column_values_for_multi_value_column():
@@ -129,6 +166,34 @@ def test_add_uses_rejects_blank_name_when_creating_new_node(monkeypatch):
                     "Key": "Type == Adamana Brown",
                     "label": "DIALECT",
                     "Name": "   ",
+                }
+            ],
+            database="ArchaMap",
+            uploadOption="add_uses",
+            formatKey=False,
+            optionalProperties=[],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
+
+
+def test_input_nodes_uses_rejects_malformed_key_before_upload(monkeypatch):
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+    monkeypatch.setattr(upload, "getQuery", lambda *args, **kwargs: [])
+
+    with pytest.raises(ValueError, match="Invalid 'Key' format"):
+        upload.input_Nodes_Uses(
+            dataset=[
+                {
+                    "CMID": "AM1",
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha &&",
+                    "label": "DIALECT",
+                    "Name": "Alpha",
                 }
             ],
             database="ArchaMap",
