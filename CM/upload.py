@@ -477,14 +477,27 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
             if required not in df.columns:
                 raise ValueError(f"Missing required column {required}")
 
-        # Every column excluding the required columns in the dataframe
-        # This carries forwaard geoCoords and parentContext even though they are not in optionalProperties               
+        # Every column excluding required locator columns in the dataframe.
+        # This intentionally carries forward geoCoords and parentContext even if
+        # they are not in optionalProperties.
         vars = df.drop(columns=[col for col in requiredCols if col in df.columns]).columns.tolist()
+
+        optional_props = optionalProperties if isinstance(optionalProperties, list) else []
+        normalized_optional_props = [str(prop).strip() for prop in optional_props if str(prop).strip()]
+        normalized_optional_set = set(normalized_optional_props)
 
         if "NewKey" in vars:
             for x in range(len(vars)):
                 if vars[x] == "NewKey":
                     vars[x] = "Key"
+
+        if propertyType == "USES":
+            # Relationship locator columns must never be written as USES props.
+            vars = [var for var in vars if var not in {"CMID", "datasetID", "relID", "OldKey"}]
+
+            # Keep Key editable only when the caller explicitly requested a key edit.
+            if "Key" in vars and "NewKey" not in normalized_optional_set and "Key" not in normalized_optional_set:
+                vars = [var for var in vars if var != "Key"]
 
         if not vars:
             raise ValueError("No columns to change were uploaded.")
