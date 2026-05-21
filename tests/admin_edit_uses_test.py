@@ -285,3 +285,64 @@ def test_add_edit_delete_uses_parent_context_accepts_single_json_string(monkeypa
     assert result == "done"
     row = captured["df"].to_dict(orient="records")[0]
     assert row["parentContext"] == ['{"parent":"AM27636","eventDate":"420","eventType":"FOLLOWS"}']
+
+
+def test_add_edit_delete_uses_parent_sends_multi_parent_list(monkeypatch):
+    captured = {}
+    payload = _base_input()
+    payload["s1_8"] = "parent"
+    payload["s1_3"] = "SD2182 || SD2181"
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(
+        admin,
+        "getPropertiesMetadata",
+        lambda driver: [
+            {"type": "relationship", "property": "parent", "metaType": "list"},
+        ],
+    )
+    monkeypatch.setattr(admin, "processUSES", lambda **kwargs: None)
+    monkeypatch.setattr(admin, "getGroupLabels", lambda cmid, driver: "DATASET")
+    monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
+
+    def fake_update_property(df, optionalProperties, isDataset, database, user, updateType, propertyType="USES", sep="||||"):
+        captured["df"] = df.copy()
+        return {"result": [{"relID": "rel-123"}], "df": df.to_dict(orient="records")}
+
+    monkeypatch.setattr(admin, "updateProperty", fake_update_property)
+
+    result = admin.add_edit_delete_USES("sociomap", "tester", payload)
+
+    assert result == "done"
+    row = captured["df"].to_dict(orient="records")[0]
+    assert row["parent"] == ["SD2182", "SD2181"]
+
+
+def test_add_edit_delete_node_dataset_parent_normalizes_multi_parent_values(monkeypatch):
+    captured = {}
+    payload = {
+        "s1_1": "add",
+        "s1_2": "SD2183",
+        "s1_3": "SD2182, SD2181",
+        "s1_7": "parent",
+    }
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
+    monkeypatch.setattr(admin, "processDATASETs", lambda database, CMID, user: captured.setdefault("processed", CMID))
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "RETURN a.parent AS val" in query:
+            return [[]]
+        if "SET a.parent = $id" in query:
+            captured["params"] = params
+            return []
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin, "getQuery", fake_get_query)
+
+    result = admin.add_edit_delete_Node("sociomap", "tester", payload)
+
+    assert result == "updated successfully"
+    assert captured["params"] == {"id": ["SD2182", "SD2181"]}
+    assert captured["processed"] == "SD2183"

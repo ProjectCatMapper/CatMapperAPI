@@ -56,6 +56,32 @@ class FakeDriver:
         return FakeSession()
 
 
+class FakeNoUsesSession(FakeSession):
+    def __init__(self, labels):
+        self._labels = labels
+
+    def run(self, query, **kwargs):
+        if "MATCH (n:CATEGORY)<-[r:USES]" in query:
+            return FakeCursor([])
+        if "MATCH (n {CMID: $cmid}) RETURN n.CMID AS CMID" in query:
+            return FakeCursor([
+                {
+                    "CMID": kwargs.get("cmid"),
+                    "CMName": "Example",
+                    "labels": self._labels,
+                }
+            ])
+        return super().run(query, **kwargs)
+
+
+class FakeNoUsesDriver:
+    def __init__(self, labels):
+        self._labels = labels
+
+    def session(self):
+        return FakeNoUsesSession(self._labels)
+
+
 def test_admin_nodeproperties_returns_filtered_fields(client, monkeypatch):
     monkeypatch.setattr(admin_routes, "getDriver", lambda database: FakeDriver())
 
@@ -84,6 +110,36 @@ def test_admin_usesproperties_returns_records_and_allowed_props(client, monkeypa
     assert payload["error"] == ""
     assert len(payload["r"]) == 1
     assert set(payload["r1"]) == {"Key", "year"}
+
+
+def test_admin_usesproperties_rejects_dataset_cmid(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: FakeNoUsesDriver(["DATASET", "STACK"]))
+
+    response = client.get(
+        "/admin_add_edit_delete_usesproperties",
+        query_string={"CMID": "SD2182", "database": "SocioMap"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert "Use add/edit/delete node property" in payload["error"]
+    assert payload["r"] == []
+    assert payload["r1"] == []
+
+
+def test_admin_usesproperties_rejects_deleted_cmid(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: FakeNoUsesDriver(["DELETED"]))
+
+    response = client.get(
+        "/admin_add_edit_delete_usesproperties",
+        query_string={"CMID": "SD2183", "database": "SocioMap"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert "deleted node" in payload["error"]
+    assert payload["r"] == []
+    assert payload["r1"] == []
 
 
 def test_create_label_helper_excludes_internal_labels(client, monkeypatch):

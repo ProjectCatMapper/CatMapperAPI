@@ -550,6 +550,37 @@ def admin_usesproperties():
         
         temp_list.sort(key=lambda x: (x[2].get("CMName", ""), x[1].get("Key", "")))
         records_list.extend(temp_list)
+
+        if not records_list:
+            node_rows = session.run(
+                "MATCH (n {CMID: $cmid}) RETURN n.CMID AS CMID, n.CMName AS CMName, labels(n) AS labels",
+                cmid=CMID,
+            ).data()
+            if not node_rows:
+                return jsonify({"error": "Invalid CMID", "r": [], "r1": []})
+
+            labels = set(node_rows[0].get("labels") or [])
+            if "DELETED" in labels:
+                return jsonify({
+                    "error": f"{CMID} is a deleted node and has no editable USES ties.",
+                    "r": [],
+                    "r1": [],
+                })
+            if "DATASET" in labels:
+                return jsonify({
+                    "error": (
+                        "USES properties belong to category nodes. "
+                        "Use add/edit/delete node property to edit dataset parent values."
+                    ),
+                    "r": [],
+                    "r1": [],
+                })
+
+            return jsonify({
+                "error": f"No USES ties found for {CMID}.",
+                "r": [],
+                "r1": [],
+            })
         
         allowed = session.run(q1).data()
         allowed_props = list({row['property'] for row in allowed})

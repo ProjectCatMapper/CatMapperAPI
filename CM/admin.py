@@ -27,6 +27,18 @@ import re
 ############################
 #section for general use helper functions
 
+_ADMIN_MULTI_VALUE_SEPARATOR = re.compile(r"\s*(?:\|{2,}|,|;)\s*")
+
+
+def _split_admin_multi_value(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        values = value
+    else:
+        values = _ADMIN_MULTI_VALUE_SEPARATOR.split(str(value))
+    return [str(val).strip() for val in values if str(val).strip()]
+
 #Function used by deleteNode to get elementId for either a single or list of CMIDs
 #deletenode only needs to operate on a string
 def getID(id_value, property, driver):
@@ -204,12 +216,11 @@ def getNodeMergeSummary(cmid, driver):
     }
 
 def validatePropertyCMID(value,proptoChange,validgroupLabel,driver):
-    if "||" in value:
-            value = value.split("||")
-    else:
-        value = [value]
-    for val in value:
-        val = val.strip()
+    values = _split_admin_multi_value(value)
+    if not values:
+        raise Exception(f"{proptoChange} requires at least one CMID")
+
+    for val in values:
 
         validprop = isValidCMID(val, driver)
 
@@ -352,11 +363,9 @@ def add_edit_delete_USES(database,user,input):
 
         if USES_property == "parent":
             groupLabel = getGroupLabels(CMID,driver)
-            if "||" in new_property_value:
-                for i in new_property_value.split("||"):
-                    validatePropertyCMID(i,USES_property,groupLabel,driver)
-            else:
-                validatePropertyCMID(new_property_value,USES_property,groupLabel,driver)
+            parent_values = _split_admin_multi_value(new_property_value)
+            validatePropertyCMID(parent_values,USES_property,groupLabel,driver)
+            new_property_value = parent_values
         else:
             query = """
                     UNWIND $prop as prop
@@ -387,7 +396,7 @@ def add_edit_delete_USES(database,user,input):
                 raise TypeError(f"Property '{USES_property}' requires a floating-point number. Received: {new_property_value}")
 
                 
-    if is_list_meta:
+    if is_list_meta and not isinstance(new_property_value, list):
         normalized_value = str(new_property_value).strip()
         if "||" in normalized_value:
             new_property_value = [part.strip() for part in normalized_value.split("||") if part.strip()]
@@ -637,11 +646,15 @@ def add_edit_delete_Node(database,user,input):
 
     driver = getDriver(database)
 
+    list_value = None
+
     if changeNodeProperty == "parent":
-        validatePropertyCMID(changeNodeValue,changeNodeProperty,"DATASET",driver)
+        list_value = _split_admin_multi_value(changeNodeValue)
+        validatePropertyCMID(list_value,changeNodeProperty,"DATASET",driver)
                 
     if changeNodeProperty == "District":
-        validatePropertyCMID(changeNodeValue,changeNodeProperty,"AREA",driver)
+        list_value = _split_admin_multi_value(changeNodeValue)
+        validatePropertyCMID(list_value,changeNodeProperty,"AREA",driver)
     
     if changeNodeProperty == "glottocode":
         node_summary = getNodeMergeSummary(changeNodeID, driver)
@@ -698,10 +711,10 @@ def add_edit_delete_Node(database,user,input):
         if label == "DATASET" and changeNodeProperty in ["District", "parent"]:
             q = f"""
                 MATCH (a {{CMID: '{changeNodeID}'}})
-                SET a.{changeNodeProperty} = split($id, ' || ')
+                SET a.{changeNodeProperty} = $id
             """
             #CMCypherQuery(con=con, query=q, parameters={'id': changeNodeValue})
-            getQuery(q,driver=driver,params={"id":changeNodeValue})
+            getQuery(q,driver=driver,params={"id": list_value or _split_admin_multi_value(changeNodeValue)})
 
             processDATASETs(database,CMID=changeNodeID,user=user)
         else:
