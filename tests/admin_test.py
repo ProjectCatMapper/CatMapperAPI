@@ -26,6 +26,8 @@ class FakeSession:
     def run(self, query, **kwargs):
         if "return properties(n) AS props" in query:
             return FakeCursor([{"props": {"Name": "Athens", "Key": "ATH", "ignore": "x"}}])
+        if "MATCH (n {CMID: $cmid}) RETURN labels(n) AS labels" in query:
+            return FakeCursor([{"labels": ["CATEGORY"]}])
         if "p.type='node'" in query:
             return FakeCursor([{"property": "Name"}, {"property": "Key"}, {"property": "label"}])
         if "MATCH (n:CATEGORY)<-[r:USES]" in query:
@@ -82,6 +84,20 @@ class FakeNoUsesDriver:
         return FakeNoUsesSession(self._labels)
 
 
+class FakeDeletedNodePropertiesSession(FakeSession):
+    def run(self, query, **kwargs):
+        if "return properties(n) AS props" in query:
+            return FakeCursor([{"props": {"CMName": "Deleted", "CMID": "SD2183"}}])
+        if "MATCH (n {CMID: $cmid}) RETURN labels(n) AS labels" in query:
+            return FakeCursor([{"labels": ["DELETED"]}])
+        return super().run(query, **kwargs)
+
+
+class FakeDeletedNodePropertiesDriver:
+    def session(self):
+        return FakeDeletedNodePropertiesSession()
+
+
 def test_admin_nodeproperties_returns_filtered_fields(client, monkeypatch):
     monkeypatch.setattr(admin_routes, "getDriver", lambda database: FakeDriver())
 
@@ -95,6 +111,19 @@ def test_admin_nodeproperties_returns_filtered_fields(client, monkeypatch):
     assert payload["error"] == ""
     assert payload["r"] == {"Key": "ATH", "Name": "Athens"}
     assert "label" in payload["r1"]
+
+
+def test_admin_nodeproperties_rejects_deleted_node(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: FakeDeletedNodePropertiesDriver())
+
+    response = client.get(
+        "/admin_add_edit_delete_nodeproperties",
+        query_string={"CMID": "SD2183", "database": "SocioMap", "option": "add"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert "deleted node" in payload["error"]
 
 
 def test_admin_usesproperties_returns_records_and_allowed_props(client, monkeypatch):

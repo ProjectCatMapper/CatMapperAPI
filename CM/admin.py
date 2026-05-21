@@ -39,6 +39,30 @@ def _split_admin_multi_value(value):
         values = _ADMIN_MULTI_VALUE_SEPARATOR.split(str(value))
     return [str(val).strip() for val in values if str(val).strip()]
 
+
+def _editable_node_label(cmid, driver):
+    query = """
+    MATCH (n {CMID: $cmid})
+    RETURN labels(n) AS labels
+    """
+    rows = getQuery(query=query, driver=driver, params={"cmid": cmid}, type="dict")
+    if not rows:
+        raise ValueError(f"{cmid} is invalid")
+
+    labels = set(rows[0].get("labels") or [])
+    if "DELETED" in labels:
+        raise ValueError(f"{cmid} is a deleted node and cannot be edited.")
+    if "DATASET" in labels:
+        return "DATASET"
+    if "CATEGORY" in labels:
+        return "CATEGORY"
+    if "PROPERTY" in labels:
+        return "PROPERTY"
+    if "LABEL" in labels:
+        return "LABEL"
+
+    raise ValueError(f"{cmid} has no editable node label.")
+
 #Function used by deleteNode to get elementId for either a single or list of CMIDs
 #deletenode only needs to operate on a string
 def getID(id_value, property, driver):
@@ -665,15 +689,7 @@ def add_edit_delete_Node(database,user,input):
     if not changeNodeID or not addOrEditNode:
         return "CMID is empty or choice of add/edit/delete is empty"
     
-    # label = CMgetLabel(CMID=changeNodeID, con=con)[0]
-    if changeNodeID[1] == "D":
-        label = "DATASET"
-    elif changeNodeID[1] == "M":
-        label = "CATEGORY"
-    elif changeNodeID[1] == "P":
-        label = "PROPERTY"
-    elif changeNodeID[1] == "L":
-        label = "LABEL"
+    label = _editable_node_label(changeNodeID, driver)
 
     # Get prior value
     priorValQuery = f"""

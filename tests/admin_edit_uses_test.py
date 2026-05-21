@@ -332,6 +332,8 @@ def test_add_edit_delete_node_dataset_parent_normalizes_multi_parent_values(monk
     monkeypatch.setattr(admin, "processDATASETs", lambda database, CMID, user: captured.setdefault("processed", CMID))
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "RETURN labels(n) AS labels" in query:
+            return [{"labels": ["DATASET", "STACK"]}]
         if "RETURN a.parent AS val" in query:
             return [[]]
         if "SET a.parent = $id" in query:
@@ -346,3 +348,25 @@ def test_add_edit_delete_node_dataset_parent_normalizes_multi_parent_values(monk
     assert result == "updated successfully"
     assert captured["params"] == {"id": ["SD2182", "SD2181"]}
     assert captured["processed"] == "SD2183"
+
+
+def test_add_edit_delete_node_rejects_deleted_node(monkeypatch):
+    payload = {
+        "s1_1": "add",
+        "s1_2": "SD2183",
+        "s1_3": "SD2182 || SD2181",
+        "s1_7": "parent",
+    }
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "RETURN labels(n) AS labels" in query:
+            return [{"labels": ["DELETED"]}]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin, "getQuery", fake_get_query)
+
+    with pytest.raises(ValueError, match="deleted node"):
+        admin.add_edit_delete_Node("sociomap", "tester", payload)

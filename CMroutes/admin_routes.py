@@ -503,6 +503,14 @@ def admin_nodeproperties():
 
         if r == []:
             return jsonify({"error": "Invalid CMID"})
+        node_rows = session.run(
+            "MATCH (n {CMID: $cmid}) RETURN labels(n) AS labels",
+            cmid=CMID,
+        ).data()
+        labels = set(node_rows[0].get("labels") or []) if node_rows else set()
+        if "DELETED" in labels:
+            return jsonify({"error": f"{CMID} is a deleted node and cannot be edited."})
+
         props = [k for k in r[0]['props'].keys()] if r else []
 
         # Run q1 to get allowed properties
