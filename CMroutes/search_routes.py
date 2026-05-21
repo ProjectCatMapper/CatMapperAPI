@@ -4,6 +4,8 @@ import os
 import re
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from datetime import datetime, timezone
 
@@ -19,6 +21,10 @@ _NLP_PARSE_LOG_WRITE_LOCK = threading.Lock()
 _DEFAULT_NLP_PARSE_LOG_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "log", "nlp_parse_requests")
 )
+_DEFAULT_OLLAMA_URL = "http://qwen3:11434"
+_DEFAULT_OLLAMA_MODEL = "qwen3-nl2api:q4km"
+_MAX_NLP_PROMPT_CHARS = 8000
+_SAFE_OLLAMA_MODEL_RE = re.compile(r"^[A-Za-z0-9_.:/-]{1,120}$")
 
 
 def _utc_now_iso():
@@ -53,6 +59,27 @@ def _safe_log_database_name(raw_database):
     if re.fullmatch(r"[a-z0-9_-]{1,40}", value):
         return value
     return "unknown"
+
+
+def _ollama_base_url():
+    raw_url = (
+        os.getenv("CATMAPPER_OLLAMA_URL")
+        or os.getenv("OLLAMA_URL")
+        or _DEFAULT_OLLAMA_URL
+    )
+    return str(raw_url or _DEFAULT_OLLAMA_URL).strip().rstrip("/")
+
+
+def _ollama_model(raw_model=None):
+    candidate = str(
+        raw_model
+        or os.getenv("CATMAPPER_OLLAMA_MODEL")
+        or os.getenv("OLLAMA_MODEL")
+        or _DEFAULT_OLLAMA_MODEL
+    ).strip()
+    if not _SAFE_OLLAMA_MODEL_RE.fullmatch(candidate):
+        return _DEFAULT_OLLAMA_MODEL
+    return candidate
 
 
 def _parse_contexts_query_args(req):
@@ -513,6 +540,80 @@ def cancel_translate_task():
             message="Cancel requested. Waiting for current batch to finish.",
         )
         return jsonify(_translate_task_response(updated))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@search_bp.route('/api/nlp/parse', methods=['POST'])
+@search_bp.route('/nlp/parse', methods=['POST'])
+def parse_nlp_with_qwen():
+    """Proxy NLP prompt parsing to the server-side Ollama/Qwen service."""
+    try:
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return jsonify({"error": "JSON object payload is required."}), 400
+
+        prompt = str(payload.get("prompt") or "")[:_MAX_NLP_PROMPT_CHARS].strip()
+        if not prompt:
+            return jsonify({"error": "prompt is required."}), 400
+
+        model = _ollama_model(payload.get("model"))
+        timeout_raw = payload.get("timeoutSeconds") or os.getenv("CATMAPPER_OLLAMA_TIMEOUT_SECONDS", "12")
+        try:
+            timeout_seconds = max(1, min(60, int(timeout_raw)))
+        except (TypeError, ValueError):
+            timeout_seconds = 12
+
+        request_body = json.dumps({
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0
+            }
+        }).encode("utf-8")
+
+        ollama_request = urllib.request.Request(
+            f"{_ollama_base_url()}/api/generate",
+            data=request_body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(ollama_request, timeout=timeout_seconds) as response:
+                response_body = response.read().decode("utf-8")
+        except TimeoutError:
+            return jsonify({"error": "Qwen request timed out.", "model": model}), 504
+        except urllib.error.HTTPError as err:
+            error_body = err.read().decode("utf-8", errors="replace")
+            return jsonify({
+                "error": f"Qwen endpoint returned {err.code}.",
+                "model": model,
+                "details": error_body[:1000]
+            }), 502
+        except urllib.error.URLError as err:
+            return jsonify({
+                "error": "Qwen endpoint is unavailable.",
+                "model": model,
+                "details": str(err.reason)
+            }), 502
+
+        try:
+            ollama_payload = json.loads(response_body)
+        except json.JSONDecodeError:
+            return jsonify({
+                "error": "Qwen endpoint returned invalid JSON.",
+                "model": model,
+                "raw": response_body[:1000]
+            }), 502
+
+        return jsonify({
+            "status": "ok",
+            "model": model,
+            "response": ollama_payload.get("response", ""),
+            "done": ollama_payload.get("done", False),
+        }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
