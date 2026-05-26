@@ -665,12 +665,25 @@ def moveCATEGORYMERGINGties(database, user, input):
 def add_edit_delete_Node(database,user,input):
     changeNodeID = input.get('s1_2')
     changeNodeProperty = input.get('s1_7')
-    changeNodeValue = input.get('s1_3').strip()
+    changeNodeValue = (input.get('s1_3') or "").strip()
     addOrEditNode = input.get('s1_1')
 
     driver = getDriver(database)
 
+    metaTypes = getPropertiesMetadata(driver)
+    property_meta_types = [
+        item.get("metaType")
+        for item in metaTypes
+        if item.get("type") == "node" and item.get("property") == changeNodeProperty
+    ]
+    is_list_meta = any(
+        isinstance(meta_type, str) and "list" in meta_type.lower()
+        for meta_type in property_meta_types
+    )
     list_value = None
+
+    if is_list_meta:
+        list_value = _split_admin_multi_value(changeNodeValue)
 
     if changeNodeProperty == "parent":
         list_value = _split_admin_multi_value(changeNodeValue)
@@ -739,7 +752,7 @@ def add_edit_delete_Node(database,user,input):
                 SET a.{changeNodeProperty} = $id
             """
             #CMCypherQuery(con=con, query=q, parameters={'id': changeNodeValue})
-            getQuery(q,driver=driver,params={"id":changeNodeValue})
+            getQuery(q,driver=driver,params={"id": list_value if is_list_meta else changeNodeValue})
 
             if changeNodeProperty == "CMName":
                 try:

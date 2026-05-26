@@ -328,6 +328,9 @@ def test_add_edit_delete_node_dataset_parent_normalizes_multi_parent_values(monk
     }
 
     monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [
+        {"type": "node", "property": "parent", "metaType": "list"},
+    ])
     monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
     monkeypatch.setattr(admin, "processDATASETs", lambda database, CMID, user: captured.setdefault("processed", CMID))
 
@@ -350,6 +353,39 @@ def test_add_edit_delete_node_dataset_parent_normalizes_multi_parent_values(monk
     assert captured["processed"] == "SD2183"
 
 
+def test_add_edit_delete_node_list_metadata_splits_pipe_delimited_values(monkeypatch):
+    captured = {}
+    payload = {
+        "s1_1": "edit",
+        "s1_2": "SD767",
+        "s1_3": "SM461549 || SM461550 || SM461551",
+        "s1_7": "foci",
+    }
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [
+        {"type": "node", "property": "foci", "metaType": "list"},
+    ])
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "RETURN labels(n) AS labels" in query:
+            return [{"labels": ["DATASET"]}]
+        if "RETURN a.foci AS val" in query:
+            return [["SM461549", "SM461550"]]
+        if "SET a.foci = $id" in query:
+            captured["params"] = params
+            return []
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin, "getQuery", fake_get_query)
+    monkeypatch.setattr(admin, "processDATASETs", lambda database, CMID, user: captured.setdefault("processed", CMID))
+
+    result = admin.add_edit_delete_Node("sociomap", "tester", payload)
+
+    assert result == "updated successfully"
+    assert captured["params"] == {"id": ["SM461549", "SM461550", "SM461551"]}
+
+
 def test_add_edit_delete_node_rejects_deleted_node(monkeypatch):
     payload = {
         "s1_1": "add",
@@ -359,6 +395,9 @@ def test_add_edit_delete_node_rejects_deleted_node(monkeypatch):
     }
 
     monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [
+        {"type": "node", "property": "parent", "metaType": "list"},
+    ])
     monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
