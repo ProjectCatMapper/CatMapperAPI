@@ -7,7 +7,7 @@ import math
 from datetime import datetime, timezone
 
 from CM import unlist
-from CM.keys import invalid_key_row_numbers
+from CM.keys import invalid_key_format_error, key_format_warning_messages
 from .auth_utils import verify_request_auth, classify_auth_error_status
 from .task_store import get_task_store, DEFAULT_UPLOAD_BATCH_SIZE
 from .task_queue import enqueue_upload_task, is_rq_enabled
@@ -114,7 +114,7 @@ def _validate_simple_key_values(df, key_column):
         if col not in df.columns:
             raise Exception(f"Simple upload requires key column '{col}' in payload rows.")
         key_series = df[col].fillna("").astype(str)
-        bad_rows = key_series[key_series.str.contains(r"==", regex=True)].index.tolist()
+        bad_rows = key_series[key_series.str.contains(r"\s==\s", regex=True)].index.tolist()
         if bad_rows:
             bad_rows = [i + 1 for i in bad_rows]
             raise Exception(
@@ -173,15 +173,13 @@ def _compose_simple_key(df, key_columns):
         )
 
 
-def _raise_invalid_key_rows(df, column="Key"):
+def _validate_key_rows(df, column="Key"):
     if column not in df.columns:
         raise Exception(f"{column} column is required for this upload.")
-    invalid_rows = invalid_key_row_numbers(df[column])
-    if invalid_rows:
-        raise ValueError(
-            f"Invalid '{column}' format in rows:\n{invalid_rows}. "
-            "Must be of form VARIABLE == VALUE"
-        )
+    invalid_key_error = invalid_key_format_error(df[column], column)
+    if invalid_key_error:
+        raise ValueError(invalid_key_error)
+    return key_format_warning_messages(df[column], column)
 
 
 def _standard_upload_is_dataset(df):
@@ -202,14 +200,16 @@ def _standard_upload_is_dataset(df):
 
 def _prevalidate_standard_keys(df, upload_option, merging_type):
     dataset = pd.DataFrame(df)
+    warnings = []
     if (
         upload_option == "add_uses"
         or (upload_option == "add_node" and not _standard_upload_is_dataset(dataset))
         or merging_type == "merging_ties_to_categories"
     ):
-        _raise_invalid_key_rows(dataset, "Key")
+        warnings.extend(_validate_key_rows(dataset, "Key"))
     if upload_option == "update_replace" and "NewKey" in dataset.columns:
-        _raise_invalid_key_rows(dataset, "NewKey")
+        warnings.extend(_validate_key_rows(dataset, "NewKey"))
+    return warnings
 
 
 def _prepare_upload_job(data, acting_user):
@@ -249,7 +249,7 @@ def _prepare_upload_job(data, acting_user):
         raise Exception("`so` must be either 'standard' or 'simple'.")
 
     if so == "standard":
-        _prevalidate_standard_keys(df, upload_option, mergingType)
+        warnings.extend(_prevalidate_standard_keys(df, upload_option, mergingType))
         dataset_payload = df
         total_rows = len(pd.DataFrame(df))
         job_args = {
@@ -303,7 +303,7 @@ def _prepare_upload_job(data, acting_user):
 
     _validate_simple_key_values(df, key_columns)
     _compose_simple_key(df, key_columns)
-    _raise_invalid_key_rows(df, "Key")
+    warnings.extend(_validate_key_rows(df, "Key"))
     df.rename(columns={CMName: "CMName", CMID: "CMID", Name: "Name"}, inplace=True)
     dataset_payload = df.to_dict(orient='records')
 

@@ -2,7 +2,14 @@ import pandas as pd
 import pytest
 
 import CM.upload as upload
-from CM.keys import invalid_key_row_numbers, is_valid_key_format
+from CM.keys import (
+    invalid_key_format_error,
+    invalid_key_row_details,
+    invalid_key_row_numbers,
+    is_valid_key_format,
+    key_format_warning_messages,
+    key_format_warnings,
+)
 
 
 @pytest.mark.parametrize(
@@ -26,19 +33,72 @@ def test_key_format_validator_accepts_standard_keys(key):
         " == Adamana Brown",
         "Type == Alpha &&",
         "Type == Alpha && Period",
-        "Type == Alpha == Beta",
-        "Type == Alpha && Period == Early == Late",
-        "Type == Alpha&&Period == Early",
     ],
 )
 def test_key_format_validator_rejects_malformed_keys(key):
     assert is_valid_key_format(key) is False
 
 
+@pytest.mark.parametrize(
+    "key",
+    [
+        "Type == Alpha == Beta",
+        "Type == Alpha&&Period == Early",
+        "Type&&Subtype == Alpha",
+        "Type == 1==2",
+        "Type == Alpha&&",
+        "&&Type == Alpha",
+    ],
+)
+def test_key_format_validator_allows_reserved_tokens_inside_key_parts(key):
+    assert is_valid_key_format(key) is True
+
+
 def test_invalid_key_row_numbers_are_one_based():
-    rows = ["Type == Alpha", "Type == Alpha &&", "Type == Beta == Gamma"]
+    rows = ["Type == Alpha", "Type == Alpha &&", "Type==Beta"]
 
     assert invalid_key_row_numbers(rows) == [2, 3]
+
+
+@pytest.mark.parametrize(
+    "key, expected_message",
+    [
+        ("Type == Alpha&&Period == Early", 'Does the original variable value contain "&&"?'),
+        ("Type == Alpha == Beta", 'Does the original variable value contain "=="?'),
+        ("Type&&Subtype == Alpha", 'Does the original variable name contain "&&"?'),
+        ("Type == 1==2", 'Does the original variable value contain "=="?'),
+        ("Type == Alpha&&", 'Does the original variable value contain "&&"?'),
+        ("&&Type == Alpha", 'Does the original variable name contain "&&"?'),
+    ],
+)
+def test_key_format_warnings_preserve_reserved_token_prompt(key, expected_message):
+    assert any(expected_message in warning for warning in key_format_warnings(key))
+
+
+def test_invalid_key_row_details_include_row_specific_messages():
+    rows = ["Type == Alpha", "Type==Alpha", "Type == "]
+
+    details = invalid_key_row_details(rows)
+
+    assert [detail["row"] for detail in details] == [2, 3]
+    assert 'Found "==" without spaces around it' in details[0]["message"]
+    assert 'Key value must not be empty after " == "' in details[1]["message"]
+
+
+def test_invalid_key_format_error_includes_guidance_and_row_messages():
+    message = invalid_key_format_error(["Type==Alpha"], "Key")
+
+    assert "Invalid 'Key' format in rows:\n[1]." in message
+    assert 'Use spaces around delimiters: variable == value.' in message
+    assert 'Row 1: Found "==" without spaces around it' in message
+
+
+def test_key_format_warning_messages_include_rows_and_columns():
+    messages = key_format_warning_messages(["Type == 1==2"], "Key")
+
+    assert len(messages) == 1
+    assert messages[0].startswith("Key row 1:")
+    assert 'Does the original variable value contain "=="?' in messages[0]
 
 
 def test_collect_unique_column_values_for_multi_value_column():

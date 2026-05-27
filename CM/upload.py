@@ -2123,18 +2123,22 @@ def input_Nodes_Uses(
         dataset = createKey(dataset, "Key").copy()
 
     # When uploading keys or new keys, make sure they follow the standard convention.
+    key_warnings = []
     if (uploadOption == "add_node" and not isDataset) or uploadOption == "add_uses" or mergingType == "merging_ties_to_categories" :
-        invalid_rows = invalid_key_row_numbers(dataset["Key"])
-
-        if invalid_rows:
-            raise ValueError(f"Invalid 'Key' format in rows:\n{invalid_rows}. Must be of form VARIABLE == VALUE")
+        invalid_key_error = invalid_key_format_error(dataset["Key"], "Key")
+        if invalid_key_error:
+            raise ValueError(invalid_key_error)
+        key_warnings.extend(key_format_warning_messages(dataset["Key"], "Key"))
           
     if uploadOption == "update_replace":
         if "NewKey" in dataset.columns:
-            invalid_rows = invalid_key_row_numbers(dataset["NewKey"])
+            invalid_key_error = invalid_key_format_error(dataset["NewKey"], "NewKey")
+            if invalid_key_error:
+                raise ValueError(invalid_key_error)
+            key_warnings.extend(key_format_warning_messages(dataset["NewKey"], "NewKey"))
 
-            if invalid_rows:
-                raise ValueError(f"Invalid 'NewKey' format in rows:\n{invalid_rows}. Must be of form VARIABLE == VALUE")
+    for key_warning in key_warnings:
+        updateLog(f"log/{user}uploadProgress.txt", f"Warning: {key_warning}", write="a")
 
     # Treat whitespace-only values as missing for key identifier/name columns.
     # This prevents creating nodes with blank CMName when CMID is missing.

@@ -258,6 +258,30 @@ def test_upload_rejects_preformatted_keys_in_simple_mode(client, monkeypatch):
     assert "simple upload expects raw key values" in str(body.get("error", "")).lower()
 
 
+def test_upload_simple_allows_raw_key_value_with_unspaced_equals_warning(client, monkeypatch):
+    seen = {}
+
+    def fake_start_upload_task(**kwargs):
+        seen.update(kwargs)
+        return "upload-task-123"
+
+    monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
+    monkeypatch.setattr(upload_routes, "_start_upload_task", fake_start_upload_task)
+
+    payload = _base_payload()
+    payload["df"] = [{"source_name": "Alpha", "source_key": "1==2"}]
+
+    response = client.post("/uploadInputNodes", json=payload)
+
+    assert response.status_code == 202
+    body = response.get_json() or {}
+    assert seen["job_args"]["dataset"][0]["Key"] == "source_key == 1==2"
+    assert any(
+        'Does the original variable value contain "=="?' in warning
+        for warning in body.get("warnings", [])
+    )
+
+
 def test_upload_simple_rejects_malformed_composed_key_before_queueing(client, monkeypatch):
     monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
     monkeypatch.setattr(
@@ -372,13 +396,15 @@ def test_upload_standard_rejects_malformed_key_before_queueing(client, monkeypat
     assert "invalid 'key' format" in str(body.get("error", "")).lower()
 
 
-def test_upload_standard_rejects_malformed_newkey_before_queueing(client, monkeypatch):
+def test_upload_standard_warns_when_newkey_value_contains_reserved_token(client, monkeypatch):
+    seen = {}
+
+    def fake_start_upload_task(**kwargs):
+        seen.update(kwargs)
+        return "upload-task-123"
+
     monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
-    monkeypatch.setattr(
-        upload_routes,
-        "_start_upload_task",
-        lambda **kwargs: (_ for _ in ()).throw(AssertionError("upload should not execute")),
-    )
+    monkeypatch.setattr(upload_routes, "_start_upload_task", fake_start_upload_task)
 
     payload = _base_payload()
     payload["so"] = "standard"
@@ -400,9 +426,13 @@ def test_upload_standard_rejects_malformed_newkey_before_queueing(client, monkey
 
     response = client.post("/uploadInputNodes", json=payload)
 
-    assert response.status_code == 500
+    assert response.status_code == 202
     body = response.get_json() or {}
-    assert "invalid 'newkey' format" in str(body.get("error", "")).lower()
+    assert seen["job_args"]["dataset"][0]["NewKey"] == "Type == Alpha == Beta"
+    assert any(
+        'Does the original variable value contain "=="?' in warning
+        for warning in body.get("warnings", [])
+    )
 
 
 def test_upload_standard_add_node_dataset_does_not_require_key(client, monkeypatch):
