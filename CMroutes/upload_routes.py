@@ -97,10 +97,6 @@ def _resolve_optional_properties(data):
         return optional_properties, warnings
 
     all_context = _coerce_property_list(data.get("allContext"))
-    if all_context and "allContext" in data and "optionalProperties" not in data:
-        warnings.append(
-            "`allContext` is deprecated for upload property selection; use `optionalProperties`."
-        )
     return all_context, warnings
 
 

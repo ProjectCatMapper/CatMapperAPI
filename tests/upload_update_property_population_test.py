@@ -135,3 +135,71 @@ def test_update_property_uses_relid_does_not_write_locator_fields(monkeypatch):
     assert isinstance(result, dict)
     assert "r.CMID" not in captured["update_query"]
     assert "r.datasetID" not in captured["update_query"]
+
+
+def test_update_property_population_estimate_update_is_null_safe(monkeypatch):
+    captured = {"update_query": ""}
+
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+    monkeypatch.setattr(
+        upload,
+        "getPropertiesMetadata",
+        lambda driver: [
+            {"type": "relationship", "property": "populationEstimate", "metaType": "float"},
+        ],
+    )
+    monkeypatch.setattr(upload, "createLog", lambda **kwargs: None)
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "oldVals" in query:
+            return [
+                {
+                    "relID": "rel-1",
+                    "CMID": "SM1",
+                    "Key": "K1",
+                    "datasetID": "SD1",
+                    "oldVals": {"populationEstimate": None},
+                }
+            ]
+        if "SET r.status = 'update'" in query:
+            captured["update_query"] = query
+            return [
+                {
+                    "nodeID": "node-1",
+                    "relID": "rel-1",
+                    "CMID": "SM1",
+                    "Key": "K1",
+                    "datasetID": "SD1",
+                    "populationEstimate": "250",
+                }
+            ]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    df = pd.DataFrame(
+        [
+            {
+                "CMID": "SM1",
+                "datasetID": "SD1",
+                "Key": "K1",
+                "relID": "rel-1",
+                "populationEstimate": 250,
+            }
+        ]
+    )
+
+    result = upload.updateProperty(
+        df=df,
+        optionalProperties=["populationEstimate"],
+        isDataset=False,
+        database="sociomap",
+        user="tester",
+        updateType="update",
+        propertyType="USES",
+    )
+
+    assert isinstance(result, dict)
+    assert "CASE WHEN r.populationEstimate IS NULL THEN []" in captured["update_query"]
+    assert "CASE WHEN row.populationEstimate IS NULL THEN []" in captured["update_query"]
+    assert "apoc.coll.flatten([[v IN apoc.coll.flatten" not in captured["update_query"]

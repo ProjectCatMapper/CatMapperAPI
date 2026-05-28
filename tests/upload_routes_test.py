@@ -322,7 +322,7 @@ def test_upload_prefers_optional_properties_over_all_context(client, monkeypatch
     assert "warnings" not in body
 
 
-def test_upload_returns_deprecation_warning_for_all_context_only(client, monkeypatch):
+def test_upload_accepts_all_context_without_user_facing_deprecation_warning(client, monkeypatch):
     seen = {}
 
     def fake_start_upload_task(**kwargs):
@@ -340,8 +340,7 @@ def test_upload_returns_deprecation_warning_for_all_context_only(client, monkeyp
     assert response.status_code == 202
     assert seen["job_args"]["optionalProperties"] == ["legacy_prop"]
     body = response.get_json() or {}
-    warnings = body.get("warnings") or []
-    assert any("deprecated" in str(w).lower() for w in warnings)
+    assert "warnings" not in body
 
 
 def test_upload_passes_ignore_if_same_to_job_args(client, monkeypatch):

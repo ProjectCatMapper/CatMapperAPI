@@ -560,12 +560,14 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
             if var == "populationEstimate":
                 # custom.formatProperties expects string-compatible tokens.
                 new_tokens = (
-                    f"[v IN apoc.coll.flatten([row.{var}], true) "
-                    f"WHERE v IS NOT NULL | toString(v)]"
+                    f"CASE WHEN row.{var} IS NULL THEN [] "
+                    f"ELSE [v IN apoc.coll.flatten([row.{var}], true) "
+                    f"WHERE v IS NOT NULL | toString(v)] END"
                 )
                 existing_tokens = (
-                    f"[v IN apoc.coll.flatten([{node_or_tie}.{var}], true) "
-                    f"WHERE v IS NOT NULL | toString(v)]"
+                    f"CASE WHEN {node_or_tie}.{var} IS NULL THEN [] "
+                    f"ELSE [v IN apoc.coll.flatten([{node_or_tie}.{var}], true) "
+                    f"WHERE v IS NOT NULL | toString(v)] END"
                 )
                 if updateType == "overwrite" and var != "log":
                     props.append(
@@ -573,7 +575,7 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
                     )
                 else:
                     props.append(
-                        f"{node_or_tie}.{var} = custom.formatProperties(apoc.coll.flatten([{existing_tokens},{new_tokens}], true),'{metaType}','{sep}')[0].prop"
+                        f"{node_or_tie}.{var} = custom.formatProperties(({existing_tokens} + {new_tokens}),'{metaType}','{sep}')[0].prop"
                     )
             elif updateType == "overwrite" and var != "log":
                 props.append(
