@@ -17,6 +17,7 @@ from .log import createLog
 from .USES import processUSES
 from .USES import addCMNameRel, processDATASETs
 from .upload import updateProperty
+from .keys import invalid_key_format_error
 from flask import jsonify
 from collections import Counter
 
@@ -429,6 +430,10 @@ def add_edit_delete_USES(database,user,input):
     
     if addOrEditNode == "edit" or addOrEditNode == "add":
         if USES_property == "Key":
+            invalid_key_error = invalid_key_format_error([new_property_value], "Key")
+            if invalid_key_error:
+                raise ValueError(invalid_key_error)
+
             data = {
                 'CMID': CMID,
                 'Key': key,

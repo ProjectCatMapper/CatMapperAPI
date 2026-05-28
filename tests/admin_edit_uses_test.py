@@ -123,6 +123,83 @@ def test_add_edit_delete_uses_handles_list_population_meta_type(monkeypatch):
     assert row["populationEstimate"] == ["792"]
 
 
+def test_add_edit_delete_uses_rejects_invalid_key_format(monkeypatch):
+    payload = _base_input()
+    payload["s1_3"] = "EC = 16981"
+    payload["s1_8"] = "Key"
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [])
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
+            return [{"groupLabel": None}]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin, "getQuery", fake_get_query)
+    monkeypatch.setattr(
+        admin,
+        "updateProperty",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("updateProperty should not be called")),
+    )
+
+    with pytest.raises(ValueError, match="Each Key pair must include"):
+        admin.add_edit_delete_USES("sociomap", "tester", payload)
+
+
+def test_add_edit_delete_uses_accepts_valid_key_format(monkeypatch):
+    captured = {}
+    payload = _base_input()
+    payload["s1_3"] = "EC == 16981"
+    payload["s1_8"] = "Key"
+
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def run(self, query, **kwargs):
+            captured["duplicate_rows"] = kwargs.get("rows")
+            class FakeResult:
+                @staticmethod
+                def data():
+                    return []
+
+            return FakeResult()
+
+    class FakeDriver:
+        def session(self):
+            return FakeSession()
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: FakeDriver())
+    monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [])
+    monkeypatch.setattr(admin, "processUSES", lambda **kwargs: None)
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
+            return [{"groupLabel": None}]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin, "getQuery", fake_get_query)
+
+    def fake_update_property(df, optionalProperties, isDataset, database, user, updateType, propertyType="USES", sep="||||"):
+        captured["df"] = df.copy()
+        captured["optionalProperties"] = list(optionalProperties)
+        return {"result": [{"relID": "rel-123"}], "df": df.to_dict(orient="records")}
+
+    monkeypatch.setattr(admin, "updateProperty", fake_update_property)
+
+    result = admin.add_edit_delete_USES("sociomap", "tester", payload)
+
+    assert result == "done"
+    assert captured["optionalProperties"] == ["NewKey"]
+    row = captured["df"].to_dict(orient="records")[0]
+    assert row["NewKey"] == "EC == 16981"
+    assert captured["duplicate_rows"]["NewKey"] == "EC == 16981"
+
+
 def test_add_edit_delete_uses_delete_logs_multiple_rel_ids(monkeypatch):
     captured = {}
 
