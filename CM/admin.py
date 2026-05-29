@@ -29,6 +29,8 @@ import re
 #section for general use helper functions
 
 _ADMIN_MULTI_VALUE_SEPARATOR = re.compile(r"\s*(?:\|{2,}|,|;)\s*")
+_USES_SELF_CONTEXT_PROPERTY_EXCEPTIONS = {"DISTRICT"}
+_USES_SELF_CONTEXT_RELATIONSHIP_EXCEPTIONS = {"DISTRICT_OF"}
 
 
 def _split_admin_multi_value(value):
@@ -39,6 +41,39 @@ def _split_admin_multi_value(value):
     else:
         values = _ADMIN_MULTI_VALUE_SEPARATOR.split(str(value))
     return [str(val).strip() for val in values if str(val).strip()]
+
+
+def _normalize_contextual_tie_token(value):
+    return re.sub(r"[^A-Z0-9]+", "_", str(value or "").strip().upper()).strip("_")
+
+
+def _is_uses_self_context_exception(uses_property, relationship):
+    return (
+        _normalize_contextual_tie_token(uses_property) in _USES_SELF_CONTEXT_PROPERTY_EXCEPTIONS
+        or _normalize_contextual_tie_token(relationship) in _USES_SELF_CONTEXT_RELATIONSHIP_EXCEPTIONS
+    )
+
+
+def _group_label_from_context_relationship(relationship):
+    relationship_token = _normalize_contextual_tie_token(relationship)
+    if relationship_token.endswith("_OF"):
+        return relationship_token[:-3]
+    return None
+
+
+def validate_uses_contextual_property(CMID, uses_property, property_group_label, relationship, driver):
+    if not property_group_label:
+        return
+    if _is_uses_self_context_exception(uses_property, relationship):
+        return
+
+    category_group_label = getGroupLabels(CMID, driver)
+    if _normalize_contextual_tie_token(category_group_label) == _normalize_contextual_tie_token(property_group_label):
+        raise ValueError(
+            f"Cannot add {uses_property} to USES tie for {CMID}: both the USES category "
+            f"and the {uses_property} property target are {category_group_label}. "
+            "Same-domain contextual USES properties are not allowed except district/DISTRICT_OF."
+        )
 
 
 def _editable_node_label(cmid, driver):
@@ -396,11 +431,14 @@ def add_edit_delete_USES(database,user,input):
                     UNWIND $prop as prop
                     MATCH (n:PROPERTY)
                     WHERE n.CMName = prop
-                    RETURN n.groupLabel as groupLabel
+                    RETURN n.groupLabel as groupLabel, n.relationship as relationship
                     """
-            groupLabel = getQuery(query=query, params={"prop": USES_property}, driver=driver)
-            groupLabel = groupLabel[0].get('groupLabel') if groupLabel else None
+            property_metadata = getQuery(query=query, params={"prop": USES_property}, driver=driver)
+            property_metadata = property_metadata[0] if property_metadata else {}
+            relationship = property_metadata.get('relationship')
+            groupLabel = property_metadata.get('groupLabel') or _group_label_from_context_relationship(relationship)
             if groupLabel:
+                validate_uses_contextual_property(CMID, USES_property, groupLabel, relationship, driver)
                 validatePropertyCMID(new_property_value,USES_property,groupLabel,driver)
         
         if USES_property in integer_constrained_properties:

@@ -395,6 +395,85 @@ def test_add_edit_delete_uses_parent_sends_multi_parent_list(monkeypatch):
     assert row["parent"] == ["SD2182", "SD2181"]
 
 
+def test_add_edit_delete_uses_rejects_same_domain_contextual_property(monkeypatch):
+    payload = _base_input()
+    payload["s1_2"] = "SM-LANG"
+    payload["s1_3"] = "SM-OTHER-LANG"
+    payload["s1_8"] = "language"
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [])
+    monkeypatch.setattr(admin, "getGroupLabels", lambda cmid, driver: "LANGUOID")
+    monkeypatch.setattr(
+        admin,
+        "validatePropertyCMID",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("CMID validation should not run after same-domain rejection")),
+    )
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
+            return [{"groupLabel": None, "relationship": "LANGUOID_OF"}]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin, "getQuery", fake_get_query)
+    monkeypatch.setattr(
+        admin,
+        "updateProperty",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("updateProperty should not be called")),
+    )
+
+    with pytest.raises(ValueError, match="Cannot add language"):
+        admin.add_edit_delete_USES("sociomap", "tester", payload)
+
+
+def test_add_edit_delete_uses_allows_district_same_domain_exception(monkeypatch):
+    captured = {}
+    payload = _base_input()
+    payload["s1_2"] = "SM-AREA"
+    payload["s1_3"] = "SM-OTHER-AREA"
+    payload["s1_8"] = "district"
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [])
+    monkeypatch.setattr(admin, "getGroupLabels", lambda cmid, driver: "AREA")
+    monkeypatch.setattr(admin, "processUSES", lambda **kwargs: None)
+
+    def fake_validate_property_cmid(value, proptoChange, validgroupLabel, driver):
+        captured["validated"] = {
+            "value": value,
+            "property": proptoChange,
+            "groupLabel": validgroupLabel,
+        }
+
+    monkeypatch.setattr(admin, "validatePropertyCMID", fake_validate_property_cmid)
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
+            return [{"groupLabel": None, "relationship": "AREA_OF"}]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin, "getQuery", fake_get_query)
+
+    def fake_update_property(df, optionalProperties, isDataset, database, user, updateType, propertyType="USES", sep="||||"):
+        captured["df"] = df.copy()
+        captured["optionalProperties"] = list(optionalProperties)
+        return {"result": [{"relID": "rel-123"}], "df": df.to_dict(orient="records")}
+
+    monkeypatch.setattr(admin, "updateProperty", fake_update_property)
+
+    result = admin.add_edit_delete_USES("sociomap", "tester", payload)
+
+    assert result == "done"
+    assert captured["validated"] == {
+        "value": "SM-OTHER-AREA",
+        "property": "district",
+        "groupLabel": "AREA",
+    }
+    assert captured["optionalProperties"] == ["district"]
+    row = captured["df"].to_dict(orient="records")[0]
+    assert row["district"] == "SM-OTHER-AREA"
+
+
 def test_add_edit_delete_node_dataset_parent_normalizes_multi_parent_values(monkeypatch):
     captured = {}
     payload = {
