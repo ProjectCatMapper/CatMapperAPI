@@ -542,7 +542,11 @@ def admin_usesproperties():
 
     q = "MATCH (n:CATEGORY)<-[r:USES]-(d:DATASET) WHERE n.CMID = $cmid RETURN {CMName: n.CMName, CMID: n.CMID,elementId: elementId(n)} AS n,r,d"
     
-    q1 = "MATCH (p:PROPERTY) WHERE p.type='relationship' RETURN p.CMName as property"
+    q1 = """
+    MATCH (p:PROPERTY)
+    WHERE p.type='relationship'
+    RETURN p.CMName as property, p.groupLabel as groupLabel, p.relationship as relationship
+    """
 
     with driver.session() as session:
         result = session.run(q, cmid=CMID)
@@ -591,7 +595,18 @@ def admin_usesproperties():
             })
         
         allowed = session.run(q1).data()
-        allowed_props = list({row['property'] for row in allowed})
+        allowed_props = sorted({
+            row['property']
+            for row in allowed
+            if row.get('property')
+            and uses_contextual_property_allowed_for_category(
+                CMID,
+                row.get('property'),
+                row.get('groupLabel'),
+                row.get('relationship'),
+                driver,
+            )
+        })
         
     return {
         "r": records_list,

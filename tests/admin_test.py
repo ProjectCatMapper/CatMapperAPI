@@ -98,6 +98,33 @@ class FakeDeletedNodePropertiesDriver:
         return FakeDeletedNodePropertiesSession()
 
 
+class FakeUsesPropertyFilterSession(FakeSession):
+    def run(self, query, **kwargs):
+        if "MATCH (n:CATEGORY)<-[r:USES]" in query:
+            return FakeCursor(
+                [
+                    {
+                        "n": {"CMName": "Language Category", "CMID": "SM-LANG", "elementId": "n-lang"},
+                        "r": FakeRelationship({"Key": "L"}, "rel-lang"),
+                        "d": {"CMName": "Dataset A", "CMID": "SD1"},
+                    }
+                ]
+            )
+        if "p.type='relationship'" in query:
+            return FakeCursor([
+                {"property": "language", "groupLabel": None, "relationship": "LANGUOID_OF"},
+                {"property": "polity", "groupLabel": None, "relationship": "POLITY_OF"},
+                {"property": "district", "groupLabel": None, "relationship": "DISTRICT_OF"},
+                {"property": "source", "groupLabel": None, "relationship": None},
+            ])
+        return super().run(query, **kwargs)
+
+
+class FakeUsesPropertyFilterDriver:
+    def session(self):
+        return FakeUsesPropertyFilterSession()
+
+
 def test_admin_nodeproperties_returns_filtered_fields(client, monkeypatch):
     monkeypatch.setattr(admin_routes, "getDriver", lambda database: FakeDriver())
 
@@ -139,6 +166,24 @@ def test_admin_usesproperties_returns_records_and_allowed_props(client, monkeypa
     assert payload["error"] == ""
     assert len(payload["r"]) == 1
     assert set(payload["r1"]) == {"Key", "year"}
+
+
+def test_admin_usesproperties_hides_same_domain_contextual_props_except_district(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: FakeUsesPropertyFilterDriver())
+    monkeypatch.setattr(admin_module, "getGroupLabels", lambda cmid, driver: "LANGUOID")
+
+    response = client.get(
+        "/admin_add_edit_delete_usesproperties",
+        query_string={"CMID": "SM-LANG", "database": "SocioMap"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["error"] == ""
+    assert "language" not in payload["r1"]
+    assert "district" in payload["r1"]
+    assert "polity" in payload["r1"]
+    assert "source" in payload["r1"]
 
 
 def test_admin_usesproperties_rejects_dataset_cmid(client, monkeypatch):

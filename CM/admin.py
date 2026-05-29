@@ -61,17 +61,33 @@ def _group_label_from_context_relationship(relationship):
     return None
 
 
-def validate_uses_contextual_property(CMID, uses_property, property_group_label, relationship, driver):
-    if not property_group_label:
+def _uses_contextual_property_target_group(property_group_label, relationship):
+    return property_group_label or _group_label_from_context_relationship(relationship)
+
+
+def _uses_contextual_same_domain(CMID, uses_property, property_group_label, relationship, driver):
+    target_group = _uses_contextual_property_target_group(property_group_label, relationship)
+    if not target_group:
         return
     if _is_uses_self_context_exception(uses_property, relationship):
         return
 
     category_group_label = getGroupLabels(CMID, driver)
-    if _normalize_contextual_tie_token(category_group_label) == _normalize_contextual_tie_token(property_group_label):
+    if _normalize_contextual_tie_token(category_group_label) == _normalize_contextual_tie_token(target_group):
+        return category_group_label, target_group
+
+
+def uses_contextual_property_allowed_for_category(CMID, uses_property, property_group_label, relationship, driver):
+    return _uses_contextual_same_domain(CMID, uses_property, property_group_label, relationship, driver) is None
+
+
+def validate_uses_contextual_property(CMID, uses_property, property_group_label, relationship, driver):
+    same_domain = _uses_contextual_same_domain(CMID, uses_property, property_group_label, relationship, driver)
+    if same_domain:
+        category_group_label, target_group = same_domain
         raise ValueError(
             f"Cannot add {uses_property} to USES tie for {CMID}: both the USES category "
-            f"and the {uses_property} property target are {category_group_label}. "
+            f"and the {uses_property} property target are {target_group or category_group_label}. "
             "Same-domain contextual USES properties are not allowed except district/DISTRICT_OF."
         )
 
@@ -436,7 +452,7 @@ def add_edit_delete_USES(database,user,input):
             property_metadata = getQuery(query=query, params={"prop": USES_property}, driver=driver)
             property_metadata = property_metadata[0] if property_metadata else {}
             relationship = property_metadata.get('relationship')
-            groupLabel = property_metadata.get('groupLabel') or _group_label_from_context_relationship(relationship)
+            groupLabel = _uses_contextual_property_target_group(property_metadata.get('groupLabel'), relationship)
             if groupLabel:
                 validate_uses_contextual_property(CMID, USES_property, groupLabel, relationship, driver)
                 validatePropertyCMID(new_property_value,USES_property,groupLabel,driver)
