@@ -585,6 +585,32 @@ def test_collect_cmid_metadata_targets_includes_child_cmids_for_parent_validatio
     assert set(targets) == {"SM251419", "SM251572"}
 
 
+def test_fetch_cmid_metadata_accepts_set_inputs(monkeypatch):
+    captured_chunks = []
+
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+
+    def fake_get_query(query, driver, params=None, **kwargs):
+        captured_chunks.append(params["cmids"])
+        return [
+            {
+                "cmid": "SM64",
+                "labels": ["CATEGORY", "AREA"],
+                "groupLabels": ["AREA"],
+            }
+        ]
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    metadata = upload._fetch_cmid_metadata(object(), {"SM64"})
+
+    assert captured_chunks == [["SM64"]]
+    assert metadata["SM64"] == {
+        "labels": {"CATEGORY", "AREA"},
+        "groupLabels": {"AREA"},
+    }
+
+
 def test_resolve_group_labels_falls_back_to_node_labels_when_mapping_missing():
     metadata_entry = {
         "labels": {"CATEGORY", "ETHNICITY"},

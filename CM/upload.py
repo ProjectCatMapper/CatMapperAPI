@@ -1050,6 +1050,7 @@ def _collect_cmid_metadata_targets(dataset, multi_value_column_map):
 
 
 def _chunk_list(values, chunk_size):
+    values = list(values)
     for start in range(0, len(values), chunk_size):
         yield values[start : start + chunk_size]
 
