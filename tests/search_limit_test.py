@@ -61,6 +61,7 @@ def test_search_year_range_uses_overlap_logic_in_query(monkeypatch):
     )
 
     query = result["query"]
+    assert "queryNodes('AREA'" in query
     assert "apoc.coll.min(years) <= inputYearEnd" in query
     assert "apoc.coll.max(years) >= inputYearStart" in query
     assert "apoc.coll.min(rStarts) >= inputYearStart" not in query
