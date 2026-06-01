@@ -7,6 +7,18 @@ from .extensions import mail
 
 admin_bp = Blueprint('admin', __name__)
 
+_ADMIN_USES_NON_ADDABLE_COMPONENT_PROPERTIES = {
+    "eventdate",
+    "eventtype",
+    "latitude",
+    "longitude",
+}
+
+
+def _admin_uses_property_addable(property_name):
+    normalized = str(property_name or "").strip().lower()
+    return normalized not in _ADMIN_USES_NON_ADDABLE_COMPONENT_PROPERTIES
+
 
 def _parse_credentials(raw_value):
     value = unlist(raw_value)
@@ -608,6 +620,7 @@ def admin_usesproperties():
             row['property']
             for row in allowed
             if row.get('property')
+            and _admin_uses_property_addable(row.get('property'))
             and node_property_allowed_for_labels(row.get('property'), category_labels, driver)
             and uses_contextual_property_allowed_for_category(
                 CMID,
