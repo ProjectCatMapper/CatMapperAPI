@@ -454,6 +454,54 @@ def test_validate_non_parent_multi_value_columns_raises_for_wrong_label():
     assert "CMID SM251420" in message
 
 
+def test_validate_restricted_node_property_domains_rejects_wrong_domain(monkeypatch):
+    dataset = pd.DataFrame(
+        {
+            "CMID": ["SM-LANG"],
+            "FIPS": ["US"],
+        }
+    )
+    cmid_metadata = {
+        "SM-LANG": {"labels": {"CATEGORY", "LANGUOID"}, "groupLabels": {"LANGUOID"}},
+    }
+
+    monkeypatch.setattr(upload, "getQuery", lambda *args, **kwargs: [])
+
+    with pytest.raises(ValueError) as err:
+        upload._validate_restricted_node_property_domains(
+            dataset,
+            ["FIPS"],
+            cmid_metadata,
+            object(),
+        )
+
+    assert "FIPS is only valid for AREA nodes" in str(err.value)
+
+
+def test_validate_restricted_node_property_domains_accepts_iso3_for_languoid(monkeypatch):
+    dataset = pd.DataFrame(
+        {
+            "CMID": ["SM-LANG"],
+            "ISO3": ["eng"],
+        }
+    )
+    cmid_metadata = {
+        "SM-LANG": {"labels": {"CATEGORY", "LANGUOID"}, "groupLabels": {"LANGUOID"}},
+    }
+
+    monkeypatch.setattr(upload, "getQuery", lambda *args, **kwargs: [])
+
+    assert (
+        upload._validate_restricted_node_property_domains(
+            dataset,
+            ["ISO3"],
+            cmid_metadata,
+            object(),
+        )
+        is None
+    )
+
+
 def test_validate_parent_label_compatibility_raises_on_mismatch(monkeypatch):
     dataset = pd.DataFrame(
         {

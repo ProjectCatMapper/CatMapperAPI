@@ -1201,6 +1201,96 @@ def _validate_non_parent_multi_value_columns(dataset, column_value_map, cmid_met
             )
 
 
+def _fetch_label_domain_map(driver, labels):
+    labels = sorted({str(label or "").strip() for label in labels if str(label or "").strip()})
+    if not labels:
+        return {}
+
+    query = """
+    UNWIND $labels AS label
+    OPTIONAL MATCH (m:LABEL {CMName: label})
+    RETURN label, m.groupLabel AS groupLabel
+    """
+    rows = getQuery(query, driver, params={"labels": labels}, type="dict")
+    return {
+        row["label"]: (row.get("groupLabel") or row["label"])
+        for row in rows
+        if row.get("label")
+    }
+
+
+def _restricted_node_properties_in_dataset(dataset, node_properties):
+    return [
+        prop
+        for prop in node_properties
+        if prop in dataset.columns and get_node_property_domain_restriction(prop)
+    ]
+
+
+def _row_has_value(row, property_name):
+    value = row.get(property_name)
+    if value is None:
+        return False
+    if isinstance(value, list):
+        return any(str(item).strip() for item in value if item is not None)
+    if pd.isna(value):
+        return False
+    return str(value).strip() != ""
+
+
+def _upload_row_domains(row, cmid_metadata, label_domain_map):
+    domains = set()
+    cmid = str(row.get("CMID") or "").strip()
+    if cmid:
+        domains.update(_resolve_group_labels(cmid_metadata.get(cmid)))
+
+    label = str(row.get("label") or "").strip()
+    if label:
+        domains.add(label_domain_map.get(label, label))
+
+    group_label = str(row.get("groupLabel") or "").strip()
+    if group_label:
+        domains.add(group_label)
+
+    return domains
+
+
+def _validate_restricted_node_property_domains(dataset, node_properties, cmid_metadata, driver):
+    restricted_props = _restricted_node_properties_in_dataset(dataset, node_properties)
+    if not restricted_props:
+        return
+
+    label_domain_map = _fetch_label_domain_map(
+        driver,
+        dataset["label"].dropna().astype(str).tolist() if "label" in dataset.columns else [],
+    )
+
+    errors = []
+    for row_index, row in dataset.iterrows():
+        domains = _upload_row_domains(row, cmid_metadata, label_domain_map)
+        for prop in restricted_props:
+            if not _row_has_value(row, prop):
+                continue
+            allowed_domains = get_node_property_domain_restriction(prop)
+            if domains.intersection(allowed_domains):
+                continue
+            allowed_text = " or ".join(sorted(allowed_domains))
+            found_text = ", ".join(sorted(domains)) if domains else "unknown"
+            cmid = str(row.get("CMID") or "").strip() or "<new node>"
+            errors.append(
+                f"row {row_index + 1} CMID {cmid}: {prop} is only valid for {allowed_text} nodes "
+                f"(found {found_text})"
+            )
+
+    if errors:
+        suffix = " ..." if len(errors) > 10 else ""
+        raise ValueError(
+            "Restricted node property domain mismatch: "
+            + "; ".join(errors[:10])
+            + suffix
+        )
+
+
 def _validate_parent_label_compatibility(dataset, cmid_metadata, driver, user):
     if "parent" not in dataset.columns:
         return
@@ -2521,10 +2611,13 @@ def input_Nodes_Uses(
     # 2) Grouplabel for CMID in property matches property
     # 3) Grouplabel for CMID for parent matches Grouplabel of child.
     multi_value_column_map = _collect_multi_value_column_map(dataset, multi_value_columns)
-    unique_multi_value_cmids = _collect_cmid_metadata_targets(
+    restricted_node_properties = _restricted_node_properties_in_dataset(dataset, nodeProperties)
+    unique_multi_value_cmids = set(_collect_cmid_metadata_targets(
         dataset,
         multi_value_column_map,
-    )
+    ))
+    if restricted_node_properties and "CMID" in dataset.columns:
+        unique_multi_value_cmids.update(_collect_unique_column_values(dataset, "CMID", set()))
     cmid_metadata = {}
     if unique_multi_value_cmids:
         updateLog(
@@ -2539,6 +2632,8 @@ def input_Nodes_Uses(
             write="a",
         )
 
+    _validate_restricted_node_property_domains(dataset, nodeProperties, cmid_metadata, driver)
+    check_query_cancellation()
     _validate_non_parent_multi_value_columns(dataset, multi_value_column_map, cmid_metadata)
     check_query_cancellation()
     if "parent" in multi_value_column_map:

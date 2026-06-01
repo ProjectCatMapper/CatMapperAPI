@@ -451,6 +451,14 @@ def add_edit_delete_USES(database,user,input):
                     """
             property_metadata = getQuery(query=query, params={"prop": USES_property}, driver=driver)
             property_metadata = property_metadata[0] if property_metadata else {}
+            if get_node_property_domain_restriction(USES_property):
+                node_summary = getNodeMergeSummary(CMID, driver)
+                validate_node_property_domain_for_labels(
+                    CMID,
+                    USES_property,
+                    node_summary.get("labels", []),
+                    driver,
+                )
             relationship = property_metadata.get('relationship')
             groupLabel = _uses_contextual_property_target_group(property_metadata.get('groupLabel'), relationship)
             if groupLabel:
@@ -752,10 +760,14 @@ def add_edit_delete_Node(database,user,input):
         list_value = _split_admin_multi_value(changeNodeValue)
         validatePropertyCMID(list_value,changeNodeProperty,"AREA",driver)
     
-    if changeNodeProperty == "glottocode":
+    if addOrEditNode != "delete" and get_node_property_domain_restriction(changeNodeProperty):
         node_summary = getNodeMergeSummary(changeNodeID, driver)
-        if "LANGUOID" not in node_summary.get("labels", []):
-            raise Exception("Only nodes with a LANGUOID label can have a glottocode property")
+        validate_node_property_domain_for_labels(
+            changeNodeID,
+            changeNodeProperty,
+            node_summary.get("labels", []),
+            driver,
+        )
     
 
     if not changeNodeID or not addOrEditNode:

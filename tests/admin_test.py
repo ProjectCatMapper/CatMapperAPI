@@ -23,11 +23,23 @@ class FakeCursor:
 
 
 class FakeSession:
-    def run(self, query, **kwargs):
+    def run(self, query, *args, **kwargs):
         if "return properties(n) AS props" in query:
             return FakeCursor([{"props": {"Name": "Athens", "Key": "ATH", "ignore": "x"}}])
         if "MATCH (n {CMID: $cmid}) RETURN labels(n) AS labels" in query:
             return FakeCursor([{"labels": ["CATEGORY"]}])
+        if "OPTIONAL MATCH (m:LABEL {CMName: label})" in query:
+            params = args[0] if args else kwargs
+            label_rows = []
+            for label in params.get("labels", []):
+                group = {
+                    "AREA": "AREA",
+                    "ADM0": "AREA",
+                    "LANGUOID": "LANGUOID",
+                    "LANGUAGE": "LANGUOID",
+                }.get(label)
+                label_rows.append({"label": label, "groupLabel": group})
+            return FakeCursor(label_rows)
         if "p.type='node'" in query:
             return FakeCursor([{"property": "Name"}, {"property": "Key"}, {"property": "label"}])
         if "MATCH (n:CATEGORY)<-[r:USES]" in query:
@@ -85,7 +97,7 @@ class FakeNoUsesDriver:
 
 
 class FakeDeletedNodePropertiesSession(FakeSession):
-    def run(self, query, **kwargs):
+    def run(self, query, *args, **kwargs):
         if "return properties(n) AS props" in query:
             return FakeCursor([{"props": {"CMName": "Deleted", "CMID": "SD2183"}}])
         if "MATCH (n {CMID: $cmid}) RETURN labels(n) AS labels" in query:
@@ -99,12 +111,17 @@ class FakeDeletedNodePropertiesDriver:
 
 
 class FakeUsesPropertyFilterSession(FakeSession):
-    def run(self, query, **kwargs):
+    def run(self, query, *args, **kwargs):
         if "MATCH (n:CATEGORY)<-[r:USES]" in query:
             return FakeCursor(
                 [
                     {
-                        "n": {"CMName": "Language Category", "CMID": "SM-LANG", "elementId": "n-lang"},
+                        "n": {
+                            "CMName": "Language Category",
+                            "CMID": "SM-LANG",
+                            "elementId": "n-lang",
+                            "labels": ["CATEGORY", "LANGUOID", "LANGUAGE"],
+                        },
                         "r": FakeRelationship({"Key": "L"}, "rel-lang"),
                         "d": {"CMName": "Dataset A", "CMID": "SD1"},
                     }
@@ -115,14 +132,72 @@ class FakeUsesPropertyFilterSession(FakeSession):
                 {"property": "language", "groupLabel": None, "relationship": "LANGUOID_OF"},
                 {"property": "polity", "groupLabel": None, "relationship": "POLITY_OF"},
                 {"property": "district", "groupLabel": None, "relationship": "DISTRICT_OF"},
+                {"property": "glottocode", "groupLabel": None, "relationship": None},
+                {"property": "FIPS", "groupLabel": None, "relationship": None},
+                {"property": "ISO3", "groupLabel": None, "relationship": None},
                 {"property": "source", "groupLabel": None, "relationship": None},
             ])
-        return super().run(query, **kwargs)
+        return super().run(query, *args, **kwargs)
 
 
 class FakeUsesPropertyFilterDriver:
     def session(self):
         return FakeUsesPropertyFilterSession()
+
+
+class FakeUsesPropertyEthnicityFilterSession(FakeSession):
+    def run(self, query, *args, **kwargs):
+        if "MATCH (n:CATEGORY)<-[r:USES]" in query:
+            return FakeCursor(
+                [
+                    {
+                        "n": {
+                            "CMName": "Ethnicity Category",
+                            "CMID": "SM-ETH",
+                            "elementId": "n-eth",
+                            "labels": ["CATEGORY", "ETHNICITY"],
+                        },
+                        "r": FakeRelationship({"Key": "E"}, "rel-eth"),
+                        "d": {"CMName": "Dataset A", "CMID": "SD1"},
+                    }
+                ]
+            )
+        if "p.type='relationship'" in query:
+            return FakeCursor([
+                {"property": "glottocode", "groupLabel": None, "relationship": None},
+                {"property": "FIPS", "groupLabel": None, "relationship": None},
+                {"property": "ISO2", "groupLabel": None, "relationship": None},
+                {"property": "ISO3", "groupLabel": None, "relationship": None},
+                {"property": "ISONumeric", "groupLabel": None, "relationship": None},
+                {"property": "source", "groupLabel": None, "relationship": None},
+            ])
+        return super().run(query, *args, **kwargs)
+
+
+class FakeUsesPropertyEthnicityFilterDriver:
+    def session(self):
+        return FakeUsesPropertyEthnicityFilterSession()
+
+
+class FakeRestrictedNodePropertySession(FakeSession):
+    def run(self, query, *args, **kwargs):
+        if "return properties(n) AS props" in query:
+            return FakeCursor([{"props": {"CMID": "SM-LANG", "CMName": "Lang"}}])
+        if "MATCH (n {CMID: $cmid}) RETURN labels(n) AS labels" in query:
+            return FakeCursor([{"labels": ["CATEGORY", "LANGUOID", "LANGUAGE"]}])
+        if "p.type='node'" in query:
+            return FakeCursor([
+                {"property": "CMName"},
+                {"property": "glottocode"},
+                {"property": "FIPS"},
+                {"property": "ISO3"},
+            ])
+        return super().run(query, *args, **kwargs)
+
+
+class FakeRestrictedNodePropertyDriver:
+    def session(self):
+        return FakeRestrictedNodePropertySession()
 
 
 def test_admin_nodeproperties_returns_filtered_fields(client, monkeypatch):
@@ -138,6 +213,22 @@ def test_admin_nodeproperties_returns_filtered_fields(client, monkeypatch):
     assert payload["error"] == ""
     assert payload["r"] == {"Key": "ATH", "Name": "Athens"}
     assert "label" in payload["r1"]
+
+
+def test_admin_nodeproperties_filters_restricted_identifier_fields(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: FakeRestrictedNodePropertyDriver())
+
+    response = client.get(
+        "/admin_add_edit_delete_nodeproperties",
+        query_string={"CMID": "SM-LANG", "database": "SocioMap", "option": "add"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["error"] == ""
+    assert "glottocode" in payload["r1"]
+    assert "ISO3" in payload["r1"]
+    assert "FIPS" not in payload["r1"]
 
 
 def test_admin_nodeproperties_rejects_deleted_node(client, monkeypatch):
@@ -183,7 +274,30 @@ def test_admin_usesproperties_hides_same_domain_contextual_props_except_district
     assert "language" not in payload["r1"]
     assert "district" in payload["r1"]
     assert "polity" in payload["r1"]
+    assert "glottocode" in payload["r1"]
+    assert "ISO3" in payload["r1"]
+    assert "FIPS" not in payload["r1"]
     assert "source" in payload["r1"]
+
+
+def test_admin_usesproperties_hides_restricted_identifiers_for_unrelated_domain(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: FakeUsesPropertyEthnicityFilterDriver())
+    monkeypatch.setattr(admin_module, "getGroupLabels", lambda cmid, driver: "ETHNICITY")
+
+    response = client.get(
+        "/admin_add_edit_delete_usesproperties",
+        query_string={"CMID": "SM-ETH", "database": "SocioMap"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["error"] == ""
+    assert "source" in payload["r1"]
+    assert "glottocode" not in payload["r1"]
+    assert "FIPS" not in payload["r1"]
+    assert "ISO2" not in payload["r1"]
+    assert "ISO3" not in payload["r1"]
+    assert "ISONumeric" not in payload["r1"]
 
 
 def test_admin_usesproperties_rejects_dataset_cmid(client, monkeypatch):

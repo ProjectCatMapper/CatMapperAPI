@@ -515,7 +515,11 @@ def admin_nodeproperties():
 
         # Run q1 to get allowed properties
         allowed = session.run(q1).data()
-        allowed_props = {row['property'] for row in allowed}
+        allowed_props = {
+            row['property']
+            for row in allowed
+            if node_property_allowed_for_labels(row.get('property'), labels, driver)
+        }
 
         r = {k: v for k, v in r[0]['props'].items() if k in allowed_props}
 
@@ -540,7 +544,11 @@ def admin_usesproperties():
 
     driver = getDriver(database)
 
-    q = "MATCH (n:CATEGORY)<-[r:USES]-(d:DATASET) WHERE n.CMID = $cmid RETURN {CMName: n.CMName, CMID: n.CMID,elementId: elementId(n)} AS n,r,d"
+    q = """
+    MATCH (n:CATEGORY)<-[r:USES]-(d:DATASET)
+    WHERE n.CMID = $cmid
+    RETURN {CMName: n.CMName, CMID: n.CMID, elementId: elementId(n), labels: labels(n)} AS n, r, d
+    """
     
     q1 = """
     MATCH (p:PROPERTY)
@@ -594,11 +602,13 @@ def admin_usesproperties():
                 "r1": [],
             })
         
+        category_labels = records_list[0][0].get("labels", []) if records_list else []
         allowed = session.run(q1).data()
         allowed_props = sorted({
             row['property']
             for row in allowed
             if row.get('property')
+            and node_property_allowed_for_labels(row.get('property'), category_labels, driver)
             and uses_contextual_property_allowed_for_category(
                 CMID,
                 row.get('property'),

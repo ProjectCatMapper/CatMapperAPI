@@ -565,3 +565,41 @@ def test_add_edit_delete_node_rejects_deleted_node(monkeypatch):
 
     with pytest.raises(ValueError, match="deleted node"):
         admin.add_edit_delete_Node("sociomap", "tester", payload)
+
+
+def test_add_edit_delete_node_rejects_restricted_identifier_wrong_domain(monkeypatch):
+    payload = {
+        "s1_1": "add",
+        "s1_2": "SM-LANG",
+        "s1_3": "US",
+        "s1_7": "FIPS",
+    }
+
+    class FakeDomainSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def run(self, query, params=None):
+            return [{"label": "LANGUOID", "groupLabel": "LANGUOID"}]
+
+    class FakeDomainDriver:
+        def session(self):
+            return FakeDomainSession()
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: FakeDomainDriver())
+    monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [])
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "RETURN n.CMID AS CMID" in query:
+            return [{"CMID": "SM-LANG", "CMName": "Language", "labels": ["CATEGORY", "LANGUOID"]}]
+        if "OPTIONAL MATCH (m:LABEL {CMName: label})" in query:
+            return [{"label": "LANGUOID", "groupLabel": "LANGUOID"}]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin, "getQuery", fake_get_query)
+
+    with pytest.raises(ValueError, match="FIPS.*AREA"):
+        admin.add_edit_delete_Node("sociomap", "tester", payload)
