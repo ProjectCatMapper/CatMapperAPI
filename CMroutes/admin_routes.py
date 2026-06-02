@@ -20,6 +20,11 @@ def _admin_uses_property_addable(property_name):
     return normalized not in _ADMIN_USES_NON_ADDABLE_COMPONENT_PROPERTIES
 
 
+def _admin_uses_property_reltype_addable(reltype):
+    normalized = str(reltype or "").strip().upper()
+    return normalized != "MERGING"
+
+
 def _parse_credentials(raw_value):
     value = unlist(raw_value)
     if isinstance(value, dict):
@@ -565,7 +570,8 @@ def admin_usesproperties():
     q1 = """
     MATCH (p:PROPERTY)
     WHERE p.type='relationship'
-    RETURN p.CMName as property, p.groupLabel as groupLabel, p.relationship as relationship
+    RETURN p.CMName as property, p.groupLabel as groupLabel, p.relationship as relationship,
+           p.reltype as reltype
     """
 
     with driver.session() as session:
@@ -621,6 +627,7 @@ def admin_usesproperties():
             for row in allowed
             if row.get('property')
             and _admin_uses_property_addable(row.get('property'))
+            and _admin_uses_property_reltype_addable(row.get('reltype'))
             and node_property_allowed_for_labels(row.get('property'), category_labels, driver)
             and uses_contextual_property_allowed_for_category(
                 CMID,

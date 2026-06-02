@@ -139,6 +139,7 @@ class FakeUsesPropertyFilterSession(FakeSession):
                 {"property": "eventType", "groupLabel": None, "relationship": None},
                 {"property": "latitude", "groupLabel": None, "relationship": None},
                 {"property": "longitude", "groupLabel": None, "relationship": None},
+                {"property": "mergeOnly", "groupLabel": None, "relationship": None, "reltype": "MERGING"},
                 {"property": "source", "groupLabel": None, "relationship": None},
             ])
         return super().run(query, *args, **kwargs)
@@ -285,6 +286,7 @@ def test_admin_usesproperties_hides_same_domain_contextual_props_except_district
     assert "eventType" not in payload["r1"]
     assert "latitude" not in payload["r1"]
     assert "longitude" not in payload["r1"]
+    assert "mergeOnly" not in payload["r1"]
     assert "source" in payload["r1"]
 
 
