@@ -21,8 +21,20 @@ def _admin_uses_property_addable(property_name):
 
 
 def _admin_uses_property_reltype_addable(reltype):
-    normalized = str(reltype or "").strip().upper()
-    return normalized != "MERGING"
+    if reltype is None:
+        return True
+
+    if isinstance(reltype, (list, tuple, set)):
+        values = reltype
+    else:
+        values = str(reltype).replace("||", "|").replace(",", "|").split("|")
+
+    normalized_values = {
+        str(value or "").strip().upper()
+        for value in values
+        if str(value or "").strip()
+    }
+    return "MERGING" not in normalized_values
 
 
 def _parse_credentials(raw_value):
