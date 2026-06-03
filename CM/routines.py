@@ -507,6 +507,66 @@ def getBadCMID(database, mail=None, return_type="data"):
         return "Error: " + str(e)
 
 
+def getDuplicateNodeCMIDs(database, mail=None, return_type="data"):
+    """
+    Identify duplicate node CMIDs, including DELETED nodes.
+
+    This checks CATEGORY, DATASET, and DELETED nodes in a single database for
+    non-empty CMID values that are assigned to more than one node.
+    """
+    try:
+        driver = getDriver(database)
+        query = """
+        MATCH (n)
+        WHERE (n:CATEGORY OR n:DATASET OR n:DELETED)
+            AND n.CMID IS NOT NULL
+            AND trim(toString(n.CMID)) <> ""
+        WITH trim(toString(n.CMID)) AS CMID, collect(n) AS nodes
+        WHERE size(nodes) > 1
+        UNWIND nodes AS n
+        OPTIONAL MATCH (n)-[:IS]->(replacement)
+        RETURN
+            CMID,
+            size(nodes) AS duplicateNodeCount,
+            elementId(n) AS nodeID,
+            labels(n) AS labels,
+            n.CMName AS CMName,
+            replacement.CMID AS replacementCMID,
+            replacement.CMName AS replacementCMName
+        ORDER BY CMID, nodeID
+        """
+        results = getQuery(query, driver, type="df")
+
+        duplicate_groups = 0
+        if isinstance(results, pd.DataFrame) and not results.empty and "CMID" in results.columns:
+            duplicate_groups = results["CMID"].nunique()
+
+        fp1 = None
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            with tempfile.NamedTemporaryFile(delete=False,
+                                             prefix=f"duplicate_node_cmids_{database}_",
+                                             suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp1 = tmpfile.name
+                results.to_excel(fp1, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Duplicate node CMIDs for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
+
+        if return_type == "data":
+            return {
+                "Duplicate CMID groups": duplicate_groups,
+                "Duplicate node rows": len(results),
+                "Duplicate CMIDs": results.to_dict(orient="records"),
+            }
+        elif return_type == "info":
+            return {
+                "info": f"Duplicate CMID groups: {duplicate_groups}; Duplicate node rows: {len(results)}",
+                "filepath": fp1,
+            }
+    except Exception as e:
+        result = str(e)
+        return result, 500
+
+
 def getMultipleLabels(database, mail=None, return_type="data"):
     """
     Identify `USES` relationships in which multiple labels are assigned 
@@ -2506,6 +2566,7 @@ def runRoutinesStream(databases="all", mail=None):
             ("Check Domains", lambda db: checkDomains(db, mail=None, return_type="info"), True),
             ("Bad Domains", lambda db: getBadDomains(db, mail=None, return_type="info"), True),
             ("Bad CMID", lambda db: getBadCMID(db, mail=None, return_type="info"), True),
+            ("Duplicate CMIDs including deleted", lambda db: getDuplicateNodeCMIDs(db, mail=None, return_type="info"), True),
             ("Multiple Labels", lambda db: getMultipleLabels(db, mail=None, return_type="info"), True),
             ("Bad JSON", lambda db: getBadComplexProperties(db, mail=None, return_type="info"), True),
             ("Bad Relations", lambda db: getBadRelations(db, mail=None, return_type="info"), True),
@@ -2596,6 +2657,7 @@ def runRoutinesStream(databases="all", mail=None):
           <tr><td>Check Domains</td><td>checkDomains</td><td>Detects missing or inconsistent domain/subdomain assignments in USES relationships.</td></tr>
           <tr><td>Bad Domains</td><td>getBadDomains</td><td>Identifies invalid or missing labels: bad subdomain labels, nodes missing CATEGORY, or nodes missing DATASET.</td></tr>
           <tr><td>Bad CMID</td><td>getBadCMID</td><td>Finds invalid or outdated CMIDs used in USES relationships, including replacements from deleted nodes.</td></tr>
+          <tr><td>Duplicate CMIDs including deleted</td><td>getDuplicateNodeCMIDs</td><td>Finds duplicate non-empty CMID values assigned to CATEGORY, DATASET, or DELETED nodes.</td></tr>
           <tr><td>Multiple Labels</td><td>getMultipleLabels</td><td>Flags USES relationships that have multiple subdomain labels assigned.</td></tr>
           <tr><td>Bad JSON</td><td>getBadComplexProperties</td><td>Validates JSON properties (geoCoords, parentContext) and reports invalid entries.</td></tr>
           <tr><td>Bad Relations</td><td>getBadRelations</td><td>Checks for invalid or inconsistent parent–child category relationships and mis-specified CONTAINS links.</td></tr>

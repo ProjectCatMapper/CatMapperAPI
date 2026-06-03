@@ -81,6 +81,29 @@ def uses_contextual_property_allowed_for_category(CMID, uses_property, property_
     return _uses_contextual_same_domain(CMID, uses_property, property_group_label, relationship, driver) is None
 
 
+def uses_contextual_property_needs_category_group(uses_property, property_group_label, relationship):
+    return (
+        bool(_uses_contextual_property_target_group(property_group_label, relationship))
+        and not _is_uses_self_context_exception(uses_property, relationship)
+    )
+
+
+def get_uses_contextual_category_group(CMID, driver):
+    return getGroupLabels(CMID, driver)
+
+
+def uses_contextual_property_allowed_for_group(category_group_label, uses_property, property_group_label, relationship):
+    target_group = _uses_contextual_property_target_group(property_group_label, relationship)
+    if not target_group:
+        return True
+    if _is_uses_self_context_exception(uses_property, relationship):
+        return True
+    return (
+        _normalize_contextual_tie_token(category_group_label)
+        != _normalize_contextual_tie_token(target_group)
+    )
+
+
 def validate_uses_contextual_property(CMID, uses_property, property_group_label, relationship, driver):
     same_domain = _uses_contextual_same_domain(CMID, uses_property, property_group_label, relationship, driver)
     if same_domain:

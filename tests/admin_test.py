@@ -267,7 +267,13 @@ def test_admin_usesproperties_returns_records_and_allowed_props(client, monkeypa
 
 def test_admin_usesproperties_hides_same_domain_contextual_props_except_district(client, monkeypatch):
     monkeypatch.setattr(admin_routes, "getDriver", lambda database: FakeUsesPropertyFilterDriver())
-    monkeypatch.setattr(admin_module, "getGroupLabels", lambda cmid, driver: "LANGUOID")
+    group_label_calls = []
+
+    def fake_get_group_labels(cmid, driver):
+        group_label_calls.append(cmid)
+        return "LANGUOID"
+
+    monkeypatch.setattr(admin_module, "getGroupLabels", fake_get_group_labels)
 
     response = client.get(
         "/admin_add_edit_delete_usesproperties",
@@ -290,6 +296,7 @@ def test_admin_usesproperties_hides_same_domain_contextual_props_except_district
     assert "mergeOnly" not in payload["r1"]
     assert "mergeDelimited" not in payload["r1"]
     assert "source" in payload["r1"]
+    assert group_label_calls == ["SM-LANG"]
 
 
 def test_admin_usesproperties_hides_restricted_identifiers_for_unrelated_domain(client, monkeypatch):

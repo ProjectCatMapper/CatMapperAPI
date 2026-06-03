@@ -634,21 +634,43 @@ def admin_usesproperties():
         
         category_labels = records_list[0][0].get("labels", []) if records_list else []
         allowed = session.run(q1).data()
-        allowed_props = sorted({
-            row['property']
-            for row in allowed
-            if row.get('property')
-            and _admin_uses_property_addable(row.get('property'))
-            and _admin_uses_property_reltype_addable(row.get('reltype'))
-            and node_property_allowed_for_labels(row.get('property'), category_labels, driver)
-            and uses_contextual_property_allowed_for_category(
-                CMID,
-                row.get('property'),
+        category_domains = None
+        category_group_label = None
+        allowed_props = []
+        for row in allowed:
+            property_name = row.get('property')
+            if not property_name:
+                continue
+            if not _admin_uses_property_addable(property_name):
+                continue
+            if not _admin_uses_property_reltype_addable(row.get('reltype')):
+                continue
+
+            allowed_domains = get_node_property_domain_restriction(property_name)
+            if allowed_domains:
+                if category_domains is None:
+                    category_domains = resolve_domains_from_node_labels(category_labels, driver)
+                if not category_domains.intersection(allowed_domains):
+                    continue
+
+            if uses_contextual_property_needs_category_group(
+                property_name,
                 row.get('groupLabel'),
                 row.get('relationship'),
-                driver,
-            )
-        })
+            ):
+                if category_group_label is None:
+                    category_group_label = get_uses_contextual_category_group(CMID, driver)
+                if not uses_contextual_property_allowed_for_group(
+                    category_group_label,
+                    property_name,
+                    row.get('groupLabel'),
+                    row.get('relationship'),
+                ):
+                    continue
+
+            allowed_props.append(property_name)
+
+        allowed_props = sorted(set(allowed_props))
         
     return {
         "r": records_list,
