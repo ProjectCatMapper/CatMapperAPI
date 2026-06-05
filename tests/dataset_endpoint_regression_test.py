@@ -78,6 +78,23 @@ def test_get_dataset_data_normalizes_scalar_cmid_to_list(monkeypatch):
     assert captured["params"]["cmid"] == ["AD354514"]
 
 
+def test_normalize_domain_expands_group_label_to_subdomains(monkeypatch):
+    monkeypatch.setattr(
+        datasets_module,
+        "_get_label_mapping",
+        lambda driver: pd.DataFrame([
+            {"label": "AREA", "groupLabel": "AREA"},
+            {"label": "ADM0", "groupLabel": "AREA"},
+            {"label": "ADM1", "groupLabel": "AREA"},
+            {"label": "LANGUAGE", "groupLabel": "LANGUAGE"},
+        ]),
+    )
+
+    domain = datasets_module._normalize_domain("AREA", object())
+
+    assert domain == ["AREA", "ADM0", "ADM1"]
+
+
 def test_dataset_route_returns_json_error_payload(client, monkeypatch):
     monkeypatch.setattr(
         explore_routes,

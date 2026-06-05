@@ -78,6 +78,8 @@ def _normalize_domain(domain, driver):
         if matching_groups:
             matched_labels = labels[labels['groupLabel'].isin(matching_groups)]['label'].tolist()
             domain = matched_labels + domain
+
+    domain = list(dict.fromkeys(domain))
     
     return domain
 
