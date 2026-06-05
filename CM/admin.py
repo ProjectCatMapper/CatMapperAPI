@@ -30,7 +30,7 @@ import re
 
 _ADMIN_MULTI_VALUE_SEPARATOR = re.compile(r"\s*(?:\|{2,}|,|;)\s*")
 _USES_SELF_CONTEXT_PROPERTY_EXCEPTIONS = {"DISTRICT"}
-_USES_SELF_CONTEXT_RELATIONSHIP_EXCEPTIONS = {"DISTRICT_OF"}
+_USES_SELF_CONTEXT_RELATIONSHIP_EXCEPTIONS = {"AREA_OF"}
 
 
 def _split_admin_multi_value(value):
@@ -111,7 +111,7 @@ def validate_uses_contextual_property(CMID, uses_property, property_group_label,
         raise ValueError(
             f"Cannot add {uses_property} to USES tie for {CMID}: both the USES category "
             f"and the {uses_property} property target are {target_group or category_group_label}. "
-            "Same-domain contextual USES properties are not allowed except district/DISTRICT_OF."
+            "Same-domain contextual USES properties are not allowed except district/AREA_OF."
         )
 
 

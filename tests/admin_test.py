@@ -131,7 +131,7 @@ class FakeUsesPropertyFilterSession(FakeSession):
             return FakeCursor([
                 {"property": "language", "groupLabel": None, "relationship": "LANGUOID_OF"},
                 {"property": "polity", "groupLabel": None, "relationship": "POLITY_OF"},
-                {"property": "district", "groupLabel": None, "relationship": "DISTRICT_OF"},
+                {"property": "district", "groupLabel": None, "relationship": "AREA_OF"},
                 {"property": "glottocode", "groupLabel": None, "relationship": None},
                 {"property": "FIPS", "groupLabel": None, "relationship": None},
                 {"property": "ISO3", "groupLabel": None, "relationship": None},

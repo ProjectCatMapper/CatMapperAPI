@@ -1090,7 +1090,7 @@ def _fetch_cmid_metadata(driver, cmids, chunk_size=1500):
 
 
 def _required_label_for_column(column_name):
-    if column_name == "country":
+    if column_name in {"country", "district", "District"}:
         return "AREA"
     if column_name == "language":
         return "LANGUOID"

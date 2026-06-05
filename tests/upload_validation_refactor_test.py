@@ -121,6 +121,11 @@ def test_normalize_semicolon_value_list_handles_stringified_lists():
     ]
 
 
+@pytest.mark.parametrize("column_name", ["country", "district", "District"])
+def test_required_label_for_area_reference_columns(column_name):
+    assert upload._required_label_for_column(column_name) == "AREA"
+
+
 def test_create_uses_normalizes_stringified_district_lists(monkeypatch):
     captured = {}
 
@@ -452,6 +457,27 @@ def test_validate_non_parent_multi_value_columns_raises_for_wrong_label():
     assert "Wrong labels in database for column 'language'" in message
     assert "row 2" in message
     assert "CMID SM251420" in message
+
+
+def test_validate_non_parent_multi_value_columns_accepts_area_for_district():
+    dataset = pd.DataFrame(
+        {
+            "CMID": [""],
+            "District": ["SM64"],
+        }
+    )
+    column_map = {"District": ["SM64"]}
+    cmid_metadata = {
+        "SM64": {"labels": {"CATEGORY", "AREA", "ADM0"}, "groupLabels": {"AREA"}},
+    }
+
+    result = upload._validate_non_parent_multi_value_columns(
+        dataset,
+        column_map,
+        cmid_metadata,
+    )
+
+    assert result is None
 
 
 def test_validate_restricted_node_property_domains_rejects_wrong_domain(monkeypatch):
