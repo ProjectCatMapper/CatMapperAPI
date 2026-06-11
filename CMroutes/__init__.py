@@ -10,6 +10,7 @@ from .user_routes import *
 from .admin_routes import *
 from .homepage_routes import *
 from .metadata_routes import *
+from .reconciliation_routes import *
 from flask import Flask
 from .extensions import mail
 from .search_routes import *
