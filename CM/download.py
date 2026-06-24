@@ -54,7 +54,7 @@ def get_backup_csv_urls(database, bucket="catmapper", region="us-west-1", mostRe
 
     Parameters:
         database (str): "ArchaMap" or "SocioMap"
-        bucket (str): S3 bucket name (default: "sociomap-backups")
+        bucket (str): S3 bucket name (default: "catmapper")
         region (str): AWS region (default: "us-west-1")
         mostRecent (bool): If True, only return the most recent CSV files.
 
@@ -69,7 +69,6 @@ def get_backup_csv_urls(database, bucket="catmapper", region="us-west-1", mostRe
     prefix = source["s3_prefix"]
     local_dir = source["local_dir"]
     aws_client_kwargs = _aws_client_kwargs_from_config()
-    presign_client = None
 
     def list_s3_pages(unsigned=False):
         client_kwargs = {"region_name": region}
@@ -121,23 +120,6 @@ def get_backup_csv_urls(database, bucket="catmapper", region="us-west-1", mostRe
                 continue
         return file_info
 
-    def build_s3_url(key):
-        nonlocal presign_client
-        if not aws_client_kwargs:
-            return f"https://{bucket}.s3.{region}.amazonaws.com/{key}"
-
-        if presign_client is None:
-            presign_client = boto3.client(
-                "s3",
-                region_name=region,
-                **aws_client_kwargs,
-            )
-        return presign_client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": bucket, "Key": key},
-            ExpiresIn=24 * 60 * 60,
-        )
-
     try:
         file_info = collect_file_info_from_s3(unsigned=False)
     except (NoCredentialsError, ClientError):
@@ -154,7 +136,7 @@ def get_backup_csv_urls(database, bucket="catmapper", region="us-west-1", mostRe
 
     # Build list of (URL, size_MB) tuples
     results = [
-        (build_s3_url(key), size)
+        (f"https://{bucket}.s3.{region}.amazonaws.com/{key}", size)
         for _, key, size in file_info
     ]
 

@@ -109,7 +109,7 @@ def test_get_backup_csv_urls_falls_back_to_local_files(monkeypatch, tmp_path):
     ]
 
 
-def test_get_backup_csv_urls_presigns_private_s3_objects(monkeypatch):
+def test_get_backup_csv_urls_returns_static_urls_for_public_csv_prefix(monkeypatch):
     created_clients = []
 
     class FakePaginator:
@@ -133,15 +133,6 @@ def test_get_backup_csv_urls_presigns_private_s3_objects(monkeypatch):
             assert name == "list_objects_v2"
             return FakePaginator()
 
-        def generate_presigned_url(self, operation, Params, ExpiresIn):
-            assert operation == "get_object"
-            assert Params == {
-                "Bucket": "catmapper",
-                "Key": "backups/sociomap1/download/SocioMap_metadata_2026-06-24.csv",
-            }
-            assert ExpiresIn == 86400
-            return f"https://signed.example.com/{Params['Key']}"
-
     def fake_boto_client(service_name, **kwargs):
         assert service_name == "s3"
         created_clients.append(kwargs)
@@ -158,7 +149,7 @@ def test_get_backup_csv_urls_presigns_private_s3_objects(monkeypatch):
 
     assert urls == [
         (
-            "https://signed.example.com/backups/sociomap1/download/SocioMap_metadata_2026-06-24.csv",
+            "https://catmapper.s3.us-west-1.amazonaws.com/backups/sociomap1/download/SocioMap_metadata_2026-06-24.csv",
             0.0,
         )
     ]
@@ -167,12 +158,7 @@ def test_get_backup_csv_urls_presigns_private_s3_objects(monkeypatch):
             "region_name": "us-west-1",
             "aws_access_key_id": "test",
             "aws_secret_access_key": "secret",
-        },
-        {
-            "region_name": "us-west-1",
-            "aws_access_key_id": "test",
-            "aws_secret_access_key": "secret",
-        },
+        }
     ]
 
 
