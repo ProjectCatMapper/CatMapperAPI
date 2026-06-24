@@ -95,7 +95,7 @@ def test_get_backup_csv_urls_falls_back_to_local_files(monkeypatch, tmp_path):
     monkeypatch.setitem(
         download_module.BACKUP_SOURCE_MAP,
         "ArchaMap",
-        {"s3_prefix": "archamap-backups/download", "local_dir": str(local_dir)},
+        {"s3_prefix": "backups/archamap1/download", "local_dir": str(local_dir)},
     )
 
     urls = download_module.get_backup_csv_urls("ArchaMap")
@@ -103,9 +103,76 @@ def test_get_backup_csv_urls_falls_back_to_local_files(monkeypatch, tmp_path):
     assert client_calls == [False, True]
     assert urls == [
         (
-            "https://sociomap-backups.s3.us-west-1.amazonaws.com/archamap-backups/download/metadata_2026-03-24.csv",
+            "https://catmapper.s3.us-west-1.amazonaws.com/backups/archamap1/download/metadata_2026-03-24.csv",
             1.0,
         )
+    ]
+
+
+def test_get_backup_csv_urls_presigns_private_s3_objects(monkeypatch):
+    created_clients = []
+
+    class FakePaginator:
+        def paginate(self, **kwargs):
+            return [
+                {
+                    "Contents": [
+                        {
+                            "Key": "backups/sociomap1/download/SocioMap_metadata_2026-06-24.csv",
+                            "Size": 2048,
+                        }
+                    ]
+                }
+            ]
+
+    class FakeClient:
+        def __init__(self, client_kwargs):
+            self.client_kwargs = client_kwargs
+
+        def get_paginator(self, name):
+            assert name == "list_objects_v2"
+            return FakePaginator()
+
+        def generate_presigned_url(self, operation, Params, ExpiresIn):
+            assert operation == "get_object"
+            assert Params == {
+                "Bucket": "catmapper",
+                "Key": "backups/sociomap1/download/SocioMap_metadata_2026-06-24.csv",
+            }
+            assert ExpiresIn == 86400
+            return f"https://signed.example.com/{Params['Key']}"
+
+    def fake_boto_client(service_name, **kwargs):
+        assert service_name == "s3"
+        created_clients.append(kwargs)
+        return FakeClient(kwargs)
+
+    monkeypatch.setattr(
+        download_module,
+        "_aws_client_kwargs_from_config",
+        lambda: {"aws_access_key_id": "test", "aws_secret_access_key": "secret"},
+    )
+    monkeypatch.setattr(download_module.boto3, "client", fake_boto_client)
+
+    urls = download_module.get_backup_csv_urls("SocioMap")
+
+    assert urls == [
+        (
+            "https://signed.example.com/backups/sociomap1/download/SocioMap_metadata_2026-06-24.csv",
+            0.0,
+        )
+    ]
+    assert created_clients == [
+        {
+            "region_name": "us-west-1",
+            "aws_access_key_id": "test",
+            "aws_secret_access_key": "secret",
+        },
+        {
+            "region_name": "us-west-1",
+            "aws_access_key_id": "test",
+            "aws_secret_access_key": "secret",
+        },
     ]
 
 
