@@ -151,6 +151,15 @@ def test_create_uses_normalizes_stringified_district_lists(monkeypatch):
             ]
         if "RETURN count(*) AS count" in query:
             return [0]
+        if "WITH DISTINCT row.datasetID AS datasetID, row.Key AS keyValue" in query:
+            return [
+                {
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "existingCMIDs": [],
+                    "rel_count": 0,
+                }
+            ]
         if params and "rows" in params:
             captured["rows"] = params["rows"]
             return [
@@ -189,6 +198,102 @@ def test_create_uses_normalizes_stringified_district_lists(monkeypatch):
 
     assert captured["rows"][0]["district"] == "AM22269"
     assert result["links"][0]["district"] == "AM22269"
+
+
+def test_input_nodes_uses_rejects_existing_dataset_key_duplicate(monkeypatch):
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='node'" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='relationship'" in query:
+            return []
+        if "MATCH (l:LABEL) return l.CMName as label" in query:
+            return ["DIALECT"]
+        if "WITH DISTINCT row.datasetID AS datasetID, row.Key AS keyValue" in query:
+            return [
+                {
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "existingCMIDs": ["AM999"],
+                    "rel_count": 1,
+                }
+            ]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    with pytest.raises(ValueError, match="same datasetID and Key already exists"):
+        upload.input_Nodes_Uses(
+            dataset=[
+                {
+                    "CMID": "AM1",
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "label": "DIALECT",
+                    "Name": "Alpha",
+                }
+            ],
+            database="ArchaMap",
+            uploadOption="add_uses",
+            formatKey=False,
+            optionalProperties=[],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
+
+
+def test_input_nodes_uses_rejects_upload_dataset_key_duplicate_to_different_cmids(monkeypatch):
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='node'" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='relationship'" in query:
+            return []
+        if "MATCH (l:LABEL) return l.CMName as label" in query:
+            return ["DIALECT"]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    with pytest.raises(ValueError, match="Duplicate datasetID \\+ Key values"):
+        upload.input_Nodes_Uses(
+            dataset=[
+                {
+                    "CMID": "AM1",
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "label": "DIALECT",
+                    "Name": "Alpha",
+                },
+                {
+                    "CMID": "AM2",
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "label": "DIALECT",
+                    "Name": "Beta",
+                },
+            ],
+            database="ArchaMap",
+            uploadOption="add_uses",
+            formatKey=False,
+            optionalProperties=[],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
 
 
 def test_input_nodes_uses_formats_key_before_key_validation(monkeypatch):

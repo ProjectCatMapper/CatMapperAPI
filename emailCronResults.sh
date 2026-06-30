@@ -19,6 +19,17 @@ fi
 
 mkdir -p /mnt/storage/app/CatMapperAPI/log
 
+python_cmd=()
+if [ -n "${CATMAPPER_API_PYTHON:-}" ]; then
+    python_cmd=("$CATMAPPER_API_PYTHON")
+elif [ -x "/home/rjbischo/.conda/envs/api_env/bin/python" ]; then
+    python_cmd=("/home/rjbischo/.conda/envs/api_env/bin/python")
+elif [ -x "/opt/conda/bin/conda" ]; then
+    python_cmd=("/opt/conda/bin/conda" "run" "-n" "api_env" "python")
+elif command -v python3 >/dev/null 2>&1; then
+    python_cmd=("python3")
+fi
+
 # File paths for backups
 archamap_backup="/mnt/storage/app/db/archamap1/backups/neo4j-backup.tar.zst"
 sociomap_backup="/mnt/storage/app/db/sociomap1/backups/neo4j-backup.tar.zst"
@@ -51,18 +62,13 @@ else
 fi
 
 # Email body
-body="Archamap last backed up: $archamap_last_modified<br>Sociomap last backed up: $sociomap_last_modified<br>GIS database last backed up: $gis_last_modified<br>User database last backed up: $user_last_modified<br>\nPlease check the logs for more details."
+body="Archamap last backed up: $archamap_last_modified<br>Sociomap last backed up: $sociomap_last_modified<br>GIS database last backed up: $gis_last_modified<br>User database last backed up: $user_last_modified<br>Please check the logs for more details."
 
-if [ -n "${BREVO_API_KEY:-${API_KEY:-}}" ] && command -v python3 >/dev/null 2>&1; then
-    python3 "$script_dir/send_transactional_email.py" \
-        --to "admin@catmapper.org" \
-        --sender "admin@catmapper.org" \
-        --sender-name "${MAIL_SENDER_NAME:-CatMapper}" \
+if [ "${#python_cmd[@]}" -gt 0 ]; then
+    "${python_cmd[@]}" "$script_dir/send_configured_email.py" \
         --subject "$subject" \
         --html "$body" \
-        --text "Please review the CatMapper backup timestamps." \
-        --tag "catmapper" \
-        --tag "backup-status"
+        --text "Please review the CatMapper backup timestamps."
 else
     echo -e "$body" | mail -a "Content-Type: text/html" -s "$subject" admin@catmapper.org
 fi

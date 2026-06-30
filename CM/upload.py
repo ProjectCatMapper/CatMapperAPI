@@ -318,6 +318,8 @@ def createUSES(links, database, user):
         # Convert all values to strings and replace NaN with empty strings
         links = links.fillna("").astype(str)
 
+        _validate_new_uses_dataset_key_uniqueness(links, driver, uploadOption="add_uses")
+
         #Removes required properties that either aren't added to uses tie (datasetID, CMID, CMName) or are added separately (Key)
         vars = links.columns.difference(["datasetID", "CMID", "Key", "CMName"])
 
@@ -2039,6 +2041,102 @@ def _is_same_update_add_value(existing_value, incoming_value):
     return str(existing_value) == str(incoming_value)
 
 
+def _format_uses_dataset_key_conflicts(conflicts, limit=10):
+    lines = []
+    for conflict in conflicts[:limit]:
+        target = conflict.get("CMID") or conflict.get("existingCMIDs")
+        target_text = f", CMID={target}" if target else ""
+        lines.append(
+            f"(datasetID={conflict.get('datasetID')}, Key={conflict.get('Key')}{target_text})"
+        )
+    if len(conflicts) > limit:
+        lines.append(f"... and {len(conflicts) - limit} more")
+    return ", ".join(lines)
+
+
+def _uses_target_count_for_group(group):
+    if "CMID" not in group.columns:
+        return len(group)
+
+    cmids = group["CMID"].fillna("").astype(str).str.strip()
+    blank_count = int((cmids == "").sum())
+    non_blank_count = cmids[cmids != ""].nunique()
+    return int(non_blank_count + blank_count)
+
+
+def _validate_new_uses_dataset_key_uniqueness(
+    dataset,
+    driver,
+    uploadOption="add_uses",
+    key_column="Key",
+):
+    if key_column not in dataset.columns or "datasetID" not in dataset.columns:
+        return
+
+    if uploadOption not in {"add_node", "add_uses", "update_replace"}:
+        return
+
+    candidate_cols = ["datasetID", key_column]
+    if "CMID" in dataset.columns:
+        candidate_cols.append("CMID")
+
+    candidates = dataset[candidate_cols].copy()
+    candidates["datasetID"] = candidates["datasetID"].fillna("").astype(str).str.strip()
+    candidates[key_column] = candidates[key_column].fillna("").astype(str).str.strip()
+    candidates = candidates[
+        (candidates["datasetID"] != "") & (candidates[key_column] != "")
+    ]
+
+    if candidates.empty:
+        return
+
+    if key_column != "Key":
+        candidates = candidates.rename(columns={key_column: "Key"})
+
+    input_conflicts = []
+    for (dataset_id, key), group in candidates.groupby(["datasetID", "Key"], dropna=False):
+        if _uses_target_count_for_group(group) > 1:
+            input_conflicts.append({"datasetID": dataset_id, "Key": key})
+
+    if input_conflicts:
+        raise ValueError(
+            "Duplicate datasetID + Key values in upload would create multiple USES ties: "
+            + _format_uses_dataset_key_conflicts(input_conflicts)
+        )
+
+    existing_rows = candidates[["datasetID", "Key"]].drop_duplicates().to_dict(
+        orient="records"
+    )
+    if not existing_rows:
+        return
+
+    query = """
+        UNWIND $rows AS row
+        WITH DISTINCT row.datasetID AS datasetID, row.Key AS keyValue
+        OPTIONAL MATCH (d:DATASET {CMID: datasetID})-[r:USES {Key: keyValue}]->(c:CATEGORY)
+        RETURN datasetID AS datasetID,
+               keyValue AS Key,
+               collect(DISTINCT c.CMID) AS existingCMIDs,
+               count(r) AS rel_count
+    """
+    results = getQuery(query, driver, params={"rows": existing_rows})
+    db_conflicts = [
+        {
+            "datasetID": row.get("datasetID"),
+            "Key": row.get("Key"),
+            "existingCMIDs": row.get("existingCMIDs", []),
+        }
+        for row in results
+        if row.get("rel_count", 0) >= 1
+    ]
+
+    if db_conflicts:
+        raise ValueError(
+            "A USES tie with the same datasetID and Key already exists: "
+            + _format_uses_dataset_key_conflicts(db_conflicts)
+        )
+
+
 def input_Nodes_Uses(
     dataset,
     database,
@@ -2437,6 +2535,30 @@ def input_Nodes_Uses(
     #data_dict is created as a “records” data dictionary from dataset for the purpose of error checking.
     # also used for functions 5 and 6
     data_dict = dataset.to_dict(orient="records")
+
+    if uploadOption in {"add_node", "add_uses"}:
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking duplicate datasetID/Key pairs for new USES ties",
+            write="a",
+        )
+        _validate_new_uses_dataset_key_uniqueness(
+            dataset,
+            driver,
+            uploadOption=uploadOption,
+        )
+    elif uploadOption == "update_replace" and "NewKey" in optionalProperties:
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking duplicate datasetID/NewKey pairs for USES key replacement",
+            write="a",
+        )
+        _validate_new_uses_dataset_key_uniqueness(
+            dataset,
+            driver,
+            uploadOption=uploadOption,
+            key_column="NewKey",
+        )
 
     # checks for all CMIDS to be either category or dataset
     if "CMID" in dataset.columns:
