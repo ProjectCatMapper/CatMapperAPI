@@ -954,6 +954,13 @@ def is_non_empty(x):
     return pd.notna(x) and str(x).strip() != ''
 
 
+def _stringify_upload_values(df):
+    """Convert true missing values to empty strings without erasing literal text."""
+    df = df.mask(df.isna(), "")
+    df = df.astype(str)
+    return df.replace({"nan": "", "<NA>": ""})
+
+
 def _split_multi_value_cell(value):
     if value is None:
         return []
@@ -2525,11 +2532,8 @@ def input_Nodes_Uses(
             except (ValueError, TypeError):
                 raise ValueError(f"Longitude at row {index} is not a valid number (value: {row['longitude']}).")
             
-    """ Replaces nan/NA values with None and then replaces all none with "" """
-    """ Also converts everything to string """
-    dataset = dataset.replace({np.nan: None, pd.NA: None})
-    dataset = dataset.astype(str)
-    dataset = dataset.replace({"nan": "", "<NA>": "", "None": ""})
+    """Convert true missing values to empty strings while preserving literal text."""
+    dataset = _stringify_upload_values(dataset)
 
     """ CMID checks """
     #data_dict is created as a “records” data dictionary from dataset for the purpose of error checking.

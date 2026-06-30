@@ -190,6 +190,36 @@ def test_upload_simple_maps_selected_columns_to_name_cmname_and_altnames(client,
     assert seen["job_args"]["formatKey"] is False
 
 
+def test_upload_simple_preserves_literal_none_name_fields(client, monkeypatch):
+    seen = {}
+
+    def fake_start_upload_task(**kwargs):
+        seen.update(kwargs)
+        return "upload-task-123"
+
+    monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
+    monkeypatch.setattr(upload_routes, "_start_upload_task", fake_start_upload_task)
+
+    payload = _base_payload()
+    payload["df"] = [
+        {
+            "cm_name_col": "None",
+            "category_name_col": "None",
+            "source_key": "K1",
+        }
+    ]
+    payload["formData"]["cmNameColumn"] = "cm_name_col"
+    payload["formData"]["categoryNamesColumn"] = "category_name_col"
+
+    response = client.post("/uploadInputNodes", json=payload)
+
+    assert response.status_code == 202
+    row = seen["job_args"]["dataset"][0]
+    assert row["CMName"] == "None"
+    assert row["Name"] == "None"
+    assert row["Key"] == "source_key == K1"
+
+
 def test_upload_simple_supports_multiple_key_columns_with_and_join(client, monkeypatch):
     seen = {}
 

@@ -405,6 +405,26 @@ def test_add_node_rejects_blank_cmname(monkeypatch):
         )
 
 
+def test_stringify_upload_values_preserves_literal_none_names():
+    dataset = pd.DataFrame(
+        [
+            {
+                "CMName": "None",
+                "Name": "None",
+                "empty_value": None,
+                "pd_missing": pd.NA,
+            }
+        ]
+    )
+
+    result = upload._stringify_upload_values(dataset)
+
+    assert result.loc[0, "CMName"] == "None"
+    assert result.loc[0, "Name"] == "None"
+    assert result.loc[0, "empty_value"] == ""
+    assert result.loc[0, "pd_missing"] == ""
+
+
 def test_validate_variable_category_type_values_normalizes_variable_rows_by_label():
     dataset = pd.DataFrame(
         {
