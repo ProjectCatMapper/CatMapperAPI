@@ -1,7 +1,13 @@
 #!/bin/bash
 
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/aws_config_credentials.sh"
+trap cleanup_aws_credentials_file EXIT
+
 # Check if the argument is provided
-if [ -z "$1" ]; then
+if [ -z "${1:-}" ]; then
     echo "Usage: $0 <database_name>"
     exit 1
 fi
@@ -29,7 +35,8 @@ chmod -R 777 /mnt/storage/app/db/"$database_name"/backups;
 # Pull the backup from AWS S3 if pullAWS is true
 if [ "$pullAWS" = true ]; then
     echo "Pulling backup from AWS S3..."
-    sudo -u rjbischo aws s3 cp s3://catmapper/backups/"$database_name"/neo4j-backup.tar.zst /mnt/storage/app/db/"$database_name"/backups/
+    configure_aws_cli_credentials
+    aws s3 cp s3://catmapper/backups/"$database_name"/neo4j-backup.tar.zst /mnt/storage/app/db/"$database_name"/backups/
 else
     echo "Skipping AWS S3 pull."
 fi
