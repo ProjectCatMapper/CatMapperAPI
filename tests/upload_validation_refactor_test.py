@@ -329,6 +329,26 @@ def test_validate_non_parent_multi_value_columns_raises_for_wrong_label():
     assert "CMID SM251420" in message
 
 
+def test_district_column_accepts_area_group_label():
+    dataset = pd.DataFrame(
+        {
+            "CMID": ["AM100"],
+            "district": ["AM200"],
+        }
+    )
+    column_map = {"district": ["AM200"]}
+    cmid_metadata = {
+        "AM200": {"labels": {"CATEGORY", "REGION"}, "groupLabels": {"AREA"}},
+    }
+
+    upload._validate_non_parent_multi_value_columns(dataset, column_map, cmid_metadata)
+
+
+def test_district_column_required_label_is_area_for_legacy_case_variants():
+    assert upload._required_label_for_column("district") == "AREA"
+    assert upload._required_label_for_column("District") == "AREA"
+
+
 def test_validate_parent_label_compatibility_raises_on_mismatch(monkeypatch):
     dataset = pd.DataFrame(
         {
