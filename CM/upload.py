@@ -1074,9 +1074,10 @@ def _fetch_cmid_metadata(driver, cmids, chunk_size=1500):
 
 
 def _required_label_for_column(column_name):
-    if column_name == "country":
+    normalized_column = str(column_name or "").strip().lower()
+    if normalized_column in {"country", "district"}:
         return "AREA"
-    if column_name == "language":
+    if normalized_column == "language":
         return "LANGUOID"
     return column_name.upper()
 
@@ -1164,7 +1165,7 @@ def _validate_non_parent_multi_value_columns(dataset, column_value_map, cmid_met
         wrong_labels = [
             value
             for value in values
-            if required_label not in cmid_metadata.get(value, {}).get("labels", set())
+            if required_label not in _resolve_group_labels(cmid_metadata.get(value, {}))
         ]
         if wrong_labels:
             detail_parts = []
