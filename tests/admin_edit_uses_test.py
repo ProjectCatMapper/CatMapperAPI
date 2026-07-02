@@ -89,6 +89,21 @@ def test_validate_parent_context_list_accepts_string_event_date(monkeypatch):
     assert errors == []
 
 
+def test_validate_parent_context_list_accepts_parent_only(monkeypatch):
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        assert params == {"CMID": "SM257723"}
+        return [{"cmidExists": True}]
+
+    monkeypatch.setattr(admin, "getQuery", fake_get_query)
+
+    errors = admin.validate_parent_context_list(
+        object(),
+        ['{"parent":"SM257723"}'],
+    )
+
+    assert errors == []
+
+
 def test_add_edit_delete_uses_handles_list_population_meta_type(monkeypatch):
     captured = {}
 
@@ -331,14 +346,21 @@ def test_add_edit_delete_uses_parent_validation_reports_invalid_current_cmid(mon
         admin.add_edit_delete_USES("sociomap", "tester", payload)
 
 
-def test_add_edit_delete_uses_parent_context_accepts_single_json_string(monkeypatch):
+def test_add_edit_delete_uses_parent_context_accepts_single_json_string_and_syncs_parent(monkeypatch):
     captured = {}
     payload = _base_input()
     payload["s1_8"] = "parentContext"
-    payload["s1_3"] = '{"parent":"AM27636","eventDate":"420","eventType":"FOLLOWS"}'
+    payload["s1_3"] = '{"parent":"SM257723"}'
 
     monkeypatch.setattr(admin, "getDriver", lambda database: object())
-    monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [])
+    monkeypatch.setattr(
+        admin,
+        "getPropertiesMetadata",
+        lambda driver: [
+            {"type": "relationship", "property": "parentContext", "metaType": "list"},
+            {"type": "relationship", "property": "parent", "metaType": "list"},
+        ],
+    )
     monkeypatch.setattr(admin, "processUSES", lambda **kwargs: None)
     monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
 
@@ -353,6 +375,7 @@ def test_add_edit_delete_uses_parent_context_accepts_single_json_string(monkeypa
 
     def fake_update_property(df, optionalProperties, isDataset, database, user, updateType, propertyType="USES", sep="||||"):
         captured["df"] = df.copy()
+        captured["optionalProperties"] = list(optionalProperties)
         return {"result": [{"relID": "rel-123"}], "df": df.to_dict(orient="records")}
 
     monkeypatch.setattr(admin, "updateProperty", fake_update_property)
@@ -360,8 +383,10 @@ def test_add_edit_delete_uses_parent_context_accepts_single_json_string(monkeypa
     result = admin.add_edit_delete_USES("sociomap", "tester", payload)
 
     assert result == "done"
+    assert captured["optionalProperties"] == ["parentContext", "parent"]
     row = captured["df"].to_dict(orient="records")[0]
-    assert row["parentContext"] == ['{"parent":"AM27636","eventDate":"420","eventType":"FOLLOWS"}']
+    assert row["parentContext"] == ['{"parent":"SM257723"}']
+    assert row["parent"] == ["SM257723"]
 
 
 def test_add_edit_delete_uses_parent_sends_multi_parent_list(monkeypatch):

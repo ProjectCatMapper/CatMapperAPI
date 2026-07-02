@@ -406,10 +406,11 @@ def validate_parent_context_list(driver,parent_context_list):
             errors.append((idx, "Parent CMID not in database"))
             continue
 
-        # 4️⃣ eventType validation
-        if not isinstance(event_type, str) or event_type not in VALID_EVENT_TYPES:
-            errors.append((idx, f"Invalid eventType: {event_type}"))
-            continue
+        # 4️⃣ eventType validation. eventType is optional unless eventDate exists.
+        if event_type not in (None, ""):
+            if not isinstance(event_type, str) or event_type not in VALID_EVENT_TYPES:
+                errors.append((idx, f"Invalid eventType: {event_type}"))
+                continue
 
         # 5️⃣ eventDate validation
         if event_date not in (None, ""):
@@ -430,6 +431,16 @@ def validate_parent_context_list(driver,parent_context_list):
                 continue
 
     return errors
+
+
+def _parent_cmids_from_parent_context_list(parent_context_list):
+    parent_cmids = []
+    for raw in parent_context_list:
+        pc = json.loads(raw)
+        parent = str(pc.get("parent", "")).strip()
+        if parent and parent not in parent_cmids:
+            parent_cmids.append(parent)
+    return parent_cmids
         
 ############################
 #section for add, edit, delete USES ties
@@ -557,15 +568,20 @@ def add_edit_delete_USES(database,user,input):
                     raise ValueError(
                         f"Error: {result}"
                     )        
+                parent_values = _parent_cmids_from_parent_context_list(new_property_value)
+                USES_property = ["parentContext", "parent"]
+            else:
+                USES_property = [USES_property]
 
             data = {
                     'CMID': CMID,
                     'Key': key,
                     'datasetID': datasetID,
                     'relID': relID,
-                    USES_property: new_property_value
+                    input.get('s1_8'): new_property_value
                 }
-            USES_property = [USES_property]
+            if input.get('s1_8') == "parentContext":
+                data["parent"] = parent_values
         
         if CMID[1] == "D":
             isDataset = True
