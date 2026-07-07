@@ -8,6 +8,11 @@ from datetime import datetime, timezone
 
 from CM import unlist
 from CM.keys import invalid_key_format_error, key_format_warning_messages
+from CM.ownership import (
+    new_contribution_id,
+    normalize_actor_claims,
+    validate_upload_ownership_scope,
+)
 from .auth_utils import verify_request_auth, classify_auth_error_status
 from .task_store import get_task_store, DEFAULT_UPLOAD_BATCH_SIZE
 from .task_queue import enqueue_upload_task, is_rq_enabled
@@ -67,16 +72,23 @@ def _build_auth_error_response(error_message, fallback_status=500):
     return None, status_code
 
 
-def _request_acting_user(data):
+def _request_actor_claims(data):
     credentials = unlist(data.get("cred"))
     claims = verify_request_auth(credentials=credentials, req=request)
-    acting_user = claims.get("userid") or "unknown"
+    actor_claims = normalize_actor_claims(claims)
+    acting_user = actor_claims.get("userid") or "unknown"
 
     requested_user = data.get("user")
     if requested_user is not None and str(requested_user).strip():
         if str(requested_user).strip() != str(acting_user):
             raise Exception("User does not match authenticated API key/token owner")
 
+    return actor_claims
+
+
+def _request_acting_user(data):
+    actor_claims = _request_actor_claims(data)
+    acting_user = actor_claims.get("userid") or "unknown"
     return acting_user
 
 
@@ -208,7 +220,10 @@ def _prevalidate_standard_keys(df, upload_option, merging_type):
     return warnings
 
 
-def _prepare_upload_job(data, acting_user):
+def _prepare_upload_job(data, actor_claims):
+    actor_claims = normalize_actor_claims(actor_claims)
+    acting_user = actor_claims["userid"]
+    contribution_id = new_contribution_id()
     df = data.get("df")
     database = unlist(data.get("database"))
     formData = unlist(data.get("formData"))
@@ -261,7 +276,10 @@ def _prepare_upload_job(data, acting_user):
             "geocode": False,
             "batchSize": UPLOAD_BATCH_SIZE,
             "ignoreIfSame": bool(data.get("ignore_if_same", False)),
+            "actorClaims": actor_claims,
+            "contributionId": contribution_id,
         }
+        validate_upload_ownership_scope(database, upload_option, dataset_payload, actor_claims)
         return job_args, total_rows, database, warnings
 
     if not label:
@@ -315,7 +333,10 @@ def _prepare_upload_job(data, acting_user):
         "geocode": False,
         "batchSize": UPLOAD_BATCH_SIZE,
         "ignoreIfSame": bool(data.get("ignore_if_same", False)),
+        "actorClaims": actor_claims,
+        "contributionId": contribution_id,
     }
+    validate_upload_ownership_scope(database, "add_uses", dataset_payload, actor_claims)
     return job_args, len(df), database, warnings
 
 
@@ -522,9 +543,10 @@ def upload_API():
     acting_user = "unknown"
     try:
         data = _request_json_payload()
-        acting_user = _request_acting_user(data)
+        actor_claims = _request_actor_claims(data)
+        acting_user = actor_claims.get("userid") or "unknown"
 
-        job_args, total_rows, database, warnings = _prepare_upload_job(data, acting_user)
+        job_args, total_rows, database, warnings = _prepare_upload_job(data, actor_claims)
         task_id = _start_upload_task(
             job_args=job_args,
             user=acting_user,

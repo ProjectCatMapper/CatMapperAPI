@@ -433,6 +433,7 @@ def test_upload_standard_warns_when_newkey_value_contains_reserved_token(client,
         return "upload-task-123"
 
     monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
+    monkeypatch.setattr(upload_routes, "validate_upload_ownership_scope", lambda *args, **kwargs: True)
     monkeypatch.setattr(upload_routes, "_start_upload_task", fake_start_upload_task)
 
     payload = _base_payload()

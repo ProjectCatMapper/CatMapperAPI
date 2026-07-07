@@ -29,7 +29,7 @@ import re
 #section for general use helper functions
 
 _ADMIN_MULTI_VALUE_SEPARATOR = re.compile(r"\s*(?:\|{2,}|,|;)\s*")
-_USES_SELF_CONTEXT_PROPERTY_EXCEPTIONS = {"DISTRICT"}
+_USES_SELF_CONTEXT_PROPERTY_EXCEPTIONS = {"district"}
 _USES_SELF_CONTEXT_RELATIONSHIP_EXCEPTIONS = {"AREA_OF"}
 
 
@@ -47,9 +47,13 @@ def _normalize_contextual_tie_token(value):
     return re.sub(r"[^A-Z0-9]+", "_", str(value or "").strip().upper()).strip("_")
 
 
+def _normalize_uses_property_name(value):
+    return str(value or "").strip().casefold()
+
+
 def _is_uses_self_context_exception(uses_property, relationship):
     return (
-        _normalize_contextual_tie_token(uses_property) in _USES_SELF_CONTEXT_PROPERTY_EXCEPTIONS
+        _normalize_uses_property_name(uses_property) in _USES_SELF_CONTEXT_PROPERTY_EXCEPTIONS
         or _normalize_contextual_tie_token(relationship) in _USES_SELF_CONTEXT_RELATIONSHIP_EXCEPTIONS
     )
 

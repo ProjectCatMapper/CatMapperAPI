@@ -56,7 +56,7 @@ def test_admin_edit_rejects_non_admin_bearer(client, monkeypatch):
         json={"database": "ArchaMap", "fun": "replaceProperty"},
     )
 
-    assert response.status_code == 500
+    assert response.status_code == 403
     assert "not authorized" in response.get_data(as_text=True).lower()
 
 

@@ -19,6 +19,13 @@ def _base_input():
     }
 
 
+def test_uses_self_context_exception_uses_district_property_name():
+    assert admin._is_uses_self_context_exception("district", None)
+    assert admin._is_uses_self_context_exception("District", None)
+    assert admin._is_uses_self_context_exception("language", "AREA_OF")
+    assert not admin._is_uses_self_context_exception("language", "LANGUOID_OF")
+
+
 def test_add_edit_delete_uses_uses_relid_for_selected_relation(monkeypatch):
     captured = {}
 

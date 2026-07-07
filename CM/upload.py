@@ -6,6 +6,7 @@ from .keys import *
 from .GIS import *
 from .log import *
 from .metadata import getPropertiesMetadata
+from .ownership import ownership_metadata, validate_upload_ownership_scope
 
 import json
 import os
@@ -130,8 +131,45 @@ def updateLog(f, txt, write="a"):
     if callback:
         callback(message)
 
+
+def _stamp_nodes_with_ownership(driver, node_ids, metadata):
+    node_ids = [str(node_id) for node_id in (node_ids or []) if str(node_id or "").strip()]
+    if not node_ids or not metadata:
+        return
+    query = """
+    UNWIND $nodeIds AS nodeID
+    MATCH (n)
+    WHERE elementId(n) = nodeID
+    SET
+      n.createdByUserId = $createdByUserId,
+      n.ownerUserId = $ownerUserId,
+      n.createdAt = $createdAt,
+      n.contributionId = $contributionId
+    RETURN count(n) AS stamped
+    """
+    getQuery(query=query, driver=driver, params={**metadata, "nodeIds": node_ids})
+
+
+def _stamp_uses_with_ownership(driver, rel_ids, metadata):
+    rel_ids = [str(rel_id) for rel_id in (rel_ids or []) if str(rel_id or "").strip()]
+    if not rel_ids or not metadata:
+        return
+    query = """
+    UNWIND $relIds AS relID
+    MATCH ()-[r:USES]->()
+    WHERE elementId(r) = relID
+    SET
+      r.createdByUserId = $createdByUserId,
+      r.ownerUserId = $ownerUserId,
+      r.createdAt = $createdAt,
+      r.contributionId = $contributionId
+    RETURN count(r) AS stamped
+    """
+    getQuery(query=query, driver=driver, params={**metadata, "relIds": rel_ids})
+
+
 #Creates new nodes for functions 1 and 2
-def createNodes(df, database,isDataset, user, uniqueID=None):
+def createNodes(df, database,isDataset, user, uniqueID=None, ownershipMetadata=None):
     try:
 
         driver = getDriver(database)
@@ -248,6 +286,7 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         getQuery(query=q,driver=driver)
 
         node_ids = results_df["nodeID"].tolist()
+        _stamp_nodes_with_ownership(driver, node_ids, ownershipMetadata)
 
         updateLog(f"log/{user}uploadProgress.txt", "Updating log", write="a")
 
@@ -273,7 +312,7 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
 #Creates uses ties for nodes created in functions 1 and 2
 #Currently relies on checks for duplicate rows from the main function,
 #if used independently in the future, may need more precise internal error handling.
-def createUSES(links, database, user):
+def createUSES(links, database, user, ownershipMetadata=None):
     try:
         start_time = time.time()
         if "datasetID" not in links.columns or "CMID" not in links.columns or "Key" not in links.columns:
@@ -401,6 +440,7 @@ def createUSES(links, database, user):
         )
         updateLog(f"log/{user}uploadProgress.txt", ", ".join(vars), write="a")
         result_df = pd.DataFrame(result)
+        _stamp_uses_with_ownership(driver, result_df["relID"].tolist(), ownershipMetadata)
         createLog(
             id=result_df["relID"].tolist(),
             type="relation",
@@ -2157,6 +2197,8 @@ def input_Nodes_Uses(
     mergingType="0",
     geocode=False,
     batchSize=1000,
+    actorClaims=None,
+    contributionId=None,
 ):
        
     updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write="w")
@@ -2204,6 +2246,12 @@ def input_Nodes_Uses(
         )
     
     driver = getDriver(database)
+    validate_upload_ownership_scope(database, uploadOption, dataset, actorClaims)
+    upload_ownership_metadata = (
+        ownership_metadata(actorClaims, contributionId)
+        if actorClaims
+        else None
+    )
 
     # adhoc ID used for joining and filtering output purposes.
     updateLog(f"log/{user}uploadProgress.txt", "Creating import ID", write="a")
@@ -3483,7 +3531,14 @@ def input_Nodes_Uses(
                         write="a",
                     )
 
-                    newly_created_nodes = createNodes(nodes, database, isDataset, user=user, uniqueID="importID")
+                    newly_created_nodes = createNodes(
+                        nodes,
+                        database,
+                        isDataset,
+                        user=user,
+                        uniqueID="importID",
+                        ownershipMetadata=upload_ownership_metadata,
+                    )
                     newly_created_nodes = pd.DataFrame(newly_created_nodes)
                     newly_created_nodes = newly_created_nodes.astype(str)
                     sub_dataset = sub_dataset.astype(str)
@@ -3594,7 +3649,10 @@ def input_Nodes_Uses(
                     )
                     links = links[link_cols]
                     result = createUSES(
-                        links=links, database=database, user=user
+                        links=links,
+                        database=database,
+                        user=user,
+                        ownershipMetadata=upload_ownership_metadata,
                     )
                 if isinstance(result, str):
                     updateLog(f"log/{user}uploadProgress.txt", result, write="a")

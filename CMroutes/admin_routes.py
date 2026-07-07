@@ -1,5 +1,14 @@
 from flask import Blueprint, request, jsonify, render_template, make_response
 from CM import *
+from CM.ownership import (
+    OwnershipError,
+    assert_owned_nodes,
+    assert_owned_uses_by_relids,
+    assert_owned_uses_by_triplets,
+    is_admin_claims,
+    normalize_actor_claims,
+    owned_uses_relids,
+)
 import json
 from datetime import datetime, timezone
 from .auth_utils import verify_request_auth, classify_auth_error_status
@@ -52,6 +61,81 @@ def _parse_credentials(raw_value):
         except Exception:
             return None
     return None
+
+
+OWNER_SCOPED_ADMIN_EDIT_FUNCTIONS = {
+    "add/edit/delete node property",
+    "add/edit/delete USES property",
+    "delete USES relation",
+    "move USES tie",
+}
+
+
+def _require_admin_claims(claims):
+    if not is_admin_claims(claims):
+        raise OwnershipError("User is not authorized for this admin function")
+    return True
+
+
+def _selected_uses_relid(input_payload):
+    input_payload = input_payload or {}
+    raw_selection = input_payload.get("s1_7")
+
+    relations = input_payload.get("s1_4") or []
+    try:
+        selected_index = int(raw_selection) - 1
+        if isinstance(relations, list) and 0 <= selected_index < len(relations):
+            selected_relation = relations[selected_index]
+            if isinstance(selected_relation, list) and len(selected_relation) > 1:
+                rel_props = selected_relation[1] if isinstance(selected_relation[1], dict) else {}
+                rel_id = rel_props.get("id")
+                if rel_id:
+                    return str(rel_id)
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        parsed = json.loads(raw_selection) if isinstance(raw_selection, str) else raw_selection
+    except Exception:
+        parsed = None
+    if isinstance(parsed, list) and len(parsed) > 1 and isinstance(parsed[1], dict):
+        rel_id = parsed[1].get("id")
+        if rel_id:
+            return str(rel_id)
+
+    raise ValueError("Selected USES tie is invalid or no longer available.")
+
+
+def _authorize_admin_edit_function(fun, database, input_payload, tabledata, dataset_id, claims):
+    if is_admin_claims(claims):
+        return True
+
+    if fun not in OWNER_SCOPED_ADMIN_EDIT_FUNCTIONS:
+        raise OwnershipError("User is not authorized for this admin function")
+
+    input_payload = input_payload or {}
+    if fun == "add/edit/delete node property":
+        assert_owned_nodes(database, [input_payload.get("s1_2")], claims)
+        return True
+
+    rel_id = _selected_uses_relid(input_payload)
+    assert_owned_uses_by_relids(database, [rel_id], claims)
+
+    if fun == "move USES tie":
+        additional_rows = []
+        for row in tabledata or []:
+            if not isinstance(row, dict):
+                continue
+            if row.get("optionA") == "From":
+                continue
+            additional_rows.append({
+                "CMID": row.get("CMID"),
+                "Key": row.get("Key"),
+                "datasetID": dataset_id,
+            })
+        assert_owned_uses_by_triplets(database, additional_rows, claims)
+
+    return True
 
 
 def _now_iso():
@@ -511,6 +595,15 @@ def admin_nodeproperties():
     CMID = request.args.get('CMID')
     database = request.args.get('database')
     option = request.args.get('option')
+    credentials = _parse_credentials(request.args.get("cred"))
+    try:
+        claims = normalize_actor_claims(verify_request_auth(credentials=credentials, req=request))
+        if not is_admin_claims(claims):
+            assert_owned_nodes(database, [CMID], claims)
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message, "r": {}, "r1": []}), status_code
 
     driver = getDriver(database)
 
@@ -570,6 +663,13 @@ def admin_usesproperties():
     CMID = request.args.get('CMID')
     database = request.args.get('database')
     func = request.args.get("func")
+    credentials = _parse_credentials(request.args.get("cred"))
+    try:
+        claims = normalize_actor_claims(verify_request_auth(credentials=credentials, req=request))
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message, "r": [], "r1": []}), status_code
 
     driver = getDriver(database)
 
@@ -631,6 +731,24 @@ def admin_usesproperties():
                 "r": [],
                 "r1": [],
             })
+
+        if not is_admin_claims(claims):
+            owned_rel_ids = owned_uses_relids(
+                database,
+                [record[1].get("id") for record in records_list],
+                claims,
+            )
+            records_list = [
+                record
+                for record in records_list
+                if str(record[1].get("id") or "") in owned_rel_ids
+            ]
+            if not records_list:
+                return jsonify({
+                    "error": "",
+                    "r": [],
+                    "r1": [],
+                })
         
         category_labels = records_list[0][0].get("labels", []) if records_list else []
         allowed = session.run(q1).data()
@@ -683,6 +801,13 @@ def admin_usesproperties():
 def admin_category_merging_properties():
     CMID = request.args.get('CMID')
     database = request.args.get('database')
+    credentials = _parse_credentials(request.args.get("cred"))
+    try:
+        verify_request_auth(credentials=credentials, required_role="admin", req=request)
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message, "r": [], "r1": []}), status_code
 
     driver = getDriver(database)
 
@@ -759,20 +884,27 @@ def admin_node_summary():
 
 @admin_bp.route('/check_ambiguous_usesties', methods=['POST'])
 def check_ambiguous_usesties():
-    data = request.get_data()
-    data = json.loads(data)
-    database = unlist(data.get('database'))
-    credentials = unlist(data.get("cred"))
-    input = unlist(data.get("input"))
-    CMID_from = input.get('s1_2')
-    CMID_to = input.get('s1_3')
-    USES_property = json.loads(input.get('s1_7'))
-    rel_id = USES_property[1]["id"]
-    driver = getDriver(database)
-    verify_request_auth(credentials=credentials, required_role="admin", req=request)
+    try:
+        data = request.get_data()
+        data = json.loads(data)
+        database = unlist(data.get('database'))
+        credentials = unlist(data.get("cred"))
+        input = unlist(data.get("input"))
+        CMID_from = input.get('s1_2')
+        CMID_to = input.get('s1_3')
+        USES_property = json.loads(input.get('s1_7'))
+        rel_id = USES_property[1]["id"]
+        driver = getDriver(database)
+        claims = normalize_actor_claims(verify_request_auth(credentials=credentials, req=request))
+        if not is_admin_claims(claims):
+            assert_owned_uses_by_relids(database, [rel_id], claims)
 
-    result = check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id)
-    return result
+        result = check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id)
+        return result
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 500
+        return jsonify({"error": error_message}), status_code
 
 @admin_bp.route('/admin', methods=['GET'])
 def getAdmin():
@@ -821,28 +953,40 @@ def getAdminEdit():
         apikey = unlist(data.get('apikey'))
         credentials = _parse_credentials(data.get("cred"))
         input = unlist(data.get("input"))
-        acting_user = None
+        claims = None
         auth_header = request.headers.get("Authorization", "")
         request_api_key = request.headers.get("X-API-Key", "").strip()
         auth_lower = auth_header.lower()
         has_api_key_auth = bool(request_api_key) or auth_lower.startswith("apikey ") or auth_lower.startswith("api-key ")
         if credentials or auth_header.startswith("Bearer ") or has_api_key_auth:
-            claims = verify_request_auth(credentials=credentials, required_role="admin", req=request)
-            acting_user = claims.get("userid")
+            claims = normalize_actor_claims(verify_request_auth(credentials=credentials, req=request))
         else:
             validated = False
             if apikeyEnv and apikey and apikey == apikeyEnv:
                 validated = True
-                acting_user = user
+                claims = {"userid": str(user or "legacy-admin"), "role": "admin"}
             if not validated:
                 credentials = login(user, pwd)
                 if isinstance(credentials, dict) and credentials.get('role') == "admin":
                     validated = True
-                    acting_user = credentials.get('userid')
+                    claims = {
+                        "userid": str(credentials.get("userid") or user or "legacy-admin"),
+                        "role": "admin",
+                    }
             if not validated:
                 raise Exception("User not authorized")
+        claims = normalize_actor_claims(claims)
+        acting_user = claims.get("userid")
         if not acting_user:
             acting_user = user
+        _authorize_admin_edit_function(
+            fun=fun,
+            database=database,
+            input_payload=input,
+            tabledata=data.get("tabledata"),
+            dataset_id=data.get("datasetID"),
+            claims=claims,
+        )
         
         result = "Nothing returned"
         if fun == "mergeNodes":
@@ -890,7 +1034,8 @@ def getAdminEdit():
     except Exception as e:
         # In case of an error, return an error response with an appropriate HTTP status code
         data = str(e)
-        return data, 500
+        status_code = classify_auth_error_status(data) or 500
+        return data, status_code
 
 
 @admin_bp.route('/createNodes', methods=['POST'])

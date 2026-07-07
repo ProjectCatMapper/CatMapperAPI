@@ -1,5 +1,11 @@
 import CMroutes.admin_routes as admin_routes
 import CM.admin as admin_module
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _admin_auth(monkeypatch):
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "1", "role": "admin"})
 
 
 class FakeRelationship:
