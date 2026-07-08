@@ -223,6 +223,89 @@ def test_admin_edit_allows_regular_user_delete_for_owned_isolated_node(client, m
     assert seen["cmid"] == "AM_DELETE"
 
 
+def test_admin_edit_returns_admin_review_required_for_blocked_node_delete(client, monkeypatch):
+    def blocked(database, cmid, claims):
+        raise ownership.OwnerScopedAdminReviewRequired(
+            "User is not authorized to merge or delete AM_DELETE; the CMID is referenced in other USES ties: rel-1",
+            cmid=cmid,
+            reason_code="cmid_referenced_elsewhere",
+            details={"references": ["rel-1"]},
+        )
+
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "7", "role": "user"})
+    monkeypatch.setattr(admin_routes, "assert_owner_scoped_node_removal_allowed", blocked)
+    monkeypatch.setattr(
+        admin_routes,
+        "deleteNode",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("delete should not run")),
+    )
+
+    response = client.post(
+        "/admin/edit",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "database": "ArchaMap",
+            "fun": "delete node",
+            "input": {"s1_2": "AM_DELETE"},
+        },
+    )
+
+    body = response.get_json()
+    assert response.status_code == 403
+    assert body["requiresAdminReview"] is True
+    assert body["review"]["cmid"] == "AM_DELETE"
+    assert body["review"]["reasonCode"] == "cmid_referenced_elsewhere"
+
+
+def test_node_removal_review_request_emails_admin_when_blocked(client, monkeypatch):
+    sent = {}
+
+    def blocked(database, cmid, claims):
+        raise ownership.OwnerScopedAdminReviewRequired(
+            "User is not authorized to merge or delete AM_DISCARD; the node has USES ties not owned by this user",
+            cmid=cmid,
+            reason_code="unowned_incident_uses",
+            details={"incidentUses": 2, "unownedIncidentUses": 1},
+        )
+
+    def fake_send_email(**kwargs):
+        sent.update(kwargs)
+        return "sent"
+
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "7", "role": "user"})
+    monkeypatch.setattr(admin_routes, "assert_owner_scoped_node_removal_allowed", blocked)
+    monkeypatch.setattr(admin_routes, "get_default_sender", lambda: "noreply@catmapper.org")
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(
+        admin_routes,
+        "getNodeMergeSummary",
+        lambda cmid, driver: {"CMID": cmid, "CMName": f"Node {cmid}"},
+    )
+    monkeypatch.setattr(admin_routes, "sendEmail", fake_send_email)
+
+    response = client.post(
+        "/admin/node-removal-review-request",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "database": "ArchaMap",
+            "fun": "merge nodes",
+            "input": {"s1_2": "AM_KEEP", "s1_3": "AM_DISCARD"},
+            "reason": "The duplicate was created during my upload.",
+        },
+    )
+
+    body = response.get_json()
+    assert response.status_code == 200
+    assert body["message"] == "Admin review request sent."
+    assert sent["recipients"] == ["admin@catmapper.org"]
+    assert sent["sender"] == "noreply@catmapper.org"
+    assert "merge nodes" in sent["body"]
+    assert "AM_DISCARD" in sent["body"]
+    assert "AM_KEEP" in sent["body"]
+    assert "The duplicate was created during my upload." in sent["body"]
+    assert "unowned_incident_uses" in sent["body"]
+
+
 def test_owner_helper_rejects_node_removal_with_unowned_uses_ties(monkeypatch):
     monkeypatch.setattr(ownership, "getDriver", lambda database: object())
 

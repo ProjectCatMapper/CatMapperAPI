@@ -15,6 +15,24 @@ class OwnershipError(PermissionError):
     """Raised when an authenticated non-admin user targets unowned graph data."""
 
 
+class OwnerScopedAdminReviewRequired(OwnershipError):
+    """Raised when owner-scoped node removal needs an admin review workflow."""
+
+    def __init__(self, message, *, cmid=None, reason_code=None, details=None):
+        super().__init__(message)
+        self.cmid = cmid
+        self.reason_code = reason_code
+        self.details = details or {}
+
+    def to_dict(self):
+        return {
+            "cmid": self.cmid,
+            "reasonCode": self.reason_code,
+            "details": self.details,
+            "message": str(self),
+        }
+
+
 def is_admin_claims(claims):
     return str((claims or {}).get("role") or "").strip().lower() == "admin"
 
@@ -134,9 +152,15 @@ def assert_owner_scoped_node_removal_allowed(database, cmid, claims):
     )
     incident_row = (incident_rows or [{}])[0]
     if int(incident_row.get("unownedIncidentUses") or 0) > 0:
-        raise OwnershipError(
+        raise OwnerScopedAdminReviewRequired(
             f"User is not authorized to merge or delete {target_cmid}; "
-            "the node has USES ties not owned by this user"
+            "the node has USES ties not owned by this user",
+            cmid=target_cmid,
+            reason_code="unowned_incident_uses",
+            details={
+                "incidentUses": int(incident_row.get("incidentUses") or 0),
+                "unownedIncidentUses": int(incident_row.get("unownedIncidentUses") or 0),
+            },
         )
 
     reference_query = """
@@ -159,10 +183,13 @@ def assert_owner_scoped_node_removal_allowed(database, cmid, claims):
             str(row.get("relID") or row.get("Key") or "unknown")
             for row in reference_rows
         ]
-        raise OwnershipError(
+        raise OwnerScopedAdminReviewRequired(
             f"User is not authorized to merge or delete {target_cmid}; "
             "the CMID is referenced in other USES ties: "
-            + ", ".join(rels)
+            + ", ".join(rels),
+            cmid=target_cmid,
+            reason_code="cmid_referenced_elsewhere",
+            details={"references": rels},
         )
 
     return True

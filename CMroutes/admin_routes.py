@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, render_template, make_response
 from CM import *
 from CM.ownership import (
     OwnershipError,
+    OwnerScopedAdminReviewRequired,
     assert_owner_scoped_node_removal_allowed,
     assert_owned_nodes,
     assert_owned_uses_by_relids,
@@ -158,6 +159,121 @@ def _authorize_admin_edit_function(fun, database, input_payload, tabledata, data
         assert_owned_uses_by_triplets(database, additional_rows, claims)
 
     return True
+
+
+def _node_removal_review_target(fun, input_payload):
+    input_payload = input_payload or {}
+    if fun == "merge nodes":
+        return str(input_payload.get("s1_3") or "").strip()
+    if fun == "delete node":
+        return str(input_payload.get("s1_2") or "").strip()
+    return ""
+
+
+def _safe_node_summary(database, cmid):
+    if not cmid:
+        return None
+    try:
+        return getNodeMergeSummary(cmid, getDriver(database))
+    except Exception as exc:
+        return {"CMID": cmid, "summaryError": str(exc)}
+
+
+def _format_node_removal_review_email(database, action, actor, input_payload, reason, review):
+    input_payload = input_payload or {}
+    keep_cmid = str(input_payload.get("s1_2") or "").strip() if action == "merge nodes" else ""
+    target_cmid = _node_removal_review_target(action, input_payload)
+    lines = [
+        "A CatMapper user requested admin review for a blocked node action.",
+        "",
+        f"Database: {database}",
+        f"Action: {action}",
+        f"Requested at: {datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')}",
+        f"Requester user ID: {actor.get('userid')}",
+        f"Requester role: {actor.get('role')}",
+        f"Target CMID: {target_cmid}",
+    ]
+    if keep_cmid:
+        lines.append(f"Keep CMID: {keep_cmid}")
+    lines.extend([
+        "",
+        "User reason:",
+        str(reason or "").strip(),
+        "",
+        "Blocking authorization result:",
+        str(review.get("message") or ""),
+    ])
+    reason_code = review.get("reasonCode")
+    if reason_code:
+        lines.append(f"Reason code: {reason_code}")
+    details = review.get("details") or {}
+    if details:
+        lines.extend(["", "Blocker details:", json.dumps(details, indent=2, sort_keys=True)])
+
+    target_summary = _safe_node_summary(database, target_cmid)
+    if target_summary:
+        lines.extend(["", "Target node summary:", json.dumps(target_summary, indent=2, sort_keys=True, default=str)])
+    if keep_cmid:
+        keep_summary = _safe_node_summary(database, keep_cmid)
+        if keep_summary:
+            lines.extend(["", "Keep node summary:", json.dumps(keep_summary, indent=2, sort_keys=True, default=str)])
+
+    lines.extend(["", "Submitted input:", json.dumps(input_payload, indent=2, sort_keys=True, default=str)])
+    return "\n".join(lines)
+
+
+@admin_bp.route('/admin/node-removal-review-request', methods=['POST'])
+def request_node_removal_admin_review():
+    try:
+        data = request.get_json(silent=True) or {}
+        database = unlist(data.get("database"))
+        action = unlist(data.get("fun") or data.get("action"))
+        input_payload = unlist(data.get("input")) or {}
+        reason = str(unlist(data.get("reason")) or "").strip()
+        credentials = _parse_credentials(data.get("cred"))
+
+        if database is None:
+            raise Exception("Database not specified")
+        if action not in {"merge nodes", "delete node"}:
+            raise Exception("Review requests are only supported for merge nodes and delete node")
+        if not reason:
+            raise Exception("A reason is required for admin review")
+
+        claims = normalize_actor_claims(verify_request_auth(credentials=credentials, req=request))
+        if is_admin_claims(claims):
+            raise OwnershipError("Admin users can complete this action directly")
+
+        target_cmid = _node_removal_review_target(action, input_payload)
+        if not target_cmid:
+            raise Exception("Target CMID is required")
+
+        try:
+            assert_owner_scoped_node_removal_allowed(database, target_cmid, claims)
+        except OwnerScopedAdminReviewRequired as review_error:
+            review = review_error.to_dict()
+        except Exception:
+            raise
+        else:
+            raise Exception("This action is eligible for user completion and does not require admin review")
+
+        body = _format_node_removal_review_email(database, action, claims, input_payload, reason, review)
+        sender = get_default_sender() or "admin@catmapper.org"
+        email_result = sendEmail(
+            mail=mail,
+            subject=f"CatMapper admin review requested: {action} {target_cmid}",
+            recipients=["admin@catmapper.org"],
+            body=body,
+            sender=sender,
+        )
+        return jsonify({
+            "message": "Admin review request sent.",
+            "review": review,
+            "emailResult": email_result,
+        }), 200
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message}), status_code
 
 
 def _now_iso():
@@ -1053,6 +1169,12 @@ def getAdminEdit():
         else:
             raise Exception("Function does not exist")
         return result
+    except OwnerScopedAdminReviewRequired as e:
+        return jsonify({
+            "error": str(e),
+            "requiresAdminReview": True,
+            "review": e.to_dict(),
+        }), 403
     except Exception as e:
         # In case of an error, return an error response with an appropriate HTTP status code
         data = str(e)
