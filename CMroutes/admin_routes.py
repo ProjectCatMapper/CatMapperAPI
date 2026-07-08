@@ -74,6 +74,7 @@ OWNER_SCOPED_ADMIN_EDIT_FUNCTIONS = {
 }
 
 OWNER_SCOPED_FORBIDDEN_PROPERTY_NAMES = {"log", "logid"}
+OWNER_SCOPED_USES_EDITABLE_PROPERTY_NAMES = {"key", "label", "name"}
 
 
 def _require_admin_claims(claims):
@@ -136,8 +137,8 @@ def _authorize_admin_edit_function(fun, database, input_payload, tabledata, data
 
     if fun == "add/edit/delete USES property":
         prop = str(input_payload.get("s1_8") or "").strip().lower()
-        if prop in OWNER_SCOPED_FORBIDDEN_PROPERTY_NAMES:
-            raise OwnershipError("User is not authorized to edit log properties")
+        if prop not in OWNER_SCOPED_USES_EDITABLE_PROPERTY_NAMES:
+            raise OwnershipError("User is not authorized to edit this USES property")
 
     rel_id = _selected_uses_relid(input_payload)
     assert_owned_uses_by_relids(database, [rel_id], claims)

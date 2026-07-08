@@ -107,7 +107,67 @@ def test_admin_edit_rejects_regular_user_uses_log_property(client, monkeypatch):
     )
 
     assert response.status_code == 403
-    assert "log properties" in response.get_data(as_text=True).lower()
+    assert "this uses property" in response.get_data(as_text=True).lower()
+
+
+def test_admin_edit_rejects_regular_user_uses_ownership_metadata_property(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "7", "role": "user"})
+    monkeypatch.setattr(
+        admin_routes,
+        "add_edit_delete_USES",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("uses edit should not run")),
+    )
+
+    response = client.post(
+        "/admin/edit",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "database": "ArchaMap",
+            "fun": "add/edit/delete USES property",
+            "input": {"s1_1": "edit", "s1_2": "AM1", "s1_3": "8", "s1_8": "ownerUserId"},
+        },
+    )
+
+    assert response.status_code == 403
+    assert "this uses property" in response.get_data(as_text=True).lower()
+
+
+def test_admin_edit_allows_regular_user_for_owned_uses_key_property(client, monkeypatch):
+    seen = {}
+    selected_relation = [
+        {"CMID": "AM1", "CMName": "Node"},
+        {"id": "rel-owned", "Key": "Type == A"},
+        {"CMID": "AD1", "CMName": "Dataset"},
+    ]
+
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "7", "role": "user"})
+    monkeypatch.setattr(
+        admin_routes,
+        "assert_owned_uses_by_relids",
+        lambda database, relids, claims: seen.update({"database": database, "relids": relids, "claims": claims}) or True,
+    )
+    monkeypatch.setattr(admin_routes, "add_edit_delete_USES", lambda database, user, input: "done")
+
+    response = client.post(
+        "/admin/edit",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "database": "ArchaMap",
+            "fun": "add/edit/delete USES property",
+            "input": {
+                "s1_1": "edit",
+                "s1_2": "AM1",
+                "s1_3": "Type == B",
+                "s1_4": [selected_relation],
+                "s1_7": "1",
+                "s1_8": "Key",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "done"
+    assert seen["relids"] == ["rel-owned"]
 
 
 def test_admin_edit_allows_regular_user_merge_for_owned_isolated_discard_node(client, monkeypatch):
