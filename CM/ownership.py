@@ -101,6 +101,73 @@ def assert_owned_nodes(database, cmids, claims):
     return True
 
 
+def assert_owner_scoped_node_removal_allowed(database, cmid, claims):
+    """Allow a non-admin to remove/merge away only an owned, isolated target node."""
+    actor = normalize_actor_claims(claims)
+    cmids = _dedupe_nonempty([cmid])
+    if not cmids or is_admin_claims(actor):
+        return True
+
+    assert_owned_nodes(database, cmids, actor)
+    target_cmid = cmids[0]
+    driver = getDriver(database)
+
+    incident_query = f"""
+    MATCH (n {{CMID: $cmid}})
+    OPTIONAL MATCH (n)-[r:USES]-()
+    WITH $cmid AS cmid,
+         count(r) AS incidentUses,
+         sum(
+           CASE
+             WHEN r IS NULL THEN 0
+             WHEN {_owned_count_expr("r")} = 1 THEN 0
+             ELSE 1
+           END
+         ) AS unownedIncidentUses
+    RETURN cmid, incidentUses, unownedIncidentUses
+    """
+    incident_rows = getQuery(
+        query=incident_query,
+        driver=driver,
+        params={"cmid": target_cmid, "userid": actor["userid"]},
+        type="dict",
+    )
+    incident_row = (incident_rows or [{}])[0]
+    if int(incident_row.get("unownedIncidentUses") or 0) > 0:
+        raise OwnershipError(
+            f"User is not authorized to merge or delete {target_cmid}; "
+            "the node has USES ties not owned by this user"
+        )
+
+    reference_query = """
+    MATCH (n {CMID: $cmid})
+    MATCH (:DATASET)-[r:USES]-(:CATEGORY)
+    WHERE NOT elementId(startNode(r)) = elementId(n)
+      AND NOT elementId(endNode(r)) = elementId(n)
+      AND any(k IN keys(r) WHERE toString(r[k]) = $cmid OR toString(r[k]) CONTAINS $cmid)
+    RETURN elementId(r) AS relID, r.Key AS Key
+    LIMIT 10
+    """
+    reference_rows = getQuery(
+        query=reference_query,
+        driver=driver,
+        params={"cmid": target_cmid},
+        type="dict",
+    )
+    if reference_rows:
+        rels = [
+            str(row.get("relID") or row.get("Key") or "unknown")
+            for row in reference_rows
+        ]
+        raise OwnershipError(
+            f"User is not authorized to merge or delete {target_cmid}; "
+            "the CMID is referenced in other USES ties: "
+            + ", ".join(rels)
+        )
+
+    return True
+
+
 def assert_owned_uses_by_relids(database, relids, claims):
     actor = normalize_actor_claims(claims)
     relids = _dedupe_nonempty(relids)

@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, render_template, make_response
 from CM import *
 from CM.ownership import (
     OwnershipError,
+    assert_owner_scoped_node_removal_allowed,
     assert_owned_nodes,
     assert_owned_uses_by_relids,
     assert_owned_uses_by_triplets,
@@ -68,7 +69,11 @@ OWNER_SCOPED_ADMIN_EDIT_FUNCTIONS = {
     "add/edit/delete USES property",
     "delete USES relation",
     "move USES tie",
+    "merge nodes",
+    "delete node",
 }
+
+OWNER_SCOPED_FORBIDDEN_PROPERTY_NAMES = {"log", "logid"}
 
 
 def _require_admin_claims(claims):
@@ -115,8 +120,24 @@ def _authorize_admin_edit_function(fun, database, input_payload, tabledata, data
 
     input_payload = input_payload or {}
     if fun == "add/edit/delete node property":
+        prop = str(input_payload.get("s1_7") or "").strip().lower()
+        if prop in OWNER_SCOPED_FORBIDDEN_PROPERTY_NAMES:
+            raise OwnershipError("User is not authorized to edit log properties")
         assert_owned_nodes(database, [input_payload.get("s1_2")], claims)
         return True
+
+    if fun == "merge nodes":
+        assert_owner_scoped_node_removal_allowed(database, input_payload.get("s1_3"), claims)
+        return True
+
+    if fun == "delete node":
+        assert_owner_scoped_node_removal_allowed(database, input_payload.get("s1_2"), claims)
+        return True
+
+    if fun == "add/edit/delete USES property":
+        prop = str(input_payload.get("s1_8") or "").strip().lower()
+        if prop in OWNER_SCOPED_FORBIDDEN_PROPERTY_NAMES:
+            raise OwnershipError("User is not authorized to edit log properties")
 
     rel_id = _selected_uses_relid(input_payload)
     assert_owned_uses_by_relids(database, [rel_id], claims)

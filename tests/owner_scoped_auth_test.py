@@ -66,12 +66,12 @@ def test_admin_edit_allows_regular_user_for_owned_node_property(client, monkeypa
     assert captured["claims"]["userid"] == "7"
 
 
-def test_admin_edit_rejects_regular_user_for_global_admin_function(client, monkeypatch):
+def test_admin_edit_rejects_regular_user_node_log_property(client, monkeypatch):
     monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "7", "role": "user"})
     monkeypatch.setattr(
         admin_routes,
-        "mergeNodes",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("mergeNodes should not run")),
+        "add_edit_delete_Node",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("node edit should not run")),
     )
 
     response = client.post(
@@ -79,13 +79,124 @@ def test_admin_edit_rejects_regular_user_for_global_admin_function(client, monke
         headers={"Authorization": "Bearer test-token"},
         json={
             "database": "ArchaMap",
-            "fun": "merge nodes",
-            "input": {"s1_2": "AM1", "s1_3": "AM2"},
+            "fun": "add/edit/delete node property",
+            "input": {"s1_1": "edit", "s1_2": "AM1", "s1_3": "tamper", "s1_7": "log"},
         },
     )
 
     assert response.status_code == 403
-    assert "not authorized" in response.get_data(as_text=True).lower()
+    assert "log properties" in response.get_data(as_text=True).lower()
+
+
+def test_admin_edit_rejects_regular_user_uses_log_property(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "7", "role": "user"})
+    monkeypatch.setattr(
+        admin_routes,
+        "add_edit_delete_USES",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("uses edit should not run")),
+    )
+
+    response = client.post(
+        "/admin/edit",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "database": "ArchaMap",
+            "fun": "add/edit/delete USES property",
+            "input": {"s1_1": "edit", "s1_2": "AM1", "s1_3": "tamper", "s1_8": "logID"},
+        },
+    )
+
+    assert response.status_code == 403
+    assert "log properties" in response.get_data(as_text=True).lower()
+
+
+def test_admin_edit_allows_regular_user_merge_for_owned_isolated_discard_node(client, monkeypatch):
+    seen = {}
+
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "7", "role": "user"})
+    monkeypatch.setattr(
+        admin_routes,
+        "assert_owner_scoped_node_removal_allowed",
+        lambda database, cmid, claims: seen.update({"database": database, "cmid": cmid, "claims": claims}) or True,
+    )
+    monkeypatch.setattr(admin_routes, "mergeNodes", lambda keep, discard, user, database: f"merged {discard} into {keep}")
+
+    response = client.post(
+        "/admin/edit",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "database": "ArchaMap",
+            "fun": "merge nodes",
+            "input": {"s1_2": "AM_KEEP", "s1_3": "AM_DISCARD"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "merged AM_DISCARD into AM_KEEP"
+    assert seen["cmid"] == "AM_DISCARD"
+    assert seen["claims"]["userid"] == "7"
+
+
+def test_admin_edit_allows_regular_user_delete_for_owned_isolated_node(client, monkeypatch):
+    seen = {}
+
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "7", "role": "user"})
+    monkeypatch.setattr(
+        admin_routes,
+        "assert_owner_scoped_node_removal_allowed",
+        lambda database, cmid, claims: seen.update({"database": database, "cmid": cmid, "claims": claims}) or True,
+    )
+    monkeypatch.setattr(admin_routes, "deleteNode", lambda database, user, input: "deleted")
+
+    response = client.post(
+        "/admin/edit",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "database": "ArchaMap",
+            "fun": "delete node",
+            "input": {"s1_2": "AM_DELETE"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_data(as_text=True) == "deleted"
+    assert seen["cmid"] == "AM_DELETE"
+
+
+def test_owner_helper_rejects_node_removal_with_unowned_uses_ties(monkeypatch):
+    monkeypatch.setattr(ownership, "getDriver", lambda database: object())
+
+    def fake_get_query(**kwargs):
+        query = kwargs.get("query", "")
+        if "count(n) AS targetCount" in query:
+            return [{"cmid": "AM1", "targetCount": 1, "ownedCount": 1}]
+        if "unownedIncidentUses" in query:
+            return [{"cmid": "AM1", "incidentUses": 2, "unownedIncidentUses": 1}]
+        raise AssertionError("reference query should not run after unowned incident USES")
+
+    monkeypatch.setattr(ownership, "getQuery", fake_get_query)
+
+    with pytest.raises(ownership.OwnershipError, match="USES ties not owned"):
+        ownership.assert_owner_scoped_node_removal_allowed("ArchaMap", "AM1", {"userid": "7", "role": "user"})
+
+
+def test_owner_helper_rejects_node_removal_when_cmid_referenced_elsewhere(monkeypatch):
+    monkeypatch.setattr(ownership, "getDriver", lambda database: object())
+
+    def fake_get_query(**kwargs):
+        query = kwargs.get("query", "")
+        if "count(n) AS targetCount" in query:
+            return [{"cmid": "AM1", "targetCount": 1, "ownedCount": 1}]
+        if "unownedIncidentUses" in query:
+            return [{"cmid": "AM1", "incidentUses": 1, "unownedIncidentUses": 0}]
+        if "keys(r)" in query:
+            return [{"relID": "rel-other", "Key": "Type == A"}]
+        raise AssertionError(f"unexpected query: {query}")
+
+    monkeypatch.setattr(ownership, "getQuery", fake_get_query)
+
+    with pytest.raises(ownership.OwnershipError, match="referenced in other USES ties"):
+        ownership.assert_owner_scoped_node_removal_allowed("ArchaMap", "AM1", {"userid": "7", "role": "user"})
 
 
 def test_upload_replacement_queue_carries_actor_and_checks_scope(client, monkeypatch):
