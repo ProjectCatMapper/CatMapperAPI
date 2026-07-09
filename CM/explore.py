@@ -1144,8 +1144,24 @@ def _feature_metadata_from_row(row):
 
 
 def _apply_polygon_metadata(feature, polygon, preserve_metadata=False):
+    if not isinstance(feature, dict):
+        return feature
+
+    if feature.get("type") == "FeatureCollection":
+        feature["source"] = polygon.get("source")
+        feature["features"] = [
+            _apply_polygon_metadata(child, polygon, preserve_metadata)
+            for child in feature.get("features", [])
+        ]
+        return feature
+
     feature["source"] = polygon.get("source")
     if not preserve_metadata:
+        properties = feature.get("properties")
+        if isinstance(properties, dict):
+            properties["source"] = polygon.get("source")
+        else:
+            feature["properties"] = {"source": polygon.get("source")}
         return feature
 
     metadata = _feature_metadata_from_row(polygon)

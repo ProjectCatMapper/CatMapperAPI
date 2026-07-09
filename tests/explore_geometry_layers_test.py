@@ -147,6 +147,41 @@ def test_geometry_counts_only_include_polygons_present_in_gisdb(monkeypatch):
     assert counts["AM2"] == {"pointCount": 0, "polygonCount": 1}
 
 
+def test_process_polygons_propagates_source_to_nested_feature_collection():
+    nested_geometry = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 0]]],
+                },
+            }
+        ],
+    }
+
+    polygons, sources = explore._process_polygons(
+        [
+            {
+                "geometry": json.dumps(nested_geometry),
+                "source": "GADM3.6",
+                "inherited": True,
+                "inheritedFromCMID": "SM2142",
+                "inheritedFromName": "Manitoba",
+            }
+        ],
+        preserve_metadata=True,
+    )
+
+    nested_feature = polygons[0]["features"][0]
+    assert sources == ["GADM3.6"]
+    assert nested_feature["source"] == "GADM3.6"
+    assert nested_feature["properties"]["source"] == "GADM3.6"
+    assert nested_feature["properties"]["inheritedFromCMID"] == "SM2142"
+
+
 def test_map_layer_options_route(client, monkeypatch):
     monkeypatch.setattr(
         explore_routes,
