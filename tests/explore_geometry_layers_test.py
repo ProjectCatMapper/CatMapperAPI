@@ -49,6 +49,11 @@ def test_explore_geometry_related_layer_adds_provenance_without_direct(monkeypat
     )
     monkeypatch.setattr(
         explore,
+        "_get_related_map_node_counts",
+        lambda neo4j_driver, cmid, relationships: {"AREA_OF": 5},
+    )
+    monkeypatch.setattr(
+        explore,
         "_get_points_for_cmids",
         lambda neo4j_driver, cmids: [
             {
@@ -78,6 +83,9 @@ def test_explore_geometry_related_layer_adds_provenance_without_direct(monkeypat
     assert related_layer["points"][0]["inheritedFromCMID"] == "AM2"
     assert related_layer["points"][0]["inheritedFromName"] == "District A"
     assert related_layer["points"][0]["inheritanceRelationship"] == "AREA_OF"
+    assert related_layer["nodeLimited"] is True
+    assert related_layer["displayedNodeCount"] == 1
+    assert related_layer["totalNodeCount"] == 5
 
 
 def test_map_layer_options_summarize_direct_related_and_descendant(monkeypatch):
@@ -102,10 +110,23 @@ def test_map_layer_options_summarize_direct_related_and_descendant(monkeypatch):
     )
     monkeypatch.setattr(
         explore,
+        "_get_related_map_node_counts",
+        lambda neo4j_driver, cmid, relationships: {"AREA_OF": 3},
+    )
+    monkeypatch.setattr(
+        explore,
         "_get_descendant_map_nodes",
         lambda neo4j_driver, cmid, max_depth, node_limit: [
             {"CMID": "AM3", "CMName": "Language A", "relationship": "CONTAINS", "depth": 1}
         ],
+    )
+    monkeypatch.setattr(
+        explore,
+        "_get_descendant_map_node_summary",
+        lambda neo4j_driver, cmid, max_depth: {
+            "totalNodeCount": 4,
+            "depthCounts": [{"depth": 1, "nodeCount": 2}, {"depth": 2, "nodeCount": 2}],
+        },
     )
 
     payload = explore.getMapLayerOptions("ArchaMap", "AM1")
@@ -114,8 +135,17 @@ def test_map_layer_options_summarize_direct_related_and_descendant(monkeypatch):
     assert layers["direct"]["available"] is True
     assert layers["related:AREA_OF"]["available"] is True
     assert layers["related:AREA_OF"]["polygonCount"] == 2
+    assert layers["related:AREA_OF"]["displayedNodeCount"] == 1
+    assert layers["related:AREA_OF"]["totalNodeCount"] == 3
+    assert layers["related:AREA_OF"]["nodeLimited"] is True
     assert layers["descendants:CONTAINS"]["available"] is True
     assert layers["descendants:CONTAINS"]["pointCount"] == 3
+    assert layers["descendants:CONTAINS"]["displayedNodeCount"] == 1
+    assert layers["descendants:CONTAINS"]["totalNodeCount"] == 4
+    assert layers["descendants:CONTAINS"]["depthCounts"] == [
+        {"depth": 1, "nodeCount": 2},
+        {"depth": 2, "nodeCount": 2},
+    ]
 
 
 def test_geometry_counts_only_include_polygons_present_in_gisdb(monkeypatch):

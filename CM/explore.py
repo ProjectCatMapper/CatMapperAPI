@@ -715,6 +715,27 @@ def _get_related_map_nodes(driver, cmid, relationships, node_limit):
     )
 
 
+def _get_related_map_node_counts(driver, cmid, relationships):
+    if not relationships:
+        return {}
+
+    query = """
+    MATCH (n:CATEGORY {CMID: $cmid})-[r]-(related:CATEGORY)
+    WHERE type(r) IN $relationships AND related.CMID <> $cmid
+    RETURN type(r) AS relationship, count(DISTINCT related) AS totalNodeCount
+    """
+    rows = getQuery(
+        query,
+        driver,
+        params={"cmid": cmid, "relationships": relationships},
+    )
+    return {
+        row.get("relationship"): int(row.get("totalNodeCount") or 0)
+        for row in rows
+        if row.get("relationship")
+    }
+
+
 def _get_descendant_map_nodes(driver, cmid, max_depth, node_limit):
     max_depth = _coerce_int(max_depth, DEFAULT_MAP_DESCENDANT_DEPTH, 1, MAX_MAP_DESCENDANT_DEPTH)
     query = f"""
@@ -736,6 +757,28 @@ def _get_descendant_map_nodes(driver, cmid, max_depth, node_limit):
     LIMIT $node_limit
     """
     return getQuery(query, driver, params={"cmid": cmid, "node_limit": node_limit})
+
+
+def _get_descendant_map_node_summary(driver, cmid, max_depth):
+    max_depth = _coerce_int(max_depth, DEFAULT_MAP_DESCENDANT_DEPTH, 1, MAX_MAP_DESCENDANT_DEPTH)
+    query = f"""
+    MATCH (n:CATEGORY {{CMID: $cmid}})
+    MATCH path=(n)-[:CONTAINS*1..{max_depth}]->(descendant:CATEGORY)
+    WHERE descendant.CMID <> $cmid
+    WITH descendant, min(length(path)) AS depth
+    WITH depth, count(descendant) AS nodeCount
+    ORDER BY depth
+    WITH collect({{depth: depth, nodeCount: nodeCount}}) AS depthCounts, sum(nodeCount) AS totalNodeCount
+    RETURN totalNodeCount, depthCounts
+    """
+    rows = getQuery(query, driver, params={"cmid": cmid})
+    if not rows:
+        return {"totalNodeCount": 0, "depthCounts": []}
+    row = rows[0]
+    return {
+        "totalNodeCount": int(row.get("totalNodeCount") or 0),
+        "depthCounts": row.get("depthCounts") or [],
+    }
 
 
 def _get_points_for_cmids(driver, cmids):
@@ -809,6 +852,8 @@ def _get_polygons_for_cmids(driver, cmids, simple=True):
 
 def _build_layer_option(layer_id, label, mode, nodes, counts_by_cmid, **extra):
     node_count = len(nodes)
+    total_node_count = extra.pop("totalNodeCount", node_count)
+    node_limit = extra.get("nodeLimit")
     point_count = sum(counts_by_cmid.get(node.get("CMID"), {}).get("pointCount", 0) for node in nodes)
     polygon_count = sum(counts_by_cmid.get(node.get("CMID"), {}).get("polygonCount", 0) for node in nodes)
     option = {
@@ -817,6 +862,11 @@ def _build_layer_option(layer_id, label, mode, nodes, counts_by_cmid, **extra):
         "mode": mode,
         "available": point_count > 0 or polygon_count > 0,
         "nodeCount": node_count,
+        "displayedNodeCount": node_count,
+        "totalNodeCount": total_node_count,
+        "truncatedNodeCount": max(0, total_node_count - node_count),
+        "nodeLimited": total_node_count > node_count,
+        "nodeLimit": node_limit,
         "pointCount": point_count,
         "polygonCount": polygon_count,
     }
@@ -852,6 +902,9 @@ def getMapLayerOptions(database, cmid, max_depth=DEFAULT_MAP_DESCENDANT_DEPTH, n
     related_nodes = _get_related_map_nodes(
         driver, cmid, MAP_INHERITANCE_RELATIONSHIPS, node_limit
     )
+    related_total_counts = _get_related_map_node_counts(
+        driver, cmid, MAP_INHERITANCE_RELATIONSHIPS
+    )
     related_counts = _get_geometry_counts_for_cmids(
         driver, [node.get("CMID") for node in related_nodes]
     )
@@ -870,10 +923,13 @@ def getMapLayerOptions(database, cmid, max_depth=DEFAULT_MAP_DESCENDANT_DEPTH, n
                 relationship_nodes,
                 related_counts,
                 relationship=relationship,
+                totalNodeCount=related_total_counts.get(relationship, len(relationship_nodes)),
+                nodeLimit=node_limit,
             )
         )
 
     descendant_nodes = _get_descendant_map_nodes(driver, cmid, max_depth, node_limit)
+    descendant_summary = _get_descendant_map_node_summary(driver, cmid, max_depth)
     descendant_counts = _get_geometry_counts_for_cmids(
         driver, [node.get("CMID") for node in descendant_nodes]
     )
@@ -887,6 +943,9 @@ def getMapLayerOptions(database, cmid, max_depth=DEFAULT_MAP_DESCENDANT_DEPTH, n
                 descendant_counts,
                 relationship="CONTAINS",
                 maxDepth=max_depth,
+                totalNodeCount=descendant_summary.get("totalNodeCount", len(descendant_nodes)),
+                depthCounts=descendant_summary.get("depthCounts", []),
+                nodeLimit=node_limit,
             )
         )
 
@@ -929,13 +988,33 @@ def _annotate_rows_for_inherited_layer(rows, nodes_by_cmid, mode, relationship):
     return annotated
 
 
-def _build_geometry_layer(layer_id, label, mode, points, polygons, nodes=None, relationship=None, truncated=0):
+def _build_geometry_layer(
+    layer_id,
+    label,
+    mode,
+    points,
+    polygons,
+    nodes=None,
+    relationship=None,
+    truncated=0,
+    total_node_count=None,
+    node_limit=None,
+    depth_counts=None,
+):
+    displayed_node_count = len(nodes or [])
+    total_node_count = displayed_node_count if total_node_count is None else total_node_count
     return {
         "id": layer_id,
         "label": label,
         "mode": mode,
         "relationship": relationship,
-        "nodeCount": len(nodes or []),
+        "nodeCount": displayed_node_count,
+        "displayedNodeCount": displayed_node_count,
+        "totalNodeCount": total_node_count,
+        "truncatedNodeCount": max(0, total_node_count - displayed_node_count),
+        "nodeLimited": total_node_count > displayed_node_count,
+        "nodeLimit": node_limit,
+        "depthCounts": depth_counts or [],
         "pointCount": len(points or []),
         "polygonCount": _polygon_feature_count(polygons),
         "truncatedFeatureCount": truncated,
@@ -944,9 +1023,31 @@ def _build_geometry_layer(layer_id, label, mode, points, polygons, nodes=None, r
     }
 
 
-def _build_inherited_geometry_layer(driver, layer_id, label, mode, nodes, relationship, feature_limit):
+def _build_inherited_geometry_layer(
+    driver,
+    layer_id,
+    label,
+    mode,
+    nodes,
+    relationship,
+    feature_limit,
+    total_node_count=None,
+    node_limit=None,
+    depth_counts=None,
+):
     if not nodes:
-        return _build_geometry_layer(layer_id, label, mode, [], [], [], relationship)
+        return _build_geometry_layer(
+            layer_id,
+            label,
+            mode,
+            [],
+            [],
+            [],
+            relationship,
+            total_node_count=total_node_count,
+            node_limit=node_limit,
+            depth_counts=depth_counts,
+        )
 
     nodes_by_cmid = {node.get("CMID"): node for node in nodes if node.get("CMID")}
     cmids = list(nodes_by_cmid.keys())
@@ -971,6 +1072,9 @@ def _build_inherited_geometry_layer(driver, layer_id, label, mode, nodes, relati
         nodes,
         relationship,
         truncated_points + truncated_polygons,
+        total_node_count=total_node_count,
+        node_limit=node_limit,
+        depth_counts=depth_counts,
     )
     layer["badsources"] = bad_sources
     return layer
@@ -1050,6 +1154,7 @@ def exploreGeometry(
 
     if MAP_LAYER_RELATED in requested_layers and requested_relations:
         related_nodes = _get_related_map_nodes(driver, cmid, requested_relations, node_limit)
+        related_total_counts = _get_related_map_node_counts(driver, cmid, requested_relations)
         nodes_by_relationship = defaultdict(list)
         for node in related_nodes:
             nodes_by_relationship[node.get("relationship")].append(node)
@@ -1066,11 +1171,14 @@ def exploreGeometry(
                     relationship_nodes,
                     relationship,
                     feature_limit,
+                    total_node_count=related_total_counts.get(relationship, len(relationship_nodes)),
+                    node_limit=node_limit,
                 )
             )
 
     if MAP_LAYER_DESCENDANTS in requested_layers:
         descendant_nodes = _get_descendant_map_nodes(driver, cmid, max_depth, node_limit)
+        descendant_summary = _get_descendant_map_node_summary(driver, cmid, max_depth)
         if descendant_nodes:
             map_layers.append(
                 _build_inherited_geometry_layer(
@@ -1081,6 +1189,9 @@ def exploreGeometry(
                     descendant_nodes,
                     "CONTAINS",
                     feature_limit,
+                    total_node_count=descendant_summary.get("totalNodeCount", len(descendant_nodes)),
+                    node_limit=node_limit,
+                    depth_counts=descendant_summary.get("depthCounts", []),
                 )
             )
 
