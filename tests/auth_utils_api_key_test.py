@@ -1,4 +1,5 @@
 import CMroutes.auth_utils as auth_utils
+from itsdangerous import BadSignature, SignatureExpired
 
 
 class DummyRequest:
@@ -118,3 +119,39 @@ def test_verify_request_auth_rejects_required_userid_mismatch_from_api_key(monke
         assert "do not match" in str(exc).lower()
     else:
         raise AssertionError("Expected userid mismatch to fail")
+
+
+def test_verify_request_auth_reports_expired_bearer_token(monkeypatch):
+    class ExpiredSerializer:
+        def loads(self, token, max_age=None):
+            raise SignatureExpired("expired")
+
+    monkeypatch.setattr(auth_utils, "_serializer", lambda: ExpiredSerializer())
+
+    try:
+        auth_utils.verify_request_auth(
+            req=DummyRequest(headers={"Authorization": "Bearer stale-token"}),
+        )
+    except Exception as exc:
+        assert "session expired" in str(exc).lower()
+        assert auth_utils.classify_auth_error_status(exc) == 401
+    else:
+        raise AssertionError("Expected expired bearer token to fail")
+
+
+def test_verify_request_auth_reports_invalid_bearer_token(monkeypatch):
+    class InvalidSerializer:
+        def loads(self, token, max_age=None):
+            raise BadSignature("bad signature")
+
+    monkeypatch.setattr(auth_utils, "_serializer", lambda: InvalidSerializer())
+
+    try:
+        auth_utils.verify_request_auth(
+            req=DummyRequest(headers={"Authorization": "Bearer invalid-token"}),
+        )
+    except Exception as exc:
+        assert "invalid token" in str(exc).lower()
+        assert auth_utils.classify_auth_error_status(exc) == 401
+    else:
+        raise AssertionError("Expected invalid bearer token to fail")
