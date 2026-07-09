@@ -611,28 +611,85 @@ def _get_geometry_counts_for_cmids(driver, cmids):
     if not cmids:
         return {}
 
-    query = """
+    counts = {
+        cmid: {
+            "pointCount": 0,
+            "polygonCount": 0,
+        }
+        for cmid in cmids
+    }
+
+    point_query = """
     UNWIND $cmids AS cmid
     MATCH (c:CATEGORY {CMID: cmid})
     OPTIONAL MATCH (c)<-[pointRel:USES]-(:DATASET)
     WHERE pointRel.geoCoords IS NOT NULL
-    WITH c, count(DISTINCT pointRel) AS pointCount
-    OPTIONAL MATCH (c)<-[polyRel:USES]-(:DATASET)
-    WHERE polyRel.geoPolygon IS NOT NULL
     RETURN
         c.CMID AS CMID,
-        pointCount,
-        count(DISTINCT polyRel) AS polygonCount
+        count(DISTINCT pointRel) AS pointCount
     """
-    rows = getQuery(query, driver, params={"cmids": cmids})
-    return {
-        row.get("CMID"): {
-            "pointCount": int(row.get("pointCount") or 0),
-            "polygonCount": int(row.get("polygonCount") or 0),
-        }
-        for row in rows
-        if row.get("CMID")
-    }
+    for row in getQuery(point_query, driver, params={"cmids": cmids}):
+        cmid = row.get("CMID")
+        if cmid in counts:
+            counts[cmid]["pointCount"] = int(row.get("pointCount") or 0)
+
+    polygon_ref_query = """
+    MATCH (c:CATEGORY)<-[polyRel:USES]-(:DATASET)
+    WHERE c.CMID IN $cmids AND polyRel.geoPolygon IS NOT NULL
+    RETURN c.CMID AS CMID, polyRel.geoPolygon AS geomID
+    """
+    polygon_refs = getQuery(polygon_ref_query, driver, params={"cmids": cmids})
+    geom_to_cmids = defaultdict(set)
+    for row in polygon_refs:
+        cmid = row.get("CMID")
+        geom_ids = _normalize_geom_ids(row.get("geomID"))
+        for geom_id in geom_ids:
+            geom_to_cmids[geom_id].add(cmid)
+
+    if geom_to_cmids:
+        try:
+            driver_gis = getDriver('gisdb')
+            geometry_count_query = """
+            UNWIND $geomIDs AS geomID
+            MATCH (g:GEOMETRY)
+            WHERE g.geomID = geomID
+            RETURN DISTINCT g.geomID AS geomID
+            """
+            found_geometries = getQuery(
+                geometry_count_query,
+                driver_gis,
+                params={"geomIDs": list(geom_to_cmids.keys())},
+            )
+            for row in found_geometries:
+                for cmid in geom_to_cmids.get(row.get("geomID"), []):
+                    if cmid in counts:
+                        counts[cmid]["polygonCount"] += 1
+        except Exception:
+            # The options endpoint should not fail the Explore page when gisdb is down.
+            pass
+
+    return counts
+
+
+def _normalize_geom_ids(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        values = []
+        for item in value:
+            values.extend(_normalize_geom_ids(item))
+        return values
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        if text.startswith("[") and text.endswith("]"):
+            try:
+                return _normalize_geom_ids(json.loads(text))
+            except (json.JSONDecodeError, TypeError):
+                return [text]
+        return [text]
+    return [value]
 
 
 def _get_related_map_nodes(driver, cmid, relationships, node_limit):

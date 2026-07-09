@@ -118,6 +118,35 @@ def test_map_layer_options_summarize_direct_related_and_descendant(monkeypatch):
     assert layers["descendants:CONTAINS"]["pointCount"] == 3
 
 
+def test_geometry_counts_only_include_polygons_present_in_gisdb(monkeypatch):
+    graph_driver = object()
+    gis_driver = object()
+
+    def fake_get_query(query, driver, params=None, **kwargs):
+        if "pointRel.geoCoords" in query:
+            return [
+                {"CMID": "AM1", "pointCount": 1},
+                {"CMID": "AM2", "pointCount": 0},
+            ]
+        if "polyRel.geoPolygon AS geomID" in query:
+            return [
+                {"CMID": "AM1", "geomID": "missing-geom"},
+                {"CMID": "AM2", "geomID": ["present-geom", "other-missing-geom"]},
+            ]
+        if "MATCH (g:GEOMETRY)" in query:
+            assert driver is gis_driver
+            return [{"geomID": "present-geom"}]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(explore, "getQuery", fake_get_query)
+    monkeypatch.setattr(explore, "getDriver", lambda database: gis_driver)
+
+    counts = explore._get_geometry_counts_for_cmids(graph_driver, ["AM1", "AM2"])
+
+    assert counts["AM1"] == {"pointCount": 1, "polygonCount": 0}
+    assert counts["AM2"] == {"pointCount": 0, "polygonCount": 1}
+
+
 def test_map_layer_options_route(client, monkeypatch):
     monkeypatch.setattr(
         explore_routes,
