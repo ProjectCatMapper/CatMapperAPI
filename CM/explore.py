@@ -499,34 +499,435 @@ def custom_sort(item):
         'HAS_GEOMETRY': 2,
     }
     return priority.get(item, 999), item
-    
-def exploreGeometry(database, cmid):
+
+
+MAP_LAYER_DIRECT = "direct"
+MAP_LAYER_RELATED = "related"
+MAP_LAYER_DESCENDANTS = "descendants"
+MAP_INHERITANCE_RELATIONSHIPS = [
+    "AREA_OF",
+    "LANGUOID_OF",
+    "RELIGION_OF",
+    "PERIOD_OF",
+    "CULTURE_OF",
+    "POLITY_OF",
+    "VARIABLE_OF",
+]
+DEFAULT_MAP_DESCENDANT_DEPTH = 5
+MAX_MAP_DESCENDANT_DEPTH = 8
+DEFAULT_MAP_NODE_LIMIT = 250
+MAX_MAP_NODE_LIMIT = 1000
+DEFAULT_MAP_FEATURE_LIMIT = 2000
+MAX_MAP_FEATURE_LIMIT = 10000
+
+
+def _split_param_values(value):
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        values = []
+        for item in value:
+            values.extend(_split_param_values(item))
+        return values
+    return [item.strip() for item in str(value).split(",") if item.strip()]
+
+
+def _coerce_int(value, default, minimum, maximum):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, min(maximum, parsed))
+
+
+def _normalize_map_layers(layers):
+    requested = [item.lower() for item in _split_param_values(layers)]
+    if not requested:
+        return [MAP_LAYER_DIRECT]
+    allowed = {MAP_LAYER_DIRECT, MAP_LAYER_RELATED, MAP_LAYER_DESCENDANTS}
+    normalized = [item for item in requested if item in allowed]
+    return normalized or [MAP_LAYER_DIRECT]
+
+
+def _normalize_inheritance_relations(relations):
+    requested = [item.upper() for item in _split_param_values(relations)]
+    if not requested:
+        return list(MAP_INHERITANCE_RELATIONSHIPS)
+    allowed = set(MAP_INHERITANCE_RELATIONSHIPS)
+    return [item for item in requested if item in allowed]
+
+
+def _empty_geometry_payload():
+    return {
+        "polygons": [],
+        "points": [],
+        "datasetpoints": [],
+        "polysources": [],
+        "badsources": [],
+    }
+
+
+def _polygon_feature_count(polygons):
+    if not polygons:
+        return 0
+    if isinstance(polygons, dict):
+        if isinstance(polygons.get("features"), list):
+            return len(polygons["features"])
+        if polygons.get("type"):
+            return 1
+        return 0
+    if isinstance(polygons, list):
+        return len(polygons)
+    return 0
+
+
+def _limit_points(points, feature_limit):
+    if not isinstance(points, list):
+        return [], 0
+    if len(points) <= feature_limit:
+        return points, 0
+    return points[:feature_limit], len(points) - feature_limit
+
+
+def _limit_polygons(polygons, feature_limit):
+    count = _polygon_feature_count(polygons)
+    if count <= feature_limit:
+        return polygons, 0
+
+    truncated = count - feature_limit
+    if isinstance(polygons, dict) and isinstance(polygons.get("features"), list):
+        limited = polygons.copy()
+        limited["features"] = polygons["features"][:feature_limit]
+        return limited, truncated
+    if isinstance(polygons, list):
+        return polygons[:feature_limit], truncated
+    if feature_limit < 1:
+        return [], truncated
+    return polygons, truncated
+
+
+def _get_geometry_counts_for_cmids(driver, cmids):
+    cmids = [cmid for cmid in dict.fromkeys(cmids or []) if cmid]
+    if not cmids:
+        return {}
+
+    query = """
+    UNWIND $cmids AS cmid
+    MATCH (c:CATEGORY {CMID: cmid})
+    OPTIONAL MATCH (c)<-[pointRel:USES]-(:DATASET)
+    WHERE pointRel.geoCoords IS NOT NULL
+    WITH c, count(DISTINCT pointRel) AS pointCount
+    OPTIONAL MATCH (c)<-[polyRel:USES]-(:DATASET)
+    WHERE polyRel.geoPolygon IS NOT NULL
+    RETURN
+        c.CMID AS CMID,
+        pointCount,
+        count(DISTINCT polyRel) AS polygonCount
     """
-    Explore and process geometry data for a given CMID.
-    
-    Args:
-        database: Database identifier
-        cmid: Content Management ID
-        
-    Returns:
-        dict: Dictionary containing polygons, points, dataset points, sources, and errors
+    rows = getQuery(query, driver, params={"cmids": cmids})
+    return {
+        row.get("CMID"): {
+            "pointCount": int(row.get("pointCount") or 0),
+            "polygonCount": int(row.get("polygonCount") or 0),
+        }
+        for row in rows
+        if row.get("CMID")
+    }
+
+
+def _get_related_map_nodes(driver, cmid, relationships, node_limit):
+    if not relationships:
+        return []
+
+    query = """
+    MATCH (n:CATEGORY {CMID: $cmid})-[r]-(related:CATEGORY)
+    WHERE type(r) IN $relationships AND related.CMID <> $cmid
+    RETURN DISTINCT
+        related.CMID AS CMID,
+        coalesce(related.CMName, related.Name, related.CMID) AS CMName,
+        labels(related) AS labels,
+        type(r) AS relationship,
+        [n.CMID, related.CMID] AS path
+    ORDER BY relationship, CMName, CMID
+    LIMIT $node_limit
+    """
+    return getQuery(
+        query,
+        driver,
+        params={"cmid": cmid, "relationships": relationships, "node_limit": node_limit},
+    )
+
+
+def _get_descendant_map_nodes(driver, cmid, max_depth, node_limit):
+    max_depth = _coerce_int(max_depth, DEFAULT_MAP_DESCENDANT_DEPTH, 1, MAX_MAP_DESCENDANT_DEPTH)
+    query = f"""
+    MATCH (n:CATEGORY {{CMID: $cmid}})
+    MATCH path=(n)-[:CONTAINS*1..{max_depth}]->(descendant:CATEGORY)
+    WHERE descendant.CMID <> $cmid
+    WITH
+        descendant,
+        min(length(path)) AS depth,
+        head(collect([node IN nodes(path) | node.CMID])) AS pathCmids
+    RETURN DISTINCT
+        descendant.CMID AS CMID,
+        coalesce(descendant.CMName, descendant.Name, descendant.CMID) AS CMName,
+        labels(descendant) AS labels,
+        depth,
+        pathCmids AS path,
+        "CONTAINS" AS relationship
+    ORDER BY depth, CMName, CMID
+    LIMIT $node_limit
+    """
+    return getQuery(query, driver, params={"cmid": cmid, "node_limit": node_limit})
+
+
+def _get_points_for_cmids(driver, cmids):
+    cmids = [cmid for cmid in dict.fromkeys(cmids or []) if cmid]
+    if not cmids:
+        return []
+
+    query = """
+    MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+    WHERE c.CMID IN $cmids AND r.geoCoords IS NOT NULL
+    RETURN DISTINCT
+        r.geoCoords AS geometry,
+        coalesce(d.shortName, d.CMName, d.CMID) AS source,
+        r.Key AS Key,
+        c.CMID AS sourceNodeCMID,
+        coalesce(c.CMName, c.Name, c.CMID) AS sourceNodeName,
+        labels(c) AS sourceNodeLabels
+    """
+    return [dict(record) for record in getQuery(query, driver, params={"cmids": cmids})]
+
+
+def _get_polygons_for_cmids(driver, cmids, simple=True):
+    cmids = [cmid for cmid in dict.fromkeys(cmids or []) if cmid]
+    if not cmids:
+        return []
+
+    query = """
+    MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+    WHERE c.CMID IN $cmids AND r.geoPolygon IS NOT NULL
+    RETURN DISTINCT
+        r.geoPolygon AS geomID,
+        coalesce(d.shortName, d.CMName, d.CMID) AS source,
+        c.CMID AS sourceNodeCMID,
+        coalesce(c.CMName, c.Name, c.CMID) AS sourceNodeName,
+        labels(c) AS sourceNodeLabels
+    """
+    rows = getQuery(query, driver, params={"cmids": cmids})
+    if not rows:
+        return []
+
+    driverGIS = getDriver('gisdb')
+    if simple:
+        geometry_query = """
+        UNWIND $rows AS row
+        UNWIND row.geomID AS geomID
+        MATCH (g:GEOMETRY)
+        WHERE g.geomID = geomID
+        RETURN
+            row.source AS source,
+            row.sourceNodeCMID AS sourceNodeCMID,
+            row.sourceNodeName AS sourceNodeName,
+            row.sourceNodeLabels AS sourceNodeLabels,
+            coalesce(g.simplified, g.geometry) AS geometry,
+            g.simplified IS NOT NULL AS simple
+        """
+    else:
+        geometry_query = """
+        UNWIND $rows AS row
+        UNWIND row.geomID AS geomID
+        MATCH (g:GEOMETRY)
+        WHERE g.geomID = geomID
+        RETURN
+            row.source AS source,
+            row.sourceNodeCMID AS sourceNodeCMID,
+            row.sourceNodeName AS sourceNodeName,
+            row.sourceNodeLabels AS sourceNodeLabels,
+            g.geometry AS geometry
+        """
+    return getQuery(geometry_query, driverGIS, params={"rows": rows})
+
+
+def _build_layer_option(layer_id, label, mode, nodes, counts_by_cmid, **extra):
+    node_count = len(nodes)
+    point_count = sum(counts_by_cmid.get(node.get("CMID"), {}).get("pointCount", 0) for node in nodes)
+    polygon_count = sum(counts_by_cmid.get(node.get("CMID"), {}).get("polygonCount", 0) for node in nodes)
+    option = {
+        "id": layer_id,
+        "label": label,
+        "mode": mode,
+        "available": point_count > 0 or polygon_count > 0,
+        "nodeCount": node_count,
+        "pointCount": point_count,
+        "polygonCount": polygon_count,
+    }
+    option.update(extra)
+    return option
+
+
+def getMapLayerOptions(database, cmid, max_depth=DEFAULT_MAP_DESCENDANT_DEPTH, node_limit=DEFAULT_MAP_NODE_LIMIT):
+    """
+    Return cheap map-layer availability summaries for a node.
+    Full inherited geometry is intentionally loaded through exploreGeometry only
+    after a user selects a layer.
     """
     driver = getDriver(database)
-    
-    # Get raw data from Neo4j
+    max_depth = _coerce_int(max_depth, DEFAULT_MAP_DESCENDANT_DEPTH, 1, MAX_MAP_DESCENDANT_DEPTH)
+    node_limit = _coerce_int(node_limit, DEFAULT_MAP_NODE_LIMIT, 1, MAX_MAP_NODE_LIMIT)
+
+    direct_counts = _get_geometry_counts_for_cmids(driver, [cmid]).get(
+        cmid, {"pointCount": 0, "polygonCount": 0}
+    )
+    layers = [
+        {
+            "id": MAP_LAYER_DIRECT,
+            "label": "Direct locations",
+            "mode": MAP_LAYER_DIRECT,
+            "available": direct_counts["pointCount"] > 0 or direct_counts["polygonCount"] > 0,
+            "nodeCount": 1,
+            "pointCount": direct_counts["pointCount"],
+            "polygonCount": direct_counts["polygonCount"],
+        }
+    ]
+
+    related_nodes = _get_related_map_nodes(
+        driver, cmid, MAP_INHERITANCE_RELATIONSHIPS, node_limit
+    )
+    related_counts = _get_geometry_counts_for_cmids(
+        driver, [node.get("CMID") for node in related_nodes]
+    )
+    nodes_by_relationship = defaultdict(list)
+    for node in related_nodes:
+        nodes_by_relationship[node.get("relationship")].append(node)
+    for relationship in MAP_INHERITANCE_RELATIONSHIPS:
+        relationship_nodes = nodes_by_relationship.get(relationship, [])
+        if not relationship_nodes:
+            continue
+        layers.append(
+            _build_layer_option(
+                f"{MAP_LAYER_RELATED}:{relationship}",
+                f"Related {relationship} locations",
+                MAP_LAYER_RELATED,
+                relationship_nodes,
+                related_counts,
+                relationship=relationship,
+            )
+        )
+
+    descendant_nodes = _get_descendant_map_nodes(driver, cmid, max_depth, node_limit)
+    descendant_counts = _get_geometry_counts_for_cmids(
+        driver, [node.get("CMID") for node in descendant_nodes]
+    )
+    if descendant_nodes:
+        layers.append(
+            _build_layer_option(
+                f"{MAP_LAYER_DESCENDANTS}:CONTAINS",
+                "Descendant locations",
+                MAP_LAYER_DESCENDANTS,
+                descendant_nodes,
+                descendant_counts,
+                relationship="CONTAINS",
+                maxDepth=max_depth,
+            )
+        )
+
+    return {
+        "database": database,
+        "cmid": cmid,
+        "layers": layers,
+        "limits": {
+            "maxDepth": MAX_MAP_DESCENDANT_DEPTH,
+            "maxNodes": MAX_MAP_NODE_LIMIT,
+            "defaultDepth": DEFAULT_MAP_DESCENDANT_DEPTH,
+            "defaultNodeLimit": DEFAULT_MAP_NODE_LIMIT,
+            "defaultFeatureLimit": DEFAULT_MAP_FEATURE_LIMIT,
+        },
+    }
+
+
+def _metadata_for_inherited_node(node, mode, relationship):
+    inherited_from = node.get("CMID")
+    inherited_name = node.get("CMName") or inherited_from
+    return {
+        "layerType": "inherited",
+        "inherited": True,
+        "inheritanceMode": mode,
+        "inheritanceRelationship": node.get("relationship") or relationship,
+        "inheritanceDepth": node.get("depth", 1),
+        "inheritancePath": node.get("path") or [inherited_from],
+        "inheritedFromCMID": inherited_from,
+        "inheritedFromName": inherited_name,
+    }
+
+
+def _annotate_rows_for_inherited_layer(rows, nodes_by_cmid, mode, relationship):
+    annotated = []
+    for row in rows:
+        row_dict = dict(row)
+        node = nodes_by_cmid.get(row_dict.get("sourceNodeCMID")) or {}
+        row_dict.update(_metadata_for_inherited_node(node, mode, relationship))
+        annotated.append(row_dict)
+    return annotated
+
+
+def _build_geometry_layer(layer_id, label, mode, points, polygons, nodes=None, relationship=None, truncated=0):
+    return {
+        "id": layer_id,
+        "label": label,
+        "mode": mode,
+        "relationship": relationship,
+        "nodeCount": len(nodes or []),
+        "pointCount": len(points or []),
+        "polygonCount": _polygon_feature_count(polygons),
+        "truncatedFeatureCount": truncated,
+        "points": points or [],
+        "polygons": polygons or [],
+    }
+
+
+def _build_inherited_geometry_layer(driver, layer_id, label, mode, nodes, relationship, feature_limit):
+    if not nodes:
+        return _build_geometry_layer(layer_id, label, mode, [], [], [], relationship)
+
+    nodes_by_cmid = {node.get("CMID"): node for node in nodes if node.get("CMID")}
+    cmids = list(nodes_by_cmid.keys())
+    raw_points = _annotate_rows_for_inherited_layer(
+        _get_points_for_cmids(driver, cmids), nodes_by_cmid, mode, relationship
+    )
+    raw_polygons = _annotate_rows_for_inherited_layer(
+        _get_polygons_for_cmids(driver, cmids), nodes_by_cmid, mode, relationship
+    )
+    points, bad_sources = _validate_points(raw_points, preserve_metadata=True)
+    polygons, _polysources = _process_polygons(raw_polygons, preserve_metadata=True)
+
+    points, truncated_points = _limit_points(points, feature_limit)
+    remaining_polygon_limit = max(0, feature_limit - len(points))
+    polygons, truncated_polygons = _limit_polygons(polygons, remaining_polygon_limit)
+    layer = _build_geometry_layer(
+        layer_id,
+        label,
+        mode,
+        points,
+        polygons,
+        nodes,
+        relationship,
+        truncated_points + truncated_polygons,
+    )
+    layer["badsources"] = bad_sources
+    return layer
+
+
+def _explore_direct_geometry(cmid, driver):
     polygons = getPolygon(cmid, driver)
     points = getPoints(cmid, driver)
     dataset_points = getDatasetPoints(cmid, driver)
-    
-    # Transform dataset points
+
     transformed_points = _transform_dataset_points(dataset_points)
-    
-    # Process polygons
     polygons, polysources = _process_polygons(polygons)
-    
-    # Validate and process points
     points, bad_sources = _validate_points(points)
-    
+
     return {
         "polygons": polygons,
         "points": points,
@@ -534,6 +935,105 @@ def exploreGeometry(database, cmid):
         "polysources": polysources,
         "badsources": bad_sources
     }
+
+def exploreGeometry(
+    database,
+    cmid,
+    layers=None,
+    relations=None,
+    max_depth=DEFAULT_MAP_DESCENDANT_DEPTH,
+    node_limit=DEFAULT_MAP_NODE_LIMIT,
+    feature_limit=DEFAULT_MAP_FEATURE_LIMIT,
+):
+    """
+    Explore and process geometry data for a given CMID.
+    
+    Args:
+        database: Database identifier
+        cmid: Content Management ID
+        layers: Optional comma-separated/list of direct, related, descendants
+        relations: Optional relationship allow-list for related inheritance
+        
+    Returns:
+        dict: Dictionary containing polygons, points, dataset points, sources, and errors
+    """
+    driver = getDriver(database)
+    requested_layers = _normalize_map_layers(layers)
+    requested_relations = _normalize_inheritance_relations(relations)
+    max_depth = _coerce_int(max_depth, DEFAULT_MAP_DESCENDANT_DEPTH, 1, MAX_MAP_DESCENDANT_DEPTH)
+    node_limit = _coerce_int(node_limit, DEFAULT_MAP_NODE_LIMIT, 1, MAX_MAP_NODE_LIMIT)
+    feature_limit = _coerce_int(feature_limit, DEFAULT_MAP_FEATURE_LIMIT, 1, MAX_MAP_FEATURE_LIMIT)
+
+    if MAP_LAYER_DIRECT in requested_layers:
+        result = _explore_direct_geometry(cmid, driver)
+    else:
+        result = _empty_geometry_payload()
+
+    map_layers = []
+    if MAP_LAYER_DIRECT in requested_layers:
+        direct_points, truncated_points = _limit_points(result["points"], feature_limit)
+        remaining_polygon_limit = max(0, feature_limit - len(direct_points))
+        direct_polygons, truncated_polygons = _limit_polygons(
+            result["polygons"], remaining_polygon_limit
+        )
+        result["points"] = direct_points
+        result["polygons"] = direct_polygons
+        map_layers.append(
+            _build_geometry_layer(
+                MAP_LAYER_DIRECT,
+                "Direct locations",
+                MAP_LAYER_DIRECT,
+                direct_points,
+                direct_polygons,
+                [{"CMID": cmid}],
+                None,
+                truncated_points + truncated_polygons,
+            )
+        )
+
+    if MAP_LAYER_RELATED in requested_layers and requested_relations:
+        related_nodes = _get_related_map_nodes(driver, cmid, requested_relations, node_limit)
+        nodes_by_relationship = defaultdict(list)
+        for node in related_nodes:
+            nodes_by_relationship[node.get("relationship")].append(node)
+        for relationship in requested_relations:
+            relationship_nodes = nodes_by_relationship.get(relationship, [])
+            if not relationship_nodes:
+                continue
+            map_layers.append(
+                _build_inherited_geometry_layer(
+                    driver,
+                    f"{MAP_LAYER_RELATED}:{relationship}",
+                    f"Related {relationship} locations",
+                    MAP_LAYER_RELATED,
+                    relationship_nodes,
+                    relationship,
+                    feature_limit,
+                )
+            )
+
+    if MAP_LAYER_DESCENDANTS in requested_layers:
+        descendant_nodes = _get_descendant_map_nodes(driver, cmid, max_depth, node_limit)
+        if descendant_nodes:
+            map_layers.append(
+                _build_inherited_geometry_layer(
+                    driver,
+                    f"{MAP_LAYER_DESCENDANTS}:CONTAINS",
+                    "Descendant locations",
+                    MAP_LAYER_DESCENDANTS,
+                    descendant_nodes,
+                    "CONTAINS",
+                    feature_limit,
+                )
+            )
+
+    result["maplayers"] = map_layers
+    result["limits"] = {
+        "maxDepth": max_depth,
+        "nodeLimit": node_limit,
+        "featureLimit": feature_limit,
+    }
+    return result
 
 
 def _transform_dataset_points(dataset_points):
@@ -569,7 +1069,40 @@ def _transform_dataset_points(dataset_points):
     return transformed_points
 
 
-def _process_polygons(polygons):
+def _feature_metadata_from_row(row):
+    metadata_keys = [
+        "layerType",
+        "inherited",
+        "inheritanceMode",
+        "inheritanceRelationship",
+        "inheritanceDepth",
+        "inheritancePath",
+        "inheritedFromCMID",
+        "inheritedFromName",
+        "sourceNodeCMID",
+        "sourceNodeName",
+        "sourceNodeLabels",
+    ]
+    return {key: row.get(key) for key in metadata_keys if key in row}
+
+
+def _apply_polygon_metadata(feature, polygon, preserve_metadata=False):
+    feature["source"] = polygon.get("source")
+    if not preserve_metadata:
+        return feature
+
+    metadata = _feature_metadata_from_row(polygon)
+    feature.update(metadata)
+    properties = feature.get("properties")
+    if not isinstance(properties, dict):
+        properties = {}
+    properties["source"] = polygon.get("source")
+    properties.update(metadata)
+    feature["properties"] = properties
+    return feature
+
+
+def _process_polygons(polygons, preserve_metadata=False):
     """Process polygon geometries into GeoJSON format."""
     polysources = []
     
@@ -581,19 +1114,31 @@ def _process_polygons(polygons):
         poly = {"type": 'FeatureCollection', "features": []}
         for i, polygon in enumerate(polygons):
             feature = json.loads(polygon['geometry'])
-            feature["source"] = polygon['source']
+            feature = _apply_polygon_metadata(feature, polygon, preserve_metadata)
             poly["features"].append(feature)
             polysources.append(polygon['source'])
         return poly, polysources
     else:
         # Single polygon
         poly = json.loads(polygons[0]['geometry'])
-        poly["source"] = polygons[0]['source']
+        poly = _apply_polygon_metadata(poly, polygons[0], preserve_metadata)
         polysources.append(polygons[0]['source'])
         return [poly], polysources
 
 
-def _validate_points(points):
+def _point_payload(entry, coord, preserve_metadata=False):
+    payload = {
+        "cood": coord,
+        "source": entry["source"]
+    }
+    if preserve_metadata:
+        payload.update(_feature_metadata_from_row(entry))
+        if "Key" in entry:
+            payload["Key"] = entry.get("Key")
+    return payload
+
+
+def _validate_points(points, preserve_metadata=False):
     """Validate and process point geometries."""
     valid_data = []
     bad_sources = []
@@ -641,11 +1186,14 @@ def _validate_points(points):
             valid_data.append(entry)
             
         except (json.JSONDecodeError, KeyError, ValueError, TypeError) as e:
-            bad_sources.append({
+            bad_source = {
                 'source': entry.get('source', 'Unknown'),
                 'key': entry.get('key', 'Unknown'),
                 'error': str(e)
-            })
+            }
+            if preserve_metadata:
+                bad_source.update(_feature_metadata_from_row(entry))
+            bad_sources.append(bad_source)
     
     # Flatten MultiPoint geometries
     if valid_data:
@@ -655,17 +1203,12 @@ def _validate_points(points):
                 continue
             
             if entry['geometry']["type"] == "Point":
-                point_list.append({
-                    "cood": entry['geometry']["coordinates"],
-                    "source": entry["source"]
-                })
+                point_list.append(
+                    _point_payload(entry, entry['geometry']["coordinates"], preserve_metadata)
+                )
             elif entry['geometry']["type"] == "MultiPoint":
-                source = entry['source']
                 for coord in entry['geometry']['coordinates']:
-                    point_list.append({
-                        'cood': coord,
-                        "source": source
-                    })
+                    point_list.append(_point_payload(entry, coord, preserve_metadata))
         
         if point_list:
             return point_list, bad_sources

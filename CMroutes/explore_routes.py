@@ -481,11 +481,34 @@ def catm(database, cmid):
 def getPointGeometry(database, cmid):
     """Return explore-page geometry for a node."""
     try:
-        results = exploreGeometry(database, cmid)
+        results = exploreGeometry(
+            database,
+            cmid,
+            layers=request.args.get("layers"),
+            relations=request.args.get("relations") or request.args.get("relation"),
+            max_depth=request.args.get("maxDepth"),
+            node_limit=request.args.get("nodeLimit"),
+            feature_limit=request.args.get("featureLimit"),
+        )
         return jsonify(results)
         
     except Exception as e:
         return "Error returning results: " + str(", ".join(map(str, e.args))), 500
+
+
+@explore_bp.route("/api/databases/<database>/nodes/<cmid>/map-layer-options", methods=['GET'])
+def getMapLayers(database, cmid):
+    """Return available direct and inherited map layer summaries for a node."""
+    try:
+        result = getMapLayerOptions(
+            database,
+            cmid,
+            max_depth=request.args.get("maxDepth"),
+            node_limit=request.args.get("nodeLimit"),
+        )
+        return jsonify(result)
+    except Exception as e:
+        return "Error returning map layer options: " + str(", ".join(map(str, e.args))), 500
 
 @explore_bp.route("/api/network", methods=['GET'])
 @explore_bp.route("/network", methods=['GET'])
