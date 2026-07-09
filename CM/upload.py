@@ -23,6 +23,7 @@ warnings.simplefilter("error", UserWarning)
 
 _UPLOAD_LOG_LISTENER = threading.local()
 _UPLOAD_LOG_TIMING = threading.local()
+_JSON_UPLOAD_PROPERTIES = {"parentContext", "geoCoords", "geo"}
 
 data = [
     {
@@ -337,6 +338,16 @@ def createUSES(links, database, user, ownershipMetadata=None):
                 f"Error: The following columns are not in properties: {', '.join(missing_cols)}"
             )
 
+        locator_columns = {"datasetID", "CMID", "CMName", "Key"}
+        for column_name in links.columns:
+            if column_name in db_properties_list and column_name not in locator_columns:
+                links[column_name] = links[column_name].apply(
+                    lambda value, prop=column_name: _normalize_non_json_upload_value(
+                        value,
+                        prop,
+                    )
+                )
+
         multi_value_columns = [
             "language",
             "district",
@@ -543,6 +554,16 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
 
         if not vars:
             raise ValueError("No columns to change were uploaded.")
+
+        if propertyType == "USES":
+            for var in vars:
+                if var in df.columns:
+                    df[var] = df[var].apply(
+                        lambda value, prop=var: _normalize_non_json_upload_value(
+                            value,
+                            prop,
+                        )
+                    )
                 
         # End of error checking
         
@@ -814,7 +835,23 @@ def combine_properties(df, group_by_cols, string_cols, driver):
     # Puts values from different rows in a single list and for string-value columns it checks if there is more than one value
     # then changes the list to a ; delimited string
     def combine_column(colname, values):
-        vals = [str(x).strip() for x in values if pd.notna(x)]
+        vals = []
+        for value in values:
+            if _is_missing_upload_value(value):
+                continue
+            if _is_json_upload_property(colname):
+                text = str(value).strip()
+                if text:
+                    vals.append(text)
+                continue
+
+            expanded = _expand_listish_upload_value(value)
+            if expanded is None:
+                text = str(value).strip()
+                if text:
+                    vals.append(text)
+            else:
+                vals.extend(expanded)
         unique_vals = sorted(set(vals))
         
         # strict check
@@ -999,6 +1036,89 @@ def _stringify_upload_values(df):
     df = df.mask(df.isna(), "")
     df = df.astype(str)
     return df.replace({"nan": "", "<NA>": ""})
+
+
+def _is_json_upload_property(property_name):
+    return str(property_name or "").strip() in _JSON_UPLOAD_PROPERTIES
+
+
+def _is_missing_upload_value(value):
+    if value is None:
+        return True
+    if isinstance(value, (list, tuple, set, dict)):
+        return False
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _parse_stringified_scalar_list(value):
+    if not isinstance(value, str):
+        return None
+
+    raw_value = value.strip()
+    if not (raw_value.startswith("[") and raw_value.endswith("]")):
+        return None
+
+    parsers = (ast.literal_eval, json.loads)
+    for parser in parsers:
+        try:
+            parsed_value = parser(raw_value)
+        except (ValueError, SyntaxError, json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(parsed_value, (list, tuple, set)):
+            continue
+        if any(isinstance(item, (list, tuple, set, dict)) for item in parsed_value):
+            return None
+        return list(parsed_value)
+
+    return None
+
+
+def _clean_upload_token(value):
+    if _is_missing_upload_value(value):
+        return ""
+    return str(value).strip()
+
+
+def _expand_listish_upload_value(value):
+    if _is_missing_upload_value(value):
+        return []
+
+    if isinstance(value, (list, tuple, set)):
+        tokens = []
+        for item in value:
+            nested_tokens = _expand_listish_upload_value(item)
+            if nested_tokens is None:
+                token = _clean_upload_token(item)
+                if token:
+                    tokens.append(token)
+            else:
+                tokens.extend(nested_tokens)
+        return tokens
+
+    parsed_tokens = _parse_stringified_scalar_list(value)
+    if parsed_tokens is not None:
+        return [
+            token
+            for token in (_clean_upload_token(item) for item in parsed_tokens)
+            if token
+        ]
+
+    return None
+
+
+def _normalize_non_json_upload_value(value, property_name):
+    if _is_json_upload_property(property_name):
+        return "" if _is_missing_upload_value(value) else value
+
+    tokens = _expand_listish_upload_value(value)
+    if tokens is None:
+        return "" if _is_missing_upload_value(value) else value
+
+    # De-duplicate while preserving order.
+    return ";".join(dict.fromkeys(tokens))
 
 
 def _split_multi_value_cell(value):

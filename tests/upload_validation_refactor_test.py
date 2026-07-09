@@ -200,6 +200,187 @@ def test_create_uses_normalizes_stringified_district_lists(monkeypatch):
     assert result["links"][0]["district"] == "AM22269"
 
 
+def test_combine_properties_flattens_non_json_list_values():
+    dataset = pd.DataFrame(
+        [
+            {
+                "CMID": "AM1",
+                "datasetID": "AD1",
+                "Key": "Type == Alpha",
+                "Name": "['Alpha']",
+                "district": ["AM22269"],
+                "parentContext": '["{\\"parent\\":\\"AM2\\"}"]',
+            },
+            {
+                "CMID": "AM1",
+                "datasetID": "AD1",
+                "Key": "Type == Alpha",
+                "Name": "['Beta']",
+                "district": ["AM22270"],
+                "parentContext": "",
+            },
+        ]
+    )
+
+    combined = upload.combine_properties(
+        dataset,
+        ["CMID", "datasetID", "Key"],
+        string_cols=[],
+        driver=object(),
+    )
+
+    row = combined.iloc[0]
+    assert row["Name"] == "Alpha; Beta"
+    assert row["district"] == "AM22269; AM22270"
+    assert row["parentContext"] == '["{\\"parent\\":\\"AM2\\"}"]'
+
+
+def test_create_uses_normalizes_stringified_name_lists(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+    monkeypatch.setattr(upload, "getPropertiesMetadata", lambda driver: [
+        {"property": "Name", "metaType": "list"},
+        {"property": "district", "metaType": "list"},
+        {"property": "label", "metaType": "string"},
+    ])
+    monkeypatch.setattr(upload, "updateAltNames", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "createLog", lambda *args, **kwargs: None)
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (p:PROPERTY)" in query:
+            return [
+                {"property": "Key"},
+                {"property": "Name"},
+                {"property": "district"},
+                {"property": "label"},
+            ]
+        if "RETURN count(*) AS count" in query:
+            return [0]
+        if "WITH DISTINCT row.datasetID AS datasetID, row.Key AS keyValue" in query:
+            return [
+                {
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "existingCMIDs": [],
+                    "rel_count": 0,
+                }
+            ]
+        if params and "rows" in params:
+            captured["rows"] = params["rows"]
+            return [
+                {
+                    "nodeID": "node-1",
+                    "relID": "rel-1",
+                    "Key": "Type == Alpha",
+                    "datasetID": "AD1",
+                    "CMID": "AM1",
+                    "CMName": "Alpha",
+                    "Name": ["Alpha", "Beta"],
+                    "district": ["AM22269"],
+                    "label": "DIALECT",
+                }
+            ]
+        return [1]
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    result = upload.createUSES(
+        pd.DataFrame(
+            [
+                {
+                    "datasetID": "AD1",
+                    "CMID": "AM1",
+                    "Key": "Type == Alpha",
+                    "Name": "['Alpha', 'Beta']",
+                    "district": "['AM22269']",
+                    "label": "DIALECT",
+                }
+            ]
+        ),
+        database="ArchaMap",
+        user="tester",
+    )
+
+    assert captured["rows"][0]["Name"] == "Alpha;Beta"
+    assert captured["rows"][0]["district"] == "AM22269"
+    assert result["links"][0]["Name"] == "Alpha;Beta"
+
+
+def test_update_property_normalizes_non_json_stringified_lists(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+    monkeypatch.setattr(upload, "createLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "getPropertiesMetadata", lambda driver: [
+        {"type": "relationship", "property": "Name", "metaType": "list"},
+        {"type": "relationship", "property": "district", "metaType": "list"},
+        {"type": "relationship", "property": "parentContext", "metaType": "list"},
+    ])
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "oldVals" in query:
+            return [
+                {
+                    "relID": "rel-1",
+                    "CMID": "AM1",
+                    "Key": "Type == Alpha",
+                    "datasetID": "AD1",
+                    "oldVals": {
+                        "Name": ["Old"],
+                        "district": ["AM22268"],
+                        "parentContext": [],
+                    },
+                }
+            ]
+        if "SET r.status = 'update'" in query:
+            captured["rows"] = params["rows"]
+            return [
+                {
+                    "nodeID": "node-1",
+                    "relID": "rel-1",
+                    "CMID": "AM1",
+                    "Key": "Type == Alpha",
+                    "datasetID": "AD1",
+                    "Name": ["Alpha", "Beta"],
+                    "district": ["AM22269"],
+                    "parentContext": ['["{\\"parent\\":\\"AM2\\"}"]'],
+                }
+            ]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    result = upload.updateProperty(
+        pd.DataFrame(
+            [
+                {
+                    "relID": "rel-1",
+                    "datasetID": "AD1",
+                    "CMID": "AM1",
+                    "Key": "Type == Alpha",
+                    "Name": "['Alpha', 'Beta']",
+                    "district": ["AM22269"],
+                    "parentContext": '["{\\"parent\\":\\"AM2\\"}"]',
+                }
+            ]
+        ),
+        optionalProperties=["Name", "district"],
+        isDataset=False,
+        database="ArchaMap",
+        user="tester",
+        updateType="update",
+        propertyType="USES",
+        sep=";",
+    )
+
+    assert result["df"][0]["Name"] == "Alpha;Beta"
+    assert result["df"][0]["district"] == "AM22269"
+    assert result["df"][0]["parentContext"] == '["{\\"parent\\":\\"AM2\\"}"]'
+    assert captured["rows"][0]["Name"] == "Alpha;Beta"
+
+
 def test_input_nodes_uses_rejects_existing_dataset_key_duplicate(monkeypatch):
     monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
     monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
