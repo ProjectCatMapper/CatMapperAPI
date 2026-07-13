@@ -88,6 +88,60 @@ def test_explore_geometry_related_layer_adds_provenance_without_direct(monkeypat
     assert related_layer["totalNodeCount"] == 5
 
 
+def test_explore_geometry_dataset_uses_category_layer_adds_provenance(monkeypatch):
+    driver = object()
+
+    monkeypatch.setattr(explore, "getDriver", lambda database: driver)
+    monkeypatch.setattr(
+        explore,
+        "_get_dataset_used_category_nodes",
+        lambda neo4j_driver, cmid, node_limit: [
+            {
+                "CMID": "AM2",
+                "CMName": "District A",
+                "relationship": "USES",
+                "path": ["AD1", "AM2"],
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        explore,
+        "_get_dataset_used_category_count",
+        lambda neo4j_driver, cmid: 4,
+    )
+    monkeypatch.setattr(
+        explore,
+        "_get_points_for_cmids",
+        lambda neo4j_driver, cmids: [
+            {
+                "geometry": json.dumps({"type": "Point", "coordinates": [30, 40]}),
+                "source": "District Dataset",
+                "sourceNodeCMID": "AM2",
+                "sourceNodeName": "District A",
+            }
+        ],
+    )
+    monkeypatch.setattr(explore, "_get_polygons_for_cmids", lambda neo4j_driver, cmids: [])
+
+    payload = explore.exploreGeometry("ArchaMap", "AD1", layers="uses")
+
+    assert payload["points"] == []
+    assert payload["polygons"] == []
+    uses_layer = payload["maplayers"][0]
+    assert uses_layer["id"] == "uses:CATEGORY"
+    assert uses_layer["mode"] == "uses"
+    assert uses_layer["relationship"] == "USES"
+    assert uses_layer["pointCount"] == 1
+    assert uses_layer["points"][0]["cood"] == [30, 40]
+    assert uses_layer["points"][0]["inherited"] is True
+    assert uses_layer["points"][0]["inheritedFromCMID"] == "AM2"
+    assert uses_layer["points"][0]["inheritedFromName"] == "District A"
+    assert uses_layer["points"][0]["inheritanceRelationship"] == "USES"
+    assert uses_layer["nodeLimited"] is True
+    assert uses_layer["displayedNodeCount"] == 1
+    assert uses_layer["totalNodeCount"] == 4
+
+
 def test_map_layer_options_summarize_direct_related_and_descendant(monkeypatch):
     driver = object()
 
@@ -107,6 +161,16 @@ def test_map_layer_options_summarize_direct_related_and_descendant(monkeypatch):
         lambda neo4j_driver, cmid, relationships, node_limit: [
             {"CMID": "AM2", "CMName": "District A", "relationship": "AREA_OF"}
         ],
+    )
+    monkeypatch.setattr(
+        explore,
+        "_get_dataset_used_category_nodes",
+        lambda neo4j_driver, cmid, node_limit: [],
+    )
+    monkeypatch.setattr(
+        explore,
+        "_get_dataset_used_category_count",
+        lambda neo4j_driver, cmid: 0,
     )
     monkeypatch.setattr(
         explore,
@@ -146,6 +210,65 @@ def test_map_layer_options_summarize_direct_related_and_descendant(monkeypatch):
         {"depth": 1, "nodeCount": 2},
         {"depth": 2, "nodeCount": 2},
     ]
+
+
+def test_map_layer_options_summarize_dataset_used_categories(monkeypatch):
+    driver = object()
+
+    monkeypatch.setattr(explore, "getDriver", lambda database: driver)
+    monkeypatch.setattr(
+        explore,
+        "_get_geometry_counts_for_cmids",
+        lambda neo4j_driver, cmids: {
+            "AD1": {"pointCount": 0, "polygonCount": 0},
+            "AM2": {"pointCount": 1, "polygonCount": 1},
+            "AM3": {"pointCount": 2, "polygonCount": 0},
+        },
+    )
+    monkeypatch.setattr(
+        explore,
+        "_get_dataset_used_category_nodes",
+        lambda neo4j_driver, cmid, node_limit: [
+            {"CMID": "AM2", "CMName": "District A", "relationship": "USES"},
+            {"CMID": "AM3", "CMName": "District B", "relationship": "USES"},
+        ],
+    )
+    monkeypatch.setattr(
+        explore,
+        "_get_dataset_used_category_count",
+        lambda neo4j_driver, cmid: 5,
+    )
+    monkeypatch.setattr(
+        explore,
+        "_get_related_map_nodes",
+        lambda neo4j_driver, cmid, relationships, node_limit: [],
+    )
+    monkeypatch.setattr(
+        explore,
+        "_get_related_map_node_counts",
+        lambda neo4j_driver, cmid, relationships: {},
+    )
+    monkeypatch.setattr(
+        explore,
+        "_get_descendant_map_nodes",
+        lambda neo4j_driver, cmid, max_depth, node_limit: [],
+    )
+    monkeypatch.setattr(
+        explore,
+        "_get_descendant_map_node_summary",
+        lambda neo4j_driver, cmid, max_depth: {"totalNodeCount": 0, "depthCounts": []},
+    )
+
+    payload = explore.getMapLayerOptions("ArchaMap", "AD1")
+    layers = {layer["id"]: layer for layer in payload["layers"]}
+
+    assert layers["uses:CATEGORY"]["available"] is True
+    assert layers["uses:CATEGORY"]["label"] == "USES category locations"
+    assert layers["uses:CATEGORY"]["pointCount"] == 3
+    assert layers["uses:CATEGORY"]["polygonCount"] == 1
+    assert layers["uses:CATEGORY"]["displayedNodeCount"] == 2
+    assert layers["uses:CATEGORY"]["totalNodeCount"] == 5
+    assert layers["uses:CATEGORY"]["nodeLimited"] is True
 
 
 def test_geometry_counts_only_include_polygons_present_in_gisdb(monkeypatch):

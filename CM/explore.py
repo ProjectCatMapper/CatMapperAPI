@@ -504,6 +504,7 @@ def custom_sort(item):
 MAP_LAYER_DIRECT = "direct"
 MAP_LAYER_RELATED = "related"
 MAP_LAYER_DESCENDANTS = "descendants"
+MAP_LAYER_USES_CATEGORIES = "uses"
 MAP_INHERITANCE_RELATIONSHIPS = [
     "AREA_OF",
     "LANGUOID_OF",
@@ -544,8 +545,19 @@ def _normalize_map_layers(layers):
     requested = [item.lower() for item in _split_param_values(layers)]
     if not requested:
         return [MAP_LAYER_DIRECT]
-    allowed = {MAP_LAYER_DIRECT, MAP_LAYER_RELATED, MAP_LAYER_DESCENDANTS}
-    normalized = [item for item in requested if item in allowed]
+    aliases = {
+        "used_categories": MAP_LAYER_USES_CATEGORIES,
+        "uses_categories": MAP_LAYER_USES_CATEGORIES,
+        "usescategories": MAP_LAYER_USES_CATEGORIES,
+    }
+    allowed = {
+        MAP_LAYER_DIRECT,
+        MAP_LAYER_RELATED,
+        MAP_LAYER_DESCENDANTS,
+        MAP_LAYER_USES_CATEGORIES,
+    }
+    normalized = [aliases.get(item, item) for item in requested]
+    normalized = [item for item in normalized if item in allowed]
     return normalized or [MAP_LAYER_DIRECT]
 
 
@@ -736,6 +748,34 @@ def _get_related_map_node_counts(driver, cmid, relationships):
     }
 
 
+def _get_dataset_used_category_nodes(driver, cmid, node_limit):
+    query = """
+    MATCH (d:DATASET {CMID: $cmid})-[r:USES]->(category:CATEGORY)
+    WHERE category.CMID <> $cmid
+    RETURN DISTINCT
+        category.CMID AS CMID,
+        coalesce(category.CMName, category.Name, category.CMID) AS CMName,
+        labels(category) AS labels,
+        "USES" AS relationship,
+        [d.CMID, category.CMID] AS path
+    ORDER BY CMName, CMID
+    LIMIT $node_limit
+    """
+    return getQuery(query, driver, params={"cmid": cmid, "node_limit": node_limit})
+
+
+def _get_dataset_used_category_count(driver, cmid):
+    query = """
+    MATCH (d:DATASET {CMID: $cmid})-[:USES]->(category:CATEGORY)
+    WHERE category.CMID <> $cmid
+    RETURN count(DISTINCT category) AS totalNodeCount
+    """
+    rows = getQuery(query, driver, params={"cmid": cmid})
+    if not rows:
+        return 0
+    return int(rows[0].get("totalNodeCount") or 0)
+
+
 def _get_descendant_map_nodes(driver, cmid, max_depth, node_limit):
     max_depth = _coerce_int(max_depth, DEFAULT_MAP_DESCENDANT_DEPTH, 1, MAX_MAP_DESCENDANT_DEPTH)
     query = f"""
@@ -903,6 +943,24 @@ def getMapLayerOptions(database, cmid, max_depth=DEFAULT_MAP_DESCENDANT_DEPTH, n
             "polygonCount": direct_counts["polygonCount"],
         }
     ]
+
+    used_category_nodes = _get_dataset_used_category_nodes(driver, cmid, node_limit)
+    if used_category_nodes:
+        used_category_counts = _get_geometry_counts_for_cmids(
+            driver, [node.get("CMID") for node in used_category_nodes]
+        )
+        layers.append(
+            _build_layer_option(
+                f"{MAP_LAYER_USES_CATEGORIES}:CATEGORY",
+                "USES category locations",
+                MAP_LAYER_USES_CATEGORIES,
+                used_category_nodes,
+                used_category_counts,
+                relationship="USES",
+                totalNodeCount=_get_dataset_used_category_count(driver, cmid),
+                nodeLimit=node_limit,
+            )
+        )
 
     related_nodes = _get_related_map_nodes(
         driver, cmid, MAP_INHERITANCE_RELATIONSHIPS, node_limit
@@ -1118,6 +1176,7 @@ def exploreGeometry(
         database: Database identifier
         cmid: Content Management ID
         layers: Optional comma-separated/list of direct, related, descendants
+            or uses
         relations: Optional relationship allow-list for related inheritance
         
     Returns:
@@ -1156,6 +1215,23 @@ def exploreGeometry(
                 truncated_points + truncated_polygons,
             )
         )
+
+    if MAP_LAYER_USES_CATEGORIES in requested_layers:
+        used_category_nodes = _get_dataset_used_category_nodes(driver, cmid, node_limit)
+        if used_category_nodes:
+            map_layers.append(
+                _build_inherited_geometry_layer(
+                    driver,
+                    f"{MAP_LAYER_USES_CATEGORIES}:CATEGORY",
+                    "USES category locations",
+                    MAP_LAYER_USES_CATEGORIES,
+                    used_category_nodes,
+                    "USES",
+                    feature_limit,
+                    total_node_count=_get_dataset_used_category_count(driver, cmid),
+                    node_limit=node_limit,
+                )
+            )
 
     if MAP_LAYER_RELATED in requested_layers and requested_relations:
         related_nodes = _get_related_map_nodes(driver, cmid, requested_relations, node_limit)
