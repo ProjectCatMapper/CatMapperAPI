@@ -1,4 +1,5 @@
 import threading
+import uuid
 
 import pandas as pd
 
@@ -15,6 +16,11 @@ from CM import (
 from .task_queue import enqueue_waiting_uses_task, is_rq_enabled
 from .task_store import get_task_store
 from .upload_error_utils import extract_upload_error_details
+from CM.geojson_upload import (
+    GeoJSONUploadError,
+    apply_geojson_upload,
+    delete_preflight_token,
+)
 
 
 class UploadCancelledError(Exception):
@@ -135,3 +141,55 @@ def run_waiting_uses_task(waiting_task_id, database=None):
         store.complete_waiting_task(waiting_task_id, str(result))
     except Exception as err:
         store.fail_waiting_task(waiting_task_id, str(err))
+
+
+def run_geojson_upload_task(task_id):
+    """Apply one staged polygon file using the shared upload task store."""
+    store = get_task_store()
+    task = store.get_upload_task(task_id, cursor=0)
+    if task is None:
+        return
+    payload = store.get_upload_job_payload(task_id)
+    if not isinstance(payload, dict) or payload.get("kind") != "geojson_polygon":
+        store.fail_upload_task(task_id, "Polygon upload job payload is missing.")
+        return
+    token = payload.get("token")
+
+    def _cancelled():
+        return store.is_upload_cancel_requested(task_id)
+
+    if _cancelled():
+        store.cancel_upload_task(task_id, "Polygon upload cancelled before starting.")
+        store.delete_upload_job_payload(task_id)
+        delete_preflight_token(token)
+        return
+
+    store.mark_upload_running(task_id)
+    upload_id = f"geojson_{uuid.uuid4().hex}"
+    try:
+        result = apply_geojson_upload(
+            payload["path"],
+            payload["database"],
+            payload["actorClaims"],
+            expected_digest=payload["expectedDigest"],
+            replace_existing=bool(payload.get("replaceExisting")),
+            upload_id=upload_id,
+            cancelled=_cancelled,
+            log=lambda message: store.append_upload_event(task_id, message),
+        )
+        store.complete_upload_task(
+            task_id,
+            f"Polygon upload completed for {result['featureCount']} feature(s).",
+            [result],
+            ["featureCount", "geometryNodes", "usesLinks", "uploadID"],
+        )
+    except GeoJSONUploadError as err:
+        if _cancelled() and "cancel" in str(err).lower():
+            store.cancel_upload_task(task_id, str(err))
+        else:
+            store.fail_upload_task(task_id, str(err), error_details=err.details)
+    except Exception as err:
+        store.fail_upload_task(task_id, str(err))
+    finally:
+        store.delete_upload_job_payload(task_id)
+        delete_preflight_token(token)

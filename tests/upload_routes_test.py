@@ -688,6 +688,30 @@ def test_cancel_upload_task_running_adds_stop_signal_event(monkeypatch):
     assert "Stop signal sent to worker." in updated["events"]
 
 
+def test_cancel_running_polygon_task_defers_rq_stop_during_critical_section(monkeypatch):
+    store = get_task_store()
+    task_id = store.create_upload_task(
+        user="api-user", database="ArchaMap", total_rows=1, batch_size=500
+    )
+    store.set_upload_job_payload(
+        task_id, {"kind": "geojson_polygon", "token": "a" * 32}
+    )
+    store.mark_upload_running(task_id)
+    task = store.get_upload_task(task_id, cursor=0)
+    monkeypatch.setattr(
+        upload_routes,
+        "_send_cancel_to_rq",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("RQ stop must be deferred")),
+    )
+
+    upload_routes._cancel_upload_task(task_id, task)
+
+    updated = store.get_upload_task(task_id, cursor=0)
+    assert updated["status"] == "running"
+    assert updated["cancelRequested"] is True
+    assert any("critical verification/rollback" in event for event in updated["events"])
+
+
 def test_upload_waiting_uses_status_returns_task_for_authenticated_user(client, monkeypatch):
     monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
     monkeypatch.setattr(

@@ -429,14 +429,26 @@ def _send_cancel_to_rq(task_id, task):
 
 def _cancel_upload_task(task_id, task):
     store = get_task_store()
+    job_payload = store.get_upload_job_payload(task_id)
+    is_geojson_polygon = isinstance(job_payload, dict) and job_payload.get("kind") == "geojson_polygon"
     _request_upload_cancel(task_id)
 
     status = str(task.get("status") or "").strip().lower()
-    stopped, action = _send_cancel_to_rq(task_id, task)
+    if status == "running" and is_geojson_polygon:
+        stopped, action = False, "deferred-polygon-cancel"
+        store.append_upload_event(
+            task_id,
+            "Cancellation will be honored before the USES transaction; critical verification/rollback cannot be interrupted.",
+        )
+    else:
+        stopped, action = _send_cancel_to_rq(task_id, task)
 
     if status == "queued":
         store.cancel_upload_task(task_id, "Upload cancelled before starting.")
         store.delete_upload_job_payload(task_id)
+        if is_geojson_polygon:
+            from CM.geojson_upload import delete_preflight_token
+            delete_preflight_token(job_payload.get("token"))
         if stopped:
             store.append_upload_event(task_id, "Queued job removed from queue.")
         return

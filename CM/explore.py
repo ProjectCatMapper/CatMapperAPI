@@ -819,13 +819,19 @@ def _get_polygons_for_cmids(driver, cmids, simple=True):
     if not rows:
         return []
 
+    lookup_rows = []
+    for row in rows:
+        for geom_id in _normalize_geom_ids(row.get("geomID")):
+            lookup_rows.append({**dict(row), "geomID": geom_id})
+    if not lookup_rows:
+        return []
+
     driverGIS = getDriver('gisdb')
     if simple:
         geometry_query = """
         UNWIND $rows AS row
-        UNWIND row.geomID AS geomID
         MATCH (g:GEOMETRY)
-        WHERE g.geomID = geomID
+        WHERE g.geomID = row.geomID
         RETURN
             row.source AS source,
             row.sourceNodeCMID AS sourceNodeCMID,
@@ -837,9 +843,8 @@ def _get_polygons_for_cmids(driver, cmids, simple=True):
     else:
         geometry_query = """
         UNWIND $rows AS row
-        UNWIND row.geomID AS geomID
         MATCH (g:GEOMETRY)
-        WHERE g.geomID = geomID
+        WHERE g.geomID = row.geomID
         RETURN
             row.source AS source,
             row.sourceNodeCMID AS sourceNodeCMID,
@@ -847,7 +852,7 @@ def _get_polygons_for_cmids(driver, cmids, simple=True):
             row.sourceNodeLabels AS sourceNodeLabels,
             g.geometry AS geometry
         """
-    return getQuery(geometry_query, driverGIS, params={"rows": rows})
+    return getQuery(geometry_query, driverGIS, params={"rows": lookup_rows})
 
 
 def _build_layer_option(layer_id, label, mode, nodes, counts_by_cmid, **extra):

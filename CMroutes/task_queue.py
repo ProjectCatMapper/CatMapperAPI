@@ -47,6 +47,15 @@ def enqueue_upload_task(task_id):
     )
 
 
+def enqueue_geojson_upload_task(task_id):
+    return _enqueue(
+        "CMroutes.upload_jobs.run_geojson_upload_task",
+        task_id,
+        queue_name_env="CATMAPPER_UPLOAD_QUEUE",
+        default_queue="catmapper-upload",
+    )
+
+
 def enqueue_waiting_uses_task(waiting_task_id, database):
     return _enqueue(
         "CMroutes.upload_jobs.run_waiting_uses_task",

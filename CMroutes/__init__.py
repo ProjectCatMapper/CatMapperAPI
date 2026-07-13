@@ -6,6 +6,7 @@ from .log_routes import *
 from .docs_routes import *
 from .explore_routes import *
 from .upload_routes import *
+from .geojson_upload_routes import *
 from .user_routes import *
 from .admin_routes import *
 from .homepage_routes import *
