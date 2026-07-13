@@ -562,6 +562,7 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
                         lambda value, prop=var: _normalize_non_json_upload_value(
                             value,
                             prop,
+                            separator=sep,
                         )
                     )
                 
@@ -1109,7 +1110,7 @@ def _expand_listish_upload_value(value):
     return None
 
 
-def _normalize_non_json_upload_value(value, property_name):
+def _normalize_non_json_upload_value(value, property_name, separator=";"):
     if _is_json_upload_property(property_name):
         return "" if _is_missing_upload_value(value) else value
 
@@ -1118,7 +1119,7 @@ def _normalize_non_json_upload_value(value, property_name):
         return "" if _is_missing_upload_value(value) else value
 
     # De-duplicate while preserving order.
-    return ";".join(dict.fromkeys(tokens))
+    return separator.join(dict.fromkeys(tokens))
 
 
 def _split_multi_value_cell(value):

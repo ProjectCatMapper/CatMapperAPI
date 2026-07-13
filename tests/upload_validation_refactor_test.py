@@ -381,6 +381,68 @@ def test_update_property_normalizes_non_json_stringified_lists(monkeypatch):
     assert captured["rows"][0]["Name"] == "Alpha;Beta"
 
 
+def test_update_property_uses_formatter_separator_for_admin_parent_lists(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+    monkeypatch.setattr(upload, "createLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "getPropertiesMetadata", lambda driver: [
+        {"type": "relationship", "property": "parent", "metaType": "list"},
+    ])
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "oldVals" in query:
+            return [
+                {
+                    "relID": "rel-1",
+                    "CMID": "SM486205",
+                    "Key": "EC == example",
+                    "datasetID": "SD1",
+                    "oldVals": {"parent": ["SM21103"]},
+                }
+            ]
+        if "SET r.status = 'update'" in query:
+            captured["query"] = query
+            captured["rows"] = params["rows"]
+            return [
+                {
+                    "nodeID": "node-1",
+                    "relID": "rel-1",
+                    "CMID": "SM486205",
+                    "Key": "EC == example",
+                    "datasetID": "SD1",
+                    "parent": ["SM21103", "SM237437"],
+                }
+            ]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    result = upload.updateProperty(
+        pd.DataFrame(
+            [
+                {
+                    "relID": "rel-1",
+                    "datasetID": "SD1",
+                    "CMID": "SM486205",
+                    "Key": "EC == example",
+                    "parent": ["SM21103", "SM237437"],
+                }
+            ]
+        ),
+        optionalProperties=["parent"],
+        isDataset=False,
+        database="SocioMap",
+        user="tester",
+        updateType="overwrite",
+        propertyType="USES",
+    )
+
+    assert result["df"][0]["parent"] == "SM21103||||SM237437"
+    assert captured["rows"][0]["parent"] == "SM21103||||SM237437"
+    assert "'list','||||'" in captured["query"]
+
+
 def test_input_nodes_uses_rejects_existing_dataset_key_duplicate(monkeypatch):
     monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
     monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
