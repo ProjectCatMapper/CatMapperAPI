@@ -29,6 +29,44 @@ def test_explore_geometry_defaults_to_direct_layer(monkeypatch):
     assert payload["datasetpoints"] == []
     assert payload["maplayers"][0]["id"] == "direct"
     assert payload["maplayers"][0]["mode"] == "direct"
+    assert payload["limits"]["pointLimit"] == 5000
+    assert payload["limits"]["polygonLimit"] == 2500
+    assert payload["limits"]["featureLimit"] is None
+
+
+def test_map_feature_limits_default_points_and_polygons_independently():
+    points = [{"id": index} for index in range(explore.DEFAULT_MAP_POINT_LIMIT + 1)]
+    polygons = [{"id": index} for index in range(explore.DEFAULT_MAP_POLYGON_LIMIT + 1)]
+
+    limited_points, limited_polygons, truncated_points, truncated_polygons = explore._limit_map_features(
+        points,
+        polygons,
+        explore.DEFAULT_MAP_POINT_LIMIT,
+        explore.DEFAULT_MAP_POLYGON_LIMIT,
+    )
+
+    assert len(limited_points) == 5000
+    assert len(limited_polygons) == 2500
+    assert truncated_points == 1
+    assert truncated_polygons == 1
+
+
+def test_map_feature_limit_param_preserves_legacy_combined_cap():
+    points = [{"id": index} for index in range(4)]
+    polygons = [{"id": index} for index in range(4)]
+
+    limited_points, limited_polygons, truncated_points, truncated_polygons = explore._limit_map_features(
+        points,
+        polygons,
+        explore.DEFAULT_MAP_POINT_LIMIT,
+        explore.DEFAULT_MAP_POLYGON_LIMIT,
+        feature_limit=5,
+    )
+
+    assert len(limited_points) == 4
+    assert len(limited_polygons) == 1
+    assert truncated_points == 0
+    assert truncated_polygons == 3
 
 
 def test_explore_geometry_related_layer_adds_provenance_without_direct(monkeypatch):
@@ -210,6 +248,8 @@ def test_map_layer_options_summarize_direct_related_and_descendant(monkeypatch):
         {"depth": 1, "nodeCount": 2},
         {"depth": 2, "nodeCount": 2},
     ]
+    assert payload["limits"]["defaultPointLimit"] == 5000
+    assert payload["limits"]["defaultPolygonLimit"] == 2500
 
 
 def test_map_layer_options_summarize_dataset_used_categories(monkeypatch):

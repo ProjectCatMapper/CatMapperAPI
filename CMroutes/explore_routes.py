@@ -488,6 +488,8 @@ def getPointGeometry(database, cmid):
             relations=request.args.get("relations") or request.args.get("relation"),
             max_depth=request.args.get("maxDepth"),
             node_limit=request.args.get("nodeLimit"),
+            point_limit=request.args.get("pointLimit"),
+            polygon_limit=request.args.get("polygonLimit"),
             feature_limit=request.args.get("featureLimit"),
         )
         return jsonify(results)
