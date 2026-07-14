@@ -248,6 +248,7 @@ def test_map_layer_options_summarize_direct_related_and_descendant(monkeypatch):
         {"depth": 1, "nodeCount": 2},
         {"depth": 2, "nodeCount": 2},
     ]
+    assert payload["limits"]["maxDepth"] == 30
     assert payload["limits"]["defaultPointLimit"] == 5000
     assert payload["limits"]["defaultPolygonLimit"] == 2500
 
