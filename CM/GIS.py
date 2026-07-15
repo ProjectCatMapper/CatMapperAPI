@@ -125,14 +125,31 @@ def getPolygon(CMID, driver, simple=True):
 
 
 def getPoints(CMID, driver):
-    query = "match (:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET) where not r.geoCoords is null return distinct r.geoCoords as geometry, d.shortName as source, r.Key as Key"
+    query = """
+    MATCH (c:CATEGORY {CMID: $CMID})<-[r:USES]-(d:DATASET)
+    WHERE r.geoCoords IS NOT NULL
+    RETURN DISTINCT
+        r.geoCoords AS geometry,
+        coalesce(d.shortName, d.CMName, d.CMID) AS source,
+        r.Key AS Key,
+        c.CMID AS CMID,
+        coalesce(c.CMName, c.Name, c.CMID) AS CMName
+    """
     result = getQuery(query, driver, params={"CMID": CMID})
     points = [dict(record) for record in result]
     return points
 
 def getDatasetPoints(CMID, driver):
-
-    query = "match (c:CATEGORY)<-[r:USES]-(:DATASET {CMID: $CMID}) where not r.geoCoords is null return distinct r.geoCoords as geometry, c.CMName as source"
+    query = """
+    MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET {CMID: $CMID})
+    WHERE r.geoCoords IS NOT NULL
+    RETURN DISTINCT
+        r.geoCoords AS geometry,
+        coalesce(c.CMName, c.Name, c.CMID) AS source,
+        r.Key AS Key,
+        c.CMID AS CMID,
+        coalesce(c.CMName, c.Name, c.CMID) AS CMName
+    """
     result = getQuery(query, driver, params={"CMID": CMID})
     points = [dict(record) for record in result]
     return points

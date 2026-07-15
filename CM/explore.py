@@ -699,6 +699,58 @@ def _get_geometry_counts_for_cmids(driver, cmids):
     return counts
 
 
+def _get_dataset_uses_geometry_counts(driver, dataset_cmid, category_cmids):
+    """Count geometry on only one dataset's USES ties, grouped by category."""
+    category_cmids = [cmid for cmid in dict.fromkeys(category_cmids or []) if cmid]
+    if not category_cmids:
+        return {}
+
+    counts = {
+        cmid: {"pointCount": 0, "polygonCount": 0}
+        for cmid in category_cmids
+    }
+    point_query = """
+    MATCH (:DATASET {CMID: $dataset_cmid})-[r:USES]->(c:CATEGORY)
+    WHERE c.CMID IN $category_cmids AND r.geoCoords IS NOT NULL
+    RETURN c.CMID AS CMID, count(DISTINCT r) AS pointCount
+    """
+    params = {"dataset_cmid": dataset_cmid, "category_cmids": category_cmids}
+    for row in getQuery(point_query, driver, params=params):
+        if row.get("CMID") in counts:
+            counts[row["CMID"]]["pointCount"] = int(row.get("pointCount") or 0)
+
+    polygon_query = """
+    MATCH (:DATASET {CMID: $dataset_cmid})-[r:USES]->(c:CATEGORY)
+    WHERE c.CMID IN $category_cmids AND r.geoPolygon IS NOT NULL
+    RETURN c.CMID AS CMID, r.geoPolygon AS geomID
+    """
+    geom_to_cmids = defaultdict(set)
+    for row in getQuery(polygon_query, driver, params=params):
+        for geom_id in _normalize_geom_ids(row.get("geomID")):
+            geom_to_cmids[geom_id].add(row.get("CMID"))
+
+    if geom_to_cmids:
+        try:
+            found = getQuery(
+                """
+                UNWIND $geomIDs AS geomID
+                MATCH (g:GEOMETRY)
+                WHERE g.geomID = geomID
+                RETURN DISTINCT g.geomID AS geomID
+                """,
+                getDriver("gisdb"),
+                params={"geomIDs": list(geom_to_cmids)},
+            )
+            for row in found:
+                for category_cmid in geom_to_cmids.get(row.get("geomID"), []):
+                    if category_cmid in counts:
+                        counts[category_cmid]["polygonCount"] += 1
+        except Exception:
+            pass
+
+    return counts
+
+
 def _normalize_geom_ids(value):
     if value is None:
         return []
@@ -911,6 +963,78 @@ def _get_polygons_for_cmids(driver, cmids, simple=True):
     return getQuery(geometry_query, driverGIS, params={"rows": lookup_rows})
 
 
+def _get_dataset_uses_points(driver, dataset_cmid, category_cmids):
+    """Return point geometry only from the selected dataset's USES ties."""
+    category_cmids = [cmid for cmid in dict.fromkeys(category_cmids or []) if cmid]
+    if not category_cmids:
+        return []
+
+    query = """
+    MATCH (d:DATASET {CMID: $dataset_cmid})-[r:USES]->(c:CATEGORY)
+    WHERE c.CMID IN $category_cmids AND r.geoCoords IS NOT NULL
+    RETURN DISTINCT
+        r.geoCoords AS geometry,
+        coalesce(d.shortName, d.CMName, d.CMID) AS source,
+        r.Key AS Key,
+        c.CMID AS sourceNodeCMID,
+        coalesce(c.CMName, c.Name, c.CMID) AS sourceNodeName,
+        labels(c) AS sourceNodeLabels
+    """
+    return [
+        dict(record)
+        for record in getQuery(
+            query,
+            driver,
+            params={"dataset_cmid": dataset_cmid, "category_cmids": category_cmids},
+        )
+    ]
+
+
+def _get_dataset_uses_polygons(driver, dataset_cmid, category_cmids, simple=True):
+    """Return polygon geometry only from the selected dataset's USES ties."""
+    category_cmids = [cmid for cmid in dict.fromkeys(category_cmids or []) if cmid]
+    if not category_cmids:
+        return []
+
+    query = """
+    MATCH (d:DATASET {CMID: $dataset_cmid})-[r:USES]->(c:CATEGORY)
+    WHERE c.CMID IN $category_cmids AND r.geoPolygon IS NOT NULL
+    RETURN DISTINCT
+        r.geoPolygon AS geomID,
+        coalesce(d.shortName, d.CMName, d.CMID) AS source,
+        c.CMID AS sourceNodeCMID,
+        coalesce(c.CMName, c.Name, c.CMID) AS sourceNodeName,
+        labels(c) AS sourceNodeLabels
+    """
+    rows = getQuery(
+        query,
+        driver,
+        params={"dataset_cmid": dataset_cmid, "category_cmids": category_cmids},
+    )
+    lookup_rows = [
+        {**dict(row), "geomID": geom_id}
+        for row in rows
+        for geom_id in _normalize_geom_ids(row.get("geomID"))
+    ]
+    if not lookup_rows:
+        return []
+
+    driver_gis = getDriver("gisdb")
+    geometry_expression = "coalesce(g.simplified, g.geometry)" if simple else "g.geometry"
+    geometry_query = f"""
+    UNWIND $rows AS row
+    MATCH (g:GEOMETRY)
+    WHERE g.geomID = row.geomID
+    RETURN
+        row.source AS source,
+        row.sourceNodeCMID AS sourceNodeCMID,
+        row.sourceNodeName AS sourceNodeName,
+        row.sourceNodeLabels AS sourceNodeLabels,
+        {geometry_expression} AS geometry
+    """
+    return getQuery(geometry_query, driver_gis, params={"rows": lookup_rows})
+
+
 def _build_layer_option(layer_id, label, mode, nodes, counts_by_cmid, **extra):
     node_count = len(nodes)
     total_node_count = extra.pop("totalNodeCount", node_count)
@@ -962,8 +1086,10 @@ def getMapLayerOptions(database, cmid, max_depth=DEFAULT_MAP_DESCENDANT_DEPTH, n
 
     used_category_nodes = _get_dataset_used_category_nodes(driver, cmid, node_limit)
     if used_category_nodes:
-        used_category_counts = _get_geometry_counts_for_cmids(
-            driver, [node.get("CMID") for node in used_category_nodes]
+        used_category_counts = _get_dataset_uses_geometry_counts(
+            driver,
+            cmid,
+            [node.get("CMID") for node in used_category_nodes],
         )
         layers.append(
             _build_layer_option(
@@ -1125,6 +1251,8 @@ def _build_inherited_geometry_layer(
     total_node_count=None,
     node_limit=None,
     depth_counts=None,
+    raw_points=None,
+    raw_polygons=None,
 ):
     if not nodes:
         return _build_geometry_layer(
@@ -1145,11 +1273,13 @@ def _build_inherited_geometry_layer(
 
     nodes_by_cmid = {node.get("CMID"): node for node in nodes if node.get("CMID")}
     cmids = list(nodes_by_cmid.keys())
+    point_rows = _get_points_for_cmids(driver, cmids) if raw_points is None else raw_points
+    polygon_rows = _get_polygons_for_cmids(driver, cmids) if raw_polygons is None else raw_polygons
     raw_points = _annotate_rows_for_inherited_layer(
-        _get_points_for_cmids(driver, cmids), nodes_by_cmid, mode, relationship
+        point_rows, nodes_by_cmid, mode, relationship
     )
     raw_polygons = _annotate_rows_for_inherited_layer(
-        _get_polygons_for_cmids(driver, cmids), nodes_by_cmid, mode, relationship
+        polygon_rows, nodes_by_cmid, mode, relationship
     )
     points, bad_sources = _validate_points(raw_points, preserve_metadata=True)
     polygons, _polysources = _process_polygons(raw_polygons, preserve_metadata=True)
@@ -1277,6 +1407,7 @@ def exploreGeometry(
     if MAP_LAYER_USES_CATEGORIES in requested_layers:
         used_category_nodes = _get_dataset_used_category_nodes(driver, cmid, node_limit)
         if used_category_nodes:
+            used_category_cmids = [node.get("CMID") for node in used_category_nodes]
             map_layers.append(
                 _build_inherited_geometry_layer(
                     driver,
@@ -1290,6 +1421,8 @@ def exploreGeometry(
                     feature_limit=legacy_feature_limit,
                     total_node_count=_get_dataset_used_category_count(driver, cmid),
                     node_limit=node_limit,
+                    raw_points=_get_dataset_uses_points(driver, cmid, used_category_cmids),
+                    raw_polygons=_get_dataset_uses_polygons(driver, cmid, used_category_cmids),
                 )
             )
 
@@ -1462,6 +1595,12 @@ def _point_payload(entry, coord, preserve_metadata=False):
         "cood": coord,
         "source": entry["source"]
     }
+    cmid = entry.get("CMID") or entry.get("sourceNodeCMID")
+    cmname = entry.get("CMName") or entry.get("sourceNodeName")
+    if cmid:
+        payload["CMID"] = cmid
+    if cmname:
+        payload["CMName"] = cmname
     if preserve_metadata:
         payload.update(_feature_metadata_from_row(entry))
         if "Key" in entry:

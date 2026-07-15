@@ -147,19 +147,26 @@ def test_explore_geometry_dataset_uses_category_layer_adds_provenance(monkeypatc
         "_get_dataset_used_category_count",
         lambda neo4j_driver, cmid: 4,
     )
-    monkeypatch.setattr(
-        explore,
-        "_get_points_for_cmids",
-        lambda neo4j_driver, cmids: [
+    requested = {}
+
+    def exact_uses_points(neo4j_driver, dataset_cmid, cmids):
+        requested["dataset_cmid"] = dataset_cmid
+        requested["cmids"] = cmids
+        return [
             {
                 "geometry": json.dumps({"type": "Point", "coordinates": [30, 40]}),
-                "source": "District Dataset",
+                "source": "Requested Dataset",
                 "sourceNodeCMID": "AM2",
                 "sourceNodeName": "District A",
             }
-        ],
+        ]
+
+    monkeypatch.setattr(explore, "_get_dataset_uses_points", exact_uses_points)
+    monkeypatch.setattr(
+        explore,
+        "_get_dataset_uses_polygons",
+        lambda neo4j_driver, dataset_cmid, cmids: [],
     )
-    monkeypatch.setattr(explore, "_get_polygons_for_cmids", lambda neo4j_driver, cmids: [])
 
     payload = explore.exploreGeometry("ArchaMap", "AD1", layers="uses")
 
@@ -171,6 +178,9 @@ def test_explore_geometry_dataset_uses_category_layer_adds_provenance(monkeypatc
     assert uses_layer["relationship"] == "USES"
     assert uses_layer["pointCount"] == 1
     assert uses_layer["points"][0]["cood"] == [30, 40]
+    assert uses_layer["points"][0]["CMID"] == "AM2"
+    assert uses_layer["points"][0]["CMName"] == "District A"
+    assert uses_layer["points"][0]["source"] == "Requested Dataset"
     assert uses_layer["points"][0]["inherited"] is True
     assert uses_layer["points"][0]["inheritedFromCMID"] == "AM2"
     assert uses_layer["points"][0]["inheritedFromName"] == "District A"
@@ -178,6 +188,50 @@ def test_explore_geometry_dataset_uses_category_layer_adds_provenance(monkeypatc
     assert uses_layer["nodeLimited"] is True
     assert uses_layer["displayedNodeCount"] == 1
     assert uses_layer["totalNodeCount"] == 4
+    assert requested == {"dataset_cmid": "AD1", "cmids": ["AM2"]}
+
+
+def test_dataset_uses_geometry_queries_are_scoped_to_the_root_dataset(monkeypatch):
+    graph_driver = object()
+    gis_driver = object()
+    graph_queries = []
+
+    def fake_get_query(query, driver, params=None, **kwargs):
+        if driver is graph_driver:
+            graph_queries.append((query, params))
+            assert "(d:DATASET {CMID: $dataset_cmid})-[r:USES]->(c:CATEGORY)" in query
+            assert params == {"dataset_cmid": "AD1", "category_cmids": ["AM2"]}
+            if "r.geoCoords" in query:
+                return [{
+                    "geometry": json.dumps({"type": "Point", "coordinates": [30, 40]}),
+                    "source": "Requested Dataset",
+                    "sourceNodeCMID": "AM2",
+                    "sourceNodeName": "District A",
+                }]
+            return [{
+                "geomID": "geom-1",
+                "source": "Requested Dataset",
+                "sourceNodeCMID": "AM2",
+                "sourceNodeName": "District A",
+                "sourceNodeLabels": ["CATEGORY", "DISTRICT"],
+            }]
+        assert driver is gis_driver
+        return [{
+            "geometry": json.dumps({"type": "Polygon", "coordinates": []}),
+            "source": "Requested Dataset",
+            "sourceNodeCMID": "AM2",
+            "sourceNodeName": "District A",
+        }]
+
+    monkeypatch.setattr(explore, "getQuery", fake_get_query)
+    monkeypatch.setattr(explore, "getDriver", lambda database: gis_driver)
+
+    points = explore._get_dataset_uses_points(graph_driver, "AD1", ["AM2"])
+    polygons = explore._get_dataset_uses_polygons(graph_driver, "AD1", ["AM2"])
+
+    assert points[0]["sourceNodeCMID"] == "AM2"
+    assert polygons[0]["sourceNodeCMID"] == "AM2"
+    assert len(graph_queries) == 2
 
 
 def test_map_layer_options_summarize_direct_related_and_descendant(monkeypatch):
@@ -280,6 +334,14 @@ def test_map_layer_options_summarize_dataset_used_categories(monkeypatch):
         explore,
         "_get_dataset_used_category_count",
         lambda neo4j_driver, cmid: 5,
+    )
+    monkeypatch.setattr(
+        explore,
+        "_get_dataset_uses_geometry_counts",
+        lambda neo4j_driver, dataset_cmid, cmids: {
+            "AM2": {"pointCount": 1, "polygonCount": 1},
+            "AM3": {"pointCount": 2, "polygonCount": 0},
+        },
     )
     monkeypatch.setattr(
         explore,
