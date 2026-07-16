@@ -1134,7 +1134,22 @@ def getMapLayerOptions(database, cmid, max_depth=DEFAULT_MAP_DESCENDANT_DEPTH, n
         )
 
     descendant_nodes = _get_descendant_map_nodes(driver, cmid, max_depth, node_limit)
-    descendant_summary = _get_descendant_map_node_summary(driver, cmid, max_depth)
+    all_descendant_summary = _get_descendant_map_node_summary(
+        driver, cmid, MAX_MAP_DESCENDANT_DEPTH
+    )
+    all_depth_counts = all_descendant_summary.get("depthCounts", [])
+    available_descendant_depth = max(
+        (int(entry.get("depth") or 0) for entry in all_depth_counts),
+        default=0,
+    )
+    descendant_depth_counts = [
+        entry
+        for entry in all_depth_counts
+        if int(entry.get("depth") or 0) <= max_depth
+    ]
+    descendant_total_node_count = sum(
+        int(entry.get("nodeCount") or 0) for entry in descendant_depth_counts
+    )
     descendant_counts = _get_geometry_counts_for_cmids(
         driver, [node.get("CMID") for node in descendant_nodes]
     )
@@ -1148,8 +1163,9 @@ def getMapLayerOptions(database, cmid, max_depth=DEFAULT_MAP_DESCENDANT_DEPTH, n
                 descendant_counts,
                 relationship="CONTAINS",
                 maxDepth=max_depth,
-                totalNodeCount=descendant_summary.get("totalNodeCount", len(descendant_nodes)),
-                depthCounts=descendant_summary.get("depthCounts", []),
+                availableDepth=available_descendant_depth,
+                totalNodeCount=descendant_total_node_count,
+                depthCounts=descendant_depth_counts,
                 nodeLimit=node_limit,
             )
         )
@@ -1160,8 +1176,12 @@ def getMapLayerOptions(database, cmid, max_depth=DEFAULT_MAP_DESCENDANT_DEPTH, n
         "layers": layers,
         "limits": {
             "maxDepth": MAX_MAP_DESCENDANT_DEPTH,
+            "availableDescendantDepth": available_descendant_depth,
             "maxNodes": MAX_MAP_NODE_LIMIT,
-            "defaultDepth": DEFAULT_MAP_DESCENDANT_DEPTH,
+            "defaultDepth": min(
+                DEFAULT_MAP_DESCENDANT_DEPTH,
+                available_descendant_depth or DEFAULT_MAP_DESCENDANT_DEPTH,
+            ),
             "defaultNodeLimit": DEFAULT_MAP_NODE_LIMIT,
             "defaultPointLimit": DEFAULT_MAP_POINT_LIMIT,
             "defaultPolygonLimit": DEFAULT_MAP_POLYGON_LIMIT,

@@ -236,6 +236,7 @@ def test_dataset_uses_geometry_queries_are_scoped_to_the_root_dataset(monkeypatc
 
 def test_map_layer_options_summarize_direct_related_and_descendant(monkeypatch):
     driver = object()
+    summary_depths = []
 
     monkeypatch.setattr(explore, "getDriver", lambda database: driver)
     monkeypatch.setattr(
@@ -276,14 +277,14 @@ def test_map_layer_options_summarize_direct_related_and_descendant(monkeypatch):
             {"CMID": "AM3", "CMName": "Language A", "relationship": "CONTAINS", "depth": 1}
         ],
     )
-    monkeypatch.setattr(
-        explore,
-        "_get_descendant_map_node_summary",
-        lambda neo4j_driver, cmid, max_depth: {
+    def fake_descendant_summary(neo4j_driver, cmid, max_depth):
+        summary_depths.append(max_depth)
+        return {
             "totalNodeCount": 4,
             "depthCounts": [{"depth": 1, "nodeCount": 2}, {"depth": 2, "nodeCount": 2}],
-        },
-    )
+        }
+
+    monkeypatch.setattr(explore, "_get_descendant_map_node_summary", fake_descendant_summary)
 
     payload = explore.getMapLayerOptions("ArchaMap", "AM1")
     layers = {layer["id"]: layer for layer in payload["layers"]}
@@ -302,11 +303,15 @@ def test_map_layer_options_summarize_direct_related_and_descendant(monkeypatch):
         {"depth": 1, "nodeCount": 2},
         {"depth": 2, "nodeCount": 2},
     ]
+    assert layers["descendants:CONTAINS"]["availableDepth"] == 2
     assert payload["limits"]["maxDepth"] == 30
+    assert payload["limits"]["availableDescendantDepth"] == 2
+    assert payload["limits"]["defaultDepth"] == 2
     assert payload["limits"]["maxNodes"] == 5000
     assert payload["limits"]["defaultNodeLimit"] == 5000
     assert payload["limits"]["defaultPointLimit"] == 5000
     assert payload["limits"]["defaultPolygonLimit"] == 2500
+    assert summary_depths == [explore.MAX_MAP_DESCENDANT_DEPTH]
 
 
 def test_map_layer_options_summarize_dataset_used_categories(monkeypatch):
