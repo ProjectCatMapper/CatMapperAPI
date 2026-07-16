@@ -29,44 +29,54 @@ def test_explore_geometry_defaults_to_direct_layer(monkeypatch):
     assert payload["datasetpoints"] == []
     assert payload["maplayers"][0]["id"] == "direct"
     assert payload["maplayers"][0]["mode"] == "direct"
-    assert payload["limits"]["pointLimit"] == 5000
+    assert payload["limits"]["pointLimit"] is None
     assert payload["limits"]["polygonLimit"] == 2500
     assert payload["limits"]["featureLimit"] is None
 
 
-def test_map_feature_limits_default_points_and_polygons_independently():
-    points = [{"id": index} for index in range(explore.DEFAULT_MAP_POINT_LIMIT + 1)]
+def test_map_feature_limits_polygons_but_returns_all_points():
+    points = [{"id": index} for index in range(5001)]
     polygons = [{"id": index} for index in range(explore.DEFAULT_MAP_POLYGON_LIMIT + 1)]
 
     limited_points, limited_polygons, truncated_points, truncated_polygons = explore._limit_map_features(
         points,
         polygons,
-        explore.DEFAULT_MAP_POINT_LIMIT,
         explore.DEFAULT_MAP_POLYGON_LIMIT,
     )
 
-    assert len(limited_points) == 5000
+    assert len(limited_points) == 5001
     assert len(limited_polygons) == 2500
-    assert truncated_points == 1
+    assert truncated_points == 0
     assert truncated_polygons == 1
 
 
-def test_map_feature_limit_param_preserves_legacy_combined_cap():
-    points = [{"id": index} for index in range(4)]
-    polygons = [{"id": index} for index in range(4)]
+def test_explore_geometry_ignores_legacy_point_caps(monkeypatch):
+    driver = object()
+    raw_points = [
+        {
+            "geometry": json.dumps({"type": "Point", "coordinates": [index, index]}),
+            "source": "Direct Dataset",
+        }
+        for index in range(3)
+    ]
 
-    limited_points, limited_polygons, truncated_points, truncated_polygons = explore._limit_map_features(
-        points,
-        polygons,
-        explore.DEFAULT_MAP_POINT_LIMIT,
-        explore.DEFAULT_MAP_POLYGON_LIMIT,
-        feature_limit=5,
+    monkeypatch.setattr(explore, "getDriver", lambda database: driver)
+    monkeypatch.setattr(explore, "getPolygon", lambda cmid, neo4j_driver: [])
+    monkeypatch.setattr(explore, "getPoints", lambda cmid, neo4j_driver: raw_points)
+    monkeypatch.setattr(explore, "getDatasetPoints", lambda cmid, neo4j_driver: [])
+
+    payload = explore.exploreGeometry(
+        "ArchaMap",
+        "AM1",
+        point_limit=1,
+        feature_limit=1,
     )
 
-    assert len(limited_points) == 4
-    assert len(limited_polygons) == 1
-    assert truncated_points == 0
-    assert truncated_polygons == 3
+    assert len(payload["points"]) == 3
+    assert payload["maplayers"][0]["pointCount"] == 3
+    assert payload["maplayers"][0]["truncatedFeatureCount"] == 0
+    assert payload["limits"]["pointLimit"] is None
+    assert payload["limits"]["featureLimit"] is None
 
 
 def test_descendant_candidate_limit_is_applied_after_depth_order(monkeypatch):
@@ -331,8 +341,9 @@ def test_map_layer_options_summarize_direct_related_and_descendant(monkeypatch):
     assert payload["limits"]["defaultDepth"] == 2
     assert payload["limits"]["maxNodes"] == 5000
     assert payload["limits"]["defaultNodeLimit"] == 5000
-    assert payload["limits"]["defaultPointLimit"] == 5000
+    assert "defaultPointLimit" not in payload["limits"]
     assert payload["limits"]["defaultPolygonLimit"] == 2500
+    assert "maxPointLimit" not in payload["limits"]
     assert summary_depths == [explore.MAX_MAP_DESCENDANT_DEPTH]
 
 

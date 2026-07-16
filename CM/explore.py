@@ -518,12 +518,8 @@ DEFAULT_MAP_DESCENDANT_DEPTH = 5
 MAX_MAP_DESCENDANT_DEPTH = 30
 DEFAULT_MAP_NODE_LIMIT = 5000
 MAX_MAP_NODE_LIMIT = 5000
-DEFAULT_MAP_POINT_LIMIT = 5000
-MAX_MAP_POINT_LIMIT = 20000
 DEFAULT_MAP_POLYGON_LIMIT = 2500
 MAX_MAP_POLYGON_LIMIT = 10000
-DEFAULT_MAP_FEATURE_LIMIT = DEFAULT_MAP_POINT_LIMIT + DEFAULT_MAP_POLYGON_LIMIT
-MAX_MAP_FEATURE_LIMIT = MAX_MAP_POINT_LIMIT + MAX_MAP_POLYGON_LIMIT
 
 
 def _split_param_values(value):
@@ -597,41 +593,27 @@ def _polygon_feature_count(polygons):
     return 0
 
 
-def _limit_points(points, feature_limit):
-    if not isinstance(points, list):
-        return [], 0
-    if len(points) <= feature_limit:
-        return points, 0
-    return points[:feature_limit], len(points) - feature_limit
-
-
-def _limit_polygons(polygons, feature_limit):
+def _limit_polygons(polygons, polygon_limit):
     count = _polygon_feature_count(polygons)
-    if count <= feature_limit:
+    if count <= polygon_limit:
         return polygons, 0
 
-    truncated = count - feature_limit
+    truncated = count - polygon_limit
     if isinstance(polygons, dict) and isinstance(polygons.get("features"), list):
         limited = polygons.copy()
-        limited["features"] = polygons["features"][:feature_limit]
+        limited["features"] = polygons["features"][:polygon_limit]
         return limited, truncated
     if isinstance(polygons, list):
-        return polygons[:feature_limit], truncated
-    if feature_limit < 1:
+        return polygons[:polygon_limit], truncated
+    if polygon_limit < 1:
         return [], truncated
     return polygons, truncated
 
 
-def _limit_map_features(points, polygons, point_limit, polygon_limit, feature_limit=None):
-    if feature_limit is not None:
-        limited_points, truncated_points = _limit_points(points, feature_limit)
-        remaining_polygon_limit = max(0, feature_limit - len(limited_points))
-        limited_polygons, truncated_polygons = _limit_polygons(polygons, remaining_polygon_limit)
-        return limited_points, limited_polygons, truncated_points, truncated_polygons
-
-    limited_points, truncated_points = _limit_points(points, point_limit)
+def _limit_map_features(points, polygons, polygon_limit):
+    limited_points = points if isinstance(points, list) else []
     limited_polygons, truncated_polygons = _limit_polygons(polygons, polygon_limit)
-    return limited_points, limited_polygons, truncated_points, truncated_polygons
+    return limited_points, limited_polygons, 0, truncated_polygons
 
 
 def _get_geometry_counts_for_cmids(driver, cmids):
@@ -1193,10 +1175,7 @@ def getMapLayerOptions(database, cmid, max_depth=DEFAULT_MAP_DESCENDANT_DEPTH, n
                 available_descendant_depth or DEFAULT_MAP_DESCENDANT_DEPTH,
             ),
             "defaultNodeLimit": DEFAULT_MAP_NODE_LIMIT,
-            "defaultPointLimit": DEFAULT_MAP_POINT_LIMIT,
             "defaultPolygonLimit": DEFAULT_MAP_POLYGON_LIMIT,
-            "defaultFeatureLimit": DEFAULT_MAP_FEATURE_LIMIT,
-            "maxPointLimit": MAX_MAP_POINT_LIMIT,
             "maxPolygonLimit": MAX_MAP_POLYGON_LIMIT,
         },
     }
@@ -1275,9 +1254,7 @@ def _build_inherited_geometry_layer(
     mode,
     nodes,
     relationship,
-    point_limit,
     polygon_limit,
-    feature_limit=None,
     total_node_count=None,
     node_limit=None,
     depth_counts=None,
@@ -1295,9 +1272,7 @@ def _build_inherited_geometry_layer(
             relationship,
             total_node_count=total_node_count,
             node_limit=node_limit,
-            point_limit=point_limit,
             polygon_limit=polygon_limit,
-            feature_limit=feature_limit,
             depth_counts=depth_counts,
         )
 
@@ -1317,9 +1292,7 @@ def _build_inherited_geometry_layer(
     points, polygons, truncated_points, truncated_polygons = _limit_map_features(
         points,
         polygons,
-        point_limit,
         polygon_limit,
-        feature_limit,
     )
     layer = _build_geometry_layer(
         layer_id,
@@ -1332,9 +1305,7 @@ def _build_inherited_geometry_layer(
         truncated_points + truncated_polygons,
         total_node_count=total_node_count,
         node_limit=node_limit,
-        point_limit=point_limit,
         polygon_limit=polygon_limit,
-        feature_limit=feature_limit,
         depth_counts=depth_counts,
     )
     layer["badsources"] = bad_sources
@@ -1387,15 +1358,8 @@ def exploreGeometry(
     requested_relations = _normalize_inheritance_relations(relations)
     max_depth = _coerce_int(max_depth, DEFAULT_MAP_DESCENDANT_DEPTH, 1, MAX_MAP_DESCENDANT_DEPTH)
     node_limit = _coerce_int(node_limit, DEFAULT_MAP_NODE_LIMIT, 1, MAX_MAP_NODE_LIMIT)
-    legacy_feature_limit = None
-    if feature_limit is not None and point_limit is None and polygon_limit is None:
-        legacy_feature_limit = _coerce_int(
-            feature_limit,
-            DEFAULT_MAP_FEATURE_LIMIT,
-            1,
-            MAX_MAP_FEATURE_LIMIT,
-        )
-    point_limit = _coerce_int(point_limit, DEFAULT_MAP_POINT_LIMIT, 1, MAX_MAP_POINT_LIMIT)
+    # point_limit and feature_limit remain accepted for API compatibility, but
+    # points are intentionally unlimited. Only polygons are capped.
     polygon_limit = _coerce_int(polygon_limit, DEFAULT_MAP_POLYGON_LIMIT, 0, MAX_MAP_POLYGON_LIMIT)
 
     if MAP_LAYER_DIRECT in requested_layers:
@@ -1408,12 +1372,9 @@ def exploreGeometry(
         direct_points, direct_polygons, truncated_points, truncated_polygons = _limit_map_features(
             result["points"],
             result["polygons"],
-            point_limit,
             polygon_limit,
-            legacy_feature_limit,
         )
-        dataset_point_limit = legacy_feature_limit if legacy_feature_limit is not None else point_limit
-        dataset_points, truncated_dataset_points = _limit_points(result["datasetpoints"], dataset_point_limit)
+        dataset_points = result["datasetpoints"] if isinstance(result["datasetpoints"], list) else []
         result["points"] = direct_points
         result["polygons"] = direct_polygons
         result["datasetpoints"] = dataset_points
@@ -1427,10 +1388,8 @@ def exploreGeometry(
                 direct_polygons,
                 [{"CMID": cmid}],
                 None,
-                truncated_points + truncated_dataset_points + truncated_polygons,
-                point_limit=point_limit,
+                truncated_points + truncated_polygons,
                 polygon_limit=polygon_limit,
-                feature_limit=legacy_feature_limit,
             )
         )
 
@@ -1446,9 +1405,7 @@ def exploreGeometry(
                     MAP_LAYER_USES_CATEGORIES,
                     used_category_nodes,
                     "USES",
-                    point_limit,
                     polygon_limit,
-                    feature_limit=legacy_feature_limit,
                     total_node_count=_get_dataset_used_category_count(driver, cmid),
                     node_limit=node_limit,
                     raw_points=_get_dataset_uses_points(driver, cmid, used_category_cmids),
@@ -1474,9 +1431,7 @@ def exploreGeometry(
                     MAP_LAYER_RELATED,
                     relationship_nodes,
                     relationship,
-                    point_limit,
                     polygon_limit,
-                    feature_limit=legacy_feature_limit,
                     total_node_count=related_total_counts.get(relationship, len(relationship_nodes)),
                     node_limit=node_limit,
                 )
@@ -1494,9 +1449,7 @@ def exploreGeometry(
                     MAP_LAYER_DESCENDANTS,
                     descendant_nodes,
                     "CONTAINS",
-                    point_limit,
                     polygon_limit,
-                    feature_limit=legacy_feature_limit,
                     total_node_count=descendant_summary.get("totalNodeCount", len(descendant_nodes)),
                     node_limit=node_limit,
                     depth_counts=descendant_summary.get("depthCounts", []),
@@ -1507,9 +1460,9 @@ def exploreGeometry(
     result["limits"] = {
         "maxDepth": max_depth,
         "nodeLimit": node_limit,
-        "pointLimit": point_limit,
+        "pointLimit": None,
         "polygonLimit": polygon_limit,
-        "featureLimit": legacy_feature_limit,
+        "featureLimit": None,
     }
     return result
 
