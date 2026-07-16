@@ -69,6 +69,28 @@ def test_map_feature_limit_param_preserves_legacy_combined_cap():
     assert truncated_polygons == 3
 
 
+def test_descendant_candidate_limit_is_applied_after_depth_order(monkeypatch):
+    captured = {}
+
+    def fake_get_query(query, driver, params=None, **kwargs):
+        captured["query"] = " ".join(query.split())
+        captured["params"] = params
+        return []
+
+    monkeypatch.setattr(explore, "getQuery", fake_get_query)
+
+    assert explore._get_descendant_map_nodes(object(), "SM1", 7, 5000) == []
+
+    query = captured["query"]
+    selection_order = query.index("ORDER BY depth, CMName, descendant.CMID")
+    selection_limit = query.index("LIMIT $node_limit")
+    result_projection = query.index("RETURN descendant.CMID AS CMID")
+
+    assert selection_order < selection_limit < result_projection
+    assert "WHERE length(candidatePath) = depth" in query
+    assert captured["params"] == {"cmid": "SM1", "node_limit": 5000}
+
+
 def test_explore_geometry_related_layer_adds_provenance_without_direct(monkeypatch):
     driver = object()
 

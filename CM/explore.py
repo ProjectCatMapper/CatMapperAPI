@@ -853,16 +853,26 @@ def _get_descendant_map_nodes(driver, cmid, max_depth, node_limit):
     WITH
         descendant,
         min(length(path)) AS depth,
-        head(collect([node IN nodes(path) | node.CMID])) AS pathCmids
-    RETURN DISTINCT
-        descendant.CMID AS CMID,
+        collect(path) AS descendantPaths
+    WITH
+        descendant,
+        depth,
         coalesce(descendant.CMName, descendant.Name, descendant.CMID) AS CMName,
+        head([
+            candidatePath IN descendantPaths
+            WHERE length(candidatePath) = depth |
+            [node IN nodes(candidatePath) | node.CMID]
+        ]) AS pathCmids
+    ORDER BY depth, CMName, descendant.CMID
+    LIMIT $node_limit
+    RETURN
+        descendant.CMID AS CMID,
+        CMName,
         labels(descendant) AS labels,
         depth,
         pathCmids AS path,
         "CONTAINS" AS relationship
     ORDER BY depth, CMName, CMID
-    LIMIT $node_limit
     """
     return getQuery(query, driver, params={"cmid": cmid, "node_limit": node_limit})
 
