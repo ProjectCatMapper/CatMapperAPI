@@ -469,6 +469,11 @@ def test_add_edit_delete_uses_allows_district_same_domain_exception(monkeypatch)
     monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [])
     monkeypatch.setattr(admin, "getGroupLabels", lambda cmid, driver: "AREA")
     monkeypatch.setattr(admin, "processUSES", lambda **kwargs: None)
+    monkeypatch.setattr(
+        admin,
+        "validate_contextual_tie_primary_domains",
+        lambda *args, **kwargs: None,
+    )
 
     def fake_validate_property_cmid(value, proptoChange, validgroupLabel, driver):
         captured["validated"] = {
@@ -504,6 +509,49 @@ def test_add_edit_delete_uses_allows_district_same_domain_exception(monkeypatch)
     assert captured["optionalProperties"] == ["district"]
     row = captured["df"].to_dict(orient="records")[0]
     assert row["district"] == "SM-OTHER-AREA"
+
+
+def test_add_edit_delete_uses_checks_actual_labels_for_language_of(monkeypatch):
+    payload = _base_input()
+    payload["s1_2"] = "SM-DIALECT"
+    payload["s1_3"] = "SM-FAMILY"
+    payload["s1_8"] = "language"
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [])
+    monkeypatch.setattr(admin, "getGroupLabels", lambda cmid, driver: "LANGUOID")
+    monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
+            # LANGUAGE_OF cannot reliably reveal the LANGUOID primary domain by
+            # parsing its name, so the endpoint-label validator must decide.
+            return [{"groupLabel": None, "relationship": "LANGUAGE_OF"}]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin, "getQuery", fake_get_query)
+
+    def reject_shared_labels(driver, source_cmid, target_cmids, relationship):
+        assert source_cmid == "SM-DIALECT"
+        assert target_cmids == ["SM-FAMILY"]
+        assert relationship == "LANGUAGE_OF"
+        raise ValueError("same primary domain: LANGUOID")
+
+    monkeypatch.setattr(
+        admin,
+        "validate_contextual_tie_primary_domains",
+        reject_shared_labels,
+    )
+    monkeypatch.setattr(
+        admin,
+        "updateProperty",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("updateProperty should not run after endpoint rejection")
+        ),
+    )
+
+    with pytest.raises(ValueError, match="LANGUOID"):
+        admin.add_edit_delete_USES("sociomap", "tester", payload)
 
 
 def test_add_edit_delete_node_dataset_parent_normalizes_multi_parent_values(monkeypatch):

@@ -15,7 +15,11 @@ from .utils import *
 from .metadata import *
 from .log import createLog
 from .USES import processUSES
-from .USES import addCMNameRel, processDATASETs
+from .USES import (
+    addCMNameRel,
+    processDATASETs,
+    validate_contextual_tie_primary_domains,
+)
 from .upload import updateProperty
 from .keys import invalid_key_format_error
 from flask import jsonify
@@ -502,6 +506,13 @@ def add_edit_delete_USES(database,user,input):
             if groupLabel:
                 validate_uses_contextual_property(CMID, USES_property, groupLabel, relationship, driver)
                 validatePropertyCMID(new_property_value,USES_property,groupLabel,driver)
+            if relationship:
+                validate_contextual_tie_primary_domains(
+                    driver,
+                    CMID,
+                    _split_admin_multi_value(new_property_value),
+                    relationship,
+                )
         
         if USES_property in integer_constrained_properties:
             try:

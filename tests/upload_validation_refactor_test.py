@@ -848,6 +848,61 @@ def test_validate_non_parent_multi_value_columns_accepts_area_for_district():
     assert result is None
 
 
+def test_validate_contextual_primary_domain_ties_rejects_languoid_to_languoid():
+    dataset = pd.DataFrame(
+        {
+            "CMID": ["SM-DIALECT"],
+            "language": ["SM-FAMILY"],
+        }
+    )
+    cmid_metadata = {
+        "SM-DIALECT": {
+            "labels": {"CATEGORY", "LANGUOID", "DIALECT"},
+            "groupLabels": {"LANGUOID"},
+        },
+        "SM-FAMILY": {
+            "labels": {"CATEGORY", "LANGUOID", "FAMILY"},
+            "groupLabels": {"LANGUOID"},
+        },
+    }
+
+    with pytest.raises(ValueError, match="same primary domain") as err:
+        upload._validate_contextual_primary_domain_ties(
+            dataset,
+            {"language": ["SM-FAMILY"]},
+            cmid_metadata,
+        )
+
+    assert "SM-DIALECT" in str(err.value)
+    assert "SM-FAMILY" in str(err.value)
+    assert "LANGUOID" in str(err.value)
+
+
+def test_validate_contextual_primary_domain_ties_allows_area_of_area():
+    dataset = pd.DataFrame(
+        {
+            "CMID": ["SM-AREA-CHILD"],
+            "district": ["SM-AREA-PARENT"],
+        }
+    )
+    cmid_metadata = {
+        "SM-AREA-CHILD": {
+            "labels": {"CATEGORY", "AREA", "ADM1"},
+            "groupLabels": {"AREA"},
+        },
+        "SM-AREA-PARENT": {
+            "labels": {"CATEGORY", "AREA", "ADM0"},
+            "groupLabels": {"AREA"},
+        },
+    }
+
+    assert upload._validate_contextual_primary_domain_ties(
+        dataset,
+        {"district": ["SM-AREA-PARENT"]},
+        cmid_metadata,
+    ) is None
+
+
 def test_validate_restricted_node_property_domains_rejects_wrong_domain(monkeypatch):
     dataset = pd.DataFrame(
         {

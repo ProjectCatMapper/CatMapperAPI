@@ -4,6 +4,101 @@ from .utils import *
 from .metadata import getPropertiesMetadata
 from .log import createLog
 
+
+def contextual_tie_primary_domain_conflicts(driver, source_cmid, target_cmids, relationship):
+    """Return target nodes sharing a Neo4j domain label with the source node."""
+    if not isinstance(target_cmids, (list, tuple, set)):
+        target_cmids = [target_cmids]
+    normalized_targets = sorted({
+        str(cmid).strip() for cmid in target_cmids if str(cmid).strip()
+    })
+    if not str(source_cmid or "").strip() or not normalized_targets:
+        return []
+
+    relationship = sanitize_cypher_identifier(relationship, "relationship")
+    query = """
+    MATCH (source:CATEGORY {CMID: $source_cmid})
+    MATCH (target:CATEGORY)
+    WHERE target.CMID IN $target_cmids
+    WITH target,
+         [label IN labels(source)
+          WHERE label <> 'CATEGORY' AND label IN labels(target)] AS sharedLabels
+    WHERE size(sharedLabels) > 0
+      AND NOT ($relationship = 'AREA_OF' AND 'AREA' IN sharedLabels)
+    RETURN target.CMID AS targetCMID, sharedLabels
+    """
+    return getQuery(
+        query,
+        driver=driver,
+        params={
+            "source_cmid": str(source_cmid).strip(),
+            "target_cmids": normalized_targets,
+            "relationship": relationship,
+        },
+    )
+
+
+def validate_contextual_tie_primary_domains(driver, source_cmid, target_cmids, relationship):
+    conflicts = contextual_tie_primary_domain_conflicts(
+        driver,
+        source_cmid,
+        target_cmids,
+        relationship,
+    )
+    if conflicts:
+        details = "; ".join(
+            f"{source_cmid} -> {row['targetCMID']} "
+            f"({', '.join(row.get('sharedLabels') or [])})"
+            for row in conflicts
+        )
+        raise ValueError(
+            f"Cannot create {relationship} ties between nodes in the same primary domain: "
+            f"{details}. AREA_OF between AREA nodes is the only exception."
+        )
+
+
+def _contextual_tie_primary_domain_conflicts(driver, source_cmids, property, relationship):
+    """Return attempted contextual ties whose endpoints share a domain label."""
+    normalized_cmids = None
+    if source_cmids is not None:
+        if not isinstance(source_cmids, (list, tuple, set)):
+            source_cmids = [source_cmids]
+        normalized_cmids = sorted({
+            str(cmid).strip() for cmid in source_cmids if str(cmid).strip()
+        })
+        if not normalized_cmids:
+            return []
+
+    relationship = sanitize_cypher_identifier(relationship, "relationship")
+    query = f"""
+    MATCH (source:CATEGORY)<-[uses:USES]-(:DATASET)
+    WHERE $source_cmids IS NULL OR source.CMID IN $source_cmids
+    WITH source,
+         [value IN apoc.coll.flatten(collect(uses[$property]), true)
+          WHERE value IS NOT NULL AND value <> ''] AS contextualCMIDs
+    MATCH (target:CATEGORY)
+    WHERE target.CMID IN contextualCMIDs
+    WITH source, target,
+         [label IN labels(source)
+          WHERE label <> 'CATEGORY' AND label IN labels(target)] AS sharedLabels
+    WHERE size(sharedLabels) > 0
+      AND NOT ($relationship = 'AREA_OF' AND 'AREA' IN sharedLabels)
+    RETURN source.CMID AS sourceCMID, target.CMID AS targetCMID,
+           sharedLabels
+    LIMIT 20
+    """
+    # The relationship is passed as data as well as sanitized above. Keeping it
+    # out of the pattern lets this check run before the relationship exists.
+    return getQuery(
+        query,
+        driver=driver,
+        params={
+            "source_cmids": normalized_cmids,
+            "property": property,
+            "relationship": relationship,
+        },
+    )
+
 def mergeUSES(database, CMID, Key, datasetID, properties = None):
     """
     Merge USES relationships in the database.
@@ -84,6 +179,23 @@ def mergeDupRelations(database, CMID=None):
 def fixUsesRels(database, property, relationship, CMID=None):
     try:
         driver = getDriver(database)
+        conflicts = _contextual_tie_primary_domain_conflicts(
+            driver,
+            CMID,
+            property,
+            relationship,
+        )
+        if conflicts:
+            conflict_text = "; ".join(
+                f"{row['sourceCMID']} -> {row['targetCMID']} "
+                f"({', '.join(row.get('sharedLabels') or [])})"
+                for row in conflicts
+            )
+            raise ValueError(
+                f"Cannot create {relationship} ties between nodes in the same primary domain: "
+                f"{conflict_text}. AREA_OF between AREA nodes is the only exception."
+            )
+
         if property in ["country", "district"]:
             qProp = "collect(distinct coalesce(r.country, [])) + collect(distinct coalesce(r.district, []))"
         else:

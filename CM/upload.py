@@ -1211,9 +1211,9 @@ def _collect_cmid_metadata_targets(dataset, multi_value_column_map):
         for cmid in values
     }
 
-    # Parent compatibility checks compare parent values against child CMID labels.
-    # Child CMIDs must always be resolvable in the same metadata map.
-    if "parent" in multi_value_column_map and "CMID" in dataset.columns:
+    # Contextual tie checks compare every referenced value against the category
+    # receiving that tie, so child CMIDs must be present in the same map.
+    if multi_value_column_map and "CMID" in dataset.columns:
         targets.update(_collect_unique_column_values(dataset, "CMID", set()))
 
     return sorted(targets)
@@ -1370,6 +1370,38 @@ def _validate_non_parent_multi_value_columns(dataset, column_value_map, cmid_met
                 + ", ".join(detail_parts)
                 + suffix
             )
+
+
+def _validate_contextual_primary_domain_ties(dataset, column_value_map, cmid_metadata):
+    """Reject direct contextual ties whose category endpoints share a domain."""
+    errors = []
+    for row_index, row in dataset.iterrows():
+        child_domains = _upload_row_domains(row, cmid_metadata, {})
+        if not child_domains:
+            continue
+
+        for column_name in column_value_map:
+            if column_name == "parent" or column_name not in dataset.columns:
+                continue
+            for target_cmid in _split_multi_value_cell(row.get(column_name)):
+                target_domains = _resolve_group_labels(cmid_metadata.get(target_cmid))
+                shared_domains = child_domains.intersection(target_domains)
+                if not shared_domains or "AREA" in shared_domains:
+                    continue
+                child_cmid = str(row.get("CMID") or "").strip() or "<new node>"
+                errors.append(
+                    f"row {row_index + 1} CMID {child_cmid}, property {column_name}, "
+                    f"target {target_cmid} (shared domain: {', '.join(sorted(shared_domains))})"
+                )
+
+    if errors:
+        suffix = " ..." if len(errors) > 10 else ""
+        raise ValueError(
+            "Cannot create contextual ties between nodes in the same primary domain: "
+            + "; ".join(errors[:10])
+            + suffix
+            + ". AREA_OF between AREA nodes is the only exception."
+        )
 
 
 def _fetch_label_domain_map(driver, labels):
@@ -2931,6 +2963,12 @@ def input_Nodes_Uses(
     _validate_restricted_node_property_domains(dataset, nodeProperties, cmid_metadata, driver)
     check_query_cancellation()
     _validate_non_parent_multi_value_columns(dataset, multi_value_column_map, cmid_metadata)
+    check_query_cancellation()
+    _validate_contextual_primary_domain_ties(
+        dataset,
+        multi_value_column_map,
+        cmid_metadata,
+    )
     check_query_cancellation()
     if "parent" in multi_value_column_map:
         _validate_parent_label_compatibility(dataset, cmid_metadata, driver, user)
