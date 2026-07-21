@@ -111,6 +111,7 @@ def test_runRoutines_includes_duplicate_node_cmid_check(client, monkeypatch):
         "checkUSES",
         "get_duplicate_empty_USES",
         "get_duplicate_triplets",
+        "waitingUSES",
         "processUSES",
         "getInappropriateprops_Nodes_Rels",
         "get_empty_nodeprops",
@@ -130,3 +131,6 @@ def test_runRoutines_includes_duplicate_node_cmid_check(client, monkeypatch):
     assert "Duplicate CMIDs including deleted for TestDB" in body
     assert "getDuplicateNodeCMIDs-ok" in body
     assert "getDuplicateNodeCMIDs" in called
+    assert "Process Waiting USES for TestDB" in body
+    assert "waitingUSES-ok" in body
+    assert "waitingUSES" in called

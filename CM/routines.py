@@ -2577,6 +2577,7 @@ def runRoutinesStream(databases="all", mail=None):
             ("Check USES", lambda db: checkUSES(db, save=True, mail=None, return_type="info"), True),
             ("Check USES for empty and duplicates", lambda db: get_duplicate_empty_USES(db, mail=None, return_type="info"), True),
             ("Check USES for duplicate triplets", lambda db: get_duplicate_triplets(db, mail=None, return_type="info"), True),
+            ("Process Waiting USES", lambda db: waitingUSES(db), False),
             ("Process USES", lambda db: processUSES(db, detailed=False), False),
             ("Invalid Node and USES properties", lambda db: getInappropriateprops_Nodes_Rels(db, mail=None, return_type="info"), True),
             ("Empty Node properties", lambda db: get_empty_nodeprops(db, mail=None, return_type="info"), True),
@@ -2668,6 +2669,7 @@ def runRoutinesStream(databases="all", mail=None):
           <tr><td>Check USES</td><td>checkUSES</td><td>Validates USES relationships, checking for missing or malformed label, Key, or Name fields.</td></tr>
           <tr><td>Check USES for empty and duplicates</td><td>get_duplicate_empty_USES</td><td>Validates USES relationships, checking for missing or duplicate properties including properties that are supposed to be singular and are not.</td></tr>
           <tr><td>Check USES for duplicate triplets</td><td>get_duplicate_triplets</td><td>Validates USES for duplicate datasetID,CMID and Key triplets.</td></tr>
+          <tr><td>Process Waiting USES</td><td>waitingUSES</td><td>Processes USES relationships marked for update and verifies that no update markers remain.</td></tr>
           <tr><td>Process USES</td><td>processUSES</td><td>Processes and reconciles USES relationships for consistency and downstream use.</td></tr>
           <tr><td>Invalid Node and USES props</td><td>getInappropriateprops_Nodes_Rels</td><td>Identifies invalid node and USES ties properties.</td></tr>
           <tr><td>Multiple label checks</td><td>get_label_check</td><td>Identifies label discrepancies.</td></tr>

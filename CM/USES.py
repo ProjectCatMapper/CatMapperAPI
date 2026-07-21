@@ -656,29 +656,49 @@ def waitingUSES(database, BATCH_SIZE=1000):
         driver = getDriver(database)
         CMID = getQuery(
             "Match (c:CATEGORY)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' return c.CMID as CMID", driver, type='list')
-        CMID = list(set(CMID))
+        CMID = sorted(set(CMID))
         if CMID:
             for i in range(0, len(CMID), BATCH_SIZE):
                 # Slice the CMID list to get the current batch
                 batch = CMID[i:i + BATCH_SIZE]
 
                 # Perform the update operation for the current batch
-                processUSES(database=database, CMID=batch)
+                batch_result = processUSES(database=database, CMID=batch)
+                if (
+                    isinstance(batch_result, tuple)
+                    and len(batch_result) == 2
+                    and batch_result[1] == 500
+                ):
+                    raise RuntimeError(
+                        f"processUSES failed for batch {i // BATCH_SIZE + 1}: "
+                        f"{batch_result[0]}"
+                    )
 
                 # Optional: Print progress (useful for debugging or monitoring)
                 print(
                     f"Processed batch {i // BATCH_SIZE + 1} with {len(batch)} CMIDs.")
-            # this query maybe redundant, the status is set in processUSES
-            getQuery("Match (c:CATEGORY)<-[r:USES]-(d:DATASET) where r.status is not null and r.status = 'update' set r.status = NULL", driver)
+
+            remaining = getQuery(
+                "Match (:CATEGORY)<-[r:USES]-(:DATASET) "
+                "where r.status = 'update' return count(r) as count",
+                driver,
+                type='list'
+            )
+            remaining_count = remaining[0] if remaining else 0
+            if remaining_count:
+                raise RuntimeError(
+                    f"{remaining_count} USES ties still have status = 'update' "
+                    "after processing"
+                )
             result = f"Successfully updated {len(CMID)} CMIDs in batches of {BATCH_SIZE}."
         else:
             result = "Nothing to update"
         return result
     except Exception as e:
         try:
-            return str(e), 500
+            return f"Error in waitingUSES: {e}", 500
         except:
-            return "Error", 500
+            return "Error in waitingUSES", 500
 
 
 def addCMNameRel(database, CMID=None):
