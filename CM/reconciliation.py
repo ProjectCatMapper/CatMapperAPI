@@ -45,7 +45,7 @@ def build_manifest(database, base_url, frontend_base_url):
     return {
         "versions": [RECONCILIATION_API_VERSION],
         "name": f"CatMapper {database} Reconciliation",
-        "identifierSpace": f"https://catmapper.org/id/{frontend_database}",
+        "identifierSpace": f"https://catmapper.org/{frontend_database}",
         "schemaSpace": "https://catmapper.org/schema/catmapper",
         "documentation": "https://help.catmapper.org/API",
         "serviceVersion": "catmapper-openrefine-0.1",

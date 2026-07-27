@@ -12,6 +12,7 @@ def test_reconciliation_manifest_uses_clean_api_host_urls(client):
     assert body["versions"] == ["0.2"]
     assert body["preview"]["url"] == "https://api.catmapper.org/reconcile/SocioMap/preview/{{id}}"
     assert body["suggest"]["entity"]["service_url"] == "https://api.catmapper.org/reconcile/SocioMap"
+    assert body["identifierSpace"] == "https://catmapper.org/sociomap"
     assert body["view"]["url"] == "https://catmapper.org/sociomap/{{id}}"
 
 
@@ -24,6 +25,7 @@ def test_reconciliation_manifest_alias_advertises_canonical_dev_url(client):
     assert response.status_code == 200
     body = response.get_json()
     assert body["preview"]["url"] == "https://dev-api.catmapper.org/reconcile/ArchaMap/preview/{{id}}"
+    assert body["identifierSpace"] == "https://catmapper.org/archamap"
     assert body["view"]["url"] == "https://dev.catmapper.org/archamap/{{id}}"
 
 
