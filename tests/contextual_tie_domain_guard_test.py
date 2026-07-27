@@ -52,6 +52,29 @@ def test_contextual_tie_conflict_query_checks_shared_neo4j_labels(monkeypatch):
     }
 
 
+def test_contextual_tie_guard_allows_same_domain_parent_contains(monkeypatch):
+    monkeypatch.setattr(
+        uses_module,
+        "getQuery",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("CONTAINS should bypass the same-domain query")
+        ),
+    )
+
+    assert uses_module.validate_contextual_tie_primary_domains(
+        object(),
+        "SM-CHILD",
+        ["SM-PARENT"],
+        "CONTAINS",
+    ) is None
+    assert uses_module._contextual_tie_primary_domain_conflicts(
+        object(),
+        ["SM-CHILD"],
+        "parent",
+        "CONTAINS",
+    ) == []
+
+
 def test_fix_uses_rels_does_not_create_same_domain_tie(monkeypatch):
     monkeypatch.setattr(uses_module, "getDriver", lambda database: object())
     queries = []

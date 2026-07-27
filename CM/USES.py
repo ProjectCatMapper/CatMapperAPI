@@ -16,6 +16,11 @@ def contextual_tie_primary_domain_conflicts(driver, source_cmid, target_cmids, r
         return []
 
     relationship = sanitize_cypher_identifier(relationship, "relationship")
+    # Parent/CONTAINS relationships intentionally model hierarchies inside a
+    # primary domain (for example ETHNICITY -> ETHNICITY). They are not the
+    # cross-domain contextual ties guarded by this validator.
+    if relationship == "CONTAINS":
+        return []
     query = """
     MATCH (source:CATEGORY {CMID: $source_cmid})
     MATCH (target:CATEGORY)
@@ -53,7 +58,8 @@ def validate_contextual_tie_primary_domains(driver, source_cmid, target_cmids, r
         )
         raise ValueError(
             f"Cannot create {relationship} ties between nodes in the same primary domain: "
-            f"{details}. AREA_OF between AREA nodes is the only exception."
+            f"{details}. Parent/CONTAINS ties and AREA_OF between AREA nodes "
+            "are exceptions."
         )
 
 
@@ -70,6 +76,8 @@ def _contextual_tie_primary_domain_conflicts(driver, source_cmids, property, rel
             return []
 
     relationship = sanitize_cypher_identifier(relationship, "relationship")
+    if relationship == "CONTAINS":
+        return []
     query = f"""
     MATCH (source:CATEGORY)<-[uses:USES]-(:DATASET)
     WHERE $source_cmids IS NULL OR source.CMID IN $source_cmids
@@ -193,7 +201,8 @@ def fixUsesRels(database, property, relationship, CMID=None):
             )
             raise ValueError(
                 f"Cannot create {relationship} ties between nodes in the same primary domain: "
-                f"{conflict_text}. AREA_OF between AREA nodes is the only exception."
+                f"{conflict_text}. Parent/CONTAINS ties and AREA_OF between AREA "
+                "nodes are exceptions."
             )
 
         if property in ["country", "district"]:

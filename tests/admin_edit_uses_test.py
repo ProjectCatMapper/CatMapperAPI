@@ -22,6 +22,7 @@ def _base_input():
 def test_uses_self_context_exception_uses_district_property_name():
     assert admin._is_uses_self_context_exception("district", None)
     assert admin._is_uses_self_context_exception("District", None)
+    assert admin._is_uses_self_context_exception("parent", "CONTAINS")
     assert admin._is_uses_self_context_exception("language", "AREA_OF")
     assert not admin._is_uses_self_context_exception("language", "LANGUOID_OF")
 
@@ -551,6 +552,30 @@ def test_add_edit_delete_uses_checks_actual_labels_for_language_of(monkeypatch):
     )
 
     with pytest.raises(ValueError, match="LANGUOID"):
+        admin.add_edit_delete_USES("sociomap", "tester", payload)
+
+
+def test_add_edit_delete_uses_reports_process_uses_failure(monkeypatch):
+    payload = _base_input()
+    payload["s1_3"] = "SM-PARENT"
+    payload["s1_8"] = "parent"
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [])
+    monkeypatch.setattr(admin, "getGroupLabels", lambda cmid, driver: "ETHNICITY")
+    monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        admin,
+        "updateProperty",
+        lambda *args, **kwargs: {"result": [{"relID": "rel-123"}]},
+    )
+    monkeypatch.setattr(
+        admin,
+        "processUSES",
+        lambda **kwargs: ("updateContains failed", 500),
+    )
+
+    with pytest.raises(RuntimeError, match="updateContains failed"):
         admin.add_edit_delete_USES("sociomap", "tester", payload)
 
 

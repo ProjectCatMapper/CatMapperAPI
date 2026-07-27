@@ -33,8 +33,8 @@ import re
 #section for general use helper functions
 
 _ADMIN_MULTI_VALUE_SEPARATOR = re.compile(r"\s*(?:\|{2,}|,|;)\s*")
-_USES_SELF_CONTEXT_PROPERTY_EXCEPTIONS = {"district"}
-_USES_SELF_CONTEXT_RELATIONSHIP_EXCEPTIONS = {"AREA_OF"}
+_USES_SELF_CONTEXT_PROPERTY_EXCEPTIONS = {"district", "parent"}
+_USES_SELF_CONTEXT_RELATIONSHIP_EXCEPTIONS = {"AREA_OF", "CONTAINS"}
 
 
 def _split_admin_multi_value(value):
@@ -45,6 +45,12 @@ def _split_admin_multi_value(value):
     else:
         values = _ADMIN_MULTI_VALUE_SEPARATOR.split(str(value))
     return [str(val).strip() for val in values if str(val).strip()]
+
+
+def _require_process_uses_success(result):
+    if isinstance(result, tuple) and len(result) == 2 and result[1] == 500:
+        raise RuntimeError(f"USES processing failed: {result[0]}")
+    return result
 
 
 def _normalize_contextual_tie_token(value):
@@ -620,7 +626,9 @@ def add_edit_delete_USES(database,user,input):
             updated_rows = update_result.get("result")
             if isinstance(updated_rows, list) and len(updated_rows) == 0:
                 raise Exception("No USES ties were updated. Verify the selected relation still exists.")
-        processUSES(CMID=CMID,database=database,user=user)
+        _require_process_uses_success(
+            processUSES(CMID=CMID, database=database, user=user)
+        )
     elif addOrEditNode == "delete":
         if relID:
             q = """
@@ -645,7 +653,9 @@ def add_edit_delete_USES(database,user,input):
                 "USES_property": USES_property
             }
         result = getQuery(q,driver=driver,params = params)
-        processUSES(CMID=CMID,database=database,user=user)
+        _require_process_uses_success(
+            processUSES(CMID=CMID, database=database, user=user)
+        )
         rel_ids = [row["relID"] for row in result] if isinstance(result, list) else []
         if not rel_ids:
             raise Exception("No USES ties were updated. Verify the selected relation still exists.")
