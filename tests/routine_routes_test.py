@@ -111,6 +111,7 @@ def test_runRoutines_includes_duplicate_node_cmid_check(client, monkeypatch):
         "checkUSES",
         "get_duplicate_empty_USES",
         "get_duplicate_triplets",
+        "getBadGlottocodes",
         "waitingUSES",
         "processUSES",
         "getInappropriateprops_Nodes_Rels",
@@ -134,3 +135,6 @@ def test_runRoutines_includes_duplicate_node_cmid_check(client, monkeypatch):
     assert "Process Waiting USES for TestDB" in body
     assert "waitingUSES-ok" in body
     assert "waitingUSES" in called
+    assert "Glottocode Checks for TestDB" in body
+    assert "getBadGlottocodes-ok" in body
+    assert "getBadGlottocodes" in called
