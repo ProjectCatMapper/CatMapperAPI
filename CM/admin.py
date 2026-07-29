@@ -632,10 +632,10 @@ def add_edit_delete_USES(database,user,input):
     elif addOrEditNode == "delete":
         if relID:
             q = """
-                    MATCH ()-[r:USES]-()
+                    MATCH ()-[r:USES]->()
                     WHERE elementId(r) = $relID
                     REMOVE r[$USES_property]
-                    RETURN elementId(r) as relID
+                    RETURN DISTINCT elementId(r) as relID
                 """
             params = {
                 "relID": relID,
@@ -656,7 +656,7 @@ def add_edit_delete_USES(database,user,input):
         _require_process_uses_success(
             processUSES(CMID=CMID, database=database, user=user)
         )
-        rel_ids = [row["relID"] for row in result] if isinstance(result, list) else []
+        rel_ids = list(dict.fromkeys(row["relID"] for row in result)) if isinstance(result, list) else []
         if not rel_ids:
             raise Exception("No USES ties were updated. Verify the selected relation still exists.")
         log_message = f"deleted USES property {input.get('s1_8')}"

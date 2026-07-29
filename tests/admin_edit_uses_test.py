@@ -236,7 +236,9 @@ def test_add_edit_delete_uses_delete_logs_multiple_rel_ids(monkeypatch):
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
         if "REMOVE r[$USES_property]" in query:
-            return [{"relID": "rel-1"}, {"relID": "rel-2"}]
+            assert "MATCH ()-[r:USES]->()" in query
+            assert "RETURN DISTINCT elementId(r) as relID" in query
+            return [{"relID": "rel-1"}, {"relID": "rel-1"}, {"relID": "rel-2"}]
         raise AssertionError(f"Unexpected query: {query}")
 
     monkeypatch.setattr(admin, "getQuery", fake_get_query)
