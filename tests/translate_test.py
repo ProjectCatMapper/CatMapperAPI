@@ -90,3 +90,64 @@ def test_translate_key_dataset_filter_requires_matching_uses_key(monkeypatch):
 
     query = " ".join(result[0]["query"].split())
     assert "match (a)<-[r:USES]-(d:DATASET {CMID: row.dataset}) where r.Key = matching" in query
+
+
+def test_translate_return_dataset_keys_returns_one_row_per_uses_tie(monkeypatch):
+    monkeypatch.setattr(search_module, "getDriver", lambda database: object())
+    monkeypatch.setattr(search_module, "validate_domain_label", lambda domain, **kwargs: domain)
+
+    def fake_get_query(query, driver, params=None):
+        assert "apoc.text.join(collect(Key)" not in query
+        return [
+            {
+                "CMuniqueCategoryID": 0,
+                "CMuniqueRowID": [0],
+                "term": "Alpha",
+                "country": None,
+                "context": None,
+                "CMID": "SM1",
+                "CMName": "Alpha",
+                "label": "CATEGORY",
+                "matching": "Alpha",
+                "matchingDistance": 0,
+                "CMcountry": [],
+                "Key": "K1",
+            },
+            {
+                "CMuniqueCategoryID": 0,
+                "CMuniqueRowID": [0],
+                "term": "Alpha",
+                "country": None,
+                "context": None,
+                "CMID": "SM1",
+                "CMName": "Alpha",
+                "label": "CATEGORY",
+                "matching": "Alpha",
+                "matchingDistance": 0,
+                "CMcountry": [],
+                "Key": "K2",
+            },
+        ]
+
+    monkeypatch.setattr(search_module, "getQuery", fake_get_query)
+
+    data, order, warnings = search_module.translate(
+        database="SocioMap",
+        property="Name",
+        domain="CATEGORY",
+        key="true",
+        term="source_name",
+        country="",
+        context="",
+        dataset="datasetID",
+        yearStart=None,
+        yearEnd=None,
+        query="false",
+        table=[{"source_name": "Alpha", "datasetID": "SD1"}],
+        countsamename=None,
+    )
+
+    assert warnings == []
+    assert "Key_source_name" in order
+    assert data["Key_source_name"].tolist() == ["K1", "K2"]
+    assert data["source_name"].tolist() == ["Alpha", "Alpha"]
