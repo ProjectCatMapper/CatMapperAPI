@@ -1,8 +1,9 @@
 # CatMapperAPI Test Overview
 
-Last reviewed: February 18, 2026
+Last reviewed: July 29, 2026
 
-This folder currently has 15 automated API test suites with 54 total checks.  
+This folder currently has 61 automated API test files with 389 total checks.
+Of those checks, 11 are marked `realdb` and skipped by default.
 The goal of these tests is to confirm that core account, admin, upload/download, merge, and documentation features behave safely and predictably.
 
 ## Current Test Suites
@@ -30,24 +31,34 @@ The goal of these tests is to confirm that core account, admin, upload/download,
 
 ## Real Neo4j Integration Tests
 
-- Suite: `tests/neo4j_realdb_integration_test.py`
+- Suites:
+  - `tests/dataset_endpoint_regression_test.py`
+  - `tests/merge_template_realdb_e2e_test.py`
+  - `tests/neo4j_realdb_integration_test.py`
+  - `tests/reconciliation_realdb_test.py`
+  - `tests/simple_upload_realdb_test.py`
 - Marker: `realdb`
 - Default behavior: skipped unless explicitly enabled
 
 Run only real-DB integration tests:
 
 ```bash
-python3 -m pytest -q tests/neo4j_realdb_integration_test.py --run-realdb
+conda run -n api_env python -m pytest -q -m realdb --run-realdb
 ```
 
 Run all tests including real-DB integration tests:
 
 ```bash
-CM_RUN_REALDB_TESTS=1 python3 -m pytest -q
+CM_RUN_REALDB_TESTS=1 conda run -n api_env python -m pytest -q
 ```
 
 Optional database selection (default: `ArchaMap`):
 
 ```bash
-CM_REALDB_DATABASE=SocioMap python3 -m pytest -q tests/neo4j_realdb_integration_test.py --run-realdb
+CM_REALDB_DATABASE=SocioMap conda run -n api_env python -m pytest -q \
+  tests/neo4j_realdb_integration_test.py --run-realdb
 ```
+
+For Neo4j version upgrades, use the disposable four-database gate documented
+in `../ops/neo4j-upgrade/README.md`. Its release mode redirects these tests to
+restored disposable volumes rather than the live databases.

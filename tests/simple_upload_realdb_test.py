@@ -52,6 +52,18 @@ def simple_upload_seed(realdb_driver, realdb_database):
                 type="dict",
             )
 
+        cleanup_logs_query = """
+        MATCH (l:LOG {user: 'pytest'})
+        WHERE any(key IN keys(l) WHERE toString(l[key]) CONTAINS $run_id)
+        DETACH DELETE l
+        """
+        getQuery(
+            cleanup_logs_query,
+            realdb_driver,
+            params={"run_id": run_id},
+            type="dict",
+        )
+
         cleanup_tmp_query = """
         MATCH (n:TEST_TMP {testRunId: $run_id})
         DETACH DELETE n
@@ -98,7 +110,10 @@ def test_simple_upload_realdb_forces_add_uses_and_maps_columns(simple_upload_see
         },
     }
 
-    job_args, total_rows, _database, _warnings = _prepare_upload_job(data, acting_user="pytest")
+    job_args, total_rows, _database, _warnings = _prepare_upload_job(
+        data,
+        actor_claims={"userid": "pytest", "role": "admin"},
+    )
 
     # Ensure simple preprocessing keeps expected mapping semantics stable.
     assert job_args["uploadOption"] == "add_uses"
@@ -178,7 +193,10 @@ def test_simple_upload_realdb_multiple_key_columns_with_sparse_values(simple_upl
         },
     }
 
-    job_args, total_rows, _database, _warnings = _prepare_upload_job(data, acting_user="pytest")
+    job_args, total_rows, _database, _warnings = _prepare_upload_job(
+        data,
+        actor_claims={"userid": "pytest", "role": "admin"},
+    )
 
     assert job_args["uploadOption"] == "add_uses"
     assert job_args["formatKey"] is False

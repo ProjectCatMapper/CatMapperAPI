@@ -11,6 +11,34 @@ if str(ROOT) not in sys.path:
 from app import app as flask_app
 
 
+def _configure_realdb_targets():
+    """Point realdb tests at explicit disposable targets when supplied."""
+    from CM import utils as utils_module
+
+    user = os.environ.get("CM_REALDB_USER")
+    password = os.environ.get("CM_REALDB_PASSWORD")
+    uri_by_database = {
+        database: os.environ.get(f"CM_REALDB_URI_{database.upper()}")
+        for database in ("sociomap", "archamap", "gisdb", "userdb")
+    }
+    if not any(uri_by_database.values()):
+        return
+    if not user or not password:
+        raise pytest.UsageError(
+            "CM_REALDB_USER and CM_REALDB_PASSWORD are required when "
+            "CM_REALDB_URI_* overrides are used"
+        )
+
+    for section in ("DB", "OFFLINE"):
+        if not utils_module.config.has_section(section):
+            utils_module.config.add_section(section)
+        utils_module.config.set(section, "user", user)
+        utils_module.config.set(section, "pwd", password)
+        for database, uri in uri_by_database.items():
+            if uri:
+                utils_module.config.set(section, database, uri)
+
+
 def _run_realdb_enabled(pytestconfig) -> bool:
     return bool(
         pytestconfig.getoption("--run-realdb")
@@ -64,6 +92,7 @@ def realdb_driver(pytestconfig, realdb_database):
     if not _run_realdb_enabled(pytestconfig):
         pytest.skip("realdb tests are disabled")
 
+    _configure_realdb_targets()
     # Let failures raise so CI/local runs fail loudly if connectivity breaks.
     driver = getDriver(realdb_database)
     try:
