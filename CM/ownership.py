@@ -245,14 +245,16 @@ def assert_owner_scoped_node_removal_allowed(database, cmid, claims):
     MATCH (:DATASET)-[r:USES]-(:CATEGORY)
     WHERE NOT elementId(startNode(r)) = elementId(n)
       AND NOT elementId(endNode(r)) = elementId(n)
+      AND r.ownerUserId IS NOT NULL
+      AND toString(r.ownerUserId) <> $userid
       AND any(k IN keys(r) WHERE toString(r[k]) = $cmid OR toString(r[k]) CONTAINS $cmid)
-    RETURN elementId(r) AS relID, r.Key AS Key
+    RETURN elementId(r) AS relID, r.Key AS Key, r.ownerUserId AS ownerUserId
     LIMIT 10
     """
     reference_rows = getQuery(
         query=reference_query,
         driver=driver,
-        params={"cmid": target_cmid},
+        params={"cmid": target_cmid, "userid": actor["userid"]},
         type="dict",
     )
     if reference_rows:
@@ -262,7 +264,7 @@ def assert_owner_scoped_node_removal_allowed(database, cmid, claims):
         ]
         raise OwnerScopedAdminReviewRequired(
             f"User is not authorized to merge or delete {target_cmid}; "
-            "the CMID is referenced in other USES ties: "
+            "the CMID is referenced in USES ties owned by another user: "
             + ", ".join(rels),
             cmid=target_cmid,
             reason_code="cmid_referenced_elsewhere",

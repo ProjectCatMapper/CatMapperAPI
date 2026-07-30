@@ -340,6 +340,7 @@ def test_owner_helper_rejects_node_removal_with_unowned_uses_ties(monkeypatch):
 
 def test_owner_helper_rejects_node_removal_when_cmid_referenced_elsewhere(monkeypatch):
     monkeypatch.setattr(ownership, "getDriver", lambda database: object())
+    seen_reference_params = {}
 
     def fake_get_query(**kwargs):
         query = kwargs.get("query", "")
@@ -353,13 +354,16 @@ def test_owner_helper_rejects_node_removal_when_cmid_referenced_elsewhere(monkey
         if "unownedIncidentUses" in query:
             return [{"cmid": "AM1", "incidentUses": 1, "unownedIncidentUses": 0}]
         if "keys(r)" in query:
+            assert "toString(r.ownerUserId) <> $userid" in query
+            seen_reference_params.update(kwargs.get("params") or {})
             return [{"relID": "rel-other", "Key": "Type == A"}]
         raise AssertionError(f"unexpected query: {query}")
 
     monkeypatch.setattr(ownership, "getQuery", fake_get_query)
 
-    with pytest.raises(ownership.OwnershipError, match="referenced in other USES ties"):
+    with pytest.raises(ownership.OwnershipError, match="owned by another user"):
         ownership.assert_owner_scoped_node_removal_allowed("ArchaMap", "AM1", {"userid": "7", "role": "user"})
+    assert seen_reference_params == {"cmid": "AM1", "userid": "7"}
 
 
 def test_upload_replacement_queue_carries_actor_and_checks_scope(client, monkeypatch):
