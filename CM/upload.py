@@ -24,6 +24,17 @@ warnings.simplefilter("error", UserWarning)
 _UPLOAD_LOG_LISTENER = threading.local()
 _UPLOAD_LOG_TIMING = threading.local()
 _JSON_UPLOAD_PROPERTIES = {"parentContext", "geoCoords", "geo"}
+_INTERNAL_OWNER_PROPERTY_NAMES = {"ownerUserId", "modifiedByOtherUser"}
+
+
+def _get_editable_properties_metadata(driver):
+    """Return public upload metadata while remaining compatible with simple test drivers."""
+    return [
+        row
+        for row in getPropertiesMetadata(driver)
+        if not bool(row.get("internal"))
+        and row.get("CMName") not in _INTERNAL_OWNER_PROPERTY_NAMES
+    ]
 
 data = [
     {
@@ -142,10 +153,8 @@ def _stamp_nodes_with_ownership(driver, node_ids, metadata):
     MATCH (n)
     WHERE elementId(n) = nodeID
     SET
-      n.createdByUserId = $createdByUserId,
       n.ownerUserId = $ownerUserId,
-      n.createdAt = $createdAt,
-      n.contributionId = $contributionId
+      n.modifiedByOtherUser = $modifiedByOtherUser
     RETURN count(n) AS stamped
     """
     getQuery(query=query, driver=driver, params={**metadata, "nodeIds": node_ids})
@@ -160,10 +169,8 @@ def _stamp_uses_with_ownership(driver, rel_ids, metadata):
     MATCH ()-[r:USES]->()
     WHERE elementId(r) = relID
     SET
-      r.createdByUserId = $createdByUserId,
       r.ownerUserId = $ownerUserId,
-      r.createdAt = $createdAt,
-      r.contributionId = $contributionId
+      r.modifiedByOtherUser = $modifiedByOtherUser
     RETURN count(r) AS stamped
     """
     getQuery(query=query, driver=driver, params={**metadata, "relIds": rel_ids})
@@ -231,11 +238,11 @@ def createNodes(df, database,isDataset, user, uniqueID=None, ownershipMetadata=N
 
         if isDataset:
             allowed_properties = getQuery(
-                "MATCH (p:PROPERTY) WHERE p.nodeType CONTAINS 'DATASET' or p.nodeType='NO EDIT' return p.CMName as property", driver, type="list"
+                "MATCH (p:PROPERTY) WHERE coalesce(p.internal, false) = false AND (p.nodeType CONTAINS 'DATASET' or p.nodeType='NO EDIT') return p.CMName as property", driver, type="list"
             )
         else:
             allowed_properties = getQuery(
-                "MATCH (p:PROPERTY) WHERE p.nodeType CONTAINS 'CATEGORY' or p.nodeType='NO EDIT' return p.CMName as property", driver, type="list"
+                "MATCH (p:PROPERTY) WHERE coalesce(p.internal, false) = false AND (p.nodeType CONTAINS 'CATEGORY' or p.nodeType='NO EDIT') return p.CMName as property", driver, type="list"
             )
         
         vars = [v for v in vars if v in allowed_properties] + ['importID']
@@ -328,7 +335,7 @@ def createUSES(links, database, user, ownershipMetadata=None):
         # We get all columns that need to be set as properties for realtionships
         # This is useful when determining valid columns coming from the API, not relevant to UI.
         db_properties = getQuery(
-            "MATCH (p:PROPERTY) WHERE p.type = 'relationship' RETURN p.CMName AS property",
+            "MATCH (p:PROPERTY) WHERE p.type = 'relationship' AND coalesce(p.internal, false) = false RETURN p.CMName AS property",
             driver,
         )
         db_properties_list = [item["property"] for item in db_properties]
@@ -381,7 +388,7 @@ def createUSES(links, database, user, ownershipMetadata=None):
         #     """
 
         # metaTypes = getQuery(query, driver)
-        metaTypes = getPropertiesMetadata(driver)
+        metaTypes = _get_editable_properties_metadata(driver)
         metaTypeDict = {item["property"]: item["metaType"] for item in metaTypes}
 
         keys = []
@@ -503,7 +510,17 @@ def createUSES(links, database, user, ownershipMetadata=None):
 # This function does 3 things : it creates the correct datatyper for calls from upload, it changes the database
 # and it logs those changes.
 # If no seperator is specified, quadruple stove pipe should lead to no parsing.
-def updateProperty(df,optionalProperties,isDataset, database, user, updateType, propertyType="USES",sep = "||||"):
+def updateProperty(
+    df,
+    optionalProperties,
+    isDataset,
+    database,
+    user,
+    updateType,
+    propertyType="USES",
+    sep="||||",
+    actorClaims=None,
+):
     try:
         # double checking for errors, if in future we call this function elsewhere outside this pipeline
         if not updateType in ["overwrite", "update"]:
@@ -513,6 +530,33 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
             df = df.drop("importID")
 
         driver = getDriver(database)
+        actor_claims = actorClaims or {}
+        actor_user_id = str(actor_claims.get("userid") or "").strip()
+        owner_scoped = (
+            bool(actor_user_id)
+            and str(actor_claims.get("role") or "user").strip().lower()
+            != "admin"
+        )
+        uses_owner_guard = (
+            """
+              AND toString(coalesce(r.ownerUserId, '')) = $actorUserId
+              AND coalesce(r.modifiedByOtherUser, false) = false
+            """
+            if owner_scoped
+            else ""
+        )
+        node_owner_guard = (
+            """
+            WHERE toString(coalesce(n.ownerUserId, '')) = $actorUserId
+              AND coalesce(n.modifiedByOtherUser, false) = false
+              AND NOT EXISTS {
+                MATCH (n)-[ownedRel:USES]-()
+                WHERE toString(coalesce(ownedRel.ownerUserId, '')) <> $actorUserId
+              }
+            """
+            if owner_scoped
+            else ""
+        )
 
         has_relid = False
         if propertyType == "USES":
@@ -606,7 +650,7 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
 
         # getting metatypes for properties
         #metaTypes = getQuery(query, driver)
-        metaTypes = getPropertiesMetadata(driver)
+        metaTypes = _get_editable_properties_metadata(driver)
         if propertyType == "USES":
             filteredItems = [item for item in metaTypes if item["type"] == "relationship"]
             node_or_tie = "r"
@@ -708,6 +752,7 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
                 UNWIND $rows AS row
                 MATCH (a:DATASET)-[r:USES]->(b:CATEGORY)
                 WHERE elementId(r) = row.relID
+                {uses_owner_guard}
                 WITH row, r, b
                 SET r.status = 'update', {props}
                 RETURN elementId(b) as nodeID,elementId(r) as relID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID
@@ -717,6 +762,7 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
                 UNWIND $rows AS row
                 MATCH (a:DATASET)-[r:USES]->(b:CATEGORY)
                 WHERE elementId(r) = row.relID
+                {uses_owner_guard}
                 WITH row, r, b
                 SET r.status = 'update', {props}
                 RETURN elementId(b) as nodeID,elementId(r) as relID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, {return_props}
@@ -725,13 +771,17 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
             q = f"""
             UNWIND $rows AS row
             MATCH (n {{CMID: row.CMID}})
+            {node_owner_guard}
             SET {props}
             RETURN elementId(n) as nodeID, n.CMID as CMID
             """
 
         df_dict = df.to_dict(orient="records")
 
-        result = getQuery(query=q, driver=driver, params={"rows": df_dict})
+        query_params = {"rows": df_dict}
+        if owner_scoped:
+            query_params["actorUserId"] = actor_user_id
+        result = getQuery(query=q, driver=driver, params=query_params)
 
         logs = []
 
@@ -2105,7 +2155,7 @@ def updateMergeProperty(df,optionalProperties, database, user, mergingType, requ
                 
         # getting metatypes for properties
         #metaTypes = getQuery(query, driver)
-        metaTypes = getPropertiesMetadata(driver)
+        metaTypes = _get_editable_properties_metadata(driver)
         filteredItems = [item for item in metaTypes if item["type"] == "relationship"]
 
         metaTypeDict = {item["property"]: item["metaType"] for item in filteredItems}
@@ -2353,7 +2403,10 @@ def input_Nodes_Uses(
     actorClaims=None,
     contributionId=None,
 ):
-       
+    # Transitional compatibility for jobs queued before simplified ownership
+    # metadata removed contributionId. The value is intentionally ignored.
+    del contributionId
+
     updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write="w")
 
     if user is None:
@@ -2401,7 +2454,7 @@ def input_Nodes_Uses(
     driver = getDriver(database)
     validate_upload_ownership_scope(database, uploadOption, dataset, actorClaims)
     upload_ownership_metadata = (
-        ownership_metadata(actorClaims, contributionId)
+        ownership_metadata(actorClaims)
         if actorClaims
         else None
     )
@@ -2453,11 +2506,11 @@ def input_Nodes_Uses(
         "loading node and relationship property metadata",
         write="a",
     )
-    node_query = "MATCH (p:PROPERTY) WHERE p.type='node' RETURN p.CMName as property"
+    node_query = "MATCH (p:PROPERTY) WHERE p.type='node' AND coalesce(p.internal, false) = false RETURN p.CMName as property"
     node_values = getQuery(node_query, driver, type="list")
     nodeProperties = [value for value in node_values if value in optionalProperties]
     
-    link_query = "MATCH (p:PROPERTY) WHERE p.type='relationship' RETURN p.CMName as property"
+    link_query = "MATCH (p:PROPERTY) WHERE p.type='relationship' AND coalesce(p.internal, false) = false RETURN p.CMName as property"
     link_values = getQuery(link_query, driver, type="list")
     linkProperties = [value for value in link_values if value in optionalProperties]
     
@@ -3347,6 +3400,9 @@ def input_Nodes_Uses(
             driver,
             type="list",
         )
+    string_cols = [
+        col for col in string_cols if col not in _INTERNAL_OWNER_PROPERTY_NAMES
+    ]
 
     if uploadOption == "add_uses":
         updateLog(
@@ -3412,7 +3468,11 @@ def input_Nodes_Uses(
             type="list",
         )
     
-    node_string_cols = [col for col in node_string_cols if col not in ["CMID","label"]]
+    node_string_cols = [
+        col
+        for col in node_string_cols
+        if col not in {"CMID", "label", *_INTERNAL_OWNER_PROPERTY_NAMES}
+    ]
     
     if uploadOption == "node_add":
         updateLog(
@@ -3513,7 +3573,7 @@ def input_Nodes_Uses(
 
     # Combining paired properties is only necessary for functions 1 through 6
     if mergingType == "0":
-        properties = getPropertiesMetadata(driver)
+        properties = _get_editable_properties_metadata(driver)
         properties = pd.DataFrame(properties)
 
         # Grouping linkproperties for a common super label.
@@ -3785,7 +3845,8 @@ def input_Nodes_Uses(
                         database=database,
                         user=user,
                         updateType="overwrite",
-                        sep=";"
+                        sep=";",
+                        actorClaims=actorClaims,
                     )
                 elif uploadOption == "update_add":
                     updateLog(
@@ -3798,7 +3859,8 @@ def input_Nodes_Uses(
                         database=database,
                         user=user,
                         updateType="update",
-                        sep=";"
+                        sep=";",
+                        actorClaims=actorClaims,
                     )
                 elif uploadOption == "add_node" or uploadOption == "add_uses":
                     updateLog(
@@ -3874,7 +3936,8 @@ def input_Nodes_Uses(
                         user=user,
                         updateType="overwrite",
                         propertyType="NODE",
-                        sep=";"
+                        sep=";",
+                        actorClaims=actorClaims,
                     )
                 elif uploadOption == "node_add":
                     updateLog(
@@ -3890,7 +3953,8 @@ def input_Nodes_Uses(
                         user=user,
                         updateType="update",
                         propertyType="NODE",
-                        sep=";"
+                        sep=";",
+                        actorClaims=actorClaims,
                     )
 
                 updateLog(

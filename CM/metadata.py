@@ -135,17 +135,24 @@ def getLabelsMetadata(driver):
     data = getQuery(query=query, driver=driver)
     return data
     
-def getPropertiesMetadata(driver):
+def getPropertiesMetadata(driver, include_internal=True):
     query = """
     match (n:PROPERTY) 
+    WHERE $includeInternal OR coalesce(n.internal, false) = false
     return n.CMName as property, n.type as type, 
     n.relationship as relationship, n.description as description, 
     n.display as display, n.group as group,
     n.metaType as metaType, n.search as search,
     n.translation as translation,
-    n.nodeType as nodeType
+    n.nodeType as nodeType,
+    coalesce(n.internal, false) as internal,
+    coalesce(n.editable, true) as editable
     """
-    data = getQuery(query=query, driver=driver)
+    data = getQuery(
+        query=query,
+        driver=driver,
+        params={"includeInternal": bool(include_internal)},
+    )
     return data
 
 def getNodeProperties(database, domain, CMID):

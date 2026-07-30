@@ -27,6 +27,28 @@ def test_uses_self_context_exception_uses_district_property_name():
     assert not admin._is_uses_self_context_exception("language", "LANGUOID_OF")
 
 
+def test_admin_uses_edit_rejects_internal_authorization_property(monkeypatch):
+    payload = _base_input()
+    payload["s1_8"] = "ownerUserId"
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+
+    with pytest.raises(PermissionError, match="internal authorization metadata"):
+        admin.add_edit_delete_USES("sociomap", "tester", payload)
+
+
+def test_admin_node_edit_rejects_internal_authorization_property(monkeypatch):
+    payload = {
+        "s1_1": "edit",
+        "s1_2": "SM1",
+        "s1_3": "false",
+        "s1_7": "modifiedByOtherUser",
+    }
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+
+    with pytest.raises(PermissionError, match="internal authorization metadata"):
+        admin.add_edit_delete_Node("sociomap", "tester", payload)
+
+
 def test_add_edit_delete_uses_uses_relid_for_selected_relation(monkeypatch):
     captured = {}
 
@@ -605,15 +627,26 @@ def test_add_edit_delete_node_dataset_parent_normalizes_multi_parent_values(monk
         if "SET a.parent = $id" in query:
             captured["params"] = params
             return []
+        if "RETURN elementId(n) AS nodeID" in query:
+            return [{"nodeID": "node-1"}]
         raise AssertionError(f"Unexpected query: {query}")
 
     monkeypatch.setattr(admin, "getQuery", fake_get_query)
+    monkeypatch.setattr(
+        admin,
+        "createLog",
+        lambda **kwargs: captured.setdefault("log", kwargs),
+    )
 
     result = admin.add_edit_delete_Node("sociomap", "tester", payload)
 
     assert result == "updated successfully"
-    assert captured["params"] == {"id": ["SD2182", "SD2181"]}
+    assert captured["params"] == {
+        "changeNodeID": "SD2183",
+        "id": ["SD2182", "SD2181"],
+    }
     assert captured["processed"] == "SD2183"
+    assert captured["log"]["id"] == ["node-1"]
 
 
 def test_add_edit_delete_node_list_metadata_splits_pipe_delimited_values(monkeypatch):
@@ -638,15 +671,26 @@ def test_add_edit_delete_node_list_metadata_splits_pipe_delimited_values(monkeyp
         if "SET a.foci = $id" in query:
             captured["params"] = params
             return []
+        if "RETURN elementId(n) AS nodeID" in query:
+            return [{"nodeID": "node-2"}]
         raise AssertionError(f"Unexpected query: {query}")
 
     monkeypatch.setattr(admin, "getQuery", fake_get_query)
     monkeypatch.setattr(admin, "processDATASETs", lambda database, CMID, user: captured.setdefault("processed", CMID))
+    monkeypatch.setattr(
+        admin,
+        "createLog",
+        lambda **kwargs: captured.setdefault("log", kwargs),
+    )
 
     result = admin.add_edit_delete_Node("sociomap", "tester", payload)
 
     assert result == "updated successfully"
-    assert captured["params"] == {"id": ["SM461549", "SM461550", "SM461551"]}
+    assert captured["params"] == {
+        "changeNodeID": "SD767",
+        "id": ["SM461549", "SM461550", "SM461551"],
+    }
+    assert captured["log"]["id"] == ["node-2"]
 
 
 def test_add_edit_delete_node_rejects_deleted_node(monkeypatch):

@@ -12,6 +12,7 @@ def test_upload_properties_endpoint_groups_node_and_uses_properties(client, monk
             {"property": "datasetScope", "description": "Dataset-only property", "type": "node", "nodeType": "DATASET"},
             {"property": "parent", "description": "Parent value", "type": "node", "nodeType": "DATASET"},
             {"property": "parent", "description": "", "type": "node"},
+            {"property": "ownerUserId", "description": "Internal", "type": "node", "internal": True},
             {"property": "", "description": "skip", "type": "node"},
         ],
     )

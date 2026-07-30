@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from CM import unlist
 from CM.keys import invalid_key_format_error, key_format_warning_messages
 from CM.ownership import (
-    new_contribution_id,
     normalize_actor_claims,
     validate_upload_ownership_scope,
 )
@@ -223,7 +222,6 @@ def _prevalidate_standard_keys(df, upload_option, merging_type):
 def _prepare_upload_job(data, actor_claims):
     actor_claims = normalize_actor_claims(actor_claims)
     acting_user = actor_claims["userid"]
-    contribution_id = new_contribution_id()
     df = data.get("df")
     database = unlist(data.get("database"))
     formData = unlist(data.get("formData"))
@@ -277,7 +275,6 @@ def _prepare_upload_job(data, actor_claims):
             "batchSize": UPLOAD_BATCH_SIZE,
             "ignoreIfSame": bool(data.get("ignore_if_same", False)),
             "actorClaims": actor_claims,
-            "contributionId": contribution_id,
         }
         validate_upload_ownership_scope(database, upload_option, dataset_payload, actor_claims)
         return job_args, total_rows, database, warnings
@@ -334,7 +331,6 @@ def _prepare_upload_job(data, actor_claims):
         "batchSize": UPLOAD_BATCH_SIZE,
         "ignoreIfSame": bool(data.get("ignore_if_same", False)),
         "actorClaims": actor_claims,
-        "contributionId": contribution_id,
     }
     validate_upload_ownership_scope(database, "add_uses", dataset_payload, actor_claims)
     return job_args, len(df), database, warnings

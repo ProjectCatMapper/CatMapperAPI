@@ -7,6 +7,7 @@ from CM.utils import *
 from CM.email import *
 from CM.USES import *
 from CM.metadata import *
+from CM.ownership import reconcile_owner_edit_metadata
 import pandas as pd
 import json
 import tempfile
@@ -2713,6 +2714,7 @@ def runRoutinesStream(databases="all", mail=None):
             dbs = databases
 
         routines = [
+            ("Owner Edit Metadata", lambda db: reconcile_owner_edit_metadata(db, return_type="info"), False),
             ("Modifications", lambda db: reportChanges(db, return_type="info"), True),
             ("Check Domains", lambda db: checkDomains(db, mail=None, return_type="info"), True),
             ("Bad Domains", lambda db: getBadDomains(db, mail=None, return_type="info"), True),
@@ -2806,6 +2808,7 @@ def runRoutinesStream(databases="all", mail=None):
         <br><h2>Routine Descriptions</h2>
         <table border="1">
           <tr><th>Label</th><th>Function Name</th><th>Description</th></tr>
+          <tr><td>Owner Edit Metadata</td><td>reconcile_owner_edit_metadata</td><td>Maintains owner-only edit authorization, permanently locks objects modified by another human, removes deprecated ownership fields, and verifies internal PROPERTY definitions.</td></tr>
           <tr><td>Modifications</td><td>reportChanges</td><td>Generates a report of logged changes (nodes, relationships, merges, deletions, edits) within a date range, optionally grouped by user.</td></tr>
           <tr><td>Check Domains</td><td>checkDomains</td><td>Detects missing or inconsistent domain/subdomain assignments in USES relationships.</td></tr>
           <tr><td>Bad Domains</td><td>getBadDomains</td><td>Identifies invalid or missing labels: bad subdomain labels, nodes missing CATEGORY, or nodes missing DATASET.</td></tr>

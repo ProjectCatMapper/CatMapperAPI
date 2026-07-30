@@ -83,6 +83,11 @@ def get_upload_properties(database):
         rows = getPropertiesMetadata(driver)
         if not isinstance(rows, list):
             rows = []
+        rows = [
+            row
+            for row in rows
+            if not bool((row or {}).get("internal"))
+        ]
 
         node_properties = {}
         uses_properties = {}

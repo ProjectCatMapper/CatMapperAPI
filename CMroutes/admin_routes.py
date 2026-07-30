@@ -750,13 +750,13 @@ def admin_nodeproperties():
 
     # q1 captures relevant properties of node
     if "CP" in CMID:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'PROPERTY' RETURN p.CMName as property"
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND coalesce(p.internal, false) = false AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'PROPERTY' RETURN p.CMName as property"
     elif "CL" in CMID:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'LABEL' RETURN p.CMName as property"
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND coalesce(p.internal, false) = false AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'LABEL' RETURN p.CMName as property"
     elif "D" in CMID:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'DATASET' RETURN p.CMName as property"
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND coalesce(p.internal, false) = false AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'DATASET' RETURN p.CMName as property"
     else:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'CATEGORY' RETURN p.CMName as property"
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND coalesce(p.internal, false) = false AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'CATEGORY' RETURN p.CMName as property"
 
     with driver.session() as session:
         r = session.run(q, cmid=CMID).data()
@@ -820,6 +820,7 @@ def admin_usesproperties():
     q1 = """
     MATCH (p:PROPERTY)
     WHERE p.type='relationship'
+      AND coalesce(p.internal, false) = false
     RETURN p.CMName as property, p.groupLabel as groupLabel, p.relationship as relationship,
            p.reltype as reltype
     """
@@ -1117,6 +1118,9 @@ def getAdminEdit():
         acting_user = claims.get("userid")
         if not acting_user:
             acting_user = user
+        if isinstance(input, dict):
+            input = dict(input)
+            input["_actorClaims"] = dict(claims)
         _authorize_admin_edit_function(
             fun=fun,
             database=database,

@@ -21,7 +21,12 @@ def test_owner_helper_allows_owned_node(monkeypatch):
     monkeypatch.setattr(
         ownership,
         "getQuery",
-        lambda **kwargs: [{"cmid": "AM1", "targetCount": 1, "ownedCount": 1}],
+        lambda **kwargs: [{
+            "cmid": "AM1",
+            "targetCount": 1,
+            "ownedCount": 1,
+            "unownedIncidentUses": 0,
+        }],
     )
 
     assert ownership.assert_owned_nodes("ArchaMap", ["AM1"], {"userid": "7", "role": "user"})
@@ -32,7 +37,12 @@ def test_owner_helper_rejects_unowned_or_unmarked_node(monkeypatch):
     monkeypatch.setattr(
         ownership,
         "getQuery",
-        lambda **kwargs: [{"cmid": "AM1", "targetCount": 1, "ownedCount": 0}],
+        lambda **kwargs: [{
+            "cmid": "AM1",
+            "targetCount": 1,
+            "ownedCount": 0,
+            "unownedIncidentUses": 0,
+        }],
     )
 
     with pytest.raises(ownership.OwnershipError, match="not authorized"):
@@ -311,8 +321,13 @@ def test_owner_helper_rejects_node_removal_with_unowned_uses_ties(monkeypatch):
 
     def fake_get_query(**kwargs):
         query = kwargs.get("query", "")
-        if "count(n) AS targetCount" in query:
-            return [{"cmid": "AM1", "targetCount": 1, "ownedCount": 1}]
+        if "size(nodes) AS targetCount" in query:
+            return [{
+                "cmid": "AM1",
+                "targetCount": 1,
+                "ownedCount": 1,
+                "unownedIncidentUses": 1,
+            }]
         if "unownedIncidentUses" in query:
             return [{"cmid": "AM1", "incidentUses": 2, "unownedIncidentUses": 1}]
         raise AssertionError("reference query should not run after unowned incident USES")
@@ -328,8 +343,13 @@ def test_owner_helper_rejects_node_removal_when_cmid_referenced_elsewhere(monkey
 
     def fake_get_query(**kwargs):
         query = kwargs.get("query", "")
-        if "count(n) AS targetCount" in query:
-            return [{"cmid": "AM1", "targetCount": 1, "ownedCount": 1}]
+        if "size(nodes) AS targetCount" in query:
+            return [{
+                "cmid": "AM1",
+                "targetCount": 1,
+                "ownedCount": 1,
+                "unownedIncidentUses": 0,
+            }]
         if "unownedIncidentUses" in query:
             return [{"cmid": "AM1", "incidentUses": 1, "unownedIncidentUses": 0}]
         if "keys(r)" in query:
@@ -374,7 +394,7 @@ def test_upload_replacement_queue_carries_actor_and_checks_scope(client, monkeyp
     assert seen["upload_option"] == "update_replace"
     assert seen["claims"] == {"userid": "7", "role": "user"}
     assert seen["job_args"]["actorClaims"] == {"userid": "7", "role": "user"}
-    assert seen["job_args"]["contributionId"].startswith("contribution_")
+    assert "contributionId" not in seen["job_args"]
 
 
 def test_upload_replacement_queue_rejects_unowned_targets(client, monkeypatch):
@@ -429,4 +449,5 @@ def test_worker_rechecks_upload_ownership_before_mutating(monkeypatch):
             optionalProperties=["Name"],
             user="7",
             actorClaims={"userid": "7", "role": "user"},
+            contributionId="legacy-queued-contribution",
         )

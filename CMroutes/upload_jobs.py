@@ -27,6 +27,18 @@ class UploadCancelledError(Exception):
     pass
 
 
+_DEPRECATED_UPLOAD_JOB_KEYS = {"contributionId"}
+
+
+def _normalize_upload_job_args(job_args):
+    """Remove fields persisted by older upload producers."""
+    return {
+        key: value
+        for key, value in job_args.items()
+        if key not in _DEPRECATED_UPLOAD_JOB_KEYS
+    }
+
+
 def _humanize_upload_error(err):
     if isinstance(err, KeyError):
         missing = str(err).strip().strip("'\"")
@@ -70,6 +82,7 @@ def run_upload_task(task_id):
     if not isinstance(job_args, dict):
         store.fail_upload_task(task_id, "Upload job payload is missing.")
         return
+    job_args = _normalize_upload_job_args(job_args)
 
     def _raise_if_cancelled():
         if store.is_upload_cancel_requested(task_id):

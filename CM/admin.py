@@ -35,6 +35,7 @@ import re
 _ADMIN_MULTI_VALUE_SEPARATOR = re.compile(r"\s*(?:\|{2,}|,|;)\s*")
 _USES_SELF_CONTEXT_PROPERTY_EXCEPTIONS = {"district", "parent"}
 _USES_SELF_CONTEXT_RELATIONSHIP_EXCEPTIONS = {"AREA_OF", "CONTAINS"}
+_INTERNAL_OWNER_PROPERTY_NAMES = {"ownerUserId", "modifiedByOtherUser"}
 
 
 def _split_admin_multi_value(value):
@@ -59,6 +60,37 @@ def _normalize_contextual_tie_token(value):
 
 def _normalize_uses_property_name(value):
     return str(value or "").strip().casefold()
+
+
+def _owner_scoped_actor(input_payload):
+    claims = (input_payload or {}).get("_actorClaims") or {}
+    userid = str(claims.get("userid") or "").strip()
+    role = str(claims.get("role") or "user").strip().lower()
+    if userid and role != "admin":
+        return userid
+    return None
+
+
+def _owner_scoped_uses_guard(alias, actor_user_id):
+    if not actor_user_id:
+        return ""
+    return (
+        f" AND toString(coalesce({alias}.ownerUserId, '')) = $actorUserId"
+        f" AND coalesce({alias}.modifiedByOtherUser, false) = false"
+    )
+
+
+def _owner_scoped_node_guard(alias, actor_user_id):
+    if not actor_user_id:
+        return ""
+    return (
+        f" AND toString(coalesce({alias}.ownerUserId, '')) = $actorUserId"
+        f" AND coalesce({alias}.modifiedByOtherUser, false) = false"
+        " AND NOT EXISTS {"
+        f" MATCH ({alias})-[ownerGuardRel:USES]-()"
+        " WHERE toString(coalesce(ownerGuardRel.ownerUserId, '')) <> $actorUserId"
+        " }"
+    )
 
 
 def _is_uses_self_context_exception(uses_property, relationship):
@@ -473,6 +505,11 @@ def add_edit_delete_USES(database,user,input):
     }
 
     driver = getDriver(database)
+    actor_user_id = _owner_scoped_actor(input)
+    if USES_property in _INTERNAL_OWNER_PROPERTY_NAMES:
+        raise PermissionError(
+            f"{USES_property} is internal authorization metadata and cannot be edited directly."
+        )
 
     metaTypes = getPropertiesMetadata(driver)
     metaType = [item['metaType'] for item in metaTypes if item["type"] == "relationship" and item["property"] == USES_property]
@@ -611,14 +648,19 @@ def add_edit_delete_USES(database,user,input):
               
         df = pd.DataFrame([data])
         # Arguments coming from admin have already been parsed into lists
+        update_kwargs = {
+            "updateType": "overwrite",
+            "propertyType": "USES",
+        }
+        if input.get("_actorClaims"):
+            update_kwargs["actorClaims"] = input.get("_actorClaims")
         update_result = updateProperty(
             df,
             USES_property,
             isDataset,
             database,
             user,
-            updateType="overwrite",
-            propertyType="USES",
+            **update_kwargs,
         )
         if isinstance(update_result, str) and update_result.lower().startswith("error"):
             raise Exception(update_result)
@@ -634,9 +676,15 @@ def add_edit_delete_USES(database,user,input):
             q = """
                     MATCH ()-[r:USES]->()
                     WHERE elementId(r) = $relID
+                    {owner_guard}
                     REMOVE r[$USES_property]
                     RETURN DISTINCT elementId(r) as relID
-                """
+                """.format(
+                    owner_guard=_owner_scoped_uses_guard(
+                        "r",
+                        actor_user_id,
+                    )
+                )
             params = {
                 "relID": relID,
                 "USES_property": USES_property
@@ -644,6 +692,7 @@ def add_edit_delete_USES(database,user,input):
         else:
             q = f"""
                     MATCH (a:CATEGORY {{CMID: $CMID}})<-[r:USES {{Key: $key}}]-(d:DATASET {{CMID: $datasetID}})
+                    WHERE true {_owner_scoped_uses_guard("r", actor_user_id)}
                     REMOVE r[$USES_property] RETURN elementId(r) as relID
                 """
             params = {
@@ -652,6 +701,8 @@ def add_edit_delete_USES(database,user,input):
                 "datasetID": datasetID,
                 "USES_property": USES_property
             }
+        if actor_user_id:
+            params["actorUserId"] = actor_user_id
         result = getQuery(q,driver=driver,params = params)
         _require_process_uses_success(
             processUSES(CMID=CMID, database=database, user=user)
@@ -800,6 +851,12 @@ def add_edit_delete_Node(database,user,input):
     addOrEditNode = input.get('s1_1')
 
     driver = getDriver(database)
+    actor_user_id = _owner_scoped_actor(input)
+    owner_guard = _owner_scoped_node_guard("a", actor_user_id)
+    if changeNodeProperty in _INTERNAL_OWNER_PROPERTY_NAMES:
+        raise PermissionError(
+            f"{changeNodeProperty} is internal authorization metadata and cannot be edited directly."
+        )
 
     metaTypes = getPropertiesMetadata(driver)
     property_meta_types = [
@@ -865,29 +922,58 @@ def add_edit_delete_Node(database,user,input):
                 getQuery(q,driver=driver)
 
         q = f"""
-            MATCH (a {{CMID: '{changeNodeID}'}})
+            MATCH (a {{CMID: $changeNodeID}})
+            WHERE true {owner_guard}
             SET a.{changeNodeProperty} = NULL
+            RETURN elementId(a) AS nodeID
         """
         #CMCypherQuery(con=con, query=q)
-        getQuery(q,driver=driver)
+        mutation_params = {"changeNodeID": changeNodeID}
+        if actor_user_id:
+            mutation_params["actorUserId"] = actor_user_id
+        mutation_rows = getQuery(q, driver=driver, params=mutation_params)
 
     else:  # edit or add
         if label == "DATASET" and changeNodeProperty in ["District", "parent"]:
             q = f"""
-                MATCH (a {{CMID: '{changeNodeID}'}})
+                MATCH (a {{CMID: $changeNodeID}})
+                WHERE true {owner_guard}
                 SET a.{changeNodeProperty} = $id
+                RETURN elementId(a) AS nodeID
             """
             #CMCypherQuery(con=con, query=q, parameters={'id': changeNodeValue})
-            getQuery(q,driver=driver,params={"id": list_value or _split_admin_multi_value(changeNodeValue)})
+            mutation_params = {
+                "changeNodeID": changeNodeID,
+                "id": list_value or _split_admin_multi_value(changeNodeValue),
+            }
+            if actor_user_id:
+                mutation_params["actorUserId"] = actor_user_id
+            mutation_rows = getQuery(
+                q,
+                driver=driver,
+                params=mutation_params,
+            )
 
             processDATASETs(database,CMID=changeNodeID,user=user)
         else:
             q = f"""
-                MATCH (a {{CMID: '{changeNodeID}'}})
+                MATCH (a {{CMID: $changeNodeID}})
+                WHERE true {owner_guard}
                 SET a.{changeNodeProperty} = $id
+                RETURN elementId(a) AS nodeID
             """
             #CMCypherQuery(con=con, query=q, parameters={'id': changeNodeValue})
-            getQuery(q,driver=driver,params={"id": list_value if is_list_meta else changeNodeValue})
+            mutation_params = {
+                "changeNodeID": changeNodeID,
+                "id": list_value if is_list_meta else changeNodeValue,
+            }
+            if actor_user_id:
+                mutation_params["actorUserId"] = actor_user_id
+            mutation_rows = getQuery(
+                q,
+                driver=driver,
+                params=mutation_params,
+            )
 
             if changeNodeProperty == "CMName":
                 try:
@@ -896,9 +982,34 @@ def add_edit_delete_Node(database,user,input):
                 except Exception as e:
                     print(f"CMaddCMNameRel failed: {e}")
 
+    if actor_user_id and not mutation_rows:
+        raise PermissionError(
+            "User is not authorized to edit this node or one of its "
+            "incident USES relationships."
+        )
+
     new_val = "NULL" if addOrEditNode == "delete" else changeNodeValue
     log_msg = f"updated CMID {changeNodeID} {changeNodeProperty} from {priorVal} to {new_val}"
-    #CMlog(id=changeNodeID, type="node", log=log_msg, user=user, con=con)
+    node_rows = mutation_rows or getQuery(
+        "MATCH (n {CMID: $cmid}) RETURN elementId(n) AS nodeID",
+        driver=driver,
+        params={"cmid": changeNodeID},
+    )
+    node_ids = [
+        row.get("nodeID")
+        for row in node_rows or []
+        if row.get("nodeID")
+    ]
+    if not node_ids:
+        raise ValueError(f"Node {changeNodeID} was not found after the update.")
+    createLog(
+        id=node_ids,
+        type="node",
+        log=[log_msg] * len(node_ids),
+        user=user,
+        driver=driver,
+        isDataset=(label == "DATASET"),
+    )
     return "updated successfully"
 
 ############################
@@ -1282,6 +1393,7 @@ def check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id):
 #Function that moves uses tie from one category node to another category node
 def moveUSESties(database,user,input,dataset,tabledata):
     driver = getDriver(database)
+    actor_user_id = _owner_scoped_actor(input)
     CMID_from = input.get('s1_2').strip()
     CMID_to = input.get('s1_3').strip()
     USES_property = json.loads(input.get('s1_7'))
@@ -1372,16 +1484,30 @@ def moveUSESties(database,user,input,dataset,tabledata):
         safe_rel_id = sanitize_cypher_element_id(rel_id, "relationship elementId")
         query_move_rel = """
         MATCH ()-[r:USES]->(from)
-        WHERE from.CMID = $CMID_from AND elementId(r) = $rel_id
+        WHERE from.CMID = $CMID_from
+          AND elementId(r) = $rel_id
+          {owner_guard}
         MATCH (to)
         WHERE to.CMID = $CMID_to
         CALL apoc.refactor.to(r, to) YIELD input, output
         RETURN elementId(output) AS relID
-        """
+        """.format(
+            owner_guard=_owner_scoped_uses_guard(
+                "r",
+                actor_user_id,
+            )
+        )
+        move_params = {
+            "CMID_from": CMID_from,
+            "rel_id": safe_rel_id,
+            "CMID_to": CMID_to,
+        }
+        if actor_user_id:
+            move_params["actorUserId"] = actor_user_id
         rel_id_df = getQuery(
             query_move_rel,
             driver,
-            params={"CMID_from": CMID_from, "rel_id": safe_rel_id, "CMID_to": CMID_to},
+            params=move_params,
         )
         new_rel_id = rel_id_df[0]['relID'] if rel_id_df else None
 
@@ -1716,6 +1842,7 @@ def deleteNode(database,user,input):
 #section for deleting a USES tie
 def deleteUSES(database,user,input):
     driver = getDriver(database)
+    actor_user_id = _owner_scoped_actor(input)
     CMID = input.get('s1_2')
     USES_property = json.loads(input.get('s1_7'))
     rel_id = sanitize_cypher_element_id(USES_property[1]["id"], "relationship elementId")
@@ -1742,8 +1869,26 @@ def deleteUSES(database,user,input):
     if result:
         raise ValueError(f"There is a stack that uses this USES tie for a merging template. It is not possible to delete this USES tie using admin functions.(stackID = {result})")
 
-    q = "MATCH ()-[r]->() WHERE elementId(r) = $id DELETE r RETURN count(*) AS count"
-    result = getQuery(q, driver=driver, params={"id": rel_id})
+    q = f"""
+    MATCH ()-[r:USES]->()
+    WHERE elementId(r) = $id
+      {_owner_scoped_uses_guard("r", actor_user_id)}
+    DELETE r
+    RETURN count(*) AS count
+    """
+    delete_params = {"id": rel_id}
+    if actor_user_id:
+        delete_params["actorUserId"] = actor_user_id
+    result = getQuery(q, driver=driver, params=delete_params)
+    deleted_count = (
+        int(result[0].get("count") or 0)
+        if result
+        else 0
+    )
+    if deleted_count == 0:
+        raise PermissionError(
+            "User is not authorized to delete this USES tie or it no longer exists."
+        )
 
     processUSES(database,CMID)
 

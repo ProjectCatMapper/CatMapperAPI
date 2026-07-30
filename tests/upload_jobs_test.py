@@ -60,6 +60,19 @@ class FakeUploadStore:
         return None
 
 
+def test_normalize_upload_job_args_removes_legacy_contribution_id():
+    original = {
+        "dataset": [],
+        "database": "ArchaMap",
+        "contributionId": "contribution-old",
+    }
+
+    normalized = upload_jobs._normalize_upload_job_args(original)
+
+    assert normalized == {"dataset": [], "database": "ArchaMap"}
+    assert original["contributionId"] == "contribution-old"
+
+
 def test_run_upload_task_increments_batch_for_timed_end_of_batch_log(monkeypatch):
     store = FakeUploadStore()
     listener_ref = {}

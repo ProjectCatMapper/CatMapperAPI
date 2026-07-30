@@ -1,14 +1,68 @@
 """Owner-scoped write authorization helpers."""
 
-from datetime import datetime, timezone
-import uuid
-
 import pandas as pd
 
 from .utils import getDriver, getQuery
 
 
 OWNER_SCOPED_UPLOAD_OPTIONS = {"node_add", "node_replace", "update_add", "update_replace"}
+SYSTEM_MODIFICATION_USER_IDS = {"0"}
+INTERNAL_OWNER_PROPERTY_METADATA = (
+    {
+        "CMID": "CP188",
+        "CMName": "ownerUserId",
+        "property": "ownerUserId",
+        "type": "node",
+        "nodeType": "DATASET; CATEGORY",
+        "metaType": "string",
+        "description": "Internal user ID that exclusively owns this node for owner-scoped editing.",
+        "internal": True,
+        "editable": False,
+        "display": False,
+        "search": False,
+        "public": False,
+    },
+    {
+        "CMID": "CP189",
+        "CMName": "ownerUserId",
+        "property": "ownerUserId",
+        "type": "relationship",
+        "metaType": "string",
+        "description": "Internal user ID that exclusively owns this USES relationship for owner-scoped editing.",
+        "internal": True,
+        "editable": False,
+        "display": False,
+        "search": False,
+        "public": False,
+    },
+    {
+        "CMID": "CP190",
+        "CMName": "modifiedByOtherUser",
+        "property": "modifiedByOtherUser",
+        "type": "node",
+        "nodeType": "DATASET; CATEGORY",
+        "metaType": "boolean",
+        "description": "Internal permanent lock set when a human other than the owner modifies this node.",
+        "internal": True,
+        "editable": False,
+        "display": False,
+        "search": False,
+        "public": False,
+    },
+    {
+        "CMID": "CP191",
+        "CMName": "modifiedByOtherUser",
+        "property": "modifiedByOtherUser",
+        "type": "relationship",
+        "metaType": "boolean",
+        "description": "Internal permanent lock set when a human other than the owner modifies this USES relationship.",
+        "internal": True,
+        "editable": False,
+        "display": False,
+        "search": False,
+        "public": False,
+    },
+)
 
 
 class OwnershipError(PermissionError):
@@ -46,18 +100,11 @@ def normalize_actor_claims(claims):
     return {"userid": userid, "role": role}
 
 
-def new_contribution_id():
-    return f"contribution_{uuid.uuid4().hex}"
-
-
-def ownership_metadata(claims, contribution_id=None):
+def ownership_metadata(claims):
     actor = normalize_actor_claims(claims)
-    now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     return {
-        "createdByUserId": actor["userid"],
         "ownerUserId": actor["userid"],
-        "createdAt": now,
-        "contributionId": contribution_id or new_contribution_id(),
+        "modifiedByOtherUser": False,
     }
 
 
@@ -83,12 +130,19 @@ def _ownership_failure(object_type, values):
 def _owned_count_expr(alias):
     return (
         f"CASE WHEN toString(coalesce({alias}.ownerUserId, '')) = $userid "
-        f"OR toString(coalesce({alias}.createdByUserId, '')) = $userid "
         "THEN 1 ELSE 0 END"
     )
 
 
-def assert_owned_nodes(database, cmids, claims):
+def _owner_editable_count_expr(alias):
+    return (
+        f"CASE WHEN toString(coalesce({alias}.ownerUserId, '')) = $userid "
+        f"AND coalesce({alias}.modifiedByOtherUser, false) = false "
+        "THEN 1 ELSE 0 END"
+    )
+
+
+def assert_owned_nodes(database, cmids, claims, require_incident_uses=True):
     actor = normalize_actor_claims(claims)
     cmids = _dedupe_nonempty(cmids)
     if not cmids or is_admin_claims(actor):
@@ -99,10 +153,17 @@ def assert_owned_nodes(database, cmids, claims):
     UNWIND $cmids AS cmid
     OPTIONAL MATCH (n {{CMID: toString(cmid)}})
     WHERE NOT n:DELETED
+    OPTIONAL MATCH (n)-[r:USES]-()
     WITH toString(cmid) AS cmid,
-         count(n) AS targetCount,
-         sum({_owned_count_expr("n")}) AS ownedCount
-    RETURN cmid, targetCount, ownedCount
+         collect(DISTINCT n) AS nodes,
+         collect(DISTINCT r) AS incidentUses
+    RETURN cmid,
+           size(nodes) AS targetCount,
+           size([n IN nodes WHERE {_owner_editable_count_expr("n")} = 1]) AS ownedCount,
+           size([
+             r IN incidentUses
+             WHERE {_owned_count_expr("r")} = 0
+           ]) AS unownedIncidentUses
     """
     rows = getQuery(query=query, driver=driver, params={"cmids": cmids, "userid": actor["userid"]}, type="dict")
     missing = [row["cmid"] for row in rows if int(row.get("targetCount") or 0) == 0]
@@ -116,6 +177,17 @@ def assert_owned_nodes(database, cmids, claims):
     ]
     if unowned:
         _ownership_failure("node", unowned)
+    if require_incident_uses:
+        nodes_with_unowned_uses = [
+            row["cmid"]
+            for row in rows
+            if int(row.get("unownedIncidentUses") or 0) > 0
+        ]
+        if nodes_with_unowned_uses:
+            _ownership_failure(
+                "node with incident USES relationships not owned by this user",
+                nodes_with_unowned_uses,
+            )
     return True
 
 
@@ -126,7 +198,12 @@ def assert_owner_scoped_node_removal_allowed(database, cmid, claims):
     if not cmids or is_admin_claims(actor):
         return True
 
-    assert_owned_nodes(database, cmids, actor)
+    assert_owned_nodes(
+        database,
+        cmids,
+        actor,
+        require_incident_uses=False,
+    )
     target_cmid = cmids[0]
     driver = getDriver(database)
 
@@ -138,7 +215,7 @@ def assert_owner_scoped_node_removal_allowed(database, cmid, claims):
          sum(
            CASE
              WHEN r IS NULL THEN 0
-             WHEN {_owned_count_expr("r")} = 1 THEN 0
+             WHEN {_owner_editable_count_expr("r")} = 1 THEN 0
              ELSE 1
            END
          ) AS unownedIncidentUses
@@ -154,7 +231,7 @@ def assert_owner_scoped_node_removal_allowed(database, cmid, claims):
     if int(incident_row.get("unownedIncidentUses") or 0) > 0:
         raise OwnerScopedAdminReviewRequired(
             f"User is not authorized to merge or delete {target_cmid}; "
-            "the node has USES ties not owned by this user",
+            "the node has USES ties not owned by this user or modified by another user",
             cmid=target_cmid,
             reason_code="unowned_incident_uses",
             details={
@@ -208,7 +285,7 @@ def assert_owned_uses_by_relids(database, relids, claims):
     WHERE elementId(r) = toString(relID)
     WITH toString(relID) AS relID,
          count(r) AS targetCount,
-         sum({_owned_count_expr("r")}) AS ownedCount
+         sum({_owner_editable_count_expr("r")}) AS ownedCount
     RETURN relID, targetCount, ownedCount
     """
     rows = getQuery(query=query, driver=driver, params={"relids": relids, "userid": actor["userid"]}, type="dict")
@@ -239,7 +316,7 @@ def owned_uses_relids(database, relids, claims):
     UNWIND $relids AS relID
     MATCH ()-[r:USES]->()
     WHERE elementId(r) = toString(relID)
-    WITH toString(relID) AS relID, {_owned_count_expr("r")} AS owned
+    WITH toString(relID) AS relID, {_owner_editable_count_expr("r")} AS owned
     WHERE owned = 1
     RETURN relID
     """
@@ -277,7 +354,7 @@ def assert_owned_uses_by_triplets(database, rows, claims):
     query = f"""
     UNWIND $rows AS row
     OPTIONAL MATCH (:DATASET {{CMID: row.datasetID}})-[r:USES {{Key: row.Key}}]->(:CATEGORY {{CMID: row.CMID}})
-    WITH row, count(r) AS targetCount, sum({_owned_count_expr("r")}) AS ownedCount
+    WITH row, count(r) AS targetCount, sum({_owner_editable_count_expr("r")}) AS ownedCount
     RETURN row.CMID AS CMID, row.datasetID AS datasetID, row.Key AS Key, targetCount, ownedCount
     """
     result = getQuery(query=query, driver=driver, params={"rows": triplets, "userid": actor["userid"]}, type="dict")
@@ -317,3 +394,280 @@ def validate_upload_ownership_scope(database, upload_option, rows, claims):
 
     assert_owned_uses_by_triplets(database, frame.to_dict(orient="records"), actor)
     return True
+
+
+def _result_count(rows, key="count"):
+    if not rows:
+        return 0
+    return int((rows[0] or {}).get(key) or 0)
+
+
+def ensure_internal_owner_property_metadata(database):
+    """Create or repair the four internal PROPERTY definitions."""
+    driver = getDriver(database)
+    definitions = [dict(row) for row in INTERNAL_OWNER_PROPERTY_METADATA]
+    conflicts = getQuery(
+        query="""
+        // OWNER_METADATA_CONFLICT_CHECK
+        UNWIND $definitions AS definition
+        OPTIONAL MATCH (p:METADATA {CMID: definition.CMID})
+        WITH definition, p
+        WHERE p IS NOT NULL
+          AND (
+            coalesce(p.CMName, '') <> definition.CMName
+            OR coalesce(p.type, '') <> definition.type
+          )
+        RETURN definition.CMID AS CMID,
+               definition.CMName AS expectedName,
+               definition.type AS expectedType,
+               p.CMName AS actualName,
+               p.type AS actualType
+        """,
+        driver=driver,
+        params={"definitions": definitions},
+        type="dict",
+    )
+    if conflicts:
+        raise ValueError(
+            "Internal ownership PROPERTY CMID conflict: "
+            + ", ".join(str(row.get("CMID")) for row in conflicts)
+        )
+
+    rows = getQuery(
+        query="""
+        // OWNER_METADATA_DEFINITION_UPSERT
+        UNWIND $definitions AS definition
+        MERGE (p:METADATA:PROPERTY {CMID: definition.CMID})
+        SET p += definition
+        RETURN count(p) AS count
+        """,
+        driver=driver,
+        params={"definitions": definitions},
+        type="dict",
+    )
+    return _result_count(rows)
+
+
+def reconcile_owner_edit_metadata(database, return_type="data"):
+    """Reconcile simplified owner-edit metadata and remove legacy fields.
+
+    Existing true locks are monotonic. Objects with no usable history fail
+    closed. User ``0`` is treated as an automated system actor.
+    """
+    driver = getDriver(database)
+    system_users = sorted(SYSTEM_MODIFICATION_USER_IDS)
+    counts = {}
+
+    counts["propertyDefinitions"] = ensure_internal_owner_property_metadata(database)
+
+    rows = getQuery(
+        query="""
+        // OWNER_METADATA_NODE_OWNER_BACKFILL
+        MATCH (n)
+        WHERE (n:CATEGORY OR n:DATASET)
+          AND NOT n:DELETED
+          AND (n.ownerUserId IS NOT NULL OR n.createdByUserId IS NOT NULL)
+        WITH n, toString(coalesce(n.ownerUserId, n.createdByUserId)) AS owner
+        WHERE owner <> ''
+          AND (n.ownerUserId IS NULL OR toString(n.ownerUserId) <> owner)
+        SET n.ownerUserId = owner
+        RETURN count(n) AS count
+        """,
+        driver=driver,
+        type="dict",
+    )
+    counts["nodeOwnersBackfilled"] = _result_count(rows)
+
+    rows = getQuery(
+        query="""
+        // OWNER_METADATA_USES_OWNER_BACKFILL
+        MATCH ()-[r:USES]->()
+        WHERE r.ownerUserId IS NOT NULL OR r.createdByUserId IS NOT NULL
+        WITH r, toString(coalesce(r.ownerUserId, r.createdByUserId)) AS owner
+        WHERE owner <> ''
+          AND (r.ownerUserId IS NULL OR toString(r.ownerUserId) <> owner)
+        SET r.ownerUserId = owner
+        RETURN count(r) AS count
+        """,
+        driver=driver,
+        type="dict",
+    )
+    counts["usesOwnersBackfilled"] = _result_count(rows)
+
+    rows = getQuery(
+        query="""
+        // OWNER_METADATA_NODE_LOCK_RECONCILE
+        MATCH (n)
+        WHERE (n:CATEGORY OR n:DATASET)
+          AND NOT n:DELETED
+          AND n.ownerUserId IS NOT NULL
+        OPTIONAL MATCH (n)-[:HAS_LOG]->(l:LOG)
+        WITH n, collect(DISTINCT toString(l.user)) AS users
+        WITH n,
+             CASE
+               WHEN coalesce(n.modifiedByOtherUser, false) THEN true
+               WHEN size(users) = 0 THEN true
+               WHEN any(
+                 user IN users
+                 WHERE NOT user IN $systemUsers
+                   AND user <> toString(n.ownerUserId)
+               ) THEN true
+               ELSE false
+             END AS desired
+        WHERE n.modifiedByOtherUser IS NULL
+           OR n.modifiedByOtherUser <> desired
+        SET n.modifiedByOtherUser = desired
+        RETURN count(n) AS count
+        """,
+        driver=driver,
+        params={"systemUsers": system_users},
+        type="dict",
+    )
+    counts["nodeLocksUpdated"] = _result_count(rows)
+
+    rows = getQuery(
+        query="""
+        // OWNER_METADATA_USES_LOCK_RECONCILE
+        MATCH ()-[r:USES]->()
+        WHERE r.ownerUserId IS NOT NULL
+        WITH r, [
+          id IN apoc.coll.flatten([r.logID], true)
+          WHERE id IS NOT NULL | toString(id)
+        ] AS logIds
+        OPTIONAL MATCH (l:LOG)
+        WHERE elementId(l) IN logIds
+        WITH r, collect(DISTINCT toString(l.user)) AS users
+        WITH r,
+             CASE
+               WHEN coalesce(r.modifiedByOtherUser, false) THEN true
+               WHEN size(users) = 0 THEN true
+               WHEN any(
+                 user IN users
+                 WHERE NOT user IN $systemUsers
+                   AND user <> toString(r.ownerUserId)
+               ) THEN true
+               ELSE false
+             END AS desired
+        WHERE r.modifiedByOtherUser IS NULL
+           OR r.modifiedByOtherUser <> desired
+        SET r.modifiedByOtherUser = desired
+        RETURN count(r) AS count
+        """,
+        driver=driver,
+        params={"systemUsers": system_users},
+        type="dict",
+    )
+    counts["usesLocksUpdated"] = _result_count(rows)
+
+    rows = getQuery(
+        query="""
+        // OWNER_METADATA_NODE_LEGACY_REMOVE
+        MATCH (n)
+        WHERE (n:CATEGORY OR n:DATASET)
+          AND n.ownerUserId IS NOT NULL
+          AND (
+            n.createdByUserId IS NOT NULL
+            OR n.createdAt IS NOT NULL
+            OR n.contributionId IS NOT NULL
+          )
+        REMOVE n.createdByUserId, n.createdAt, n.contributionId
+        RETURN count(n) AS count
+        """,
+        driver=driver,
+        type="dict",
+    )
+    counts["nodeLegacyPropertiesRemoved"] = _result_count(rows)
+
+    rows = getQuery(
+        query="""
+        // OWNER_METADATA_USES_LEGACY_REMOVE
+        MATCH ()-[r:USES]->()
+        WHERE r.ownerUserId IS NOT NULL
+          AND (
+            r.createdByUserId IS NOT NULL
+            OR r.createdAt IS NOT NULL
+            OR r.contributionId IS NOT NULL
+          )
+        REMOVE r.createdByUserId, r.createdAt, r.contributionId
+        RETURN count(r) AS count
+        """,
+        driver=driver,
+        type="dict",
+    )
+    counts["usesLegacyPropertiesRemoved"] = _result_count(rows)
+
+    verification = getQuery(
+        query="""
+        // OWNER_METADATA_VERIFY
+        MATCH (n)
+        WHERE (n:CATEGORY OR n:DATASET)
+          AND NOT n:DELETED
+          AND n.ownerUserId IS NOT NULL
+        WITH count(n) AS ownedNodes,
+             count(CASE
+               WHEN n.modifiedByOtherUser IS NULL THEN 1
+             END) AS nodesMissingLock,
+             count(CASE
+               WHEN n.createdByUserId IS NOT NULL
+                 OR n.createdAt IS NOT NULL
+                 OR n.contributionId IS NOT NULL
+               THEN 1
+             END) AS nodesWithLegacy
+        MATCH ()-[r:USES]->()
+        WHERE r.ownerUserId IS NOT NULL
+        RETURN ownedNodes,
+               nodesMissingLock,
+               nodesWithLegacy,
+               count(r) AS ownedUses,
+               count(CASE
+                 WHEN r.modifiedByOtherUser IS NULL THEN 1
+               END) AS usesMissingLock,
+               count(CASE
+                 WHEN r.createdByUserId IS NOT NULL
+                   OR r.createdAt IS NOT NULL
+                   OR r.contributionId IS NOT NULL
+                 THEN 1
+               END) AS usesWithLegacy
+        """,
+        driver=driver,
+        type="dict",
+    )
+    verification_row = (verification or [{}])[0]
+    counts["verification"] = {
+        key: int(verification_row.get(key) or 0)
+        for key in (
+            "ownedNodes",
+            "nodesMissingLock",
+            "nodesWithLegacy",
+            "ownedUses",
+            "usesMissingLock",
+            "usesWithLegacy",
+        )
+    }
+
+    failures = {
+        key: counts["verification"][key]
+        for key in (
+            "nodesMissingLock",
+            "nodesWithLegacy",
+            "usesMissingLock",
+            "usesWithLegacy",
+        )
+        if counts["verification"][key] != 0
+    }
+    if failures:
+        raise RuntimeError(f"Owner metadata reconciliation incomplete: {failures}")
+
+    info = (
+        f"Owned nodes: {counts['verification']['ownedNodes']}; "
+        f"owned USES ties: {counts['verification']['ownedUses']}; "
+        f"node locks updated: {counts['nodeLocksUpdated']}; "
+        f"USES locks updated: {counts['usesLocksUpdated']}; "
+        f"legacy node properties removed: {counts['nodeLegacyPropertiesRemoved']}; "
+        f"legacy USES properties removed: {counts['usesLegacyPropertiesRemoved']}."
+    )
+    if return_type == "info":
+        return {"info": info, "data": counts}
+    if return_type == "data":
+        return counts
+    raise ValueError("return_type must be 'data' or 'info'")
