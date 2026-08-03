@@ -73,6 +73,10 @@ def test_reconcile_owner_edit_metadata_is_fail_closed_and_removes_legacy(monkeyp
     assert uses_lock["params"]["systemUsers"] == ["0"]
     assert "WHEN size(users) = 0 THEN true" in node_lock["query"]
     assert "WHEN size(users) = 0 THEN true" in uses_lock["query"]
+    assert "toBooleanOrNull(toString(n.modifiedByOtherUser))" in node_lock["query"]
+    assert "WHEN currentLock = true THEN true" in node_lock["query"]
+    assert "toBooleanOrNull(toString(r.modifiedByOtherUser))" in uses_lock["query"]
+    assert "WHEN currentLock = true THEN true" in uses_lock["query"]
     assert any(
         "REMOVE n.createdByUserId, n.createdAt, n.contributionId" in call["query"]
         for call in seen

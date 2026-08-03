@@ -505,9 +505,10 @@ def reconcile_owner_edit_metadata(database, return_type="data"):
           AND n.ownerUserId IS NOT NULL
         OPTIONAL MATCH (n)-[:HAS_LOG]->(l:LOG)
         WITH n, collect(DISTINCT toString(l.user)) AS users
+        WITH n, users, coalesce(toBooleanOrNull(toString(n.modifiedByOtherUser)), false) AS currentLock
         WITH n,
              CASE
-               WHEN coalesce(n.modifiedByOtherUser, false) THEN true
+               WHEN currentLock = true THEN true
                WHEN size(users) = 0 THEN true
                WHEN any(
                  user IN users
@@ -539,9 +540,10 @@ def reconcile_owner_edit_metadata(database, return_type="data"):
         OPTIONAL MATCH (l:LOG)
         WHERE elementId(l) IN logIds
         WITH r, collect(DISTINCT toString(l.user)) AS users
+        WITH r, users, coalesce(toBooleanOrNull(toString(r.modifiedByOtherUser)), false) AS currentLock
         WITH r,
              CASE
-               WHEN coalesce(r.modifiedByOtherUser, false) THEN true
+               WHEN currentLock = true THEN true
                WHEN size(users) = 0 THEN true
                WHEN any(
                  user IN users

@@ -2714,7 +2714,6 @@ def runRoutinesStream(databases="all", mail=None):
             dbs = databases
 
         routines = [
-            ("Owner Edit Metadata", lambda db: reconcile_owner_edit_metadata(db, return_type="info"), False),
             ("Modifications", lambda db: reportChanges(db, return_type="info"), True),
             ("Check Domains", lambda db: checkDomains(db, mail=None, return_type="info"), True),
             ("Bad Domains", lambda db: getBadDomains(db, mail=None, return_type="info"), True),
@@ -2733,6 +2732,7 @@ def runRoutinesStream(databases="all", mail=None):
             ("Glottocode Checks", lambda db: getBadGlottocodes(db, mail=None, return_type="info"), True),
             ("Process Waiting USES", lambda db: waitingUSES(db), False),
             ("Process USES", lambda db: processUSES(db, detailed=False), False),
+            ("Owner Edit Metadata", lambda db: reconcile_owner_edit_metadata(db, return_type="info"), False),
             ("Invalid Node and USES properties", lambda db: getInappropriateprops_Nodes_Rels(db, mail=None, return_type="info"), True),
             ("Empty Node properties", lambda db: get_empty_nodeprops(db, mail=None, return_type="info"), True),
             ("Label Checks", lambda db: get_label_check(db, mail=None, return_type="info"), True),
