@@ -2,6 +2,12 @@ import pandas as pd
 from .utils import *
 
 
+def _format_translate_cell(value):
+    if isinstance(value, list):
+        return '; '.join(map(str, value))
+    return str(value)
+
+
 def search(
         database,
         term,
@@ -743,16 +749,7 @@ def translate(
 
     data[f'matchType_{term}'] = data[f'matchType_{term}'].fillna('none')
     data.fillna('', inplace=True)
-    dtypes = data.dtypes.to_dict()
-    list_cols = []
-    for col_name, typ in dtypes.items():
-        if typ == 'object' and isinstance(data[col_name].iloc[0], list):
-            list_cols.append(col_name)
-
-    for col in list_cols:
-        data[col] = data[col].apply(lambda x: '; '.join(map(str, x)))
-
-    data = data.astype(str)
+    data = data.apply(lambda column: column.map(_format_translate_cell))
 
     colOrder = [
         term,

@@ -90,3 +90,62 @@ def test_translate_key_dataset_filter_requires_matching_uses_key(monkeypatch):
 
     query = " ".join(result[0]["query"].split())
     assert "match (a)<-[r:USES]-(d:DATASET {CMID: row.dataset}) where r.Key = matching" in query
+
+
+def test_translate_formats_country_lists_when_first_row_is_blank(monkeypatch):
+    monkeypatch.setattr(search_module, "getDriver", lambda database: object())
+    monkeypatch.setattr(search_module, "validate_domain_label", lambda domain, **kwargs: domain)
+
+    def fake_get_query(query, driver, params=None):
+        return [
+            {
+                "CMuniqueCategoryID": 0,
+                "CMuniqueRowID": [0],
+                "term": "Alpha",
+                "country": None,
+                "context": None,
+                "CMID": "SM1",
+                "CMName": "Alpha",
+                "label": "CATEGORY",
+                "matching": "Alpha",
+                "matchingDistance": 0,
+                "CMcountry": "",
+                "Key": "",
+            },
+            {
+                "CMuniqueCategoryID": 1,
+                "CMuniqueRowID": [1],
+                "term": "Beta",
+                "country": None,
+                "context": None,
+                "CMID": "SM2",
+                "CMName": "Beta",
+                "label": "CATEGORY",
+                "matching": "Beta",
+                "matchingDistance": 0,
+                "CMcountry": ["United States of America", "Mexico"],
+                "Key": "",
+            },
+        ]
+
+    monkeypatch.setattr(search_module, "getQuery", fake_get_query)
+
+    data, order, warnings = search_module.translate(
+        database="SocioMap",
+        property="Name",
+        domain="CATEGORY",
+        key="false",
+        term="source_name",
+        country="",
+        context="",
+        dataset="",
+        yearStart=None,
+        yearEnd=None,
+        query="false",
+        table=[{"source_name": "Alpha"}, {"source_name": "Beta"}],
+        countsamename=None,
+    )
+
+    assert warnings == []
+    assert "CMcountry_source_name" in order
+    assert data["CMcountry_source_name"].tolist() == ["", "United States of America; Mexico"]
