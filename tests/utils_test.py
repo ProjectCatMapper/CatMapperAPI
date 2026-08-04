@@ -93,5 +93,5 @@ def test_getAvailableID_dataset_uses_dataset_scope(monkeypatch):
     )
 
     assert generated == ["AD4", "AD5"]
-    assert "WHERE n:DATASET" in captured["query"]
+    assert "WHERE (n:DATASET OR n:DELETED)" in captured["query"]
     assert captured["params"]["pattern"] == "^AD[0-9]+$"
