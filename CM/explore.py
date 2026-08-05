@@ -657,14 +657,18 @@ def _validate_points(points):
             if entry['geometry']["type"] == "Point":
                 point_list.append({
                     "cood": entry['geometry']["coordinates"],
-                    "source": entry["source"]
+                    "source": entry["source"],
+                    "CMName": entry.get("CMName"),
+                    "CMID": entry.get("CMID")
                 })
             elif entry['geometry']["type"] == "MultiPoint":
                 source = entry['source']
                 for coord in entry['geometry']['coordinates']:
                     point_list.append({
                         'cood': coord,
-                        "source": source
+                        "source": source,
+                        "CMName": entry.get("CMName"),
+                        "CMID": entry.get("CMID")
                     })
         
         if point_list:

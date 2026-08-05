@@ -9,6 +9,9 @@ import re
 
 explore_bp = Blueprint('explore', __name__)
 DEFAULT_NODE_PAGE_NETWORK_LIMIT = 500
+DEFAULT_MAP_LAYER_NODE_LIMIT = 5000
+DEFAULT_MAP_LAYER_POLYGON_LIMIT = 2500
+DEFAULT_MAP_LAYER_MAX_DEPTH = 30
 
 
 def _hex_to_rgb(hex_color):
@@ -62,6 +65,167 @@ def _get_label_metadata_map(driver):
 
 def _unique_preserve_order(values):
     return list(dict.fromkeys(values))
+
+
+def _parse_positive_int(value, default, maximum=None):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    parsed = max(1, parsed)
+    if maximum is not None:
+        parsed = min(parsed, maximum)
+    return parsed
+
+
+def _get_descendant_geometry_summary(database, cmid, max_depth=DEFAULT_MAP_LAYER_MAX_DEPTH):
+    driver = getDriver(database)
+    rows = getQuery(
+        """
+        MATCH (root:CATEGORY {CMID: $cmid})
+        MATCH p = (root)-[:CONTAINS*1..30]->(descendant:CATEGORY)
+        WITH descendant, min(length(p)) AS depth
+        WHERE depth <= $max_depth
+        OPTIONAL MATCH (descendant)<-[pointRel:USES]-(:DATASET)
+        WHERE pointRel.geoCoords IS NOT NULL
+        OPTIONAL MATCH (descendant)<-[polygonRel:USES]-(:DATASET)
+        WHERE polygonRel.geoPolygon IS NOT NULL
+        WITH descendant, depth, count(pointRel) AS pointCount, count(polygonRel) AS polygonCount
+        WHERE pointCount > 0 OR polygonCount > 0
+        RETURN
+            count(DISTINCT descendant) AS nodeCount,
+            max(depth) AS availableDescendantDepth,
+            collect({depth: depth, count: 1}) AS depthRows
+        """,
+        driver=driver,
+        cmid=cmid,
+        max_depth=max_depth,
+        type="records",
+    )
+    row = rows[0] if rows else {}
+    depth_counts = {}
+    for entry in row.get("depthRows") or []:
+        depth = entry.get("depth")
+        if depth is None:
+            continue
+        depth_counts[depth] = depth_counts.get(depth, 0) + int(entry.get("count") or 0)
+    return {
+        "nodeCount": int(row.get("nodeCount") or 0),
+        "availableDescendantDepth": int(row.get("availableDescendantDepth") or 0),
+        "depthCounts": [
+            {"depth": depth, "count": count}
+            for depth, count in sorted(depth_counts.items())
+        ],
+    }
+
+
+def _build_descendant_map_options(database, cmid):
+    summary = _get_descendant_geometry_summary(database, cmid)
+    node_count = summary["nodeCount"]
+    return {
+        "layers": [{
+            "id": "descendants:CONTAINS",
+            "label": "Descendant locations",
+            "mode": "descendants",
+            "relationship": "CONTAINS",
+            "available": node_count > 0,
+            "count": node_count,
+            "nodeCount": node_count,
+            "depthCounts": summary["depthCounts"],
+        }],
+        "limits": {
+            "defaultDepth": 5,
+            "maxDepth": DEFAULT_MAP_LAYER_MAX_DEPTH,
+            "availableDescendantDepth": summary["availableDescendantDepth"],
+            "defaultNodeLimit": DEFAULT_MAP_LAYER_NODE_LIMIT,
+            "defaultPolygonLimit": DEFAULT_MAP_LAYER_POLYGON_LIMIT,
+        },
+    }
+
+
+def _get_descendant_cmid_rows(database, cmid, max_depth, node_limit):
+    driver = getDriver(database)
+    return getQuery(
+        """
+        MATCH (root:CATEGORY {CMID: $cmid})
+        MATCH p = (root)-[:CONTAINS*1..30]->(descendant:CATEGORY)
+        WITH descendant, min(length(p)) AS depth
+        WHERE depth <= $max_depth
+        OPTIONAL MATCH (descendant)<-[pointRel:USES]-(:DATASET)
+        WHERE pointRel.geoCoords IS NOT NULL
+        OPTIONAL MATCH (descendant)<-[polygonRel:USES]-(:DATASET)
+        WHERE polygonRel.geoPolygon IS NOT NULL
+        WITH descendant, depth, count(pointRel) AS pointCount, count(polygonRel) AS polygonCount
+        WHERE pointCount > 0 OR polygonCount > 0
+        RETURN descendant.CMID AS CMID, descendant.CMName AS CMName, depth
+        ORDER BY depth, CMName, CMID
+        LIMIT $node_limit
+        """,
+        driver=driver,
+        cmid=cmid,
+        max_depth=max_depth,
+        node_limit=node_limit,
+        type="records",
+    )
+
+
+def _build_descendant_geometry_layer(database, cmid, max_depth):
+    node_rows = _get_descendant_cmid_rows(
+        database,
+        cmid,
+        max_depth=max_depth,
+        node_limit=DEFAULT_MAP_LAYER_NODE_LIMIT,
+    )
+    points = []
+    polygon_features = []
+    for row in node_rows:
+        child_cmid = row.get("CMID")
+        if not child_cmid:
+            continue
+        inherited_props = {
+            "inherited": True,
+            "layerType": "inherited",
+            "sourceNodeName": row.get("CMName"),
+            "sourceNodeCMID": child_cmid,
+            "inheritedFromName": row.get("CMName"),
+            "inheritedFromCMID": child_cmid,
+            "inheritanceRelationship": "CONTAINS",
+        }
+        child_geometry = exploreGeometry(database, child_cmid) or {}
+        for point in child_geometry.get("points") or []:
+            points.append({**point, **inherited_props})
+        for polygon in getMapPolygonFeatures(child_geometry.get("polygons")):
+            if isinstance(polygon, dict):
+                polygon_features.append({
+                    **polygon,
+                    "properties": {
+                        **(polygon.get("properties") or {}),
+                        **inherited_props,
+                        **({"source": polygon.get("source")} if polygon.get("source") else {}),
+                    },
+                })
+    return {
+        "id": "descendants:CONTAINS",
+        "label": "Descendant locations",
+        "mode": "descendants",
+        "relationship": "CONTAINS",
+        "points": points,
+        "polygons": {"type": "FeatureCollection", "features": polygon_features},
+        "nodeCount": len(node_rows),
+        "displayedNodeCount": len(node_rows),
+    }
+
+
+def getMapPolygonFeatures(polygons):
+    if not polygons:
+        return []
+    if isinstance(polygons, list):
+        return polygons
+    if isinstance(polygons, dict) and isinstance(polygons.get("features"), list):
+        return polygons["features"]
+    if isinstance(polygons, dict) and polygons.get("type"):
+        return [polygons]
+    return []
 
 
 def _get_effective_labels(labels, label_metadata_map):
@@ -480,6 +644,38 @@ def getPointGeometry(database, cmid):
         
     except Exception as e:
         return "Error returning results: " + str(", ".join(map(str, e.args))), 500
+
+
+@explore_bp.route("/databases/<database>/nodes/<cmid>/map-layer-options", methods=["GET"])
+def getMapLayerOptions(database, cmid):
+    try:
+        return jsonify(_build_descendant_map_options(database, cmid))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@explore_bp.route("/databases/<database>/nodes/<cmid>/explore-geometry", methods=["GET"])
+def getInheritedPointGeometry(database, cmid):
+    try:
+        requested_layers = {
+            layer.strip()
+            for layer in str(request.args.get("layers") or "").split(",")
+            if layer.strip()
+        }
+        max_depth = _parse_positive_int(
+            request.args.get("maxDepth"),
+            5,
+            maximum=DEFAULT_MAP_LAYER_MAX_DEPTH,
+        )
+        maplayers = []
+        if "descendants" in requested_layers:
+            maplayers.append(_build_descendant_geometry_layer(database, cmid, max_depth))
+        return jsonify({
+            "maplayers": maplayers,
+            "limits": _build_descendant_map_options(database, cmid).get("limits", {}),
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @explore_bp.route("/network", methods=['GET'])
 def net():
