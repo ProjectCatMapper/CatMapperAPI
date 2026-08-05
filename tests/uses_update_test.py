@@ -50,3 +50,74 @@ def test_updateuses_runs_single_cmid_when_provided(monkeypatch):
 def test_updateuses_rejects_invalid_cmid():
     with pytest.raises(ValueError, match="Invalid CMID"):
         uses_module.updateUSES(database="sociomap", CMID="ZZ99")
+
+
+def test_waitinguses_does_not_clear_markers_when_processing_fails(monkeypatch):
+    queries = []
+
+    def fake_get_query(query, driver, **kwargs):
+        queries.append(query)
+        return ["SM123"]
+
+    monkeypatch.setattr(uses_module, "getDriver", lambda _database: object())
+    monkeypatch.setattr(uses_module, "getQuery", fake_get_query)
+    monkeypatch.setattr(
+        uses_module,
+        "processUSES",
+        lambda **_kwargs: ("processing failed", 500),
+    )
+
+    result = uses_module.waitingUSES("SocioMap")
+
+    assert result == (
+        "Error in waitingUSES: processUSES failed for batch 1: processing failed",
+        500,
+    )
+    assert len(queries) == 1
+    assert "set r.status = NULL" not in queries[0]
+
+
+def test_waitinguses_alerts_when_update_markers_remain(monkeypatch):
+    responses = iter([["SM2", "SM1", "SM1"], [1]])
+    processed_batches = []
+
+    monkeypatch.setattr(uses_module, "getDriver", lambda _database: object())
+    monkeypatch.setattr(
+        uses_module,
+        "getQuery",
+        lambda query, driver, **kwargs: next(responses),
+    )
+    monkeypatch.setattr(
+        uses_module,
+        "processUSES",
+        lambda **kwargs: processed_batches.append(kwargs["CMID"]) or "ok",
+    )
+
+    result = uses_module.waitingUSES("SocioMap", BATCH_SIZE=1)
+
+    assert processed_batches == [["SM1"], ["SM2"]]
+    assert result == (
+        "Error in waitingUSES: 1 USES ties still have status = 'update' after processing",
+        500,
+    )
+
+
+def test_waitinguses_succeeds_only_after_zero_marker_verification(monkeypatch):
+    responses = iter([["SM123"], [0]])
+    queries = []
+
+    monkeypatch.setattr(uses_module, "getDriver", lambda _database: object())
+
+    def fake_get_query(query, driver, **kwargs):
+        queries.append(query)
+        return next(responses)
+
+    monkeypatch.setattr(uses_module, "getQuery", fake_get_query)
+    monkeypatch.setattr(uses_module, "processUSES", lambda **_kwargs: "ok")
+
+    result = uses_module.waitingUSES("SocioMap")
+
+    assert result == "Successfully updated 1 CMIDs in batches of 1000."
+    assert len(queries) == 2
+    assert "return count(r) as count" in queries[1]
+    assert all("set r.status = NULL" not in query for query in queries)

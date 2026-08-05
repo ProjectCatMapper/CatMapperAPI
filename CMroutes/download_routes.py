@@ -4,8 +4,10 @@ import os
 
 download_bp = Blueprint('download', __name__)
 
+@download_bp.route('/api/databases/<database>/downloads/csv-urls', methods=['GET'])
 @download_bp.route('/CSVURLs/<database>', methods=['GET'])
 def get_backup_csv_urls_route(database):
+    """Return public CSV backup URLs for a CatMapper database."""
     try:
         mostRecent = request.args.get('mostRecent', 'true').lower() == 'true'
         if mostRecent not in [True, False]:
@@ -15,8 +17,10 @@ def get_backup_csv_urls_route(database):
     except Exception as e:
         return {"error": str(e)}, 500
 
+@download_bp.route('/api/databases/<database>/downloads/advanced', methods=['POST'])
 @download_bp.route('/download/advanced/<database>', methods=['POST'])
 def get_advanced_download_route(database):
+    """Return selected node/relationship properties for an advanced download."""
     try:
         payload = request.get_json(silent=True) or {}
         CMIDs = payload.get('CMIDs', [])
@@ -43,8 +47,10 @@ def test_download():
     else:
         abort(404, description="test.txt not found")
         
+@download_bp.route('/api/downloads/zip/<hash_id>', methods=['GET'])
 @download_bp.route('/download/zip/<hash_id>', methods=['GET'])
 def download_zip(hash_id):
+    """Download a generated merge ZIP by its temporary hash identifier."""
 
     import subprocess
 

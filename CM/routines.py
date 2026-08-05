@@ -7,6 +7,7 @@ from CM.utils import *
 from CM.email import *
 from CM.USES import *
 from CM.metadata import *
+from CM.ownership import reconcile_owner_edit_metadata
 import pandas as pd
 import json
 import tempfile
@@ -505,6 +506,66 @@ def getBadCMID(database, mail=None, return_type="data"):
 
     except Exception as e:
         return "Error: " + str(e)
+
+
+def getDuplicateNodeCMIDs(database, mail=None, return_type="data"):
+    """
+    Identify duplicate node CMIDs, including DELETED nodes.
+
+    This checks CATEGORY, DATASET, and DELETED nodes in a single database for
+    non-empty CMID values that are assigned to more than one node.
+    """
+    try:
+        driver = getDriver(database)
+        query = """
+        MATCH (n)
+        WHERE (n:CATEGORY OR n:DATASET OR n:DELETED)
+            AND n.CMID IS NOT NULL
+            AND trim(toString(n.CMID)) <> ""
+        WITH trim(toString(n.CMID)) AS CMID, collect(n) AS nodes
+        WHERE size(nodes) > 1
+        UNWIND nodes AS n
+        OPTIONAL MATCH (n)-[:IS]->(replacement)
+        RETURN
+            CMID,
+            size(nodes) AS duplicateNodeCount,
+            elementId(n) AS nodeID,
+            labels(n) AS labels,
+            n.CMName AS CMName,
+            replacement.CMID AS replacementCMID,
+            replacement.CMName AS replacementCMName
+        ORDER BY CMID, nodeID
+        """
+        results = getQuery(query, driver, type="df")
+
+        duplicate_groups = 0
+        if isinstance(results, pd.DataFrame) and not results.empty and "CMID" in results.columns:
+            duplicate_groups = results["CMID"].nunique()
+
+        fp1 = None
+        if isinstance(results, pd.DataFrame) and not results.empty:
+            with tempfile.NamedTemporaryFile(delete=False,
+                                             prefix=f"duplicate_node_cmids_{database}_",
+                                             suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp1 = tmpfile.name
+                results.to_excel(fp1, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(mail, subject=f"Duplicate node CMIDs for {database}", recipients=get_alert_recipients(), body="See attached", sender=get_default_sender(), attachments=[fp1])
+
+        if return_type == "data":
+            return {
+                "Duplicate CMID groups": duplicate_groups,
+                "Duplicate node rows": len(results),
+                "Duplicate CMIDs": results.to_dict(orient="records"),
+            }
+        elif return_type == "info":
+            return {
+                "info": f"Duplicate CMID groups: {duplicate_groups}; Duplicate node rows: {len(results)}",
+                "filepath": fp1,
+            }
+    except Exception as e:
+        result = str(e)
+        return result, 500
 
 
 def getMultipleLabels(database, mail=None, return_type="data"):
@@ -1647,8 +1708,10 @@ def checkUSES(database, save=True, mail=None, return_type="data"):
         RETURN "No Key" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
         UNION ALL
         MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
-        WITH c, d, r, [segment IN split(r.Key, " && ") | trim(segment)] AS segments
-        WHERE any(seg IN segments WHERE NOT seg CONTAINS " == ")
+        WITH c, d, r, trim(toString(r.Key)) AS keyText
+        WITH c, d, r, [segment IN split(keyText, " && ") | trim(segment)] AS segments
+        WITH c, d, r, [segment IN segments | {segment: segment, parts: split(segment, " == ")}] AS keyParts
+        WHERE any(item IN keyParts WHERE item.segment = "" OR size(item.parts) < 2 OR trim(item.parts[0]) = "" OR trim(item.parts[1]) = "")
         RETURN "Malformed Key" as error, c.CMID as CMID, c.CMName as CMName, r.Key as Key, d.CMID as datasetID, d.CMName as dataset
         UNION ALL
         MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
@@ -2432,7 +2495,158 @@ def getNumeric_Checks(database, mail=None, return_type="data"):
         result = str(e)
         return result, 500
 
-    
+
+def getBadGlottocodes(database, mail=None, return_type="data"):
+    """
+    Validate SocioMap LANGUOID glottocodes and glottocode-based USES keys.
+
+    A valid glottocode has exactly eight characters and ends in four digits.
+    For every ``glottocode == value`` component in a USES Key, the extracted
+    value must also match the target LANGUOID node's ``glottocode`` property.
+    """
+    if str(database).lower() != "sociomap":
+        if return_type == "data":
+            return {
+                "Total": 0,
+                "Invalid LANGUOID properties": 0,
+                "Invalid or mismatched USES keys": 0,
+                "Glottocode errors": [],
+            }
+        if return_type == "info":
+            return {"info": "Not applicable (SocioMap only)", "filepath": None}
+        raise ValueError("return_type must be 'data' or 'info'")
+
+    try:
+        driver = getDriver(database)
+        query = """
+        CALL () {
+            MATCH (c:LANGUOID)
+            WHERE c.glottocode IS NOT NULL
+            WITH c,
+                CASE
+                    WHEN valueType(c.glottocode) STARTS WITH 'STRING'
+                    THEN c.glottocode
+                    ELSE NULL
+                END AS stringGlottocode
+            WHERE stringGlottocode IS NULL
+               OR size(stringGlottocode) <> 8
+               OR NOT right(stringGlottocode, 4) =~ '^[0-9]{4}$'
+            RETURN
+                'Invalid LANGUOID glottocode property' AS errorType,
+                NULL AS datasetID,
+                NULL AS datasetName,
+                c.CMID AS CMID,
+                c.CMName AS CMName,
+                NULL AS Key,
+                apoc.convert.toJson(c.glottocode) AS nodeGlottocode,
+                NULL AS keyGlottocode
+
+            UNION ALL
+
+            MATCH (d:DATASET)-[r:USES]->(c:LANGUOID)
+            WHERE r.Key IS NOT NULL
+              AND valueType(r.Key) STARTS WITH 'STRING'
+            WITH d, r, c, split(r.Key, ' && ') AS keyParts
+            UNWIND keyParts AS keyPart
+            WITH d, r, c, split(keyPart, ' == ') AS keyPair
+            WHERE size(keyPair) >= 1
+              AND toLower(trim(keyPair[0])) = 'glottocode'
+            WITH d, r, c,
+                CASE
+                    WHEN size(keyPair) = 2 THEN trim(keyPair[1])
+                    ELSE NULL
+                END AS keyGlottocode,
+                CASE
+                    WHEN valueType(c.glottocode) STARTS WITH 'STRING'
+                    THEN c.glottocode
+                    ELSE NULL
+                END AS stringNodeGlottocode
+            WHERE keyGlottocode IS NULL
+               OR size(keyGlottocode) <> 8
+               OR NOT right(keyGlottocode, 4) =~ '^[0-9]{4}$'
+               OR stringNodeGlottocode IS NULL
+               OR stringNodeGlottocode <> keyGlottocode
+            RETURN
+                CASE
+                    WHEN keyGlottocode IS NULL
+                      OR size(keyGlottocode) <> 8
+                      OR NOT right(keyGlottocode, 4) =~ '^[0-9]{4}$'
+                    THEN 'Invalid glottocode USES Key'
+                    ELSE 'Glottocode USES Key does not match LANGUOID property'
+                END AS errorType,
+                d.CMID AS datasetID,
+                d.CMName AS datasetName,
+                c.CMID AS CMID,
+                c.CMName AS CMName,
+                r.Key AS Key,
+                apoc.convert.toJson(c.glottocode) AS nodeGlottocode,
+                keyGlottocode
+        }
+        RETURN
+            errorType,
+            datasetID,
+            datasetName,
+            CMID,
+            CMName,
+            Key,
+            nodeGlottocode,
+            keyGlottocode
+        ORDER BY errorType, datasetID, CMID, Key
+        """
+        results = getQuery(query, driver, type="df")
+        if not isinstance(results, pd.DataFrame):
+            results = pd.DataFrame(results)
+
+        property_error_count = 0
+        uses_error_count = 0
+        if not results.empty and "errorType" in results.columns:
+            property_error_count = int(
+                (results["errorType"] == "Invalid LANGUOID glottocode property").sum()
+            )
+            uses_error_count = len(results) - property_error_count
+
+        fp1 = None
+        if not results.empty:
+            with tempfile.NamedTemporaryFile(
+                delete=False,
+                prefix=f"invalid_glottocodes_{database}_",
+                suffix=".xlsx",
+                dir="/tmp",
+            ) as tmpfile:
+                fp1 = tmpfile.name
+                results.to_excel(fp1, index=False)
+            if isinstance(mail, Mail):
+                sendEmail(
+                    mail,
+                    subject=f"Invalid glottocodes for {database}",
+                    recipients=get_alert_recipients(),
+                    body="See attached",
+                    sender=get_default_sender(),
+                    attachments=[fp1],
+                )
+
+        if return_type == "data":
+            return {
+                "Total": len(results),
+                "Invalid LANGUOID properties": property_error_count,
+                "Invalid or mismatched USES keys": uses_error_count,
+                "Glottocode errors": results.to_dict(orient="records"),
+            }
+        if return_type == "info":
+            return {
+                "info": (
+                    f"Total: {len(results)}; "
+                    f"Invalid LANGUOID properties: {property_error_count}; "
+                    f"Invalid or mismatched USES keys: {uses_error_count}"
+                ),
+                "filepath": fp1,
+            }
+        raise ValueError("return_type must be 'data' or 'info'")
+    except Exception as e:
+        result = str(e)
+        return result, 500
+
+
 def runRoutinesStream(databases="all", mail=None):
     """
     Run a sequence of validation and processing routines for one or more
@@ -2504,6 +2718,7 @@ def runRoutinesStream(databases="all", mail=None):
             ("Check Domains", lambda db: checkDomains(db, mail=None, return_type="info"), True),
             ("Bad Domains", lambda db: getBadDomains(db, mail=None, return_type="info"), True),
             ("Bad CMID", lambda db: getBadCMID(db, mail=None, return_type="info"), True),
+            ("Duplicate CMIDs including deleted", lambda db: getDuplicateNodeCMIDs(db, mail=None, return_type="info"), True),
             ("Multiple Labels", lambda db: getMultipleLabels(db, mail=None, return_type="info"), True),
             ("Bad JSON", lambda db: getBadComplexProperties(db, mail=None, return_type="info"), True),
             ("Bad Relations", lambda db: getBadRelations(db, mail=None, return_type="info"), True),
@@ -2514,7 +2729,10 @@ def runRoutinesStream(databases="all", mail=None):
             ("Check USES", lambda db: checkUSES(db, save=True, mail=None, return_type="info"), True),
             ("Check USES for empty and duplicates", lambda db: get_duplicate_empty_USES(db, mail=None, return_type="info"), True),
             ("Check USES for duplicate triplets", lambda db: get_duplicate_triplets(db, mail=None, return_type="info"), True),
+            ("Glottocode Checks", lambda db: getBadGlottocodes(db, mail=None, return_type="info"), True),
+            ("Process Waiting USES", lambda db: waitingUSES(db), False),
             ("Process USES", lambda db: processUSES(db, detailed=False), False),
+            ("Owner Edit Metadata", lambda db: reconcile_owner_edit_metadata(db, return_type="info"), False),
             ("Invalid Node and USES properties", lambda db: getInappropriateprops_Nodes_Rels(db, mail=None, return_type="info"), True),
             ("Empty Node properties", lambda db: get_empty_nodeprops(db, mail=None, return_type="info"), True),
             ("Label Checks", lambda db: get_label_check(db, mail=None, return_type="info"), True),
@@ -2590,10 +2808,12 @@ def runRoutinesStream(databases="all", mail=None):
         <br><h2>Routine Descriptions</h2>
         <table border="1">
           <tr><th>Label</th><th>Function Name</th><th>Description</th></tr>
+          <tr><td>Owner Edit Metadata</td><td>reconcile_owner_edit_metadata</td><td>Maintains owner-only edit authorization, permanently locks objects modified by another human, removes deprecated ownership fields, and verifies internal PROPERTY definitions.</td></tr>
           <tr><td>Modifications</td><td>reportChanges</td><td>Generates a report of logged changes (nodes, relationships, merges, deletions, edits) within a date range, optionally grouped by user.</td></tr>
           <tr><td>Check Domains</td><td>checkDomains</td><td>Detects missing or inconsistent domain/subdomain assignments in USES relationships.</td></tr>
           <tr><td>Bad Domains</td><td>getBadDomains</td><td>Identifies invalid or missing labels: bad subdomain labels, nodes missing CATEGORY, or nodes missing DATASET.</td></tr>
           <tr><td>Bad CMID</td><td>getBadCMID</td><td>Finds invalid or outdated CMIDs used in USES relationships, including replacements from deleted nodes.</td></tr>
+          <tr><td>Duplicate CMIDs including deleted</td><td>getDuplicateNodeCMIDs</td><td>Finds duplicate non-empty CMID values assigned to CATEGORY, DATASET, or DELETED nodes.</td></tr>
           <tr><td>Multiple Labels</td><td>getMultipleLabels</td><td>Flags USES relationships that have multiple subdomain labels assigned.</td></tr>
           <tr><td>Bad JSON</td><td>getBadComplexProperties</td><td>Validates JSON properties (geoCoords, parentContext) and reports invalid entries.</td></tr>
           <tr><td>Bad Relations</td><td>getBadRelations</td><td>Checks for invalid or inconsistent parent–child category relationships and mis-specified CONTAINS links.</td></tr>
@@ -2604,6 +2824,8 @@ def runRoutinesStream(databases="all", mail=None):
           <tr><td>Check USES</td><td>checkUSES</td><td>Validates USES relationships, checking for missing or malformed label, Key, or Name fields.</td></tr>
           <tr><td>Check USES for empty and duplicates</td><td>get_duplicate_empty_USES</td><td>Validates USES relationships, checking for missing or duplicate properties including properties that are supposed to be singular and are not.</td></tr>
           <tr><td>Check USES for duplicate triplets</td><td>get_duplicate_triplets</td><td>Validates USES for duplicate datasetID,CMID and Key triplets.</td></tr>
+          <tr><td>Glottocode Checks</td><td>getBadGlottocodes</td><td>For SocioMap, validates eight-character glottocodes ending in four digits and checks that glottocode USES Keys match their LANGUOID node properties.</td></tr>
+          <tr><td>Process Waiting USES</td><td>waitingUSES</td><td>Processes USES relationships marked for update and verifies that no update markers remain.</td></tr>
           <tr><td>Process USES</td><td>processUSES</td><td>Processes and reconciles USES relationships for consistency and downstream use.</td></tr>
           <tr><td>Invalid Node and USES props</td><td>getInappropriateprops_Nodes_Rels</td><td>Identifies invalid node and USES ties properties.</td></tr>
           <tr><td>Multiple label checks</td><td>get_label_check</td><td>Identifies label discrepancies.</td></tr>

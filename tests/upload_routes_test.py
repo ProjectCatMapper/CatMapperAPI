@@ -190,6 +190,36 @@ def test_upload_simple_maps_selected_columns_to_name_cmname_and_altnames(client,
     assert seen["job_args"]["formatKey"] is False
 
 
+def test_upload_simple_preserves_literal_none_name_fields(client, monkeypatch):
+    seen = {}
+
+    def fake_start_upload_task(**kwargs):
+        seen.update(kwargs)
+        return "upload-task-123"
+
+    monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
+    monkeypatch.setattr(upload_routes, "_start_upload_task", fake_start_upload_task)
+
+    payload = _base_payload()
+    payload["df"] = [
+        {
+            "cm_name_col": "None",
+            "category_name_col": "None",
+            "source_key": "K1",
+        }
+    ]
+    payload["formData"]["cmNameColumn"] = "cm_name_col"
+    payload["formData"]["categoryNamesColumn"] = "category_name_col"
+
+    response = client.post("/uploadInputNodes", json=payload)
+
+    assert response.status_code == 202
+    row = seen["job_args"]["dataset"][0]
+    assert row["CMName"] == "None"
+    assert row["Name"] == "None"
+    assert row["Key"] == "source_key == K1"
+
+
 def test_upload_simple_supports_multiple_key_columns_with_and_join(client, monkeypatch):
     seen = {}
 
@@ -258,6 +288,48 @@ def test_upload_rejects_preformatted_keys_in_simple_mode(client, monkeypatch):
     assert "simple upload expects raw key values" in str(body.get("error", "")).lower()
 
 
+def test_upload_simple_allows_raw_key_value_with_unspaced_equals_warning(client, monkeypatch):
+    seen = {}
+
+    def fake_start_upload_task(**kwargs):
+        seen.update(kwargs)
+        return "upload-task-123"
+
+    monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
+    monkeypatch.setattr(upload_routes, "_start_upload_task", fake_start_upload_task)
+
+    payload = _base_payload()
+    payload["df"] = [{"source_name": "Alpha", "source_key": "1==2"}]
+
+    response = client.post("/uploadInputNodes", json=payload)
+
+    assert response.status_code == 202
+    body = response.get_json() or {}
+    assert seen["job_args"]["dataset"][0]["Key"] == "source_key == 1==2"
+    assert any(
+        'Does the original variable value contain "=="?' in warning
+        for warning in body.get("warnings", [])
+    )
+
+
+def test_upload_simple_rejects_malformed_composed_key_before_queueing(client, monkeypatch):
+    monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
+    monkeypatch.setattr(
+        upload_routes,
+        "_start_upload_task",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("upload should not execute")),
+    )
+
+    payload = _base_payload()
+    payload["df"] = [{"source_name": "Alpha", "source_key": "Alpha &&"}]
+
+    response = client.post("/uploadInputNodes", json=payload)
+
+    assert response.status_code == 500
+    body = response.get_json() or {}
+    assert "invalid 'key' format" in str(body.get("error", "")).lower()
+
+
 def test_upload_prefers_optional_properties_over_all_context(client, monkeypatch):
     seen = {}
 
@@ -280,7 +352,7 @@ def test_upload_prefers_optional_properties_over_all_context(client, monkeypatch
     assert "warnings" not in body
 
 
-def test_upload_returns_deprecation_warning_for_all_context_only(client, monkeypatch):
+def test_upload_accepts_all_context_without_user_facing_deprecation_warning(client, monkeypatch):
     seen = {}
 
     def fake_start_upload_task(**kwargs):
@@ -298,8 +370,7 @@ def test_upload_returns_deprecation_warning_for_all_context_only(client, monkeyp
     assert response.status_code == 202
     assert seen["job_args"]["optionalProperties"] == ["legacy_prop"]
     body = response.get_json() or {}
-    warnings = body.get("warnings") or []
-    assert any("deprecated" in str(w).lower() for w in warnings)
+    assert "warnings" not in body
 
 
 def test_upload_passes_ignore_if_same_to_job_args(client, monkeypatch):
@@ -327,6 +398,98 @@ def test_upload_passes_ignore_if_same_to_job_args(client, monkeypatch):
 
     assert response.status_code == 202
     assert seen["job_args"]["ignoreIfSame"] is True
+
+
+def test_upload_standard_rejects_malformed_key_before_queueing(client, monkeypatch):
+    monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
+    monkeypatch.setattr(
+        upload_routes,
+        "_start_upload_task",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("upload should not execute")),
+    )
+
+    payload = _base_payload()
+    payload["so"] = "standard"
+    payload["df"] = [
+        {"CMID": "AM1", "Key": "Type == Alpha &&", "datasetID": "AD1", "label": "DIALECT", "Name": "Alpha"}
+    ]
+    payload["formData"]["cmNameColumn"] = "Name"
+    payload["formData"]["categoryNamesColumn"] = "Name"
+    payload["formData"]["cmidColumn"] = "CMID"
+    payload["formData"]["keyColumn"] = "Key"
+
+    response = client.post("/uploadInputNodes", json=payload)
+
+    assert response.status_code == 500
+    body = response.get_json() or {}
+    assert "invalid 'key' format" in str(body.get("error", "")).lower()
+
+
+def test_upload_standard_warns_when_newkey_value_contains_reserved_token(client, monkeypatch):
+    seen = {}
+
+    def fake_start_upload_task(**kwargs):
+        seen.update(kwargs)
+        return "upload-task-123"
+
+    monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
+    monkeypatch.setattr(upload_routes, "validate_upload_ownership_scope", lambda *args, **kwargs: True)
+    monkeypatch.setattr(upload_routes, "_start_upload_task", fake_start_upload_task)
+
+    payload = _base_payload()
+    payload["so"] = "standard"
+    payload["ao"] = "update_replace"
+    payload["df"] = [
+        {
+            "CMID": "AM1",
+            "Key": "Type == Alpha",
+            "NewKey": "Type == Alpha == Beta",
+            "datasetID": "AD1",
+            "label": "DIALECT",
+            "Name": "Alpha",
+        }
+    ]
+    payload["formData"]["cmNameColumn"] = "Name"
+    payload["formData"]["categoryNamesColumn"] = "Name"
+    payload["formData"]["cmidColumn"] = "CMID"
+    payload["formData"]["keyColumn"] = "Key"
+
+    response = client.post("/uploadInputNodes", json=payload)
+
+    assert response.status_code == 202
+    body = response.get_json() or {}
+    assert seen["job_args"]["dataset"][0]["NewKey"] == "Type == Alpha == Beta"
+    assert any(
+        'Does the original variable value contain "=="?' in warning
+        for warning in body.get("warnings", [])
+    )
+
+
+def test_upload_standard_add_node_dataset_does_not_require_key(client, monkeypatch):
+    seen = {}
+
+    def fake_start_upload_task(**kwargs):
+        seen.update(kwargs)
+        return "upload-task-123"
+
+    monkeypatch.setattr(upload_routes, "verify_request_auth", lambda **kwargs: {"userid": "api-user", "role": "user"})
+    monkeypatch.setattr(upload_routes, "_start_upload_task", fake_start_upload_task)
+
+    payload = _base_payload()
+    payload["so"] = "standard"
+    payload["ao"] = "add_node"
+    payload["df"] = [
+        {"CMID": "AD1", "CMName": "Dataset One", "label": "DATASET", "shortName": "D1", "DatasetCitation": "Citation"}
+    ]
+    payload["formData"]["cmNameColumn"] = "CMName"
+    payload["formData"]["categoryNamesColumn"] = "CMName"
+    payload["formData"]["cmidColumn"] = "CMID"
+    payload["formData"]["keyColumn"] = ""
+
+    response = client.post("/uploadInputNodes", json=payload)
+
+    assert response.status_code == 202
+    assert seen["job_args"]["uploadOption"] == "add_node"
 
 
 def test_upload_rejects_user_mismatch_with_authenticated_identity(client, monkeypatch):
@@ -523,6 +686,30 @@ def test_cancel_upload_task_running_adds_stop_signal_event(monkeypatch):
     assert updated["status"] == "running"
     assert updated["cancelRequested"] is True
     assert "Stop signal sent to worker." in updated["events"]
+
+
+def test_cancel_running_polygon_task_defers_rq_stop_during_critical_section(monkeypatch):
+    store = get_task_store()
+    task_id = store.create_upload_task(
+        user="api-user", database="ArchaMap", total_rows=1, batch_size=500
+    )
+    store.set_upload_job_payload(
+        task_id, {"kind": "geojson_polygon", "token": "a" * 32}
+    )
+    store.mark_upload_running(task_id)
+    task = store.get_upload_task(task_id, cursor=0)
+    monkeypatch.setattr(
+        upload_routes,
+        "_send_cancel_to_rq",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("RQ stop must be deferred")),
+    )
+
+    upload_routes._cancel_upload_task(task_id, task)
+
+    updated = store.get_upload_task(task_id, cursor=0)
+    assert updated["status"] == "running"
+    assert updated["cancelRequested"] is True
+    assert any("critical verification/rollback" in event for event in updated["events"])
 
 
 def test_upload_waiting_uses_status_returns_task_for_authenticated_user(client, monkeypatch):

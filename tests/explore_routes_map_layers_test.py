@@ -1,64 +1,57 @@
 import CMroutes.explore_routes as explore_routes
 
 
-def test_map_layer_options_exposes_descendant_contains_when_geometry_exists(client, monkeypatch):
-    monkeypatch.setattr(explore_routes, "getDriver", lambda database: object())
+def test_map_layer_options_supports_prefixed_and_unprefixed_routes(client, monkeypatch):
+    calls = []
 
-    def fake_get_query(query, driver=None, type=None, **kwargs):
-        assert kwargs["cmid"] == "SM227020"
-        return [{
-            "nodeCount": 2,
-            "availableDescendantDepth": 2,
-            "depthRows": [{"depth": 1, "count": 1}, {"depth": 2, "count": 1}],
-        }]
+    def fake_options(database, cmid, max_depth=None, node_limit=None):
+        calls.append((database, cmid, max_depth, node_limit))
+        return {
+            "database": database,
+            "cmid": cmid,
+            "layers": [{"id": "descendants:CONTAINS", "available": True}],
+        }
 
-    monkeypatch.setattr(explore_routes, "getQuery", fake_get_query)
+    monkeypatch.setattr(explore_routes, "getMapLayerOptions", fake_options)
 
-    response = client.get("/databases/sociomap/nodes/SM227020/map-layer-options")
+    for path in (
+        "/databases/sociomap/nodes/SM227020/map-layer-options",
+        "/api/databases/sociomap/nodes/SM227020/map-layer-options",
+    ):
+        response = client.get(path, query_string={"maxDepth": "3", "nodeLimit": "25"})
+        assert response.status_code == 200
+        assert response.get_json()["layers"][0]["id"] == "descendants:CONTAINS"
 
-    assert response.status_code == 200
-    payload = response.get_json()
-    assert payload["limits"]["availableDescendantDepth"] == 2
-    assert payload["layers"][0]["id"] == "descendants:CONTAINS"
-    assert payload["layers"][0]["available"] is True
-    assert payload["layers"][0]["depthCounts"] == [
-        {"depth": 1, "count": 1},
-        {"depth": 2, "count": 1},
+    assert calls == [
+        ("sociomap", "SM227020", "3", "25"),
+        ("sociomap", "SM227020", "3", "25"),
     ]
 
 
-def test_inherited_explore_geometry_returns_descendant_point_identity(client, monkeypatch):
-    monkeypatch.setattr(explore_routes, "getDriver", lambda database: object())
+def test_explore_geometry_supports_prefixed_and_unprefixed_routes(client, monkeypatch):
+    calls = []
 
-    def fake_get_query(query, driver=None, type=None, **kwargs):
-        if "RETURN descendant.CMID AS CMID" in query:
-            return [{"CMID": "SM1", "CMName": "Child", "depth": 1}]
-        if "RETURN" in query and "nodeCount" in query:
-            return [{
-                "nodeCount": 1,
-                "availableDescendantDepth": 1,
-                "depthRows": [{"depth": 1, "count": 1}],
-            }]
-        raise AssertionError(f"Unexpected query: {query}")
+    def fake_geometry(database, cmid, **kwargs):
+        calls.append((database, cmid, kwargs))
+        return {
+            "maplayers": [{"id": "descendants:CONTAINS", "points": []}],
+            "limits": {"maxDepth": 1},
+        }
 
-    monkeypatch.setattr(explore_routes, "getQuery", fake_get_query)
-    monkeypatch.setattr(
-        explore_routes,
-        "exploreGeometry",
-        lambda database, cmid: {
-            "points": [{"cood": [1, 2], "source": "Dataset A"}],
-            "polygons": [],
-        },
-    )
+    monkeypatch.setattr(explore_routes, "exploreGeometry", fake_geometry)
 
-    response = client.get(
+    for path in (
         "/databases/sociomap/nodes/SM227020/explore-geometry",
-        query_string={"layers": "descendants", "maxDepth": "1"},
-    )
+        "/api/databases/sociomap/nodes/SM227020/explore-geometry",
+    ):
+        response = client.get(
+            path,
+            query_string={"layers": "descendants", "maxDepth": "1"},
+        )
+        assert response.status_code == 200
+        assert response.get_json()["maplayers"][0]["id"] == "descendants:CONTAINS"
 
-    assert response.status_code == 200
-    layer = response.get_json()["maplayers"][0]
-    assert layer["id"] == "descendants:CONTAINS"
-    assert layer["points"][0]["sourceNodeName"] == "Child"
-    assert layer["points"][0]["sourceNodeCMID"] == "SM1"
-    assert layer["points"][0]["inheritanceRelationship"] == "CONTAINS"
+    assert len(calls) == 2
+    assert all(call[0:2] == ("sociomap", "SM227020") for call in calls)
+    assert all(call[2]["layers"] == "descendants" for call in calls)
+    assert all(call[2]["max_depth"] == "1" for call in calls)

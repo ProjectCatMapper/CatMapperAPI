@@ -15,8 +15,13 @@ from .utils import *
 from .metadata import *
 from .log import createLog
 from .USES import processUSES
-from .USES import addCMNameRel, processDATASETs
+from .USES import (
+    addCMNameRel,
+    processDATASETs,
+    validate_contextual_tie_primary_domains,
+)
 from .upload import updateProperty
+from .keys import invalid_key_format_error
 from flask import jsonify
 from collections import Counter
 
@@ -26,6 +31,158 @@ import re
 
 ############################
 #section for general use helper functions
+
+_ADMIN_MULTI_VALUE_SEPARATOR = re.compile(r"\s*(?:\|{2,}|,|;)\s*")
+_USES_SELF_CONTEXT_PROPERTY_EXCEPTIONS = {"district", "parent"}
+_USES_SELF_CONTEXT_RELATIONSHIP_EXCEPTIONS = {"AREA_OF", "CONTAINS"}
+_INTERNAL_OWNER_PROPERTY_NAMES = {"ownerUserId", "modifiedByOtherUser"}
+
+
+def _split_admin_multi_value(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        values = value
+    else:
+        values = _ADMIN_MULTI_VALUE_SEPARATOR.split(str(value))
+    return [str(val).strip() for val in values if str(val).strip()]
+
+
+def _require_process_uses_success(result):
+    if isinstance(result, tuple) and len(result) == 2 and result[1] == 500:
+        raise RuntimeError(f"USES processing failed: {result[0]}")
+    return result
+
+
+def _normalize_contextual_tie_token(value):
+    return re.sub(r"[^A-Z0-9]+", "_", str(value or "").strip().upper()).strip("_")
+
+
+def _normalize_uses_property_name(value):
+    return str(value or "").strip().casefold()
+
+
+def _owner_scoped_actor(input_payload):
+    claims = (input_payload or {}).get("_actorClaims") or {}
+    userid = str(claims.get("userid") or "").strip()
+    role = str(claims.get("role") or "user").strip().lower()
+    if userid and role != "admin":
+        return userid
+    return None
+
+
+def _owner_scoped_uses_guard(alias, actor_user_id):
+    if not actor_user_id:
+        return ""
+    return (
+        f" AND toString(coalesce({alias}.ownerUserId, '')) = $actorUserId"
+        f" AND coalesce({alias}.modifiedByOtherUser, false) = false"
+    )
+
+
+def _owner_scoped_node_guard(alias, actor_user_id):
+    if not actor_user_id:
+        return ""
+    return (
+        f" AND toString(coalesce({alias}.ownerUserId, '')) = $actorUserId"
+        f" AND coalesce({alias}.modifiedByOtherUser, false) = false"
+        " AND NOT EXISTS {"
+        f" MATCH ({alias})-[ownerGuardRel:USES]-()"
+        " WHERE toString(coalesce(ownerGuardRel.ownerUserId, '')) <> $actorUserId"
+        " }"
+    )
+
+
+def _is_uses_self_context_exception(uses_property, relationship):
+    return (
+        _normalize_uses_property_name(uses_property) in _USES_SELF_CONTEXT_PROPERTY_EXCEPTIONS
+        or _normalize_contextual_tie_token(relationship) in _USES_SELF_CONTEXT_RELATIONSHIP_EXCEPTIONS
+    )
+
+
+def _group_label_from_context_relationship(relationship):
+    relationship_token = _normalize_contextual_tie_token(relationship)
+    if relationship_token.endswith("_OF"):
+        return relationship_token[:-3]
+    return None
+
+
+def _uses_contextual_property_target_group(property_group_label, relationship):
+    return property_group_label or _group_label_from_context_relationship(relationship)
+
+
+def _uses_contextual_same_domain(CMID, uses_property, property_group_label, relationship, driver):
+    target_group = _uses_contextual_property_target_group(property_group_label, relationship)
+    if not target_group:
+        return
+    if _is_uses_self_context_exception(uses_property, relationship):
+        return
+
+    category_group_label = getGroupLabels(CMID, driver)
+    if _normalize_contextual_tie_token(category_group_label) == _normalize_contextual_tie_token(target_group):
+        return category_group_label, target_group
+
+
+def uses_contextual_property_allowed_for_category(CMID, uses_property, property_group_label, relationship, driver):
+    return _uses_contextual_same_domain(CMID, uses_property, property_group_label, relationship, driver) is None
+
+
+def uses_contextual_property_needs_category_group(uses_property, property_group_label, relationship):
+    return (
+        bool(_uses_contextual_property_target_group(property_group_label, relationship))
+        and not _is_uses_self_context_exception(uses_property, relationship)
+    )
+
+
+def get_uses_contextual_category_group(CMID, driver):
+    return getGroupLabels(CMID, driver)
+
+
+def uses_contextual_property_allowed_for_group(category_group_label, uses_property, property_group_label, relationship):
+    target_group = _uses_contextual_property_target_group(property_group_label, relationship)
+    if not target_group:
+        return True
+    if _is_uses_self_context_exception(uses_property, relationship):
+        return True
+    return (
+        _normalize_contextual_tie_token(category_group_label)
+        != _normalize_contextual_tie_token(target_group)
+    )
+
+
+def validate_uses_contextual_property(CMID, uses_property, property_group_label, relationship, driver):
+    same_domain = _uses_contextual_same_domain(CMID, uses_property, property_group_label, relationship, driver)
+    if same_domain:
+        category_group_label, target_group = same_domain
+        raise ValueError(
+            f"Cannot add {uses_property} to USES tie for {CMID}: both the USES category "
+            f"and the {uses_property} property target are {target_group or category_group_label}. "
+            "Same-domain contextual USES properties are not allowed except district/AREA_OF."
+        )
+
+
+def _editable_node_label(cmid, driver):
+    query = """
+    MATCH (n {CMID: $cmid})
+    RETURN labels(n) AS labels
+    """
+    rows = getQuery(query=query, driver=driver, params={"cmid": cmid}, type="dict")
+    if not rows:
+        raise ValueError(f"{cmid} is invalid")
+
+    labels = set(rows[0].get("labels") or [])
+    if "DELETED" in labels:
+        raise ValueError(f"{cmid} is a deleted node and cannot be edited.")
+    if "DATASET" in labels:
+        return "DATASET"
+    if "CATEGORY" in labels:
+        return "CATEGORY"
+    if "PROPERTY" in labels:
+        return "PROPERTY"
+    if "LABEL" in labels:
+        return "LABEL"
+
+    raise ValueError(f"{cmid} has no editable node label.")
 
 #Function used by deleteNode to get elementId for either a single or list of CMIDs
 #deletenode only needs to operate on a string
@@ -204,12 +361,11 @@ def getNodeMergeSummary(cmid, driver):
     }
 
 def validatePropertyCMID(value,proptoChange,validgroupLabel,driver):
-    if "||" in value:
-            value = value.split("||")
-    else:
-        value = [value]
-    for val in value:
-        val = val.strip()
+    values = _split_admin_multi_value(value)
+    if not values:
+        raise Exception(f"{proptoChange} requires at least one CMID")
+
+    for val in values:
 
         validprop = isValidCMID(val, driver)
 
@@ -296,10 +452,11 @@ def validate_parent_context_list(driver,parent_context_list):
             errors.append((idx, "Parent CMID not in database"))
             continue
 
-        # 4️⃣ eventType validation
-        if not isinstance(event_type, str) or event_type not in VALID_EVENT_TYPES:
-            errors.append((idx, f"Invalid eventType: {event_type}"))
-            continue
+        # 4️⃣ eventType validation. eventType is optional unless eventDate exists.
+        if event_type not in (None, ""):
+            if not isinstance(event_type, str) or event_type not in VALID_EVENT_TYPES:
+                errors.append((idx, f"Invalid eventType: {event_type}"))
+                continue
 
         # 5️⃣ eventDate validation
         if event_date not in (None, ""):
@@ -320,6 +477,16 @@ def validate_parent_context_list(driver,parent_context_list):
                 continue
 
     return errors
+
+
+def _parent_cmids_from_parent_context_list(parent_context_list):
+    parent_cmids = []
+    for raw in parent_context_list:
+        pc = json.loads(raw)
+        parent = str(pc.get("parent", "")).strip()
+        if parent and parent not in parent_cmids:
+            parent_cmids.append(parent)
+    return parent_cmids
         
 ############################
 #section for add, edit, delete USES ties
@@ -338,6 +505,11 @@ def add_edit_delete_USES(database,user,input):
     }
 
     driver = getDriver(database)
+    actor_user_id = _owner_scoped_actor(input)
+    if USES_property in _INTERNAL_OWNER_PROPERTY_NAMES:
+        raise PermissionError(
+            f"{USES_property} is internal authorization metadata and cannot be edited directly."
+        )
 
     metaTypes = getPropertiesMetadata(driver)
     metaType = [item['metaType'] for item in metaTypes if item["type"] == "relationship" and item["property"] == USES_property]
@@ -352,22 +524,38 @@ def add_edit_delete_USES(database,user,input):
 
         if USES_property == "parent":
             groupLabel = getGroupLabels(CMID,driver)
-            if "||" in new_property_value:
-                for i in new_property_value.split("||"):
-                    validatePropertyCMID(i,USES_property,groupLabel,driver)
-            else:
-                validatePropertyCMID(new_property_value,USES_property,groupLabel,driver)
+            parent_values = _split_admin_multi_value(new_property_value)
+            validatePropertyCMID(parent_values,USES_property,groupLabel,driver)
+            new_property_value = parent_values
         else:
             query = """
                     UNWIND $prop as prop
                     MATCH (n:PROPERTY)
                     WHERE n.CMName = prop
-                    RETURN n.groupLabel as groupLabel
+                    RETURN n.groupLabel as groupLabel, n.relationship as relationship
                     """
-            groupLabel = getQuery(query=query, params={"prop": USES_property}, driver=driver)
-            groupLabel = groupLabel[0].get('groupLabel') if groupLabel else None
+            property_metadata = getQuery(query=query, params={"prop": USES_property}, driver=driver)
+            property_metadata = property_metadata[0] if property_metadata else {}
+            if get_node_property_domain_restriction(USES_property):
+                node_summary = getNodeMergeSummary(CMID, driver)
+                validate_node_property_domain_for_labels(
+                    CMID,
+                    USES_property,
+                    node_summary.get("labels", []),
+                    driver,
+                )
+            relationship = property_metadata.get('relationship')
+            groupLabel = _uses_contextual_property_target_group(property_metadata.get('groupLabel'), relationship)
             if groupLabel:
+                validate_uses_contextual_property(CMID, USES_property, groupLabel, relationship, driver)
                 validatePropertyCMID(new_property_value,USES_property,groupLabel,driver)
+            if relationship:
+                validate_contextual_tie_primary_domains(
+                    driver,
+                    CMID,
+                    _split_admin_multi_value(new_property_value),
+                    relationship,
+                )
         
         if USES_property in integer_constrained_properties:
             try:
@@ -387,7 +575,7 @@ def add_edit_delete_USES(database,user,input):
                 raise TypeError(f"Property '{USES_property}' requires a floating-point number. Received: {new_property_value}")
 
                 
-    if is_list_meta:
+    if is_list_meta and not isinstance(new_property_value, list):
         normalized_value = str(new_property_value).strip()
         if "||" in normalized_value:
             new_property_value = [part.strip() for part in normalized_value.split("||") if part.strip()]
@@ -396,6 +584,10 @@ def add_edit_delete_USES(database,user,input):
     
     if addOrEditNode == "edit" or addOrEditNode == "add":
         if USES_property == "Key":
+            invalid_key_error = invalid_key_format_error([new_property_value], "Key")
+            if invalid_key_error:
+                raise ValueError(invalid_key_error)
+
             data = {
                 'CMID': CMID,
                 'Key': key,
@@ -434,15 +626,20 @@ def add_edit_delete_USES(database,user,input):
                     raise ValueError(
                         f"Error: {result}"
                     )        
+                parent_values = _parent_cmids_from_parent_context_list(new_property_value)
+                USES_property = ["parentContext", "parent"]
+            else:
+                USES_property = [USES_property]
 
             data = {
                     'CMID': CMID,
                     'Key': key,
                     'datasetID': datasetID,
                     'relID': relID,
-                    USES_property: new_property_value
+                    input.get('s1_8'): new_property_value
                 }
-            USES_property = [USES_property]
+            if input.get('s1_8') == "parentContext":
+                data["parent"] = parent_values
         
         if CMID[1] == "D":
             isDataset = True
@@ -451,14 +648,19 @@ def add_edit_delete_USES(database,user,input):
               
         df = pd.DataFrame([data])
         # Arguments coming from admin have already been parsed into lists
+        update_kwargs = {
+            "updateType": "overwrite",
+            "propertyType": "USES",
+        }
+        if input.get("_actorClaims"):
+            update_kwargs["actorClaims"] = input.get("_actorClaims")
         update_result = updateProperty(
             df,
             USES_property,
             isDataset,
             database,
             user,
-            updateType="overwrite",
-            propertyType="USES",
+            **update_kwargs,
         )
         if isinstance(update_result, str) and update_result.lower().startswith("error"):
             raise Exception(update_result)
@@ -466,15 +668,23 @@ def add_edit_delete_USES(database,user,input):
             updated_rows = update_result.get("result")
             if isinstance(updated_rows, list) and len(updated_rows) == 0:
                 raise Exception("No USES ties were updated. Verify the selected relation still exists.")
-        processUSES(CMID=CMID,database=database,user=user)
+        _require_process_uses_success(
+            processUSES(CMID=CMID, database=database, user=user)
+        )
     elif addOrEditNode == "delete":
         if relID:
             q = """
-                    MATCH ()-[r:USES]-()
+                    MATCH ()-[r:USES]->()
                     WHERE elementId(r) = $relID
+                    {owner_guard}
                     REMOVE r[$USES_property]
-                    RETURN elementId(r) as relID
-                """
+                    RETURN DISTINCT elementId(r) as relID
+                """.format(
+                    owner_guard=_owner_scoped_uses_guard(
+                        "r",
+                        actor_user_id,
+                    )
+                )
             params = {
                 "relID": relID,
                 "USES_property": USES_property
@@ -482,6 +692,7 @@ def add_edit_delete_USES(database,user,input):
         else:
             q = f"""
                     MATCH (a:CATEGORY {{CMID: $CMID}})<-[r:USES {{Key: $key}}]-(d:DATASET {{CMID: $datasetID}})
+                    WHERE true {_owner_scoped_uses_guard("r", actor_user_id)}
                     REMOVE r[$USES_property] RETURN elementId(r) as relID
                 """
             params = {
@@ -490,9 +701,13 @@ def add_edit_delete_USES(database,user,input):
                 "datasetID": datasetID,
                 "USES_property": USES_property
             }
+        if actor_user_id:
+            params["actorUserId"] = actor_user_id
         result = getQuery(q,driver=driver,params = params)
-        processUSES(CMID=CMID,database=database,user=user)
-        rel_ids = [row["relID"] for row in result] if isinstance(result, list) else []
+        _require_process_uses_success(
+            processUSES(CMID=CMID, database=database, user=user)
+        )
+        rel_ids = list(dict.fromkeys(row["relID"] for row in result)) if isinstance(result, list) else []
         if not rel_ids:
             raise Exception("No USES ties were updated. Verify the selected relation still exists.")
         log_message = f"deleted USES property {input.get('s1_8')}"
@@ -632,35 +847,54 @@ def moveCATEGORYMERGINGties(database, user, input):
 def add_edit_delete_Node(database,user,input):
     changeNodeID = input.get('s1_2')
     changeNodeProperty = input.get('s1_7')
-    changeNodeValue = input.get('s1_3').strip()
+    changeNodeValue = (input.get('s1_3') or "").strip()
     addOrEditNode = input.get('s1_1')
 
     driver = getDriver(database)
+    actor_user_id = _owner_scoped_actor(input)
+    owner_guard = _owner_scoped_node_guard("a", actor_user_id)
+    if changeNodeProperty in _INTERNAL_OWNER_PROPERTY_NAMES:
+        raise PermissionError(
+            f"{changeNodeProperty} is internal authorization metadata and cannot be edited directly."
+        )
+
+    metaTypes = getPropertiesMetadata(driver)
+    property_meta_types = [
+        item.get("metaType")
+        for item in metaTypes
+        if item.get("type") == "node" and item.get("property") == changeNodeProperty
+    ]
+    is_list_meta = any(
+        isinstance(meta_type, str) and "list" in meta_type.lower()
+        for meta_type in property_meta_types
+    )
+    list_value = None
+
+    if is_list_meta:
+        list_value = _split_admin_multi_value(changeNodeValue)
 
     if changeNodeProperty == "parent":
-        validatePropertyCMID(changeNodeValue,changeNodeProperty,"DATASET",driver)
+        list_value = _split_admin_multi_value(changeNodeValue)
+        validatePropertyCMID(list_value,changeNodeProperty,"DATASET",driver)
                 
     if changeNodeProperty == "District":
-        validatePropertyCMID(changeNodeValue,changeNodeProperty,"AREA",driver)
+        list_value = _split_admin_multi_value(changeNodeValue)
+        validatePropertyCMID(list_value,changeNodeProperty,"AREA",driver)
     
-    if changeNodeProperty == "glottocode":
+    if addOrEditNode != "delete" and get_node_property_domain_restriction(changeNodeProperty):
         node_summary = getNodeMergeSummary(changeNodeID, driver)
-        if "LANGUOID" not in node_summary.get("labels", []):
-            raise Exception("Only nodes with a LANGUOID label can have a glottocode property")
+        validate_node_property_domain_for_labels(
+            changeNodeID,
+            changeNodeProperty,
+            node_summary.get("labels", []),
+            driver,
+        )
     
 
     if not changeNodeID or not addOrEditNode:
         return "CMID is empty or choice of add/edit/delete is empty"
     
-    # label = CMgetLabel(CMID=changeNodeID, con=con)[0]
-    if changeNodeID[1] == "D":
-        label = "DATASET"
-    elif changeNodeID[1] == "M":
-        label = "CATEGORY"
-    elif changeNodeID[1] == "P":
-        label = "PROPERTY"
-    elif changeNodeID[1] == "L":
-        label = "LABEL"
+    label = _editable_node_label(changeNodeID, driver)
 
     # Get prior value
     priorValQuery = f"""
@@ -688,29 +922,58 @@ def add_edit_delete_Node(database,user,input):
                 getQuery(q,driver=driver)
 
         q = f"""
-            MATCH (a {{CMID: '{changeNodeID}'}})
+            MATCH (a {{CMID: $changeNodeID}})
+            WHERE true {owner_guard}
             SET a.{changeNodeProperty} = NULL
+            RETURN elementId(a) AS nodeID
         """
         #CMCypherQuery(con=con, query=q)
-        getQuery(q,driver=driver)
+        mutation_params = {"changeNodeID": changeNodeID}
+        if actor_user_id:
+            mutation_params["actorUserId"] = actor_user_id
+        mutation_rows = getQuery(q, driver=driver, params=mutation_params)
 
     else:  # edit or add
         if label == "DATASET" and changeNodeProperty in ["District", "parent"]:
             q = f"""
-                MATCH (a {{CMID: '{changeNodeID}'}})
-                SET a.{changeNodeProperty} = split($id, ' || ')
+                MATCH (a {{CMID: $changeNodeID}})
+                WHERE true {owner_guard}
+                SET a.{changeNodeProperty} = $id
+                RETURN elementId(a) AS nodeID
             """
             #CMCypherQuery(con=con, query=q, parameters={'id': changeNodeValue})
-            getQuery(q,driver=driver,params={"id":changeNodeValue})
+            mutation_params = {
+                "changeNodeID": changeNodeID,
+                "id": list_value or _split_admin_multi_value(changeNodeValue),
+            }
+            if actor_user_id:
+                mutation_params["actorUserId"] = actor_user_id
+            mutation_rows = getQuery(
+                q,
+                driver=driver,
+                params=mutation_params,
+            )
 
             processDATASETs(database,CMID=changeNodeID,user=user)
         else:
             q = f"""
-                MATCH (a {{CMID: '{changeNodeID}'}})
+                MATCH (a {{CMID: $changeNodeID}})
+                WHERE true {owner_guard}
                 SET a.{changeNodeProperty} = $id
+                RETURN elementId(a) AS nodeID
             """
             #CMCypherQuery(con=con, query=q, parameters={'id': changeNodeValue})
-            getQuery(q,driver=driver,params={"id":changeNodeValue})
+            mutation_params = {
+                "changeNodeID": changeNodeID,
+                "id": list_value if is_list_meta else changeNodeValue,
+            }
+            if actor_user_id:
+                mutation_params["actorUserId"] = actor_user_id
+            mutation_rows = getQuery(
+                q,
+                driver=driver,
+                params=mutation_params,
+            )
 
             if changeNodeProperty == "CMName":
                 try:
@@ -719,9 +982,34 @@ def add_edit_delete_Node(database,user,input):
                 except Exception as e:
                     print(f"CMaddCMNameRel failed: {e}")
 
+    if actor_user_id and not mutation_rows:
+        raise PermissionError(
+            "User is not authorized to edit this node or one of its "
+            "incident USES relationships."
+        )
+
     new_val = "NULL" if addOrEditNode == "delete" else changeNodeValue
     log_msg = f"updated CMID {changeNodeID} {changeNodeProperty} from {priorVal} to {new_val}"
-    #CMlog(id=changeNodeID, type="node", log=log_msg, user=user, con=con)
+    node_rows = mutation_rows or getQuery(
+        "MATCH (n {CMID: $cmid}) RETURN elementId(n) AS nodeID",
+        driver=driver,
+        params={"cmid": changeNodeID},
+    )
+    node_ids = [
+        row.get("nodeID")
+        for row in node_rows or []
+        if row.get("nodeID")
+    ]
+    if not node_ids:
+        raise ValueError(f"Node {changeNodeID} was not found after the update.")
+    createLog(
+        id=node_ids,
+        type="node",
+        log=[log_msg] * len(node_ids),
+        user=user,
+        driver=driver,
+        isDataset=(label == "DATASET"),
+    )
     return "updated successfully"
 
 ############################
@@ -1105,6 +1393,7 @@ def check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id):
 #Function that moves uses tie from one category node to another category node
 def moveUSESties(database,user,input,dataset,tabledata):
     driver = getDriver(database)
+    actor_user_id = _owner_scoped_actor(input)
     CMID_from = input.get('s1_2').strip()
     CMID_to = input.get('s1_3').strip()
     USES_property = json.loads(input.get('s1_7'))
@@ -1195,16 +1484,30 @@ def moveUSESties(database,user,input,dataset,tabledata):
         safe_rel_id = sanitize_cypher_element_id(rel_id, "relationship elementId")
         query_move_rel = """
         MATCH ()-[r:USES]->(from)
-        WHERE from.CMID = $CMID_from AND elementId(r) = $rel_id
+        WHERE from.CMID = $CMID_from
+          AND elementId(r) = $rel_id
+          {owner_guard}
         MATCH (to)
         WHERE to.CMID = $CMID_to
         CALL apoc.refactor.to(r, to) YIELD input, output
         RETURN elementId(output) AS relID
-        """
+        """.format(
+            owner_guard=_owner_scoped_uses_guard(
+                "r",
+                actor_user_id,
+            )
+        )
+        move_params = {
+            "CMID_from": CMID_from,
+            "rel_id": safe_rel_id,
+            "CMID_to": CMID_to,
+        }
+        if actor_user_id:
+            move_params["actorUserId"] = actor_user_id
         rel_id_df = getQuery(
             query_move_rel,
             driver,
-            params={"CMID_from": CMID_from, "rel_id": safe_rel_id, "CMID_to": CMID_to},
+            params=move_params,
         )
         new_rel_id = rel_id_df[0]['relID'] if rel_id_df else None
 
@@ -1539,6 +1842,7 @@ def deleteNode(database,user,input):
 #section for deleting a USES tie
 def deleteUSES(database,user,input):
     driver = getDriver(database)
+    actor_user_id = _owner_scoped_actor(input)
     CMID = input.get('s1_2')
     USES_property = json.loads(input.get('s1_7'))
     rel_id = sanitize_cypher_element_id(USES_property[1]["id"], "relationship elementId")
@@ -1565,8 +1869,26 @@ def deleteUSES(database,user,input):
     if result:
         raise ValueError(f"There is a stack that uses this USES tie for a merging template. It is not possible to delete this USES tie using admin functions.(stackID = {result})")
 
-    q = "MATCH ()-[r]->() WHERE elementId(r) = $id DELETE r RETURN count(*) AS count"
-    result = getQuery(q, driver=driver, params={"id": rel_id})
+    q = f"""
+    MATCH ()-[r:USES]->()
+    WHERE elementId(r) = $id
+      {_owner_scoped_uses_guard("r", actor_user_id)}
+    DELETE r
+    RETURN count(*) AS count
+    """
+    delete_params = {"id": rel_id}
+    if actor_user_id:
+        delete_params["actorUserId"] = actor_user_id
+    result = getQuery(q, driver=driver, params=delete_params)
+    deleted_count = (
+        int(result[0].get("count") or 0)
+        if result
+        else 0
+    )
+    if deleted_count == 0:
+        raise PermissionError(
+            "User is not authorized to delete this USES tie or it no longer exists."
+        )
 
     processUSES(database,CMID)
 

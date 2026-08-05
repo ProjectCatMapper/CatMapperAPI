@@ -9,8 +9,10 @@ merge_bp = Blueprint('merge', __name__)
 def parse_dataset_choices(value):
     return [choice.strip() for choice in re.split(r"[\s,;|]+", str(value or "")) if choice.strip()]
 
+@merge_bp.route('/api/databases/<database>/merge/syntax', methods=['POST'])
 @merge_bp.route('/merge/syntax/<database>', methods=['POST'])
 def get_merge_syntax_route(database):
+    """Create downloadable merge syntax for a merge template payload."""
     try:
         from CM.merge import createSyntax
         data = request.get_json(silent=True) or {}
@@ -38,8 +40,10 @@ def get_merge_syntax_route(database):
     except Exception as e:
         return {"error": str(e)}, 500
 
+@merge_bp.route('/api/databases/<database>/merge/templates/<datasetID>', methods=['GET'])
 @merge_bp.route('/merge/template/<database>/<datasetID>', methods=['GET'])
 def get_merge_template(database, datasetID):
+    """Return the merge template workbook payload for a dataset."""
     try:
         from CM.merge import getMergingTemplate
         template = getMergingTemplate(datasetID, database)
@@ -50,8 +54,10 @@ def get_merge_template(database, datasetID):
     
     
 # what about calling this createLinkfile internally? # do we want to?
+@merge_bp.route('/api/merge/proposals', methods=['POST'])
 @merge_bp.route('/proposeMergeSubmit', methods=['POST'])
 def submit_merge():
+    """Create a merge proposal from selected datasets and criteria."""
     data = request.get_json(silent=True) or {}
     dataset_choices_raw = data.get("datasetChoices", "")
     dataset_choices = parse_dataset_choices(dataset_choices_raw)
@@ -122,14 +128,18 @@ def submit_merge():
     return result
 
 
+@merge_bp.route('/api/merge/code-downloads', methods=['POST'])
 @merge_bp.route('/downloadMergeCode', methods=['POST'])
 def get_merge_code():
+    """Legacy placeholder for merge-code download requests."""
     data = request.get_data()
     data = json.loads(data)
 
 
+@merge_bp.route('/api/merge/dataset-joins', methods=['POST'])
 @merge_bp.route('/joinDatasets', methods=['POST'])
 def submitjoinDatasets():
+    """Join two datasets for merge preview workflows."""
     data = request.get_data()
     data = json.loads(data)
     # print(data)
@@ -143,8 +153,10 @@ def submitjoinDatasets():
     return jsonify(result)
 
 
+@merge_bp.route('/api/merge/dataset-validations', methods=['POST'])
 @merge_bp.route('/validateDatasets', methods=['POST'])
 def submitvalidateDatasets():
+    """Validate that requested dataset CMIDs exist."""
     data = request.get_data()
     data = json.loads(data)
     database = unlist(data.get("database", ""))
@@ -182,8 +194,10 @@ def submitvalidateDatasets():
         "datasets": rows
     })
 
+@merge_bp.route('/api/merge/keys', methods=['POST'])
 @merge_bp.route('/getKeys', methods=['POST'])
 def getvalidKeysForDataset():
+    """Return available key variables for selected datasets and a domain."""
     data = request.get_data()
     data = json.loads(data)
     database = unlist(data.get("database", ""))
@@ -237,8 +251,10 @@ def getvalidKeysForDataset():
             
     return jsonify({"success": True, "message": "All Keys exist.","keysByDataset": result_map})        
 
+@merge_bp.route('/api/merge/link-file', methods=['GET'])
 @merge_bp.route('/linkfile', methods=['GET'])
 def getLinkFile():
+    """Return merge link-file rows for selected datasets."""
     try:
         database = request.args.get('database')
         datasets = request.args.get('datasets')
@@ -280,8 +296,10 @@ def getLinkFile():
         return result, 500
 
 
+@merge_bp.route('/api/merge/datasets', methods=['GET'])
 @merge_bp.route('/mergeDatasets', methods=['GET'])
 def getMergeDatasets():
+    """Return dataset CMIDs available for merge workflows."""
 
     database = request.args.get('database')
 
@@ -606,14 +624,17 @@ def build_merge_template_summary_payload(database, cmid):
     }
 
 
+@merge_bp.route('/api/databases/<database>/merge/templates/<cmid>/summary', methods=['GET'])
 @merge_bp.route('/merge/template/summary/<database>/<cmid>', methods=['GET'])
 def get_merge_template_summary(database, cmid):
+    """Return summary metadata for a merge template node."""
     try:
         return jsonify(build_merge_template_summary_payload(database, cmid))
     except LookupError as exc:
         return jsonify({"error": str(exc)}), 404
 
 
+@merge_bp.route('/api/databases/<database>/merge/templates/<mergingID>/datasets/<domain>', methods=['GET'])
 @merge_bp.route('/merge/datasets/<database>/<mergingID>/<domain>', methods=['GET'])
 def get_merging_datasets_by_domain(database, mergingID, domain):
     """

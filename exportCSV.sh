@@ -2,6 +2,14 @@
 
 set -euo pipefail
 
+AWS_CONFIG_INI="${AWS_CONFIG_INI:-/mnt/storage/app/CatMapperAPI/config.ini}"
+CSV_BACKUP_BUCKET="${CSV_BACKUP_BUCKET:-catmapper}"
+SOCIOMAP_CSV_PREFIX="${SOCIOMAP_CSV_PREFIX:-backups/sociomap1/download/}"
+ARCHAMAP_CSV_PREFIX="${ARCHAMAP_CSV_PREFIX:-backups/archamap1/download/}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/aws_config_credentials.sh"
+trap cleanup_aws_credentials_file EXIT
+
 mkdir -p \
     /mnt/storage/app/CatMapperAPI/log \
     /mnt/storage/app/db/sociomap1/backups/download \
@@ -73,8 +81,9 @@ normalize_download_files "SocioMap" "/mnt/storage/app/db/sociomap1/backups/downl
 echo "CSV files are exported already pivoted by Neo4j/APOC."
 
 echo "Syncing CSV files"
-sudo -u rjbischo aws s3 sync /mnt/storage/app/db/sociomap1/backups/download s3://sociomap-backups/sociomap1-backups/download/ --acl public-read;
-sudo -u rjbischo aws s3 sync /mnt/storage/app/db/archamap1/backups/download s3://sociomap-backups/archamap-backups/download/ --acl public-read;
+configure_aws_cli_credentials
+aws s3 sync /mnt/storage/app/db/sociomap1/backups/download "s3://${CSV_BACKUP_BUCKET}/${SOCIOMAP_CSV_PREFIX}";
+aws s3 sync /mnt/storage/app/db/archamap1/backups/download "s3://${CSV_BACKUP_BUCKET}/${ARCHAMAP_CSV_PREFIX}";
 
 rename_s3_prefixed_files() {
     local db_prefix="$1"
@@ -88,18 +97,17 @@ rename_s3_prefixed_files() {
         [[ "$filename" == SocioMap_* || "$filename" == ArchaMap_* ]] && continue
 
         target="${db_prefix}_${filename}"
-        sudo -u rjbischo aws s3 mv \
-            "s3://sociomap-backups/${key_prefix}${filename}" \
-            "s3://sociomap-backups/${key_prefix}${target}" \
-            --acl public-read >/dev/null
+        aws s3 mv \
+            "s3://${CSV_BACKUP_BUCKET}/${key_prefix}${filename}" \
+            "s3://${CSV_BACKUP_BUCKET}/${key_prefix}${target}" >/dev/null
         moved=$((moved + 1))
-    done < <(sudo -u rjbischo aws s3 ls "s3://sociomap-backups/${key_prefix}" | awk '{print $4}')
+    done < <(aws s3 ls "s3://${CSV_BACKUP_BUCKET}/${key_prefix}" | awk '{print $4}')
 
     echo "$db_prefix: moved $moved file(s)."
 }
 
 echo "Renaming S3 CSV files so database name is first..."
-rename_s3_prefixed_files "SocioMap" "sociomap1-backups/download/"
-rename_s3_prefixed_files "ArchaMap" "archamap-backups/download/"
+rename_s3_prefixed_files "SocioMap" "$SOCIOMAP_CSV_PREFIX"
+rename_s3_prefixed_files "ArchaMap" "$ARCHAMAP_CSV_PREFIX"
 
 echo "CSV files exported and synced to S3"

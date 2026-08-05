@@ -14,6 +14,8 @@ class FakeCursor:
 
 class FakeSession:
     def run(self, query, **kwargs):
+        if "RETURN labels(n) AS labels" in query:
+            return FakeCursor([{"labels": ["CATEGORY", "AREA"]}])
         if "return properties(n) AS props" in query:
             return FakeCursor([{"props": {"CMName": "Feature ID", "description": "Identifier"}}])
         if "p.type='node'" in query:
@@ -83,9 +85,15 @@ def test_api_prefix_serves_main_domain_selector(client, monkeypatch):
 
 def test_api_prefix_serves_admin_edit_node_property_names(client, monkeypatch):
     monkeypatch.setattr(admin_routes, "getDriver", lambda database: FakeDriver())
+    monkeypatch.setattr(
+        admin_routes,
+        "verify_request_auth",
+        lambda **kwargs: {"userid": "200", "role": "admin"},
+    )
 
     response = client.get(
         "/api/admin_add_edit_delete_nodeproperties",
+        headers={"Authorization": "Bearer test-token"},
         query_string={"CMID": "AM1", "database": "ArchaMap", "option": "edit"},
     )
 

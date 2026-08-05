@@ -24,6 +24,14 @@ VALID_VARIABLE_CATEGORY_TYPE_VALUES = {
     "CATEGORICAL",
     "TEXT",
 }
+RESTRICTED_NODE_PROPERTY_DOMAINS = {
+    "fips": {"AREA"},
+    "glottocode": {"LANGUOID"},
+    "iso2": {"AREA"},
+    "iso3": {"AREA", "LANGUOID"},
+    "isonumeric": {"AREA"},
+}
+STRUCTURAL_NODE_LABELS = {"CATEGORY", "DATASET", "DELETED", "MERGING", "STACK"}
 
 config = ConfigParser()
 config.read('config.ini')
@@ -63,6 +71,61 @@ def validate_variable_category_type_value(value, *, allow_blank=False):
             f"Invalid categoryType '{value}'. Expected one of: {allowed}."
         )
     return normalized
+
+
+def get_node_property_domain_restriction(property_name):
+    return RESTRICTED_NODE_PROPERTY_DOMAINS.get(str(property_name or "").strip().lower(), set())
+
+
+def resolve_domains_from_node_labels(labels, driver):
+    labels = [
+        str(label).strip()
+        for label in (labels or [])
+        if str(label or "").strip() and str(label).strip() not in STRUCTURAL_NODE_LABELS
+    ]
+    if not labels:
+        return set()
+
+    query = """
+    UNWIND $labels AS label
+    OPTIONAL MATCH (m:LABEL {CMName: label})
+    RETURN label, m.groupLabel AS groupLabel
+    """
+    rows = getQuery(query=query, driver=driver, params={"labels": labels}, type="dict")
+    domains = set()
+    for row in rows:
+        label = str(row.get("label") or "").strip()
+        group_label = str(row.get("groupLabel") or "").strip()
+        if group_label:
+            domains.add(group_label)
+        elif label:
+            domains.add(label)
+    return domains
+
+
+def node_property_allowed_for_labels(property_name, labels, driver):
+    allowed_domains = get_node_property_domain_restriction(property_name)
+    if not allowed_domains:
+        return True
+    domains = resolve_domains_from_node_labels(labels, driver)
+    return bool(domains.intersection(allowed_domains))
+
+
+def validate_node_property_domain_for_labels(cmid, property_name, labels, driver):
+    allowed_domains = get_node_property_domain_restriction(property_name)
+    if not allowed_domains:
+        return
+
+    domains = resolve_domains_from_node_labels(labels, driver)
+    if domains.intersection(allowed_domains):
+        return
+
+    allowed_text = " or ".join(sorted(allowed_domains))
+    found_text = ", ".join(sorted(domains)) if domains else "unknown"
+    raise ValueError(
+        f"Property '{property_name}' can only be used for {allowed_text} nodes. "
+        f"CMID {cmid} is {found_text}."
+    )
 
 
 def set_query_cancel_checker(checker):
@@ -449,7 +512,7 @@ def getAvailableID(new_id="CMID", label="CATEGORY", n=1, database="SocioMap"):
             # DATASET IDs also back MERGING/STACK nodes and must stay reserved
             # after deletion, because deleteNode() preserves the old CMID on a
             # standalone DELETED node.
-            label_filter = "WHERE (n:DATASET OR n:DELETED)"
+            label_filter = "// WHERE n:DATASET scope includes deleted reservations\n    WHERE (n:DATASET OR n:DELETED)"
         else:
             label_filter = ""
 

@@ -35,27 +35,35 @@ def _merge_node_scope(existing_scope, incoming_scope):
         return "DATASET/CATEGORY"
     return existing
 
+@metadata_bp.route('/api/databases/<database>/metadata/domains', methods=['GET'])
 @metadata_bp.route('/metadata/domains/<database>', methods=['GET'])
 def getDomains1(database):
+    """Return public top-level domains for a database."""
     domains = get_public_domains(database)
     return domains
 
+@metadata_bp.route('/api/databases/<database>/metadata/subdomains', methods=['GET'])
 @metadata_bp.route('/metadata/subdomains/<database>', methods=['GET'])
 def getSubdomains(database):
+    """Return public subdomains grouped under their domains."""
 
     subdomains = get_public_subdomains(database)
 
     return subdomains
 
+@metadata_bp.route('/api/databases/<database>/metadata/domain-descriptions', methods=['GET'])
 @metadata_bp.route('/metadata/domainDescriptions/<database>', methods=['GET'])
 def getDomainDescriptions(database):
+    """Return display descriptions for database domains and subdomains."""
     driver = getDriver(database)
     descriptions = get_domain_descriptions(database)
 
     return descriptions
 
+@metadata_bp.route('/api/databases/<database>/metadata/cmid-properties/<domain>', methods=['POST'])
 @metadata_bp.route('/metadata/CMIDProperties/<database>/<domain>', methods=['POST'])
 def getProperties_route(database, domain):
+    """Return node property metadata for the requested CMIDs and domain."""
     try:
         CMIDs = request.json.get('CMID', [])
         if domain not in ["DATASET", "CATEGORY"]:
@@ -66,13 +74,20 @@ def getProperties_route(database, domain):
         return {"error": str(e)}, 500
 
 
+@metadata_bp.route("/api/databases/<database>/metadata/upload-properties", methods=["GET"])
 @metadata_bp.route("/metadata/uploadProperties/<database>", methods=["GET"])
 def get_upload_properties(database):
+    """Return uploadable node and relationship properties for edit/upload forms."""
     try:
         driver = getDriver(database)
         rows = getPropertiesMetadata(driver)
         if not isinstance(rows, list):
             rows = []
+        rows = [
+            row
+            for row in rows
+            if not bool((row or {}).get("internal"))
+        ]
 
         node_properties = {}
         uses_properties = {}
@@ -113,8 +128,10 @@ def get_upload_properties(database):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@metadata_bp.route("/api/databases/<database>/metadata/properties", methods=["GET"])
 @metadata_bp.route("/metadata/properties/<database>", methods=["GET"])
 def get_all_property_node_properties(database):
+    """Return all PROPERTY-node properties for admin metadata editing."""
     try:
         database = str(database or "").strip().lower()
         if database not in ALLOWED_PROPERTY_METADATA_DATABASES:
@@ -139,14 +156,18 @@ def get_all_property_node_properties(database):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@metadata_bp.route("/api/translation/domains", methods=['GET'])
 @metadata_bp.route("/getTranslatedomains", methods=['GET'])
 def getTranslatedomains():
+    """Return translation domain options for the selected database."""
     database = request.args.get("database")
     result_list = get_metadata_groups(database)
     return jsonify(result_list)
     
+@metadata_bp.route(f"/api/databases/<database>/metadata/domain-tree", methods=['GET'])
 @metadata_bp.route(f"/getDomains/<database>", methods=['GET'])
 def getDomains(database):
+    """Return domain/subdomain rows used by edit and domain selector controls."""
     
     driver = getDriver(database)
     query = '''
@@ -171,8 +192,10 @@ def getDomains(database):
     
     return jsonify(result.to_dict(orient='records'))
 
+@metadata_bp.route(f"/api/databases/<database>/metadata/countries", methods=['GET'])
 @metadata_bp.route(f"/metadata/getCountries/<database>", methods=['GET'])
 def getCountries(database):
+    """Return ADM0 country options for search filters."""
     
     driver = getDriver(database)
     query = '''
@@ -187,8 +210,10 @@ def getCountries(database):
     
     return jsonify(result.to_dict(orient='records'))
 
+@metadata_bp.route('/api/datasets/domains', methods=['POST'])
 @metadata_bp.route('/datasetDomains', methods=['POST'])
 def getdatasetDomains():
+    """Return category domains represented in one or more datasets."""
     try:
         data = request.get_data()
         data = json.loads(data)
@@ -224,8 +249,10 @@ return label
         result = str(e)
         return result, 500
 
+@metadata_bp.route('/api/datasets', methods=['GET'])
 @metadata_bp.route('/allDatasets', methods=['GET'])
 def getAllDatasets():
+    """Return public dataset metadata rows for the requested database."""
     try:
         database = request.args.get('database')
 
@@ -258,8 +285,10 @@ d.Note as Note
         result = str(e)
         return result, 500
     
+@metadata_bp.route('/api/merge/link-file', methods=['GET'])
 @metadata_bp.route('/linkfile', methods=['GET'])
 def getLinkFile():
+    """Return link-file rows for selected datasets and a category domain."""
     try:
         database = request.args.get('database')
         datasets = request.args.get('datasets')
@@ -299,8 +328,10 @@ return distinct d.CMName as DatasetName, r.Key as Key, c.CMName as CMName, c.CMI
         result = str(e)
         return result, 500
     
+@metadata_bp.route('/api/metadata/nodes/<CMID>', methods=['GET'])
 @metadata_bp.route('/metadata/node/<CMID>', methods=['GET'])
 def getMetdataProperties(CMID):
+    """Return metadata node properties from both CatMapper databases."""
     try:
         if not isinstance(CMID, str):
             raise Exception("CMID must be a string")
@@ -317,8 +348,10 @@ def getMetdataProperties(CMID):
     except Exception as e:
         return str(e), 500
     
+@metadata_bp.route('/api/databases/<database>/metadata/domains/<domain>/count', methods=['GET'])
 @metadata_bp.route('/metadata/domaincount/<database>/<domain>', methods=['GET'])
 def getDomainCount(database, domain):
+    """Return the approximate node count for a domain in a database."""
     try:
         driver = getDriver(database)
         domain = validate_domain_label(domain, driver=driver)

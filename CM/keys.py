@@ -1,5 +1,131 @@
 import pandas as pd
 
+KEY_FORMAT_GUIDANCE = (
+    'Use spaces around delimiters: variable == value. '
+    'For multiple pairs, join pairs with " && ", for example: '
+    'variable == value && other_variable == other_value.'
+)
+
+
+def _reserved_token_message(token, part):
+    return (
+        f'Does the original {part} contain "{token}"? '
+        f'Please confirm it was intentional. {KEY_FORMAT_GUIDANCE}'
+    )
+
+
+def _missing_spaces_message(token, part=None):
+    location = f" in the {part}" if part else ""
+    return f'Found "{token}" without spaces around it{location}. {KEY_FORMAT_GUIDANCE}'
+
+
+def key_format_issue(value):
+    """Return a user-facing validation issue, or None when value is a valid Key."""
+    if not isinstance(value, str):
+        return f"Key must be a text value. {KEY_FORMAT_GUIDANCE}"
+
+    if value.rstrip().endswith(" &&"):
+        return f'Key contains an empty pair. Remove extra "&&" delimiters. {KEY_FORMAT_GUIDANCE}'
+
+    text = value.strip()
+    if not text:
+        return f"Key must not be empty. {KEY_FORMAT_GUIDANCE}"
+    segments = text.split(" && ")
+    if any(not segment.strip() for segment in segments):
+        return f'Key contains an empty pair. Remove extra "&&" delimiters. {KEY_FORMAT_GUIDANCE}'
+
+    for segment in segments:
+        if " == " not in segment:
+            if " == " in value and segment.startswith("=="):
+                return f'Key variable name must not be empty before " == ". {KEY_FORMAT_GUIDANCE}'
+            if " == " in value and segment.endswith("=="):
+                return f'Key value must not be empty after " == ". {KEY_FORMAT_GUIDANCE}'
+            if "==" in segment:
+                return _missing_spaces_message("==")
+            return f'Each Key pair must include " == " between variable and value. {KEY_FORMAT_GUIDANCE}'
+
+        key_name, key_value = segment.split(" == ", 1)
+        key_name = key_name.strip()
+        key_value = key_value.strip()
+
+        if not key_name:
+            return f'Key variable name must not be empty before " == ". {KEY_FORMAT_GUIDANCE}'
+        if not key_value:
+            return f'Key value must not be empty after " == ". {KEY_FORMAT_GUIDANCE}'
+
+    return None
+
+
+def key_format_warnings(value):
+    """Return user-facing warnings for valid Keys with reserved tokens in parts."""
+    if key_format_issue(value):
+        return []
+
+    warnings = []
+    for segment in value.strip().split(" && "):
+        key_name, key_value = segment.split(" == ", 1)
+        key_name = key_name.strip()
+        key_value = key_value.strip()
+
+        if "==" in key_name:
+            warnings.append(_reserved_token_message("==", "variable name"))
+        if "==" in key_value:
+            warnings.append(_reserved_token_message("==", "variable value"))
+        if "&&" in key_name:
+            warnings.append(_reserved_token_message("&&", "variable name"))
+        if "&&" in key_value:
+            warnings.append(_reserved_token_message("&&", "variable value"))
+
+    return warnings
+
+
+def is_valid_key_format(value):
+    """Return True when value follows CatMapper's Key segment format."""
+    return key_format_issue(value) is None
+
+
+def invalid_key_row_details(values):
+    """Return 1-based row numbers and messages for values that are not valid Keys."""
+    series = pd.Series(values)
+    details = []
+    for position, value in enumerate(series.tolist()):
+        issue = key_format_issue(value)
+        if issue:
+            details.append({"row": position + 1, "message": issue})
+    return details
+
+
+def invalid_key_row_numbers(values):
+    """Return 1-based row numbers for values that are not valid Keys."""
+    return [detail["row"] for detail in invalid_key_row_details(values)]
+
+
+def invalid_key_format_error(values, column="Key"):
+    """Return an upload-ready error message for invalid Keys, or None."""
+    details = invalid_key_row_details(values)
+    if not details:
+        return None
+
+    rows = [detail["row"] for detail in details]
+    row_messages = "\n".join(
+        f"Row {detail['row']}: {detail['message']}" for detail in details
+    )
+    return f"Invalid '{column}' format in rows:\n{rows}. {KEY_FORMAT_GUIDANCE}\n{row_messages}"
+
+
+def key_format_warning_messages(values, column="Key"):
+    """Return upload-ready warning messages for valid Keys with reserved tokens."""
+    series = pd.Series(values)
+    messages = []
+    seen = set()
+    for position, value in enumerate(series.tolist()):
+        for warning in key_format_warnings(value):
+            message = f"{column} row {position + 1}: {warning}"
+            if message not in seen:
+                seen.add(message)
+                messages.append(message)
+    return messages
+
 
 def createKey(nodes, cols):
     """

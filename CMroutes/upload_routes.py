@@ -7,6 +7,11 @@ import math
 from datetime import datetime, timezone
 
 from CM import unlist
+from CM.keys import invalid_key_format_error, key_format_warning_messages
+from CM.ownership import (
+    normalize_actor_claims,
+    validate_upload_ownership_scope,
+)
 from .auth_utils import verify_request_auth, classify_auth_error_status
 from .task_store import get_task_store, DEFAULT_UPLOAD_BATCH_SIZE
 from .task_queue import enqueue_upload_task, is_rq_enabled
@@ -66,16 +71,23 @@ def _build_auth_error_response(error_message, fallback_status=500):
     return None, status_code
 
 
-def _request_acting_user(data):
+def _request_actor_claims(data):
     credentials = unlist(data.get("cred"))
     claims = verify_request_auth(credentials=credentials, req=request)
-    acting_user = claims.get("userid") or "unknown"
+    actor_claims = normalize_actor_claims(claims)
+    acting_user = actor_claims.get("userid") or "unknown"
 
     requested_user = data.get("user")
     if requested_user is not None and str(requested_user).strip():
         if str(requested_user).strip() != str(acting_user):
             raise Exception("User does not match authenticated API key/token owner")
 
+    return actor_claims
+
+
+def _request_acting_user(data):
+    actor_claims = _request_actor_claims(data)
+    acting_user = actor_claims.get("userid") or "unknown"
     return acting_user
 
 
@@ -96,10 +108,6 @@ def _resolve_optional_properties(data):
         return optional_properties, warnings
 
     all_context = _coerce_property_list(data.get("allContext"))
-    if all_context and "allContext" in data and "optionalProperties" not in data:
-        warnings.append(
-            "`allContext` is deprecated for upload property selection; use `optionalProperties`."
-        )
     return all_context, warnings
 
 
@@ -113,7 +121,7 @@ def _validate_simple_key_values(df, key_column):
         if col not in df.columns:
             raise Exception(f"Simple upload requires key column '{col}' in payload rows.")
         key_series = df[col].fillna("").astype(str)
-        bad_rows = key_series[key_series.str.contains(r"==", regex=True)].index.tolist()
+        bad_rows = key_series[key_series.str.contains(r"\s==\s", regex=True)].index.tolist()
         if bad_rows:
             bad_rows = [i + 1 for i in bad_rows]
             raise Exception(
@@ -172,7 +180,48 @@ def _compose_simple_key(df, key_columns):
         )
 
 
-def _prepare_upload_job(data, acting_user):
+def _validate_key_rows(df, column="Key"):
+    if column not in df.columns:
+        raise Exception(f"{column} column is required for this upload.")
+    invalid_key_error = invalid_key_format_error(df[column], column)
+    if invalid_key_error:
+        raise ValueError(invalid_key_error)
+    return key_format_warning_messages(df[column], column)
+
+
+def _standard_upload_is_dataset(df):
+    dataset = pd.DataFrame(df)
+    if dataset.empty:
+        return False
+    if "label" in dataset.columns:
+        label = str(dataset["label"].iloc[0]).strip().upper()
+        if label in {"DATASET", "STACK", "MERGING"}:
+            return True
+    if "CMID" in dataset.columns:
+        cmids = dataset["CMID"].fillna("").astype(str).str.strip()
+        cmids = cmids[cmids != ""]
+        if not cmids.empty and cmids.str.startswith(("SD", "AD")).all():
+            return True
+    return False
+
+
+def _prevalidate_standard_keys(df, upload_option, merging_type):
+    dataset = pd.DataFrame(df)
+    warnings = []
+    if (
+        upload_option == "add_uses"
+        or (upload_option == "add_node" and not _standard_upload_is_dataset(dataset))
+        or merging_type == "merging_ties_to_categories"
+    ):
+        warnings.extend(_validate_key_rows(dataset, "Key"))
+    if upload_option == "update_replace" and "NewKey" in dataset.columns:
+        warnings.extend(_validate_key_rows(dataset, "NewKey"))
+    return warnings
+
+
+def _prepare_upload_job(data, actor_claims):
+    actor_claims = normalize_actor_claims(actor_claims)
+    acting_user = actor_claims["userid"]
     df = data.get("df")
     database = unlist(data.get("database"))
     formData = unlist(data.get("formData"))
@@ -209,6 +258,7 @@ def _prepare_upload_job(data, acting_user):
         raise Exception("`so` must be either 'standard' or 'simple'.")
 
     if so == "standard":
+        warnings.extend(_prevalidate_standard_keys(df, upload_option, mergingType))
         dataset_payload = df
         total_rows = len(pd.DataFrame(df))
         job_args = {
@@ -224,7 +274,9 @@ def _prepare_upload_job(data, acting_user):
             "geocode": False,
             "batchSize": UPLOAD_BATCH_SIZE,
             "ignoreIfSame": bool(data.get("ignore_if_same", False)),
+            "actorClaims": actor_claims,
         }
+        validate_upload_ownership_scope(database, upload_option, dataset_payload, actor_claims)
         return job_args, total_rows, database, warnings
 
     if not label:
@@ -262,6 +314,7 @@ def _prepare_upload_job(data, acting_user):
 
     _validate_simple_key_values(df, key_columns)
     _compose_simple_key(df, key_columns)
+    warnings.extend(_validate_key_rows(df, "Key"))
     df.rename(columns={CMName: "CMName", CMID: "CMID", Name: "Name"}, inplace=True)
     dataset_payload = df.to_dict(orient='records')
 
@@ -277,7 +330,9 @@ def _prepare_upload_job(data, acting_user):
         "geocode": False,
         "batchSize": UPLOAD_BATCH_SIZE,
         "ignoreIfSame": bool(data.get("ignore_if_same", False)),
+        "actorClaims": actor_claims,
     }
+    validate_upload_ownership_scope(database, "add_uses", dataset_payload, actor_claims)
     return job_args, len(df), database, warnings
 
 
@@ -370,14 +425,26 @@ def _send_cancel_to_rq(task_id, task):
 
 def _cancel_upload_task(task_id, task):
     store = get_task_store()
+    job_payload = store.get_upload_job_payload(task_id)
+    is_geojson_polygon = isinstance(job_payload, dict) and job_payload.get("kind") == "geojson_polygon"
     _request_upload_cancel(task_id)
 
     status = str(task.get("status") or "").strip().lower()
-    stopped, action = _send_cancel_to_rq(task_id, task)
+    if status == "running" and is_geojson_polygon:
+        stopped, action = False, "deferred-polygon-cancel"
+        store.append_upload_event(
+            task_id,
+            "Cancellation will be honored before the USES transaction; critical verification/rollback cannot be interrupted.",
+        )
+    else:
+        stopped, action = _send_cancel_to_rq(task_id, task)
 
     if status == "queued":
         store.cancel_upload_task(task_id, "Upload cancelled before starting.")
         store.delete_upload_job_payload(task_id)
+        if is_geojson_polygon:
+            from CM.geojson_upload import delete_preflight_token
+            delete_preflight_token(job_payload.get("token"))
         if stopped:
             store.append_upload_event(task_id, "Queued job removed from queue.")
         return
@@ -386,8 +453,10 @@ def _cancel_upload_task(task_id, task):
         store.append_upload_event(task_id, "Stop signal sent to worker.")
 
 
+@upload_bp.route("/api/uploads/waiting-uses/status", methods=["POST"])
 @upload_bp.route("/uploadWaitingUSESStatus", methods=["POST"])
 def upload_waiting_uses_status():
+    """Return status for a waiting-USES task owned by the authenticated user."""
     try:
         data = _request_json_payload()
         credentials = unlist(data.get("cred"))
@@ -417,8 +486,10 @@ def upload_waiting_uses_status():
         return jsonify({"error": error_message}), status_code
 
 
+@upload_bp.route("/api/uploads/input-nodes/status", methods=["POST"])
 @upload_bp.route("/uploadInputNodesStatus", methods=["POST"])
 def upload_input_nodes_status():
+    """Return status for an input-node upload task owned by the authenticated user."""
     try:
         data = _request_json_payload()
         acting_user = _request_acting_user(data)
@@ -443,8 +514,10 @@ def upload_input_nodes_status():
         return jsonify({"error": error_message}), status_code
 
 
+@upload_bp.route("/api/uploads/input-nodes/cancel", methods=["POST"])
 @upload_bp.route("/uploadInputNodesCancel", methods=["POST"])
 def upload_input_nodes_cancel():
+    """Request cancellation for an input-node upload task."""
     try:
         data = _request_json_payload()
         acting_user = _request_acting_user(data)
@@ -471,14 +544,17 @@ def upload_input_nodes_cancel():
         return jsonify({"error": error_message}), status_code
 
 
+@upload_bp.route("/api/uploads/input-nodes", methods=['GET', 'POST'])
 @upload_bp.route("/uploadInputNodes", methods=['GET', 'POST'])
 def upload_API():
+    """Queue a tabular input-node upload task."""
     acting_user = "unknown"
     try:
         data = _request_json_payload()
-        acting_user = _request_acting_user(data)
+        actor_claims = _request_actor_claims(data)
+        acting_user = actor_claims.get("userid") or "unknown"
 
-        job_args, total_rows, database, warnings = _prepare_upload_job(data, acting_user)
+        job_args, total_rows, database, warnings = _prepare_upload_job(data, actor_claims)
         task_id = _start_upload_task(
             job_args=job_args,
             user=acting_user,

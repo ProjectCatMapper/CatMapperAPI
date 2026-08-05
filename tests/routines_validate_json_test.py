@@ -123,6 +123,48 @@ def test_get_duplicate_triplets_suppresses_email_when_send_email_false(monkeypat
     assert result["Duplicate Triplets"][0]["CMIDs"] == ["AM354486", "AM354487"]
 
 
+def test_getDuplicateNodeCMIDs_checks_category_dataset_and_deleted(monkeypatch, tmp_path):
+    captured = {}
+
+    monkeypatch.setattr(routines, "getDriver", lambda _database: object())
+
+    def fake_get_query(query, driver, type=None, **kwargs):
+        captured["query"] = query
+        captured["type"] = type
+        return pd.DataFrame([
+            {
+                "CMID": "AM1",
+                "duplicateNodeCount": 2,
+                "nodeID": "1",
+                "labels": ["CATEGORY"],
+                "CMName": "Current",
+                "replacementCMID": None,
+                "replacementCMName": None,
+            },
+            {
+                "CMID": "AM1",
+                "duplicateNodeCount": 2,
+                "nodeID": "2",
+                "labels": ["DELETED"],
+                "CMName": "Old",
+                "replacementCMID": "AM2",
+                "replacementCMName": "Replacement",
+            },
+        ])
+
+    monkeypatch.setattr(routines, "getQuery", fake_get_query)
+    monkeypatch.setattr(routines.tempfile, "NamedTemporaryFile", lambda **kwargs: open(tmp_path / "dupes.xlsx", "wb"))
+
+    result = routines.getDuplicateNodeCMIDs(database="ArchaMap", return_type="info")
+
+    assert result["info"] == "Duplicate CMID groups: 1; Duplicate node rows: 2"
+    assert result["filepath"] == str(tmp_path / "dupes.xlsx")
+    assert captured["type"] == "df"
+    assert "n:CATEGORY OR n:DATASET OR n:DELETED" in captured["query"]
+    assert "trim(toString(n.CMID)) <> \"\"" in captured["query"]
+    assert "OPTIONAL MATCH (n)-[:IS]->(replacement)" in captured["query"]
+
+
 def test_getInappropriateprops_Nodes_Rels_includes_uses_key(monkeypatch):
     queries = []
 

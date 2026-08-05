@@ -6,10 +6,12 @@ from .log_routes import *
 from .docs_routes import *
 from .explore_routes import *
 from .upload_routes import *
+from .geojson_upload_routes import *
 from .user_routes import *
 from .admin_routes import *
 from .homepage_routes import *
 from .metadata_routes import *
+from .reconciliation_routes import *
 from flask import Flask
 from .extensions import mail
 from .search_routes import *

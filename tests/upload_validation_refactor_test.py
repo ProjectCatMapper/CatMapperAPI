@@ -2,6 +2,103 @@ import pandas as pd
 import pytest
 
 import CM.upload as upload
+from CM.keys import (
+    invalid_key_format_error,
+    invalid_key_row_details,
+    invalid_key_row_numbers,
+    is_valid_key_format,
+    key_format_warning_messages,
+    key_format_warnings,
+)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "Type == Adamana Brown",
+        "Type == Adamana Brown && Period == Archaic",
+    ],
+)
+def test_key_format_validator_accepts_standard_keys(key):
+    assert is_valid_key_format(key) is True
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "",
+        None,
+        "Type==Adamana Brown",
+        "Type == ",
+        " == Adamana Brown",
+        "Type == Alpha &&",
+        "Type == Alpha && Period",
+    ],
+)
+def test_key_format_validator_rejects_malformed_keys(key):
+    assert is_valid_key_format(key) is False
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "Type == Alpha == Beta",
+        "Type == Alpha&&Period == Early",
+        "Type&&Subtype == Alpha",
+        "Type == 1==2",
+        "Type == Alpha&&",
+        "&&Type == Alpha",
+    ],
+)
+def test_key_format_validator_allows_reserved_tokens_inside_key_parts(key):
+    assert is_valid_key_format(key) is True
+
+
+def test_invalid_key_row_numbers_are_one_based():
+    rows = ["Type == Alpha", "Type == Alpha &&", "Type==Beta"]
+
+    assert invalid_key_row_numbers(rows) == [2, 3]
+
+
+@pytest.mark.parametrize(
+    "key, expected_message",
+    [
+        ("Type == Alpha&&Period == Early", 'Does the original variable value contain "&&"?'),
+        ("Type == Alpha == Beta", 'Does the original variable value contain "=="?'),
+        ("Type&&Subtype == Alpha", 'Does the original variable name contain "&&"?'),
+        ("Type == 1==2", 'Does the original variable value contain "=="?'),
+        ("Type == Alpha&&", 'Does the original variable value contain "&&"?'),
+        ("&&Type == Alpha", 'Does the original variable name contain "&&"?'),
+    ],
+)
+def test_key_format_warnings_preserve_reserved_token_prompt(key, expected_message):
+    assert any(expected_message in warning for warning in key_format_warnings(key))
+
+
+def test_invalid_key_row_details_include_row_specific_messages():
+    rows = ["Type == Alpha", "Type==Alpha", "Type == "]
+
+    details = invalid_key_row_details(rows)
+
+    assert [detail["row"] for detail in details] == [2, 3]
+    assert 'Found "==" without spaces around it' in details[0]["message"]
+    assert 'Key value must not be empty after " == "' in details[1]["message"]
+
+
+def test_invalid_key_format_error_includes_guidance_and_row_messages():
+    message = invalid_key_format_error(["Type==Alpha"], "Key")
+
+    assert "Invalid 'Key' format in rows:\n[1]." in message
+    assert 'Use spaces around delimiters: variable == value.' in message
+    assert 'Row 1: Found "==" without spaces around it' in message
+
+
+def test_key_format_warning_messages_include_rows_and_columns():
+    messages = key_format_warning_messages(["Type == 1==2"], "Key")
+
+    assert len(messages) == 1
+    assert messages[0].startswith("Key row 1:")
+    assert 'Does the original variable value contain "=="?' in messages[0]
 
 
 def test_collect_unique_column_values_for_multi_value_column():
@@ -22,6 +119,11 @@ def test_normalize_semicolon_value_list_handles_stringified_lists():
         "AM22269",
         "AM22270",
     ]
+
+
+@pytest.mark.parametrize("column_name", ["country", "district", "District"])
+def test_required_label_for_area_reference_columns(column_name):
+    assert upload._required_label_for_column(column_name) == "AREA"
 
 
 def test_create_uses_normalizes_stringified_district_lists(monkeypatch):
@@ -49,6 +151,15 @@ def test_create_uses_normalizes_stringified_district_lists(monkeypatch):
             ]
         if "RETURN count(*) AS count" in query:
             return [0]
+        if "WITH DISTINCT row.datasetID AS datasetID, row.Key AS keyValue" in query:
+            return [
+                {
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "existingCMIDs": [],
+                    "rel_count": 0,
+                }
+            ]
         if params and "rows" in params:
             captured["rows"] = params["rows"]
             return [
@@ -87,6 +198,345 @@ def test_create_uses_normalizes_stringified_district_lists(monkeypatch):
 
     assert captured["rows"][0]["district"] == "AM22269"
     assert result["links"][0]["district"] == "AM22269"
+
+
+def test_combine_properties_flattens_non_json_list_values():
+    dataset = pd.DataFrame(
+        [
+            {
+                "CMID": "AM1",
+                "datasetID": "AD1",
+                "Key": "Type == Alpha",
+                "Name": "['Alpha']",
+                "district": ["AM22269"],
+                "parentContext": '["{\\"parent\\":\\"AM2\\"}"]',
+            },
+            {
+                "CMID": "AM1",
+                "datasetID": "AD1",
+                "Key": "Type == Alpha",
+                "Name": "['Beta']",
+                "district": ["AM22270"],
+                "parentContext": "",
+            },
+        ]
+    )
+
+    combined = upload.combine_properties(
+        dataset,
+        ["CMID", "datasetID", "Key"],
+        string_cols=[],
+        driver=object(),
+    )
+
+    row = combined.iloc[0]
+    assert row["Name"] == "Alpha; Beta"
+    assert row["district"] == "AM22269; AM22270"
+    assert row["parentContext"] == '["{\\"parent\\":\\"AM2\\"}"]'
+
+
+def test_create_uses_normalizes_stringified_name_lists(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+    monkeypatch.setattr(upload, "getPropertiesMetadata", lambda driver: [
+        {"property": "Name", "metaType": "list"},
+        {"property": "district", "metaType": "list"},
+        {"property": "label", "metaType": "string"},
+    ])
+    monkeypatch.setattr(upload, "updateAltNames", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "createLog", lambda *args, **kwargs: None)
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (p:PROPERTY)" in query:
+            return [
+                {"property": "Key"},
+                {"property": "Name"},
+                {"property": "district"},
+                {"property": "label"},
+            ]
+        if "RETURN count(*) AS count" in query:
+            return [0]
+        if "WITH DISTINCT row.datasetID AS datasetID, row.Key AS keyValue" in query:
+            return [
+                {
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "existingCMIDs": [],
+                    "rel_count": 0,
+                }
+            ]
+        if params and "rows" in params:
+            captured["rows"] = params["rows"]
+            return [
+                {
+                    "nodeID": "node-1",
+                    "relID": "rel-1",
+                    "Key": "Type == Alpha",
+                    "datasetID": "AD1",
+                    "CMID": "AM1",
+                    "CMName": "Alpha",
+                    "Name": ["Alpha", "Beta"],
+                    "district": ["AM22269"],
+                    "label": "DIALECT",
+                }
+            ]
+        return [1]
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    result = upload.createUSES(
+        pd.DataFrame(
+            [
+                {
+                    "datasetID": "AD1",
+                    "CMID": "AM1",
+                    "Key": "Type == Alpha",
+                    "Name": "['Alpha', 'Beta']",
+                    "district": "['AM22269']",
+                    "label": "DIALECT",
+                }
+            ]
+        ),
+        database="ArchaMap",
+        user="tester",
+    )
+
+    assert captured["rows"][0]["Name"] == "Alpha;Beta"
+    assert captured["rows"][0]["district"] == "AM22269"
+    assert result["links"][0]["Name"] == "Alpha;Beta"
+
+
+def test_update_property_normalizes_non_json_stringified_lists(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+    monkeypatch.setattr(upload, "createLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "getPropertiesMetadata", lambda driver: [
+        {"type": "relationship", "property": "Name", "metaType": "list"},
+        {"type": "relationship", "property": "district", "metaType": "list"},
+        {"type": "relationship", "property": "parentContext", "metaType": "list"},
+    ])
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "oldVals" in query:
+            return [
+                {
+                    "relID": "rel-1",
+                    "CMID": "AM1",
+                    "Key": "Type == Alpha",
+                    "datasetID": "AD1",
+                    "oldVals": {
+                        "Name": ["Old"],
+                        "district": ["AM22268"],
+                        "parentContext": [],
+                    },
+                }
+            ]
+        if "SET r.status = 'update'" in query:
+            captured["rows"] = params["rows"]
+            return [
+                {
+                    "nodeID": "node-1",
+                    "relID": "rel-1",
+                    "CMID": "AM1",
+                    "Key": "Type == Alpha",
+                    "datasetID": "AD1",
+                    "Name": ["Alpha", "Beta"],
+                    "district": ["AM22269"],
+                    "parentContext": ['["{\\"parent\\":\\"AM2\\"}"]'],
+                }
+            ]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    result = upload.updateProperty(
+        pd.DataFrame(
+            [
+                {
+                    "relID": "rel-1",
+                    "datasetID": "AD1",
+                    "CMID": "AM1",
+                    "Key": "Type == Alpha",
+                    "Name": "['Alpha', 'Beta']",
+                    "district": ["AM22269"],
+                    "parentContext": '["{\\"parent\\":\\"AM2\\"}"]',
+                }
+            ]
+        ),
+        optionalProperties=["Name", "district"],
+        isDataset=False,
+        database="ArchaMap",
+        user="tester",
+        updateType="update",
+        propertyType="USES",
+        sep=";",
+    )
+
+    assert result["df"][0]["Name"] == "Alpha;Beta"
+    assert result["df"][0]["district"] == "AM22269"
+    assert result["df"][0]["parentContext"] == '["{\\"parent\\":\\"AM2\\"}"]'
+    assert captured["rows"][0]["Name"] == "Alpha;Beta"
+
+
+def test_update_property_uses_formatter_separator_for_admin_parent_lists(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+    monkeypatch.setattr(upload, "createLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "getPropertiesMetadata", lambda driver: [
+        {"type": "relationship", "property": "parent", "metaType": "list"},
+    ])
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "oldVals" in query:
+            return [
+                {
+                    "relID": "rel-1",
+                    "CMID": "SM486205",
+                    "Key": "EC == example",
+                    "datasetID": "SD1",
+                    "oldVals": {"parent": ["SM21103"]},
+                }
+            ]
+        if "SET r.status = 'update'" in query:
+            captured["query"] = query
+            captured["rows"] = params["rows"]
+            return [
+                {
+                    "nodeID": "node-1",
+                    "relID": "rel-1",
+                    "CMID": "SM486205",
+                    "Key": "EC == example",
+                    "datasetID": "SD1",
+                    "parent": ["SM21103", "SM237437"],
+                }
+            ]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    result = upload.updateProperty(
+        pd.DataFrame(
+            [
+                {
+                    "relID": "rel-1",
+                    "datasetID": "SD1",
+                    "CMID": "SM486205",
+                    "Key": "EC == example",
+                    "parent": ["SM21103", "SM237437"],
+                }
+            ]
+        ),
+        optionalProperties=["parent"],
+        isDataset=False,
+        database="SocioMap",
+        user="tester",
+        updateType="overwrite",
+        propertyType="USES",
+    )
+
+    assert result["df"][0]["parent"] == "SM21103||||SM237437"
+    assert captured["rows"][0]["parent"] == "SM21103||||SM237437"
+    assert "'list','||||'" in captured["query"]
+
+
+def test_input_nodes_uses_rejects_existing_dataset_key_duplicate(monkeypatch):
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='node'" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='relationship'" in query:
+            return []
+        if "MATCH (l:LABEL) return l.CMName as label" in query:
+            return ["DIALECT"]
+        if "WITH DISTINCT row.datasetID AS datasetID, row.Key AS keyValue" in query:
+            return [
+                {
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "existingCMIDs": ["AM999"],
+                    "rel_count": 1,
+                }
+            ]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    with pytest.raises(ValueError, match="same datasetID and Key already exists"):
+        upload.input_Nodes_Uses(
+            dataset=[
+                {
+                    "CMID": "AM1",
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "label": "DIALECT",
+                    "Name": "Alpha",
+                }
+            ],
+            database="ArchaMap",
+            uploadOption="add_uses",
+            formatKey=False,
+            optionalProperties=[],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
+
+
+def test_input_nodes_uses_rejects_upload_dataset_key_duplicate_to_different_cmids(monkeypatch):
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='node'" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='relationship'" in query:
+            return []
+        if "MATCH (l:LABEL) return l.CMName as label" in query:
+            return ["DIALECT"]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    with pytest.raises(ValueError, match="Duplicate datasetID \\+ Key values"):
+        upload.input_Nodes_Uses(
+            dataset=[
+                {
+                    "CMID": "AM1",
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "label": "DIALECT",
+                    "Name": "Alpha",
+                },
+                {
+                    "CMID": "AM2",
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "label": "DIALECT",
+                    "Name": "Beta",
+                },
+            ],
+            database="ArchaMap",
+            uploadOption="add_uses",
+            formatKey=False,
+            optionalProperties=[],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
 
 
 def test_input_nodes_uses_formats_key_before_key_validation(monkeypatch):
@@ -142,6 +592,34 @@ def test_add_uses_rejects_blank_name_when_creating_new_node(monkeypatch):
         )
 
 
+def test_input_nodes_uses_rejects_malformed_key_before_upload(monkeypatch):
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+    monkeypatch.setattr(upload, "getQuery", lambda *args, **kwargs: [])
+
+    with pytest.raises(ValueError, match="Invalid 'Key' format"):
+        upload.input_Nodes_Uses(
+            dataset=[
+                {
+                    "CMID": "AM1",
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha &&",
+                    "label": "DIALECT",
+                    "Name": "Alpha",
+                }
+            ],
+            database="ArchaMap",
+            uploadOption="add_uses",
+            formatKey=False,
+            optionalProperties=[],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
+
+
 def test_add_node_rejects_blank_cmname(monkeypatch):
     monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
     monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
@@ -168,6 +646,26 @@ def test_add_node_rejects_blank_cmname(monkeypatch):
             addRecordYear=False,
             geocode=False,
         )
+
+
+def test_stringify_upload_values_preserves_literal_none_names():
+    dataset = pd.DataFrame(
+        [
+            {
+                "CMName": "None",
+                "Name": "None",
+                "empty_value": None,
+                "pd_missing": pd.NA,
+            }
+        ]
+    )
+
+    result = upload._stringify_upload_values(dataset)
+
+    assert result.loc[0, "CMName"] == "None"
+    assert result.loc[0, "Name"] == "None"
+    assert result.loc[0, "empty_value"] == ""
+    assert result.loc[0, "pd_missing"] == ""
 
 
 def test_validate_variable_category_type_values_normalizes_variable_rows_by_label():
@@ -329,6 +827,130 @@ def test_validate_non_parent_multi_value_columns_raises_for_wrong_label():
     assert "CMID SM251420" in message
 
 
+def test_validate_non_parent_multi_value_columns_accepts_area_for_district():
+    dataset = pd.DataFrame(
+        {
+            "CMID": [""],
+            "District": ["SM64"],
+        }
+    )
+    column_map = {"District": ["SM64"]}
+    cmid_metadata = {
+        "SM64": {"labels": {"CATEGORY", "AREA", "ADM0"}, "groupLabels": {"AREA"}},
+    }
+
+    result = upload._validate_non_parent_multi_value_columns(
+        dataset,
+        column_map,
+        cmid_metadata,
+    )
+
+    assert result is None
+
+
+def test_validate_contextual_primary_domain_ties_rejects_languoid_to_languoid():
+    dataset = pd.DataFrame(
+        {
+            "CMID": ["SM-DIALECT"],
+            "language": ["SM-FAMILY"],
+        }
+    )
+    cmid_metadata = {
+        "SM-DIALECT": {
+            "labels": {"CATEGORY", "LANGUOID", "DIALECT"},
+            "groupLabels": {"LANGUOID"},
+        },
+        "SM-FAMILY": {
+            "labels": {"CATEGORY", "LANGUOID", "FAMILY"},
+            "groupLabels": {"LANGUOID"},
+        },
+    }
+
+    with pytest.raises(ValueError, match="same primary domain") as err:
+        upload._validate_contextual_primary_domain_ties(
+            dataset,
+            {"language": ["SM-FAMILY"]},
+            cmid_metadata,
+        )
+
+    assert "SM-DIALECT" in str(err.value)
+    assert "SM-FAMILY" in str(err.value)
+    assert "LANGUOID" in str(err.value)
+
+
+def test_validate_contextual_primary_domain_ties_allows_area_of_area():
+    dataset = pd.DataFrame(
+        {
+            "CMID": ["SM-AREA-CHILD"],
+            "district": ["SM-AREA-PARENT"],
+        }
+    )
+    cmid_metadata = {
+        "SM-AREA-CHILD": {
+            "labels": {"CATEGORY", "AREA", "ADM1"},
+            "groupLabels": {"AREA"},
+        },
+        "SM-AREA-PARENT": {
+            "labels": {"CATEGORY", "AREA", "ADM0"},
+            "groupLabels": {"AREA"},
+        },
+    }
+
+    assert upload._validate_contextual_primary_domain_ties(
+        dataset,
+        {"district": ["SM-AREA-PARENT"]},
+        cmid_metadata,
+    ) is None
+
+
+def test_validate_restricted_node_property_domains_rejects_wrong_domain(monkeypatch):
+    dataset = pd.DataFrame(
+        {
+            "CMID": ["SM-LANG"],
+            "FIPS": ["US"],
+        }
+    )
+    cmid_metadata = {
+        "SM-LANG": {"labels": {"CATEGORY", "LANGUOID"}, "groupLabels": {"LANGUOID"}},
+    }
+
+    monkeypatch.setattr(upload, "getQuery", lambda *args, **kwargs: [])
+
+    with pytest.raises(ValueError) as err:
+        upload._validate_restricted_node_property_domains(
+            dataset,
+            ["FIPS"],
+            cmid_metadata,
+            object(),
+        )
+
+    assert "FIPS is only valid for AREA nodes" in str(err.value)
+
+
+def test_validate_restricted_node_property_domains_accepts_iso3_for_languoid(monkeypatch):
+    dataset = pd.DataFrame(
+        {
+            "CMID": ["SM-LANG"],
+            "ISO3": ["eng"],
+        }
+    )
+    cmid_metadata = {
+        "SM-LANG": {"labels": {"CATEGORY", "LANGUOID"}, "groupLabels": {"LANGUOID"}},
+    }
+
+    monkeypatch.setattr(upload, "getQuery", lambda *args, **kwargs: [])
+
+    assert (
+        upload._validate_restricted_node_property_domains(
+            dataset,
+            ["ISO3"],
+            cmid_metadata,
+            object(),
+        )
+        is None
+    )
+
+
 def test_validate_parent_label_compatibility_raises_on_mismatch(monkeypatch):
     dataset = pd.DataFrame(
         {
@@ -410,6 +1032,32 @@ def test_collect_cmid_metadata_targets_includes_child_cmids_for_parent_validatio
     targets = upload._collect_cmid_metadata_targets(dataset, column_map)
 
     assert set(targets) == {"SM251419", "SM251572"}
+
+
+def test_fetch_cmid_metadata_accepts_set_inputs(monkeypatch):
+    captured_chunks = []
+
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+
+    def fake_get_query(query, driver, params=None, **kwargs):
+        captured_chunks.append(params["cmids"])
+        return [
+            {
+                "cmid": "SM64",
+                "labels": ["CATEGORY", "AREA"],
+                "groupLabels": ["AREA"],
+            }
+        ]
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+    metadata = upload._fetch_cmid_metadata(object(), {"SM64"})
+
+    assert captured_chunks == [["SM64"]]
+    assert metadata["SM64"] == {
+        "labels": {"CATEGORY", "AREA"},
+        "groupLabels": {"AREA"},
+    }
 
 
 def test_resolve_group_labels_falls_back_to_node_labels_when_mapping_missing():

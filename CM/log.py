@@ -1,6 +1,6 @@
 from .utils import getQuery
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def createLog(id, type, log, user, driver,isDataset = False):
@@ -20,7 +20,7 @@ def createLog(id, type, log, user, driver,isDataset = False):
         raise ValueError(
             "If passing multiple IDs and logs, they must match 1-to-1")
 
-    timestamp = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ')
+    timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
     # Prepare list of dicts to UNWIND
     rows = [
@@ -44,6 +44,13 @@ def createLog(id, type, log, user, driver,isDataset = False):
         MATCH (l:{search_label}) WHERE elementId(l) = row.id
         CREATE (log:LOG {{timestamp: row.timestamp, action: row.action}})
         SET log.user = row.user
+        SET l.modifiedByOtherUser =
+          CASE
+            WHEN l.ownerUserId IS NULL THEN l.modifiedByOtherUser
+            WHEN toString(row.user) = '0' THEN coalesce(l.modifiedByOtherUser, false)
+            WHEN toString(l.ownerUserId) <> toString(row.user) THEN true
+            ELSE coalesce(l.modifiedByOtherUser, false)
+          END
         CREATE (l)-[:HAS_LOG]->(log)
         """
     elif type == "relation":
@@ -52,6 +59,13 @@ def createLog(id, type, log, user, driver,isDataset = False):
         MATCH ()-[l:USES]->() WHERE elementId(l) = row.id
         CREATE (log:LOG {timestamp: row.timestamp, action: row.action})
         SET log.user = row.user
+        SET l.modifiedByOtherUser =
+          CASE
+            WHEN l.ownerUserId IS NULL THEN l.modifiedByOtherUser
+            WHEN toString(row.user) = '0' THEN coalesce(l.modifiedByOtherUser, false)
+            WHEN toString(l.ownerUserId) <> toString(row.user) THEN true
+            ELSE coalesce(l.modifiedByOtherUser, false)
+          END
         SET l.logID = custom.formatProperties([l.logID, elementId(log)], 'list', ';')[0].prop
         """
     else:

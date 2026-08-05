@@ -84,3 +84,57 @@ def test_routines_admin_endpoint_does_not_pass_mail_object(client, monkeypatch):
         "return_type": "data",
         "send_email": False,
     }
+
+
+def test_runRoutines_includes_duplicate_node_cmid_check(client, monkeypatch):
+    called = []
+
+    def fake_info(name):
+        def _fake(*args, **kwargs):
+            called.append(name)
+            return {"info": f"{name}-ok", "filepath": None}
+        return _fake
+
+    routine_names = [
+        "reportChanges",
+        "checkDomains",
+        "getBadDomains",
+        "getBadCMID",
+        "getDuplicateNodeCMIDs",
+        "getMultipleLabels",
+        "getBadComplexProperties",
+        "getBadRelations",
+        "CMNameNotInName",
+        "missingCMName",
+        "getBadContextual",
+        "noUSES",
+        "checkUSES",
+        "get_duplicate_empty_USES",
+        "get_duplicate_triplets",
+        "getBadGlottocodes",
+        "waitingUSES",
+        "processUSES",
+        "getInappropriateprops_Nodes_Rels",
+        "get_empty_nodeprops",
+        "get_label_check",
+        "getNumeric_Checks",
+        "processDATASETs",
+        "fixMetaTypes",
+    ]
+
+    for name in routine_names:
+        monkeypatch.setattr(routine_routes.routines_module, name, fake_info(name))
+
+    response = client.get("/runRoutines/TestDB")
+    body = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert "Duplicate CMIDs including deleted for TestDB" in body
+    assert "getDuplicateNodeCMIDs-ok" in body
+    assert "getDuplicateNodeCMIDs" in called
+    assert "Process Waiting USES for TestDB" in body
+    assert "waitingUSES-ok" in body
+    assert "waitingUSES" in called
+    assert "Glottocode Checks for TestDB" in body
+    assert "getBadGlottocodes-ok" in body
+    assert "getBadGlottocodes" in called

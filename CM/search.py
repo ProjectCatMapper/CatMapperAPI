@@ -624,7 +624,13 @@ def translate(
         qKey = "with row, a, matching, CMcountry, score, '' as Key"
 
     # return results
-    qReturn = """
+    if key:
+        qReturn = """
+    return distinct row.CMuniqueCategoryID as CMuniqueCategoryID, row.CMuniqueRowID as CMuniqueRowID, row.term as term,row.country as country,row.context as context, a.CMID as CMID, a.CMName as CMName, custom.getLabel(a) as label,
+    matching, score as matchingDistance,CMcountry, Key order by matchingDistance
+    """
+    else:
+        qReturn = """
     return distinct row.CMuniqueCategoryID as CMuniqueCategoryID, row.CMuniqueRowID as CMuniqueRowID, row.term as term,row.country as country,row.context as context, a.CMID as CMID, a.CMName as CMName, custom.getLabel(a) as label, 
     matching, score as matchingDistance,CMcountry, apoc.text.join(collect(Key),'; ') as Key order by matchingDistance
     """

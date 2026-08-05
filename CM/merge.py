@@ -520,8 +520,8 @@ def joinDatasets(database, joinLeft, joinRight, domain="CATEGORY"):
         match_query = f"""
         UNWIND $datasetID AS id
         MATCH (d:DATASET {{CMID: id}})-[r:USES]->(:{domain})
-        WITH d, split(r.Key, '; ') AS Key
-        WITH d, [i IN Key | trim(split(i, ': ')[0])] AS Key
+        WITH d, split(r.Key, ' && ') AS Key
+        WITH d, [i IN Key | trim(split(i, ' == ')[0])] AS Key
         RETURN DISTINCT d.CMID AS datasetID, Key
         """
         match_left = getQuery(match_query, driver, {"datasetID": datasetID_left}, type = "df")
@@ -1379,9 +1379,11 @@ def createSyntax(template, database="SocioMap",
     )
 
     key_pairs = data[["datasetID", "Key"]].drop_duplicates().copy()
-    key_pairs["Key2"] = key_pairs["Key"].str.split("; ")
+    key_pairs["Key2"] = key_pairs["Key"].str.split(" && ")
     key_pairs = key_pairs.explode("Key2").reset_index(drop=True)
-    parsed = key_pairs["Key2"].fillna("").astype(str).str.split(r"\s*(?:==|:)\s*", n=1, regex=True, expand=True)
+    parsed = key_pairs["Key2"].fillna("").astype(str).str.split(" == ", n=1, regex=False, expand=True)
+    if 1 not in parsed.columns:
+        parsed[1] = np.nan
     key_pairs["variable"] = parsed[0]
     key_pairs["value"] = parsed[1]
     key_pairs = key_pairs.drop(columns=["Key2"])

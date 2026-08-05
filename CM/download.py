@@ -14,11 +14,11 @@ import pandas as pd
 
 BACKUP_SOURCE_MAP = {
     "ArchaMap": {
-        "s3_prefix": "archamap-backups/download",
+        "s3_prefix": "backups/archamap1/download",
         "local_dir": "/db/archamap1/backups/download",
     },
     "SocioMap": {
-        "s3_prefix": "sociomap1-backups/download",
+        "s3_prefix": "backups/sociomap1/download",
         "local_dir": "/db/sociomap1/backups/download",
     },
 }
@@ -47,14 +47,14 @@ def _aws_client_kwargs_from_config():
     return kwargs
 
 
-def get_backup_csv_urls(database, bucket="sociomap-backups", region="us-west-1", mostRecent=True):
+def get_backup_csv_urls(database, bucket="catmapper", region="us-west-1", mostRecent=True):
     """
     Returns a list of full S3 URLs to backup CSV files for the given database,
     along with their sizes in megabytes.
 
     Parameters:
         database (str): "ArchaMap" or "SocioMap"
-        bucket (str): S3 bucket name (default: "sociomap-backups")
+        bucket (str): S3 bucket name (default: "catmapper")
         region (str): AWS region (default: "us-west-1")
         mostRecent (bool): If True, only return the most recent CSV files.
 

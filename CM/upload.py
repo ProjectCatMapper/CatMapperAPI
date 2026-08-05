@@ -6,6 +6,7 @@ from .keys import *
 from .GIS import *
 from .log import *
 from .metadata import getPropertiesMetadata
+from .ownership import ownership_metadata, validate_upload_ownership_scope
 
 import json
 import os
@@ -22,6 +23,18 @@ warnings.simplefilter("error", UserWarning)
 
 _UPLOAD_LOG_LISTENER = threading.local()
 _UPLOAD_LOG_TIMING = threading.local()
+_JSON_UPLOAD_PROPERTIES = {"parentContext", "geoCoords", "geo"}
+_INTERNAL_OWNER_PROPERTY_NAMES = {"ownerUserId", "modifiedByOtherUser"}
+
+
+def _get_editable_properties_metadata(driver):
+    """Return public upload metadata while remaining compatible with simple test drivers."""
+    return [
+        row
+        for row in getPropertiesMetadata(driver)
+        if not bool(row.get("internal"))
+        and row.get("CMName") not in _INTERNAL_OWNER_PROPERTY_NAMES
+    ]
 
 data = [
     {
@@ -130,8 +143,41 @@ def updateLog(f, txt, write="a"):
     if callback:
         callback(message)
 
+
+def _stamp_nodes_with_ownership(driver, node_ids, metadata):
+    node_ids = [str(node_id) for node_id in (node_ids or []) if str(node_id or "").strip()]
+    if not node_ids or not metadata:
+        return
+    query = """
+    UNWIND $nodeIds AS nodeID
+    MATCH (n)
+    WHERE elementId(n) = nodeID
+    SET
+      n.ownerUserId = $ownerUserId,
+      n.modifiedByOtherUser = $modifiedByOtherUser
+    RETURN count(n) AS stamped
+    """
+    getQuery(query=query, driver=driver, params={**metadata, "nodeIds": node_ids})
+
+
+def _stamp_uses_with_ownership(driver, rel_ids, metadata):
+    rel_ids = [str(rel_id) for rel_id in (rel_ids or []) if str(rel_id or "").strip()]
+    if not rel_ids or not metadata:
+        return
+    query = """
+    UNWIND $relIds AS relID
+    MATCH ()-[r:USES]->()
+    WHERE elementId(r) = relID
+    SET
+      r.ownerUserId = $ownerUserId,
+      r.modifiedByOtherUser = $modifiedByOtherUser
+    RETURN count(r) AS stamped
+    """
+    getQuery(query=query, driver=driver, params={**metadata, "relIds": rel_ids})
+
+
 #Creates new nodes for functions 1 and 2
-def createNodes(df, database,isDataset, user, uniqueID=None):
+def createNodes(df, database,isDataset, user, uniqueID=None, ownershipMetadata=None):
     try:
 
         driver = getDriver(database)
@@ -192,11 +238,11 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
 
         if isDataset:
             allowed_properties = getQuery(
-                "MATCH (p:PROPERTY) WHERE p.nodeType CONTAINS 'DATASET' or p.nodeType='NO EDIT' return p.CMName as property", driver, type="list"
+                "MATCH (p:PROPERTY) WHERE coalesce(p.internal, false) = false AND (p.nodeType CONTAINS 'DATASET' or p.nodeType='NO EDIT') return p.CMName as property", driver, type="list"
             )
         else:
             allowed_properties = getQuery(
-                "MATCH (p:PROPERTY) WHERE p.nodeType CONTAINS 'CATEGORY' or p.nodeType='NO EDIT' return p.CMName as property", driver, type="list"
+                "MATCH (p:PROPERTY) WHERE coalesce(p.internal, false) = false AND (p.nodeType CONTAINS 'CATEGORY' or p.nodeType='NO EDIT') return p.CMName as property", driver, type="list"
             )
         
         vars = [v for v in vars if v in allowed_properties] + ['importID']
@@ -248,6 +294,7 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
         getQuery(query=q,driver=driver)
 
         node_ids = results_df["nodeID"].tolist()
+        _stamp_nodes_with_ownership(driver, node_ids, ownershipMetadata)
 
         updateLog(f"log/{user}uploadProgress.txt", "Updating log", write="a")
 
@@ -273,7 +320,7 @@ def createNodes(df, database,isDataset, user, uniqueID=None):
 #Creates uses ties for nodes created in functions 1 and 2
 #Currently relies on checks for duplicate rows from the main function,
 #if used independently in the future, may need more precise internal error handling.
-def createUSES(links, database, user):
+def createUSES(links, database, user, ownershipMetadata=None):
     try:
         start_time = time.time()
         if "datasetID" not in links.columns or "CMID" not in links.columns or "Key" not in links.columns:
@@ -288,7 +335,7 @@ def createUSES(links, database, user):
         # We get all columns that need to be set as properties for realtionships
         # This is useful when determining valid columns coming from the API, not relevant to UI.
         db_properties = getQuery(
-            "MATCH (p:PROPERTY) WHERE p.type = 'relationship' RETURN p.CMName AS property",
+            "MATCH (p:PROPERTY) WHERE p.type = 'relationship' AND coalesce(p.internal, false) = false RETURN p.CMName AS property",
             driver,
         )
         db_properties_list = [item["property"] for item in db_properties]
@@ -297,6 +344,16 @@ def createUSES(links, database, user):
             raise Exception(
                 f"Error: The following columns are not in properties: {', '.join(missing_cols)}"
             )
+
+        locator_columns = {"datasetID", "CMID", "CMName", "Key"}
+        for column_name in links.columns:
+            if column_name in db_properties_list and column_name not in locator_columns:
+                links[column_name] = links[column_name].apply(
+                    lambda value, prop=column_name: _normalize_non_json_upload_value(
+                        value,
+                        prop,
+                    )
+                )
 
         multi_value_columns = [
             "language",
@@ -318,6 +375,8 @@ def createUSES(links, database, user):
         # Convert all values to strings and replace NaN with empty strings
         links = links.fillna("").astype(str)
 
+        _validate_new_uses_dataset_key_uniqueness(links, driver, uploadOption="add_uses")
+
         #Removes required properties that either aren't added to uses tie (datasetID, CMID, CMName) or are added separately (Key)
         vars = links.columns.difference(["datasetID", "CMID", "Key", "CMName"])
 
@@ -329,7 +388,7 @@ def createUSES(links, database, user):
         #     """
 
         # metaTypes = getQuery(query, driver)
-        metaTypes = getPropertiesMetadata(driver)
+        metaTypes = _get_editable_properties_metadata(driver)
         metaTypeDict = {item["property"]: item["metaType"] for item in metaTypes}
 
         keys = []
@@ -399,6 +458,7 @@ def createUSES(links, database, user):
         )
         updateLog(f"log/{user}uploadProgress.txt", ", ".join(vars), write="a")
         result_df = pd.DataFrame(result)
+        _stamp_uses_with_ownership(driver, result_df["relID"].tolist(), ownershipMetadata)
         createLog(
             id=result_df["relID"].tolist(),
             type="relation",
@@ -450,7 +510,17 @@ def createUSES(links, database, user):
 # This function does 3 things : it creates the correct datatyper for calls from upload, it changes the database
 # and it logs those changes.
 # If no seperator is specified, quadruple stove pipe should lead to no parsing.
-def updateProperty(df,optionalProperties,isDataset, database, user, updateType, propertyType="USES",sep = "||||"):
+def updateProperty(
+    df,
+    optionalProperties,
+    isDataset,
+    database,
+    user,
+    updateType,
+    propertyType="USES",
+    sep="||||",
+    actorClaims=None,
+):
     try:
         # double checking for errors, if in future we call this function elsewhere outside this pipeline
         if not updateType in ["overwrite", "update"]:
@@ -460,6 +530,33 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
             df = df.drop("importID")
 
         driver = getDriver(database)
+        actor_claims = actorClaims or {}
+        actor_user_id = str(actor_claims.get("userid") or "").strip()
+        owner_scoped = (
+            bool(actor_user_id)
+            and str(actor_claims.get("role") or "user").strip().lower()
+            != "admin"
+        )
+        uses_owner_guard = (
+            """
+              AND toString(coalesce(r.ownerUserId, '')) = $actorUserId
+              AND coalesce(r.modifiedByOtherUser, false) = false
+            """
+            if owner_scoped
+            else ""
+        )
+        node_owner_guard = (
+            """
+            WHERE toString(coalesce(n.ownerUserId, '')) = $actorUserId
+              AND coalesce(n.modifiedByOtherUser, false) = false
+              AND NOT EXISTS {
+                MATCH (n)-[ownedRel:USES]-()
+                WHERE toString(coalesce(ownedRel.ownerUserId, '')) <> $actorUserId
+              }
+            """
+            if owner_scoped
+            else ""
+        )
 
         has_relid = False
         if propertyType == "USES":
@@ -477,17 +574,41 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
             if required not in df.columns:
                 raise ValueError(f"Missing required column {required}")
 
-        # Every column excluding the required columns in the dataframe
-        # This carries forwaard geoCoords and parentContext even though they are not in optionalProperties               
+        # Every column excluding required locator columns in the dataframe.
+        # This intentionally carries forward geoCoords and parentContext even if
+        # they are not in optionalProperties.
         vars = df.drop(columns=[col for col in requiredCols if col in df.columns]).columns.tolist()
+
+        optional_props = optionalProperties if isinstance(optionalProperties, list) else []
+        normalized_optional_props = [str(prop).strip() for prop in optional_props if str(prop).strip()]
+        normalized_optional_set = set(normalized_optional_props)
 
         if "NewKey" in vars:
             for x in range(len(vars)):
                 if vars[x] == "NewKey":
                     vars[x] = "Key"
 
+        if propertyType == "USES":
+            # Relationship locator columns must never be written as USES props.
+            vars = [var for var in vars if var not in {"CMID", "datasetID", "relID", "OldKey"}]
+
+            # Keep Key editable only when the caller explicitly requested a key edit.
+            if "Key" in vars and "NewKey" not in normalized_optional_set and "Key" not in normalized_optional_set:
+                vars = [var for var in vars if var != "Key"]
+
         if not vars:
             raise ValueError("No columns to change were uploaded.")
+
+        if propertyType == "USES":
+            for var in vars:
+                if var in df.columns:
+                    df[var] = df[var].apply(
+                        lambda value, prop=var: _normalize_non_json_upload_value(
+                            value,
+                            prop,
+                            separator=sep,
+                        )
+                    )
                 
         # End of error checking
         
@@ -529,7 +650,7 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
 
         # getting metatypes for properties
         #metaTypes = getQuery(query, driver)
-        metaTypes = getPropertiesMetadata(driver)
+        metaTypes = _get_editable_properties_metadata(driver)
         if propertyType == "USES":
             filteredItems = [item for item in metaTypes if item["type"] == "relationship"]
             node_or_tie = "r"
@@ -547,12 +668,14 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
             if var == "populationEstimate":
                 # custom.formatProperties expects string-compatible tokens.
                 new_tokens = (
-                    f"[v IN apoc.coll.flatten([row.{var}], true) "
-                    f"WHERE v IS NOT NULL | toString(v)]"
+                    f"CASE WHEN row.{var} IS NULL THEN [] "
+                    f"ELSE [v IN apoc.coll.flatten([row.{var}], true) "
+                    f"WHERE v IS NOT NULL | toString(v)] END"
                 )
                 existing_tokens = (
-                    f"[v IN apoc.coll.flatten([{node_or_tie}.{var}], true) "
-                    f"WHERE v IS NOT NULL | toString(v)]"
+                    f"CASE WHEN {node_or_tie}.{var} IS NULL THEN [] "
+                    f"ELSE [v IN apoc.coll.flatten([{node_or_tie}.{var}], true) "
+                    f"WHERE v IS NOT NULL | toString(v)] END"
                 )
                 if updateType == "overwrite" and var != "log":
                     props.append(
@@ -560,7 +683,7 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
                     )
                 else:
                     props.append(
-                        f"{node_or_tie}.{var} = custom.formatProperties(apoc.coll.flatten([{existing_tokens},{new_tokens}], true),'{metaType}','{sep}')[0].prop"
+                        f"{node_or_tie}.{var} = custom.formatProperties(({existing_tokens} + {new_tokens}),'{metaType}','{sep}')[0].prop"
                     )
             elif updateType == "overwrite" and var != "log":
                 props.append(
@@ -629,6 +752,7 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
                 UNWIND $rows AS row
                 MATCH (a:DATASET)-[r:USES]->(b:CATEGORY)
                 WHERE elementId(r) = row.relID
+                {uses_owner_guard}
                 WITH row, r, b
                 SET r.status = 'update', {props}
                 RETURN elementId(b) as nodeID,elementId(r) as relID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID
@@ -638,6 +762,7 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
                 UNWIND $rows AS row
                 MATCH (a:DATASET)-[r:USES]->(b:CATEGORY)
                 WHERE elementId(r) = row.relID
+                {uses_owner_guard}
                 WITH row, r, b
                 SET r.status = 'update', {props}
                 RETURN elementId(b) as nodeID,elementId(r) as relID, b.CMID as CMID, row.Key as Key, row.datasetID as datasetID, {return_props}
@@ -646,13 +771,17 @@ def updateProperty(df,optionalProperties,isDataset, database, user, updateType, 
             q = f"""
             UNWIND $rows AS row
             MATCH (n {{CMID: row.CMID}})
+            {node_owner_guard}
             SET {props}
             RETURN elementId(n) as nodeID, n.CMID as CMID
             """
 
         df_dict = df.to_dict(orient="records")
 
-        result = getQuery(query=q, driver=driver, params={"rows": df_dict})
+        query_params = {"rows": df_dict}
+        if owner_scoped:
+            query_params["actorUserId"] = actor_user_id
+        result = getQuery(query=q, driver=driver, params=query_params)
 
         logs = []
 
@@ -757,7 +886,23 @@ def combine_properties(df, group_by_cols, string_cols, driver):
     # Puts values from different rows in a single list and for string-value columns it checks if there is more than one value
     # then changes the list to a ; delimited string
     def combine_column(colname, values):
-        vals = [str(x).strip() for x in values if pd.notna(x)]
+        vals = []
+        for value in values:
+            if _is_missing_upload_value(value):
+                continue
+            if _is_json_upload_property(colname):
+                text = str(value).strip()
+                if text:
+                    vals.append(text)
+                continue
+
+            expanded = _expand_listish_upload_value(value)
+            if expanded is None:
+                text = str(value).strip()
+                if text:
+                    vals.append(text)
+            else:
+                vals.extend(expanded)
         unique_vals = sorted(set(vals))
         
         # strict check
@@ -937,6 +1082,96 @@ def is_non_empty(x):
     return pd.notna(x) and str(x).strip() != ''
 
 
+def _stringify_upload_values(df):
+    """Convert true missing values to empty strings without erasing literal text."""
+    df = df.mask(df.isna(), "")
+    df = df.astype(str)
+    return df.replace({"nan": "", "<NA>": ""})
+
+
+def _is_json_upload_property(property_name):
+    return str(property_name or "").strip() in _JSON_UPLOAD_PROPERTIES
+
+
+def _is_missing_upload_value(value):
+    if value is None:
+        return True
+    if isinstance(value, (list, tuple, set, dict)):
+        return False
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def _parse_stringified_scalar_list(value):
+    if not isinstance(value, str):
+        return None
+
+    raw_value = value.strip()
+    if not (raw_value.startswith("[") and raw_value.endswith("]")):
+        return None
+
+    parsers = (ast.literal_eval, json.loads)
+    for parser in parsers:
+        try:
+            parsed_value = parser(raw_value)
+        except (ValueError, SyntaxError, json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(parsed_value, (list, tuple, set)):
+            continue
+        if any(isinstance(item, (list, tuple, set, dict)) for item in parsed_value):
+            return None
+        return list(parsed_value)
+
+    return None
+
+
+def _clean_upload_token(value):
+    if _is_missing_upload_value(value):
+        return ""
+    return str(value).strip()
+
+
+def _expand_listish_upload_value(value):
+    if _is_missing_upload_value(value):
+        return []
+
+    if isinstance(value, (list, tuple, set)):
+        tokens = []
+        for item in value:
+            nested_tokens = _expand_listish_upload_value(item)
+            if nested_tokens is None:
+                token = _clean_upload_token(item)
+                if token:
+                    tokens.append(token)
+            else:
+                tokens.extend(nested_tokens)
+        return tokens
+
+    parsed_tokens = _parse_stringified_scalar_list(value)
+    if parsed_tokens is not None:
+        return [
+            token
+            for token in (_clean_upload_token(item) for item in parsed_tokens)
+            if token
+        ]
+
+    return None
+
+
+def _normalize_non_json_upload_value(value, property_name, separator=";"):
+    if _is_json_upload_property(property_name):
+        return "" if _is_missing_upload_value(value) else value
+
+    tokens = _expand_listish_upload_value(value)
+    if tokens is None:
+        return "" if _is_missing_upload_value(value) else value
+
+    # De-duplicate while preserving order.
+    return separator.join(dict.fromkeys(tokens))
+
+
 def _split_multi_value_cell(value):
     if value is None:
         return []
@@ -1026,15 +1261,16 @@ def _collect_cmid_metadata_targets(dataset, multi_value_column_map):
         for cmid in values
     }
 
-    # Parent compatibility checks compare parent values against child CMID labels.
-    # Child CMIDs must always be resolvable in the same metadata map.
-    if "parent" in multi_value_column_map and "CMID" in dataset.columns:
+    # Contextual tie checks compare every referenced value against the category
+    # receiving that tie, so child CMIDs must be present in the same map.
+    if multi_value_column_map and "CMID" in dataset.columns:
         targets.update(_collect_unique_column_values(dataset, "CMID", set()))
 
     return sorted(targets)
 
 
 def _chunk_list(values, chunk_size):
+    values = list(values)
     for start in range(0, len(values), chunk_size):
         yield values[start : start + chunk_size]
 
@@ -1074,7 +1310,7 @@ def _fetch_cmid_metadata(driver, cmids, chunk_size=1500):
 
 
 def _required_label_for_column(column_name):
-    if column_name == "country":
+    if column_name in {"country", "district", "District"}:
         return "AREA"
     if column_name == "language":
         return "LANGUOID"
@@ -1184,6 +1420,128 @@ def _validate_non_parent_multi_value_columns(dataset, column_value_map, cmid_met
                 + ", ".join(detail_parts)
                 + suffix
             )
+
+
+def _validate_contextual_primary_domain_ties(dataset, column_value_map, cmid_metadata):
+    """Reject direct contextual ties whose category endpoints share a domain."""
+    errors = []
+    for row_index, row in dataset.iterrows():
+        child_domains = _upload_row_domains(row, cmid_metadata, {})
+        if not child_domains:
+            continue
+
+        for column_name in column_value_map:
+            if column_name == "parent" or column_name not in dataset.columns:
+                continue
+            for target_cmid in _split_multi_value_cell(row.get(column_name)):
+                target_domains = _resolve_group_labels(cmid_metadata.get(target_cmid))
+                shared_domains = child_domains.intersection(target_domains)
+                if not shared_domains or "AREA" in shared_domains:
+                    continue
+                child_cmid = str(row.get("CMID") or "").strip() or "<new node>"
+                errors.append(
+                    f"row {row_index + 1} CMID {child_cmid}, property {column_name}, "
+                    f"target {target_cmid} (shared domain: {', '.join(sorted(shared_domains))})"
+                )
+
+    if errors:
+        suffix = " ..." if len(errors) > 10 else ""
+        raise ValueError(
+            "Cannot create contextual ties between nodes in the same primary domain: "
+            + "; ".join(errors[:10])
+            + suffix
+            + ". AREA_OF between AREA nodes is the only exception."
+        )
+
+
+def _fetch_label_domain_map(driver, labels):
+    labels = sorted({str(label or "").strip() for label in labels if str(label or "").strip()})
+    if not labels:
+        return {}
+
+    query = """
+    UNWIND $labels AS label
+    OPTIONAL MATCH (m:LABEL {CMName: label})
+    RETURN label, m.groupLabel AS groupLabel
+    """
+    rows = getQuery(query, driver, params={"labels": labels}, type="dict")
+    return {
+        row["label"]: (row.get("groupLabel") or row["label"])
+        for row in rows
+        if row.get("label")
+    }
+
+
+def _restricted_node_properties_in_dataset(dataset, node_properties):
+    return [
+        prop
+        for prop in node_properties
+        if prop in dataset.columns and get_node_property_domain_restriction(prop)
+    ]
+
+
+def _row_has_value(row, property_name):
+    value = row.get(property_name)
+    if value is None:
+        return False
+    if isinstance(value, list):
+        return any(str(item).strip() for item in value if item is not None)
+    if pd.isna(value):
+        return False
+    return str(value).strip() != ""
+
+
+def _upload_row_domains(row, cmid_metadata, label_domain_map):
+    domains = set()
+    cmid = str(row.get("CMID") or "").strip()
+    if cmid:
+        domains.update(_resolve_group_labels(cmid_metadata.get(cmid)))
+
+    label = str(row.get("label") or "").strip()
+    if label:
+        domains.add(label_domain_map.get(label, label))
+
+    group_label = str(row.get("groupLabel") or "").strip()
+    if group_label:
+        domains.add(group_label)
+
+    return domains
+
+
+def _validate_restricted_node_property_domains(dataset, node_properties, cmid_metadata, driver):
+    restricted_props = _restricted_node_properties_in_dataset(dataset, node_properties)
+    if not restricted_props:
+        return
+
+    label_domain_map = _fetch_label_domain_map(
+        driver,
+        dataset["label"].dropna().astype(str).tolist() if "label" in dataset.columns else [],
+    )
+
+    errors = []
+    for row_index, row in dataset.iterrows():
+        domains = _upload_row_domains(row, cmid_metadata, label_domain_map)
+        for prop in restricted_props:
+            if not _row_has_value(row, prop):
+                continue
+            allowed_domains = get_node_property_domain_restriction(prop)
+            if domains.intersection(allowed_domains):
+                continue
+            allowed_text = " or ".join(sorted(allowed_domains))
+            found_text = ", ".join(sorted(domains)) if domains else "unknown"
+            cmid = str(row.get("CMID") or "").strip() or "<new node>"
+            errors.append(
+                f"row {row_index + 1} CMID {cmid}: {prop} is only valid for {allowed_text} nodes "
+                f"(found {found_text})"
+            )
+
+    if errors:
+        suffix = " ..." if len(errors) > 10 else ""
+        raise ValueError(
+            "Restricted node property domain mismatch: "
+            + "; ".join(errors[:10])
+            + suffix
+        )
 
 
 def _validate_parent_label_compatibility(dataset, cmid_metadata, driver, user):
@@ -1797,7 +2155,7 @@ def updateMergeProperty(df,optionalProperties, database, user, mergingType, requ
                 
         # getting metatypes for properties
         #metaTypes = getQuery(query, driver)
-        metaTypes = getPropertiesMetadata(driver)
+        metaTypes = _get_editable_properties_metadata(driver)
         filteredItems = [item for item in metaTypes if item["type"] == "relationship"]
 
         metaTypeDict = {item["property"]: item["metaType"] for item in filteredItems}
@@ -1933,6 +2291,102 @@ def _is_same_update_add_value(existing_value, incoming_value):
     return str(existing_value) == str(incoming_value)
 
 
+def _format_uses_dataset_key_conflicts(conflicts, limit=10):
+    lines = []
+    for conflict in conflicts[:limit]:
+        target = conflict.get("CMID") or conflict.get("existingCMIDs")
+        target_text = f", CMID={target}" if target else ""
+        lines.append(
+            f"(datasetID={conflict.get('datasetID')}, Key={conflict.get('Key')}{target_text})"
+        )
+    if len(conflicts) > limit:
+        lines.append(f"... and {len(conflicts) - limit} more")
+    return ", ".join(lines)
+
+
+def _uses_target_count_for_group(group):
+    if "CMID" not in group.columns:
+        return len(group)
+
+    cmids = group["CMID"].fillna("").astype(str).str.strip()
+    blank_count = int((cmids == "").sum())
+    non_blank_count = cmids[cmids != ""].nunique()
+    return int(non_blank_count + blank_count)
+
+
+def _validate_new_uses_dataset_key_uniqueness(
+    dataset,
+    driver,
+    uploadOption="add_uses",
+    key_column="Key",
+):
+    if key_column not in dataset.columns or "datasetID" not in dataset.columns:
+        return
+
+    if uploadOption not in {"add_node", "add_uses", "update_replace"}:
+        return
+
+    candidate_cols = ["datasetID", key_column]
+    if "CMID" in dataset.columns:
+        candidate_cols.append("CMID")
+
+    candidates = dataset[candidate_cols].copy()
+    candidates["datasetID"] = candidates["datasetID"].fillna("").astype(str).str.strip()
+    candidates[key_column] = candidates[key_column].fillna("").astype(str).str.strip()
+    candidates = candidates[
+        (candidates["datasetID"] != "") & (candidates[key_column] != "")
+    ]
+
+    if candidates.empty:
+        return
+
+    if key_column != "Key":
+        candidates = candidates.rename(columns={key_column: "Key"})
+
+    input_conflicts = []
+    for (dataset_id, key), group in candidates.groupby(["datasetID", "Key"], dropna=False):
+        if _uses_target_count_for_group(group) > 1:
+            input_conflicts.append({"datasetID": dataset_id, "Key": key})
+
+    if input_conflicts:
+        raise ValueError(
+            "Duplicate datasetID + Key values in upload would create multiple USES ties: "
+            + _format_uses_dataset_key_conflicts(input_conflicts)
+        )
+
+    existing_rows = candidates[["datasetID", "Key"]].drop_duplicates().to_dict(
+        orient="records"
+    )
+    if not existing_rows:
+        return
+
+    query = """
+        UNWIND $rows AS row
+        WITH DISTINCT row.datasetID AS datasetID, row.Key AS keyValue
+        OPTIONAL MATCH (d:DATASET {CMID: datasetID})-[r:USES {Key: keyValue}]->(c:CATEGORY)
+        RETURN datasetID AS datasetID,
+               keyValue AS Key,
+               collect(DISTINCT c.CMID) AS existingCMIDs,
+               count(r) AS rel_count
+    """
+    results = getQuery(query, driver, params={"rows": existing_rows})
+    db_conflicts = [
+        {
+            "datasetID": row.get("datasetID"),
+            "Key": row.get("Key"),
+            "existingCMIDs": row.get("existingCMIDs", []),
+        }
+        for row in results
+        if row.get("rel_count", 0) >= 1
+    ]
+
+    if db_conflicts:
+        raise ValueError(
+            "A USES tie with the same datasetID and Key already exists: "
+            + _format_uses_dataset_key_conflicts(db_conflicts)
+        )
+
+
 def input_Nodes_Uses(
     dataset,
     database,
@@ -1946,8 +2400,13 @@ def input_Nodes_Uses(
     mergingType="0",
     geocode=False,
     batchSize=1000,
+    actorClaims=None,
+    contributionId=None,
 ):
-       
+    # Transitional compatibility for jobs queued before simplified ownership
+    # metadata removed contributionId. The value is intentionally ignored.
+    del contributionId
+
     updateLog(f"log/{user}uploadProgress.txt", "Starting database upload", write="w")
 
     if user is None:
@@ -1993,6 +2452,12 @@ def input_Nodes_Uses(
         )
     
     driver = getDriver(database)
+    validate_upload_ownership_scope(database, uploadOption, dataset, actorClaims)
+    upload_ownership_metadata = (
+        ownership_metadata(actorClaims)
+        if actorClaims
+        else None
+    )
 
     # adhoc ID used for joining and filtering output purposes.
     updateLog(f"log/{user}uploadProgress.txt", "Creating import ID", write="a")
@@ -2041,11 +2506,11 @@ def input_Nodes_Uses(
         "loading node and relationship property metadata",
         write="a",
     )
-    node_query = "MATCH (p:PROPERTY) WHERE p.type='node' RETURN p.CMName as property"
+    node_query = "MATCH (p:PROPERTY) WHERE p.type='node' AND coalesce(p.internal, false) = false RETURN p.CMName as property"
     node_values = getQuery(node_query, driver, type="list")
     nodeProperties = [value for value in node_values if value in optionalProperties]
     
-    link_query = "MATCH (p:PROPERTY) WHERE p.type='relationship' RETURN p.CMName as property"
+    link_query = "MATCH (p:PROPERTY) WHERE p.type='relationship' AND coalesce(p.internal, false) = false RETURN p.CMName as property"
     link_values = getQuery(link_query, driver, type="list")
     linkProperties = [value for value in link_values if value in optionalProperties]
     
@@ -2109,22 +2574,23 @@ def input_Nodes_Uses(
             raise ValueError("Key column is required when formatKey is True")
         dataset = createKey(dataset, "Key").copy()
 
-    # When uploading keys or new keys, need to make sure they follow the standard convention
-    #pattern = re.compile(r"^\s*[^=&&]+?\s*==\s*[^=&&]+?(?:\s*&&\s*[^=&&]+?\s*==\s*[^=&&]+?)*\s*$")
-    pattern = re.compile(r"^.+?\s==\s.+?(?:\s&&\s.+?\s==\s.+?)*$")
-
+    # When uploading keys or new keys, make sure they follow the standard convention.
+    key_warnings = []
     if (uploadOption == "add_node" and not isDataset) or uploadOption == "add_uses" or mergingType == "merging_ties_to_categories" :
-        invalid_rows = dataset.index[~dataset["Key"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].map(lambda x:x+1).tolist()
-
-        if invalid_rows:
-            raise ValueError(f"Invalid 'Key' format in rows:\n{invalid_rows}. Must be of form VARIABLE == VALUE")
+        invalid_key_error = invalid_key_format_error(dataset["Key"], "Key")
+        if invalid_key_error:
+            raise ValueError(invalid_key_error)
+        key_warnings.extend(key_format_warning_messages(dataset["Key"], "Key"))
           
     if uploadOption == "update_replace":
         if "NewKey" in dataset.columns:
-            invalid_rows = dataset.index[~dataset["NewKey"].apply(lambda x: isinstance(x, str) and bool(pattern.match(x)))].tolist()
+            invalid_key_error = invalid_key_format_error(dataset["NewKey"], "NewKey")
+            if invalid_key_error:
+                raise ValueError(invalid_key_error)
+            key_warnings.extend(key_format_warning_messages(dataset["NewKey"], "NewKey"))
 
-            if invalid_rows:
-                raise ValueError(f"Invalid 'NewKey' format in rows:\n{invalid_rows}. Must be of form VARIABLE == VALUE")
+    for key_warning in key_warnings:
+        updateLog(f"log/{user}uploadProgress.txt", f"Warning: {key_warning}", write="a")
 
     # Treat whitespace-only values as missing for key identifier/name columns.
     # This prevents creating nodes with blank CMName when CMID is missing.
@@ -2320,16 +2786,37 @@ def input_Nodes_Uses(
             except (ValueError, TypeError):
                 raise ValueError(f"Longitude at row {index} is not a valid number (value: {row['longitude']}).")
             
-    """ Replaces nan/NA values with None and then replaces all none with "" """
-    """ Also converts everything to string """
-    dataset = dataset.replace({np.nan: None, pd.NA: None})
-    dataset = dataset.astype(str)
-    dataset = dataset.replace({"nan": "", "<NA>": "", "None": ""})
+    """Convert true missing values to empty strings while preserving literal text."""
+    dataset = _stringify_upload_values(dataset)
 
     """ CMID checks """
     #data_dict is created as a “records” data dictionary from dataset for the purpose of error checking.
     # also used for functions 5 and 6
     data_dict = dataset.to_dict(orient="records")
+
+    if uploadOption in {"add_node", "add_uses"}:
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking duplicate datasetID/Key pairs for new USES ties",
+            write="a",
+        )
+        _validate_new_uses_dataset_key_uniqueness(
+            dataset,
+            driver,
+            uploadOption=uploadOption,
+        )
+    elif uploadOption == "update_replace" and "NewKey" in optionalProperties:
+        updateLog(
+            f"log/{user}uploadProgress.txt",
+            "checking duplicate datasetID/NewKey pairs for USES key replacement",
+            write="a",
+        )
+        _validate_new_uses_dataset_key_uniqueness(
+            dataset,
+            driver,
+            uploadOption=uploadOption,
+            key_column="NewKey",
+        )
 
     # checks for all CMIDS to be either category or dataset
     if "CMID" in dataset.columns:
@@ -2505,10 +2992,13 @@ def input_Nodes_Uses(
     # 2) Grouplabel for CMID in property matches property
     # 3) Grouplabel for CMID for parent matches Grouplabel of child.
     multi_value_column_map = _collect_multi_value_column_map(dataset, multi_value_columns)
-    unique_multi_value_cmids = _collect_cmid_metadata_targets(
+    restricted_node_properties = _restricted_node_properties_in_dataset(dataset, nodeProperties)
+    unique_multi_value_cmids = set(_collect_cmid_metadata_targets(
         dataset,
         multi_value_column_map,
-    )
+    ))
+    if restricted_node_properties and "CMID" in dataset.columns:
+        unique_multi_value_cmids.update(_collect_unique_column_values(dataset, "CMID", set()))
     cmid_metadata = {}
     if unique_multi_value_cmids:
         updateLog(
@@ -2523,7 +3013,15 @@ def input_Nodes_Uses(
             write="a",
         )
 
+    _validate_restricted_node_property_domains(dataset, nodeProperties, cmid_metadata, driver)
+    check_query_cancellation()
     _validate_non_parent_multi_value_columns(dataset, multi_value_column_map, cmid_metadata)
+    check_query_cancellation()
+    _validate_contextual_primary_domain_ties(
+        dataset,
+        multi_value_column_map,
+        cmid_metadata,
+    )
     check_query_cancellation()
     if "parent" in multi_value_column_map:
         _validate_parent_label_compatibility(dataset, cmid_metadata, driver, user)
@@ -2902,6 +3400,9 @@ def input_Nodes_Uses(
             driver,
             type="list",
         )
+    string_cols = [
+        col for col in string_cols if col not in _INTERNAL_OWNER_PROPERTY_NAMES
+    ]
 
     if uploadOption == "add_uses":
         updateLog(
@@ -2967,7 +3468,11 @@ def input_Nodes_Uses(
             type="list",
         )
     
-    node_string_cols = [col for col in node_string_cols if col not in ["CMID","label"]]
+    node_string_cols = [
+        col
+        for col in node_string_cols
+        if col not in {"CMID", "label", *_INTERNAL_OWNER_PROPERTY_NAMES}
+    ]
     
     if uploadOption == "node_add":
         updateLog(
@@ -3068,7 +3573,7 @@ def input_Nodes_Uses(
 
     # Combining paired properties is only necessary for functions 1 through 6
     if mergingType == "0":
-        properties = getPropertiesMetadata(driver)
+        properties = _get_editable_properties_metadata(driver)
         properties = pd.DataFrame(properties)
 
         # Grouping linkproperties for a common super label.
@@ -3245,7 +3750,14 @@ def input_Nodes_Uses(
                         write="a",
                     )
 
-                    newly_created_nodes = createNodes(nodes, database, isDataset, user=user, uniqueID="importID")
+                    newly_created_nodes = createNodes(
+                        nodes,
+                        database,
+                        isDataset,
+                        user=user,
+                        uniqueID="importID",
+                        ownershipMetadata=upload_ownership_metadata,
+                    )
                     newly_created_nodes = pd.DataFrame(newly_created_nodes)
                     newly_created_nodes = newly_created_nodes.astype(str)
                     sub_dataset = sub_dataset.astype(str)
@@ -3333,7 +3845,8 @@ def input_Nodes_Uses(
                         database=database,
                         user=user,
                         updateType="overwrite",
-                        sep=";"
+                        sep=";",
+                        actorClaims=actorClaims,
                     )
                 elif uploadOption == "update_add":
                     updateLog(
@@ -3346,7 +3859,8 @@ def input_Nodes_Uses(
                         database=database,
                         user=user,
                         updateType="update",
-                        sep=";"
+                        sep=";",
+                        actorClaims=actorClaims,
                     )
                 elif uploadOption == "add_node" or uploadOption == "add_uses":
                     updateLog(
@@ -3356,7 +3870,10 @@ def input_Nodes_Uses(
                     )
                     links = links[link_cols]
                     result = createUSES(
-                        links=links, database=database, user=user
+                        links=links,
+                        database=database,
+                        user=user,
+                        ownershipMetadata=upload_ownership_metadata,
                     )
                 if isinstance(result, str):
                     updateLog(f"log/{user}uploadProgress.txt", result, write="a")
@@ -3419,7 +3936,8 @@ def input_Nodes_Uses(
                         user=user,
                         updateType="overwrite",
                         propertyType="NODE",
-                        sep=";"
+                        sep=";",
+                        actorClaims=actorClaims,
                     )
                 elif uploadOption == "node_add":
                     updateLog(
@@ -3435,7 +3953,8 @@ def input_Nodes_Uses(
                         user=user,
                         updateType="update",
                         propertyType="NODE",
-                        sep=";"
+                        sep=";",
+                        actorClaims=actorClaims,
                     )
 
                 updateLog(

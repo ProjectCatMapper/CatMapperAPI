@@ -1,11 +1,51 @@
 from flask import Blueprint, request, jsonify, render_template, make_response
 from CM import *
+from CM.ownership import (
+    OwnershipError,
+    OwnerScopedAdminReviewRequired,
+    assert_owner_scoped_node_removal_allowed,
+    assert_owned_nodes,
+    assert_owned_uses_by_relids,
+    assert_owned_uses_by_triplets,
+    is_admin_claims,
+    normalize_actor_claims,
+    owned_uses_relids,
+)
 import json
 from datetime import datetime, timezone
 from .auth_utils import verify_request_auth, classify_auth_error_status
 from .extensions import mail
 
 admin_bp = Blueprint('admin', __name__)
+
+_ADMIN_USES_NON_ADDABLE_COMPONENT_PROPERTIES = {
+    "eventdate",
+    "eventtype",
+    "latitude",
+    "longitude",
+}
+
+
+def _admin_uses_property_addable(property_name):
+    normalized = str(property_name or "").strip().lower()
+    return normalized not in _ADMIN_USES_NON_ADDABLE_COMPONENT_PROPERTIES
+
+
+def _admin_uses_property_reltype_addable(reltype):
+    if reltype is None:
+        return True
+
+    if isinstance(reltype, (list, tuple, set)):
+        values = reltype
+    else:
+        values = str(reltype).replace("||", "|").replace(",", "|").split("|")
+
+    normalized_values = {
+        str(value or "").strip().upper()
+        for value in values
+        if str(value or "").strip()
+    }
+    return "MERGING" not in normalized_values
 
 
 def _parse_credentials(raw_value):
@@ -23,6 +63,217 @@ def _parse_credentials(raw_value):
         except Exception:
             return None
     return None
+
+
+OWNER_SCOPED_ADMIN_EDIT_FUNCTIONS = {
+    "add/edit/delete node property",
+    "add/edit/delete USES property",
+    "delete USES relation",
+    "move USES tie",
+    "merge nodes",
+    "delete node",
+}
+
+OWNER_SCOPED_FORBIDDEN_PROPERTY_NAMES = {"log", "logid"}
+OWNER_SCOPED_USES_EDITABLE_PROPERTY_NAMES = {"key", "label", "name"}
+
+
+def _require_admin_claims(claims):
+    if not is_admin_claims(claims):
+        raise OwnershipError("User is not authorized for this admin function")
+    return True
+
+
+def _selected_uses_relid(input_payload):
+    input_payload = input_payload or {}
+    raw_selection = input_payload.get("s1_7")
+
+    relations = input_payload.get("s1_4") or []
+    try:
+        selected_index = int(raw_selection) - 1
+        if isinstance(relations, list) and 0 <= selected_index < len(relations):
+            selected_relation = relations[selected_index]
+            if isinstance(selected_relation, list) and len(selected_relation) > 1:
+                rel_props = selected_relation[1] if isinstance(selected_relation[1], dict) else {}
+                rel_id = rel_props.get("id")
+                if rel_id:
+                    return str(rel_id)
+    except (TypeError, ValueError):
+        pass
+
+    try:
+        parsed = json.loads(raw_selection) if isinstance(raw_selection, str) else raw_selection
+    except Exception:
+        parsed = None
+    if isinstance(parsed, list) and len(parsed) > 1 and isinstance(parsed[1], dict):
+        rel_id = parsed[1].get("id")
+        if rel_id:
+            return str(rel_id)
+
+    raise ValueError("Selected USES tie is invalid or no longer available.")
+
+
+def _authorize_admin_edit_function(fun, database, input_payload, tabledata, dataset_id, claims):
+    if is_admin_claims(claims):
+        return True
+
+    if fun not in OWNER_SCOPED_ADMIN_EDIT_FUNCTIONS:
+        raise OwnershipError("User is not authorized for this admin function")
+
+    input_payload = input_payload or {}
+    if fun == "add/edit/delete node property":
+        prop = str(input_payload.get("s1_7") or "").strip().lower()
+        if prop in OWNER_SCOPED_FORBIDDEN_PROPERTY_NAMES:
+            raise OwnershipError("User is not authorized to edit log properties")
+        assert_owned_nodes(database, [input_payload.get("s1_2")], claims)
+        return True
+
+    if fun == "merge nodes":
+        assert_owner_scoped_node_removal_allowed(database, input_payload.get("s1_3"), claims)
+        return True
+
+    if fun == "delete node":
+        assert_owner_scoped_node_removal_allowed(database, input_payload.get("s1_2"), claims)
+        return True
+
+    if fun == "add/edit/delete USES property":
+        prop = str(input_payload.get("s1_8") or "").strip().lower()
+        if prop not in OWNER_SCOPED_USES_EDITABLE_PROPERTY_NAMES:
+            raise OwnershipError("User is not authorized to edit this USES property")
+
+    rel_id = _selected_uses_relid(input_payload)
+    assert_owned_uses_by_relids(database, [rel_id], claims)
+
+    if fun == "move USES tie":
+        additional_rows = []
+        for row in tabledata or []:
+            if not isinstance(row, dict):
+                continue
+            if row.get("optionA") == "From":
+                continue
+            additional_rows.append({
+                "CMID": row.get("CMID"),
+                "Key": row.get("Key"),
+                "datasetID": dataset_id,
+            })
+        assert_owned_uses_by_triplets(database, additional_rows, claims)
+
+    return True
+
+
+def _node_removal_review_target(fun, input_payload):
+    input_payload = input_payload or {}
+    if fun == "merge nodes":
+        return str(input_payload.get("s1_3") or "").strip()
+    if fun == "delete node":
+        return str(input_payload.get("s1_2") or "").strip()
+    return ""
+
+
+def _safe_node_summary(database, cmid):
+    if not cmid:
+        return None
+    try:
+        return getNodeMergeSummary(cmid, getDriver(database))
+    except Exception as exc:
+        return {"CMID": cmid, "summaryError": str(exc)}
+
+
+def _format_node_removal_review_email(database, action, actor, input_payload, reason, review):
+    input_payload = input_payload or {}
+    keep_cmid = str(input_payload.get("s1_2") or "").strip() if action == "merge nodes" else ""
+    target_cmid = _node_removal_review_target(action, input_payload)
+    lines = [
+        "A CatMapper user requested admin review for a blocked node action.",
+        "",
+        f"Database: {database}",
+        f"Action: {action}",
+        f"Requested at: {datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')}",
+        f"Requester user ID: {actor.get('userid')}",
+        f"Requester role: {actor.get('role')}",
+        f"Target CMID: {target_cmid}",
+    ]
+    if keep_cmid:
+        lines.append(f"Keep CMID: {keep_cmid}")
+    lines.extend([
+        "",
+        "User reason:",
+        str(reason or "").strip(),
+        "",
+        "Blocking authorization result:",
+        str(review.get("message") or ""),
+    ])
+    reason_code = review.get("reasonCode")
+    if reason_code:
+        lines.append(f"Reason code: {reason_code}")
+    details = review.get("details") or {}
+    if details:
+        lines.extend(["", "Blocker details:", json.dumps(details, indent=2, sort_keys=True)])
+
+    target_summary = _safe_node_summary(database, target_cmid)
+    if target_summary:
+        lines.extend(["", "Target node summary:", json.dumps(target_summary, indent=2, sort_keys=True, default=str)])
+    if keep_cmid:
+        keep_summary = _safe_node_summary(database, keep_cmid)
+        if keep_summary:
+            lines.extend(["", "Keep node summary:", json.dumps(keep_summary, indent=2, sort_keys=True, default=str)])
+
+    lines.extend(["", "Submitted input:", json.dumps(input_payload, indent=2, sort_keys=True, default=str)])
+    return "\n".join(lines)
+
+
+@admin_bp.route('/admin/node-removal-review-request', methods=['POST'])
+def request_node_removal_admin_review():
+    try:
+        data = request.get_json(silent=True) or {}
+        database = unlist(data.get("database"))
+        action = unlist(data.get("fun") or data.get("action"))
+        input_payload = unlist(data.get("input")) or {}
+        reason = str(unlist(data.get("reason")) or "").strip()
+        credentials = _parse_credentials(data.get("cred"))
+
+        if database is None:
+            raise Exception("Database not specified")
+        if action not in {"merge nodes", "delete node"}:
+            raise Exception("Review requests are only supported for merge nodes and delete node")
+        if not reason:
+            raise Exception("A reason is required for admin review")
+
+        claims = normalize_actor_claims(verify_request_auth(credentials=credentials, req=request))
+        if is_admin_claims(claims):
+            raise OwnershipError("Admin users can complete this action directly")
+
+        target_cmid = _node_removal_review_target(action, input_payload)
+        if not target_cmid:
+            raise Exception("Target CMID is required")
+
+        try:
+            assert_owner_scoped_node_removal_allowed(database, target_cmid, claims)
+        except OwnerScopedAdminReviewRequired as review_error:
+            review = review_error.to_dict()
+        except Exception:
+            raise
+        else:
+            raise Exception("This action is eligible for user completion and does not require admin review")
+
+        body = _format_node_removal_review_email(database, action, claims, input_payload, reason, review)
+        sender = get_default_sender() or "admin@catmapper.org"
+        email_result = sendEmail(
+            mail=mail,
+            subject=f"CatMapper admin review requested: {action} {target_cmid}",
+            recipients=["admin@catmapper.org"],
+            body=body,
+            sender=sender,
+        )
+        return jsonify({
+            "message": "Admin review request sent.",
+            "review": review,
+            "emailResult": email_result,
+        }), 200
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message}), status_code
 
 
 def _now_iso():
@@ -482,6 +733,15 @@ def admin_nodeproperties():
     CMID = request.args.get('CMID')
     database = request.args.get('database')
     option = request.args.get('option')
+    credentials = _parse_credentials(request.args.get("cred"))
+    try:
+        claims = normalize_actor_claims(verify_request_auth(credentials=credentials, req=request))
+        if not is_admin_claims(claims):
+            assert_owned_nodes(database, [CMID], claims)
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message, "r": {}, "r1": []}), status_code
 
     driver = getDriver(database)
 
@@ -490,24 +750,36 @@ def admin_nodeproperties():
 
     # q1 captures relevant properties of node
     if "CP" in CMID:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'PROPERTY' RETURN p.CMName as property"
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND coalesce(p.internal, false) = false AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'PROPERTY' RETURN p.CMName as property"
     elif "CL" in CMID:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'LABEL' RETURN p.CMName as property"
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND coalesce(p.internal, false) = false AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'LABEL' RETURN p.CMName as property"
     elif "D" in CMID:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'DATASET' RETURN p.CMName as property"
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND coalesce(p.internal, false) = false AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'DATASET' RETURN p.CMName as property"
     else:
-        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'CATEGORY' RETURN p.CMName as property"
+        q1 = "MATCH (p:PROPERTY) WHERE p.type='node' AND coalesce(p.internal, false) = false AND p.nodeType IS NOT NULL AND p.nodeType CONTAINS 'CATEGORY' RETURN p.CMName as property"
 
     with driver.session() as session:
         r = session.run(q, cmid=CMID).data()
 
         if r == []:
             return jsonify({"error": "Invalid CMID"})
+        node_rows = session.run(
+            "MATCH (n {CMID: $cmid}) RETURN labels(n) AS labels",
+            cmid=CMID,
+        ).data()
+        labels = set(node_rows[0].get("labels") or []) if node_rows else set()
+        if "DELETED" in labels:
+            return jsonify({"error": f"{CMID} is a deleted node and cannot be edited."})
+
         props = [k for k in r[0]['props'].keys()] if r else []
 
         # Run q1 to get allowed properties
         allowed = session.run(q1).data()
-        allowed_props = {row['property'] for row in allowed}
+        allowed_props = {
+            row['property']
+            for row in allowed
+            if node_property_allowed_for_labels(row.get('property'), labels, driver)
+        }
 
         r = {k: v for k, v in r[0]['props'].items() if k in allowed_props}
 
@@ -529,12 +801,29 @@ def admin_usesproperties():
     CMID = request.args.get('CMID')
     database = request.args.get('database')
     func = request.args.get("func")
+    credentials = _parse_credentials(request.args.get("cred"))
+    try:
+        claims = normalize_actor_claims(verify_request_auth(credentials=credentials, req=request))
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message, "r": [], "r1": []}), status_code
 
     driver = getDriver(database)
 
-    q = "MATCH (n:CATEGORY)<-[r:USES]-(d:DATASET) WHERE n.CMID = $cmid RETURN {CMName: n.CMName, CMID: n.CMID,elementId: elementId(n)} AS n,r,d"
+    q = """
+    MATCH (n:CATEGORY)<-[r:USES]-(d:DATASET)
+    WHERE n.CMID = $cmid
+    RETURN {CMName: n.CMName, CMID: n.CMID, elementId: elementId(n), labels: labels(n)} AS n, r, d
+    """
     
-    q1 = "MATCH (p:PROPERTY) WHERE p.type='relationship' RETURN p.CMName as property"
+    q1 = """
+    MATCH (p:PROPERTY)
+    WHERE p.type='relationship'
+      AND coalesce(p.internal, false) = false
+    RETURN p.CMName as property, p.groupLabel as groupLabel, p.relationship as relationship,
+           p.reltype as reltype
+    """
 
     with driver.session() as session:
         result = session.run(q, cmid=CMID)
@@ -550,9 +839,95 @@ def admin_usesproperties():
         
         temp_list.sort(key=lambda x: (x[2].get("CMName", ""), x[1].get("Key", "")))
         records_list.extend(temp_list)
+
+        if not records_list:
+            node_rows = session.run(
+                "MATCH (n {CMID: $cmid}) RETURN n.CMID AS CMID, n.CMName AS CMName, labels(n) AS labels",
+                cmid=CMID,
+            ).data()
+            if not node_rows:
+                return jsonify({"error": "Invalid CMID", "r": [], "r1": []})
+
+            labels = set(node_rows[0].get("labels") or [])
+            if "DELETED" in labels:
+                return jsonify({
+                    "error": f"{CMID} is a deleted node and has no editable USES ties.",
+                    "r": [],
+                    "r1": [],
+                })
+            if "DATASET" in labels:
+                return jsonify({
+                    "error": (
+                        "USES properties belong to category nodes. "
+                        "Use add/edit/delete node property to edit dataset parent values."
+                    ),
+                    "r": [],
+                    "r1": [],
+                })
+
+            return jsonify({
+                "error": f"No USES ties found for {CMID}.",
+                "r": [],
+                "r1": [],
+            })
+
+        if not is_admin_claims(claims):
+            owned_rel_ids = owned_uses_relids(
+                database,
+                [record[1].get("id") for record in records_list],
+                claims,
+            )
+            records_list = [
+                record
+                for record in records_list
+                if str(record[1].get("id") or "") in owned_rel_ids
+            ]
+            if not records_list:
+                return jsonify({
+                    "error": "",
+                    "r": [],
+                    "r1": [],
+                })
         
+        category_labels = records_list[0][0].get("labels", []) if records_list else []
         allowed = session.run(q1).data()
-        allowed_props = list({row['property'] for row in allowed})
+        category_domains = None
+        category_group_label = None
+        allowed_props = []
+        for row in allowed:
+            property_name = row.get('property')
+            if not property_name:
+                continue
+            if not _admin_uses_property_addable(property_name):
+                continue
+            if not _admin_uses_property_reltype_addable(row.get('reltype')):
+                continue
+
+            allowed_domains = get_node_property_domain_restriction(property_name)
+            if allowed_domains:
+                if category_domains is None:
+                    category_domains = resolve_domains_from_node_labels(category_labels, driver)
+                if not category_domains.intersection(allowed_domains):
+                    continue
+
+            if uses_contextual_property_needs_category_group(
+                property_name,
+                row.get('groupLabel'),
+                row.get('relationship'),
+            ):
+                if category_group_label is None:
+                    category_group_label = get_uses_contextual_category_group(CMID, driver)
+                if not uses_contextual_property_allowed_for_group(
+                    category_group_label,
+                    property_name,
+                    row.get('groupLabel'),
+                    row.get('relationship'),
+                ):
+                    continue
+
+            allowed_props.append(property_name)
+
+        allowed_props = sorted(set(allowed_props))
         
     return {
         "r": records_list,
@@ -565,6 +940,13 @@ def admin_usesproperties():
 def admin_category_merging_properties():
     CMID = request.args.get('CMID')
     database = request.args.get('database')
+    credentials = _parse_credentials(request.args.get("cred"))
+    try:
+        verify_request_auth(credentials=credentials, required_role="admin", req=request)
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message, "r": [], "r1": []}), status_code
 
     driver = getDriver(database)
 
@@ -641,20 +1023,27 @@ def admin_node_summary():
 
 @admin_bp.route('/check_ambiguous_usesties', methods=['POST'])
 def check_ambiguous_usesties():
-    data = request.get_data()
-    data = json.loads(data)
-    database = unlist(data.get('database'))
-    credentials = unlist(data.get("cred"))
-    input = unlist(data.get("input"))
-    CMID_from = input.get('s1_2')
-    CMID_to = input.get('s1_3')
-    USES_property = json.loads(input.get('s1_7'))
-    rel_id = USES_property[1]["id"]
-    driver = getDriver(database)
-    verify_request_auth(credentials=credentials, required_role="admin", req=request)
+    try:
+        data = request.get_data()
+        data = json.loads(data)
+        database = unlist(data.get('database'))
+        credentials = unlist(data.get("cred"))
+        input = unlist(data.get("input"))
+        CMID_from = input.get('s1_2')
+        CMID_to = input.get('s1_3')
+        USES_property = json.loads(input.get('s1_7'))
+        rel_id = USES_property[1]["id"]
+        driver = getDriver(database)
+        claims = normalize_actor_claims(verify_request_auth(credentials=credentials, req=request))
+        if not is_admin_claims(claims):
+            assert_owned_uses_by_relids(database, [rel_id], claims)
 
-    result = check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id)
-    return result
+        result = check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id)
+        return result
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 500
+        return jsonify({"error": error_message}), status_code
 
 @admin_bp.route('/admin', methods=['GET'])
 def getAdmin():
@@ -703,28 +1092,43 @@ def getAdminEdit():
         apikey = unlist(data.get('apikey'))
         credentials = _parse_credentials(data.get("cred"))
         input = unlist(data.get("input"))
-        acting_user = None
+        claims = None
         auth_header = request.headers.get("Authorization", "")
         request_api_key = request.headers.get("X-API-Key", "").strip()
         auth_lower = auth_header.lower()
         has_api_key_auth = bool(request_api_key) or auth_lower.startswith("apikey ") or auth_lower.startswith("api-key ")
         if credentials or auth_header.startswith("Bearer ") or has_api_key_auth:
-            claims = verify_request_auth(credentials=credentials, required_role="admin", req=request)
-            acting_user = claims.get("userid")
+            claims = normalize_actor_claims(verify_request_auth(credentials=credentials, req=request))
         else:
             validated = False
             if apikeyEnv and apikey and apikey == apikeyEnv:
                 validated = True
-                acting_user = user
+                claims = {"userid": str(user or "legacy-admin"), "role": "admin"}
             if not validated:
                 credentials = login(user, pwd)
                 if isinstance(credentials, dict) and credentials.get('role') == "admin":
                     validated = True
-                    acting_user = credentials.get('userid')
+                    claims = {
+                        "userid": str(credentials.get("userid") or user or "legacy-admin"),
+                        "role": "admin",
+                    }
             if not validated:
                 raise Exception("User not authorized")
+        claims = normalize_actor_claims(claims)
+        acting_user = claims.get("userid")
         if not acting_user:
             acting_user = user
+        if isinstance(input, dict):
+            input = dict(input)
+            input["_actorClaims"] = dict(claims)
+        _authorize_admin_edit_function(
+            fun=fun,
+            database=database,
+            input_payload=input,
+            tabledata=data.get("tabledata"),
+            dataset_id=data.get("datasetID"),
+            claims=claims,
+        )
         
         result = "Nothing returned"
         if fun == "mergeNodes":
@@ -769,10 +1173,17 @@ def getAdminEdit():
         else:
             raise Exception("Function does not exist")
         return result
+    except OwnerScopedAdminReviewRequired as e:
+        return jsonify({
+            "error": str(e),
+            "requiresAdminReview": True,
+            "review": e.to_dict(),
+        }), 403
     except Exception as e:
         # In case of an error, return an error response with an appropriate HTTP status code
         data = str(e)
-        return data, 500
+        status_code = classify_auth_error_status(data) or 500
+        return data, status_code
 
 
 @admin_bp.route('/createNodes', methods=['POST'])

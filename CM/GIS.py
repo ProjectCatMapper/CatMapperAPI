@@ -3,6 +3,18 @@ import pandas as pd
 from .utils import *
 
 
+def _polygon_lookup_rows(rows):
+    """Flatten scalar/list polygon references before passing them to UNWIND."""
+    flattened = []
+    for row in rows or []:
+        raw = row.get("geomID")
+        geom_ids = raw if isinstance(raw, list) else [raw]
+        for geom_id in geom_ids:
+            if geom_id is not None and str(geom_id).strip():
+                flattened.append({**dict(row), "geomID": str(geom_id).strip()})
+    return flattened
+
+
 def convert_to_multipoint(geojson_string):
     """
     Convert a semicolon-separated string of GeoJSON Point objects into a single MultiPoint geometry.
@@ -86,14 +98,13 @@ def getPolygon(CMID, driver, simple=True):
     return distinct r.geoPolygon as geomID, d.shortName as source
     """
         result = getQuery(query, driver, params={"CMID": CMID})
+        result = _polygon_lookup_rows(result)
 
         driverGIS = getDriver('gisdb')
         if simple == True:
                 query = """
     unwind $rows as row 
-    unwind row.geomID as geomID
-    unwind row.source as source
-    with geomID, source
+    with row.geomID as geomID, row.source as source
     match (g:GEOMETRY)
     where g.geomID = geomID
     return source, coalesce(g.simplified,g.geometry) as geometry, g.simplified is not null as simple
@@ -101,9 +112,7 @@ def getPolygon(CMID, driver, simple=True):
         else:
                 query = """
     unwind $rows as row 
-    unwind row.geomID as geomID
-    unwind row.source as source
-    with geomID, source
+    with row.geomID as geomID, row.source as source
     match (g:GEOMETRY) 
     where g.geomID = geomID
     return source, g.geometry as geometry
@@ -121,25 +130,25 @@ def getPoints(CMID, driver):
     WHERE r.geoCoords IS NOT NULL
     RETURN DISTINCT
         r.geoCoords AS geometry,
-        d.shortName AS source,
+        coalesce(d.shortName, d.CMName, d.CMID) AS source,
         r.Key AS Key,
-        c.CMName AS CMName,
-        c.CMID AS CMID
+        c.CMID AS CMID,
+        coalesce(c.CMName, c.Name, c.CMID) AS CMName
     """
     result = getQuery(query, driver, params={"CMID": CMID})
     points = [dict(record) for record in result]
     return points
 
 def getDatasetPoints(CMID, driver):
-
     query = """
-    MATCH (c:CATEGORY)<-[r:USES]-(:DATASET {CMID: $CMID})
+    MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET {CMID: $CMID})
     WHERE r.geoCoords IS NOT NULL
     RETURN DISTINCT
         r.geoCoords AS geometry,
-        c.CMName AS source,
-        c.CMName AS CMName,
-        c.CMID AS CMID
+        coalesce(c.CMName, c.Name, c.CMID) AS source,
+        r.Key AS Key,
+        c.CMID AS CMID,
+        coalesce(c.CMName, c.Name, c.CMID) AS CMName
     """
     result = getQuery(query, driver, params={"CMID": CMID})
     points = [dict(record) for record in result]

@@ -37,8 +37,10 @@ def parse_bearer_token(req=None):
         return None
     try:
         payload = _serializer().loads(token, max_age=AUTH_TOKEN_TTL_SECONDS)
-    except (BadSignature, SignatureExpired):
-        return None
+    except SignatureExpired as exc:
+        raise Exception("Session expired") from exc
+    except BadSignature as exc:
+        raise Exception("Invalid token") from exc
     if not isinstance(payload, dict):
         return None
     return payload
@@ -275,7 +277,10 @@ def classify_auth_error_status(error):
         "user is not verified",
         "api key matched multiple users",
         "invalid credentials",
+        "invalid token",
         "authentication failed",
+        "session expired",
+        "signature expired",
     )
     if any(marker in text for marker in unauthorized_markers):
         return 401
