@@ -124,6 +124,14 @@ def get_domain_descriptions(database):
     
     return getQuery(query, driver, type="dict")
 
+
+def clear_metadata_caches():
+    """Invalidate metadata lookups after an administrative metadata mutation."""
+    get_metadata_groups.cache_clear()
+    get_public_subdomains.cache_clear()
+    get_public_domains.cache_clear()
+    get_domain_descriptions.cache_clear()
+
 def getLabelsMetadata(driver):
     query = """
     match (n:LABEL)
