@@ -1396,6 +1396,9 @@ def saveMetadata():
             resultA = getQuery(query=query, driver=driverA, params={"updates": updatesA}, type="list")
             total_count += extract_updated_count(resultA)
 
+        if total_count:
+            clear_metadata_caches()
+
         return jsonify({
             "message": f"Updated {total_count} nodes.",
             "updatedCount": total_count,
@@ -1565,6 +1568,8 @@ def create_metadata_node():
             db_name = "SocioMap" if target == "sociomap" else "ArchaMap"
             node_results[db_name] = created_row
             created_in.append(db_name)
+
+        clear_metadata_caches()
 
         return jsonify({
             "message": f"Created metadata node {generated_cmid} in {', '.join(created_in)}.",

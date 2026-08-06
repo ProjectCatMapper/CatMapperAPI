@@ -371,6 +371,8 @@ def test_create_metadata_node_creates_in_both_databases(client, monkeypatch):
 
     created_by_driver = []
     indexed_by_driver = []
+    cache_clear_calls = []
+    monkeypatch.setattr(admin_routes, "clear_metadata_caches", lambda: cache_clear_calls.append(True))
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
         if "WHERE n.CMID STARTS WITH $prefix RETURN n.CMID AS CMID" in query:
@@ -416,9 +418,39 @@ def test_create_metadata_node_creates_in_both_databases(client, monkeypatch):
     assert payload["createdIn"] == ["SocioMap", "ArchaMap"]
     assert set(created_by_driver) == {"driver-sociomap", "driver-archamap"}
     assert set(indexed_by_driver) == {"driver-sociomap", "driver-archamap"}
+    assert cache_clear_calls == [True]
     assert payload["node"]["SocioMap"]["props"]["CMID"] == "CL251"
     assert payload["node"]["SocioMap"]["props"]["groupLabel"] == "FAMILY"
     assert payload["node"]["SocioMap"]["props"]["displayName"] == "Family Label"
+
+
+def test_save_metadata_clears_cached_domain_queries(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: f"driver-{database}")
+    monkeypatch.setattr(
+        admin_routes,
+        "getQuery",
+        lambda **kwargs: [{"updated_count": 1}],
+    )
+    cache_clear_calls = []
+    monkeypatch.setattr(admin_routes, "clear_metadata_caches", lambda: cache_clear_calls.append(True))
+
+    response = client.post(
+        "/admin/saveMetadata",
+        headers={"Authorization": "Bearer test-token"},
+        json={
+            "updates": [
+                {
+                    "id": "4:test:1",
+                    "database": "ArchaMap",
+                    "properties": {"displayOrder": "101"},
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["updatedCount"] == 1
+    assert cache_clear_calls == [True]
 
 
 def test_create_metadata_node_does_not_create_domain_index_for_non_label_nodes(client, monkeypatch):

@@ -111,6 +111,7 @@ def gethomepageCount(database):
                 "PERIOD": "Periods",
                 "CULTURE": "Cultures",
                 "CERAMIC": "Artifact",
+                "GLASS": "Artifact",
                 "STONE": "Artifact",
                 "PROJECTILE_POINT": "Artifact",
                 "WEAPON": "Artifact",
@@ -130,7 +131,7 @@ def gethomepageCount(database):
         # logic for Archamap: Summing artifacts into one display row
         if database_lower == "archamap":
             counts = {item['label']: item['node_count'] for item in raw_data}
-            artifact_labels = ["CERAMIC", "STONE", "PROJECTILE_POINT", "WEAPON", "COIN"]
+            artifact_labels = ["CERAMIC", "GLASS", "STONE", "PROJECTILE_POINT", "WEAPON", "COIN"]
             total_artifacts = sum(counts.get(lbl, 0) for lbl in artifact_labels)
             
             # Manually construct the combined list with the 'display' key
