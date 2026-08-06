@@ -1020,6 +1020,42 @@ def test_validate_parent_label_compatibility_accepts_generic_parent(monkeypatch)
     assert result is None
 
 
+def test_validate_parent_label_compatibility_accepts_multidomain_parent(monkeypatch):
+    dataset = pd.DataFrame(
+        {
+            "CMID": [""],
+            "groupLabel": ["MATERIAL"],
+            "parent": ["AM200"],
+        }
+    )
+    cmid_metadata = {
+        "AM200": {
+            "labels": {"CATEGORY", "CERAMIC", "MATERIAL"},
+            "groupLabels": {"CERAMIC", "MATERIAL"},
+        },
+    }
+
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+    monkeypatch.setattr(
+        upload,
+        "getQuery",
+        lambda query, driver, type="dict", **kwargs: [
+            {"groupLabel": "CERAMIC"},
+            {"groupLabel": "MATERIAL"},
+            {"groupLabel": "GENERIC"},
+        ],
+    )
+
+    result = upload._validate_parent_label_compatibility(
+        dataset=dataset,
+        cmid_metadata=cmid_metadata,
+        driver=object(),
+        user="tester",
+    )
+    assert result is None
+
+
 def test_collect_cmid_metadata_targets_includes_child_cmids_for_parent_validation():
     dataset = pd.DataFrame(
         {

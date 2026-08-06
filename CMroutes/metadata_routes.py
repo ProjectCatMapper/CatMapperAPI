@@ -174,7 +174,7 @@ def getDomains(database):
         MATCH (g:LABEL)
         WHERE g.groupLabel = g.CMName and g.displayOrder IS NOT NULL
         RETURN distinct g.groupLabel as domain, g.displayName as display, toInteger(g.displayOrder) as order
-        ORDER BY order
+        ORDER BY order, domain
         '''
     domains = getQuery(query,driver, type = "df")
     query = '''

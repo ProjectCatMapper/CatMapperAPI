@@ -49,8 +49,10 @@ def test_api_prefix_serves_translate_domain_selector(client, monkeypatch):
 
 def test_api_prefix_serves_main_domain_selector(client, monkeypatch):
     monkeypatch.setattr(metadata_routes, "getDriver", lambda database: object())
+    queries = []
 
     def fake_get_query(query, driver, type="df", **kwargs):
+        queries.append(query)
         if "g.displayOrder IS NOT NULL" in query:
             return pd.DataFrame([
                 {"domain": "AREA", "display": "Area", "order": 1},
@@ -70,6 +72,7 @@ def test_api_prefix_serves_main_domain_selector(client, monkeypatch):
     response = client.get("/api/getDomains/archamap")
 
     assert response.status_code == 200
+    assert "ORDER BY order, domain" in queries[0]
     assert response.get_json() == [
         {
             "domain": "AREA",
