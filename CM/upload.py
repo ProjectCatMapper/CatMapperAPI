@@ -1632,7 +1632,10 @@ def _validate_parent_label_compatibility(dataset, cmid_metadata, driver, user):
             child_group_match = valid_group_labels.intersection(child_groups)
             if "GENERIC" in parent_group_match:
                 continue
-            if parent_group_match != child_group_match:
+            # A category can legitimately be used in more than one top-level
+            # domain. Such a node remains a valid parent when it contains every
+            # domain required by the child; unrelated-only parents still fail.
+            if not child_group_match.issubset(parent_group_match):
                 child_cmid = child_cmid_values[row_number - 1] or "<missing CMID>"
                 parent_cmid = parent_value or "<self>"
                 raise ValueError(

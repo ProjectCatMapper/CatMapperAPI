@@ -3,7 +3,7 @@ from .utils import getDriver, getQuery
 import pandas as pd
 
 
-@lru_cache(maxsize=128)
+@lru_cache(maxsize=0)
 def get_metadata_groups(database):
     """
     Retrieve metadata groups with caching.
@@ -39,7 +39,7 @@ def get_metadata_groups(database):
     
 from functools import lru_cache
 
-@lru_cache(maxsize=128)
+@lru_cache(maxsize=0)
 def get_public_subdomains(database):
     """
     Retrieve public domain labels and their subdomains ordered by display order.
@@ -69,7 +69,7 @@ def get_public_subdomains(database):
 
 from functools import lru_cache
 
-@lru_cache(maxsize=128)
+@lru_cache(maxsize=0)
 def get_public_domains(database):
     """
     Retrieve top-level public domains ordered by display order.
@@ -96,7 +96,7 @@ def get_public_domains(database):
 
 from functools import lru_cache
 
-@lru_cache(maxsize=10)
+@lru_cache(maxsize=0)
 def get_domain_descriptions(database):
     """
     Retrieve descriptions for top-level public domains.
