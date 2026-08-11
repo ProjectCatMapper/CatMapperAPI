@@ -1,0 +1,88 @@
+from unittest.mock import Mock
+
+import CMroutes.survey_routes as survey_routes
+
+
+def test_survey_response_stores_only_expected_fields(client, monkeypatch):
+    stored = []
+    monkeypatch.setattr(survey_routes, "_rate_limit_exceeded", lambda: False)
+    monkeypatch.setattr(survey_routes, "store_survey_response", stored.append)
+
+    response = client.post(
+        "/api/survey-responses",
+        json={
+            "campaignId": "user-purpose-2026-08",
+            "choice": "other",
+            "otherText": "Researching classifications",
+            "url": "/SocioMap/explore",
+            "ip": "192.0.2.42",
+        },
+        environ_base={"REMOTE_ADDR": "192.0.2.42"},
+    )
+
+    assert response.status_code == 201
+    assert set(stored[0]) == {
+        "responseId",
+        "campaignId",
+        "choice",
+        "otherText",
+        "submittedAt",
+    }
+    assert stored[0]["otherText"] == "Researching classifications"
+    assert "192.0.2.42" not in str(stored[0])
+    assert "/SocioMap/explore" not in str(stored[0])
+
+
+def test_survey_response_enforces_1000_character_limit(client, monkeypatch):
+    store = Mock()
+    monkeypatch.setattr(survey_routes, "_rate_limit_exceeded", lambda: False)
+    monkeypatch.setattr(survey_routes, "store_survey_response", store)
+
+    accepted = client.post(
+        "/api/survey-responses",
+        json={"campaignId": "campaign", "choice": "other", "otherText": "x" * 1000},
+    )
+    rejected = client.post(
+        "/api/survey-responses",
+        json={"campaignId": "campaign", "choice": "other", "otherText": "x" * 1001},
+    )
+
+    assert accepted.status_code == 201
+    assert rejected.status_code == 400
+    assert "1000 characters or fewer" in rejected.get_json()["error"]
+    assert store.call_count == 1
+
+
+def test_survey_response_validates_choice_and_required_comment(client, monkeypatch):
+    store = Mock()
+    monkeypatch.setattr(survey_routes, "_rate_limit_exceeded", lambda: False)
+    monkeypatch.setattr(survey_routes, "store_survey_response", store)
+
+    invalid_choice = client.post(
+        "/api/survey-responses",
+        json={"campaignId": "campaign", "choice": "tracking"},
+    )
+    missing_other = client.post(
+        "/api/survey-responses",
+        json={"campaignId": "campaign", "choice": "other"},
+    )
+
+    assert invalid_choice.status_code == 400
+    assert missing_other.status_code == 400
+    store.assert_not_called()
+
+
+def test_survey_response_reports_storage_outage(client, monkeypatch):
+    monkeypatch.setattr(survey_routes, "_rate_limit_exceeded", lambda: False)
+    monkeypatch.setattr(
+        survey_routes,
+        "store_survey_response",
+        Mock(side_effect=survey_routes.SurveyStoreUnavailable()),
+    )
+
+    response = client.post(
+        "/api/survey-responses",
+        json={"campaignId": "campaign", "choice": "gis"},
+    )
+
+    assert response.status_code == 503
