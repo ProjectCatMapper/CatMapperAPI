@@ -33,8 +33,13 @@ REQUEST_TTL_MINUTES = 15
 logger = logging.getLogger(__name__)
 
 
+def _utc_now():
+    """Return naive UTC to remain compatible with existing stored timestamps."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def _now_iso():
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return _utc_now().replace(microsecond=0).isoformat() + "Z"
 
 
 def _mask_email(email):
@@ -166,7 +171,7 @@ def _send_new_registration_admin_email(first_name, last_name, email, database, i
 
 
 def _cleanup_requests():
-    now = datetime.utcnow()
+    now = _utc_now()
     with REQUEST_LOCK:
         for store in (PROFILE_UPDATE_REQUESTS, PASSWORD_CHANGE_REQUESTS, API_KEY_CREATE_REQUESTS):
             expired = [key for key, value in store.items() if value["expires_at"] < now]
@@ -175,7 +180,7 @@ def _cleanup_requests():
 
 
 def _cleanup_persistent_requests(entries):
-    now = datetime.utcnow()
+    now = _utc_now()
     active = []
     for entry in entries or []:
         try:
@@ -532,7 +537,7 @@ def getnewuser():
         verification_entries = [{
             "request_id": request_id,
             "verification_code": verification_code,
-            "expires_at": (datetime.utcnow() + timedelta(minutes=REQUEST_TTL_MINUTES)).isoformat() + "Z",
+            "expires_at": (_utc_now() + timedelta(minutes=REQUEST_TTL_MINUTES)).isoformat() + "Z",
         }]
 
         if existing:
@@ -799,7 +804,7 @@ def request_forgot_password():
             "request_id": request_id,
             "password_hash": password_hash(new_password),
             "verification_code": verification_code,
-            "expires_at": (datetime.utcnow() + timedelta(minutes=REQUEST_TTL_MINUTES)).isoformat() + "Z",
+            "expires_at": (_utc_now() + timedelta(minutes=REQUEST_TTL_MINUTES)).isoformat() + "Z",
         })
         _set_user_entries(userid, "pendingPasswordResetRequests", persistent_requests)
 
@@ -958,7 +963,7 @@ def request_profile_update():
                 "userid": str(userid),
                 "updates": updates,
                 "verification_code": verification_code,
-                "expires_at": datetime.utcnow() + timedelta(minutes=REQUEST_TTL_MINUTES),
+                "expires_at": _utc_now() + timedelta(minutes=REQUEST_TTL_MINUTES),
             }
 
         target_email = updates.get("email") or existing.get("email")
@@ -1083,7 +1088,7 @@ def request_password_change():
                 "userid": str(userid),
                 "password_hash": password_hash(new_password),
                 "verification_code": verification_code,
-                "expires_at": datetime.utcnow() + timedelta(minutes=REQUEST_TTL_MINUTES),
+                "expires_at": _utc_now() + timedelta(minutes=REQUEST_TTL_MINUTES),
             }
 
         target_email = existing.get("email")
@@ -1185,7 +1190,7 @@ def request_api_key_creation():
                 "api_key": api_key,
                 "api_key_hash": api_key_hash,
                 "verification_code": verification_code,
-                "expires_at": datetime.utcnow() + timedelta(minutes=REQUEST_TTL_MINUTES),
+                "expires_at": _utc_now() + timedelta(minutes=REQUEST_TTL_MINUTES),
             }
 
         _send_verification_email(

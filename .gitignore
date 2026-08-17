@@ -16,6 +16,9 @@ pyvenv.cfg
 tmp/*
 *.pyc
 *.jsonl
+.coverage
+coverage.xml
+htmlcov/
 data.json
 new.json
 poly.json

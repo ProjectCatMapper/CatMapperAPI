@@ -71,7 +71,7 @@ def test_forgot_password_confirm_accepts_email_identifier(client, monkeypatch):
                 "request_id": "forgot_abc123",
                 "password_hash": "hashed::new-password",
                 "verification_code": "123456",
-                "expires_at": (user_routes.datetime.utcnow() + user_routes.timedelta(minutes=15)).isoformat() + "Z",
+                "expires_at": (user_routes._utc_now() + user_routes.timedelta(minutes=15)).isoformat() + "Z",
             }
         ]
     }
@@ -119,7 +119,7 @@ def test_forgot_password_confirm_survives_in_memory_request_store_reset(client, 
                 "request_id": "forgot_restartsafe",
                 "password_hash": "hashed::new-password",
                 "verification_code": "654321",
-                "expires_at": (user_routes.datetime.utcnow() + user_routes.timedelta(minutes=15)).isoformat() + "Z",
+                "expires_at": (user_routes._utc_now() + user_routes.timedelta(minutes=15)).isoformat() + "Z",
             }
         ]
     }

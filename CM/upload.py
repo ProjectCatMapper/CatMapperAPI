@@ -222,7 +222,7 @@ def createNodes(df, database,isDataset, user, uniqueID=None, ownershipMetadata=N
                 return ""
             return str(value)
 
-        df = df.applymap(_normalize_node_value)
+        df = df.map(_normalize_node_value)
 
         if isDataset:
             for district_col in ("District", "district"):
@@ -2475,7 +2475,7 @@ def input_Nodes_Uses(
         dataset_for_results['CMID'] = dataset_for_results['CMID'].replace('nan', '')
 
     # trim whitespace
-    dataset = dataset.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+    dataset = dataset.map(lambda x: x.strip() if isinstance(x, str) else x)
 
     dataset = dataset.dropna(how="all").reset_index(drop=True).copy()
 
@@ -3561,7 +3561,7 @@ def input_Nodes_Uses(
         "removing control characters and leading/trailing spaces",
         write="a",
     )
-    dataset[dataset.columns] = dataset[dataset.columns].applymap(
+    dataset[dataset.columns] = dataset[dataset.columns].map(
         lambda x: (
             re.sub(r"[\t\n\r\f\v]", "", x).strip() if isinstance(x, str) else x
         )

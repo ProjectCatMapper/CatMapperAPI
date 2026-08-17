@@ -8,6 +8,9 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
 
+from CM.email import get_default_sender, sendEmail
+
+from .extensions import mail
 from .survey_store import (
     SurveyStoreUnavailable,
     deployment_environment,
@@ -24,6 +27,7 @@ MAX_OTHER_TEXT_LENGTH = 1000
 MAX_REQUEST_BYTES = 4096
 RATE_LIMIT_REQUESTS = 10
 RATE_LIMIT_SECONDS = 60 * 60
+SURVEY_NOTIFICATION_RECIPIENT = "admin@catmapper.org"
 _RATE_LIMIT_SECRET = os.getenv("CATMAPPER_SURVEY_RATE_LIMIT_SECRET", "").encode() or secrets.token_bytes(32)
 
 
@@ -54,6 +58,24 @@ def _rate_limit_exceeded():
 
 def _error(message, status):
     return jsonify({"error": message}), status
+
+
+def _send_survey_notification(response):
+    body = (
+        "A CatMapper survey response was submitted.\n\n"
+        f"Response ID: {response['responseId']}\n"
+        f"Campaign: {response['campaignId']}\n"
+        f"Answer: {response['choice']}\n"
+        f"Submitted at: {response['submittedAt']}\n"
+        f"Further comments: {response.get('otherText') or '(none)'}\n"
+    )
+    return sendEmail(
+        mail=mail,
+        subject="New CatMapper survey response",
+        recipients=[SURVEY_NOTIFICATION_RECIPIENT],
+        body=body,
+        sender=get_default_sender(),
+    )
 
 
 @survey_bp.route("/api/survey-responses", methods=["POST"])
@@ -96,5 +118,7 @@ def create_survey_response():
         store_survey_response(response)
     except SurveyStoreUnavailable:
         return _error("Survey response storage is temporarily unavailable", 503)
+
+    _send_survey_notification(response)
 
     return jsonify({"responseId": response["responseId"]}), 201

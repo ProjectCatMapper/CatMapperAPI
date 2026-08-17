@@ -8,7 +8,7 @@ from flask import jsonify
 import os
 import re
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import base64
 import zipfile
@@ -16,7 +16,7 @@ import numpy as np
 
 
 def generate_unique_hash():
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     return base64.urlsafe_b64encode(
         hashlib.sha256(now.encode()).digest()
     ).decode()[:16]
@@ -1078,6 +1078,7 @@ def _backfill_legacy_dataset_transforms(data):
         return data
 
     data = data.copy()
+    data["datasetTransform"] = data["datasetTransform"].astype("object")
     source_series = (
         data.get("value", pd.Series(index=data.index, dtype="object"))
         .fillna("")
@@ -1372,11 +1373,10 @@ def createSyntax(template, database="SocioMap",
     # Build data.xlsx payload from variable mappings.
     data = variables.copy()
     data["Key"] = data["variableKey"].fillna("").astype(str)
-    data["transform"] = (
-        data["datasetTransform"].fillna("").astype(str).str.strip().replace("", np.nan)
-        .fillna(data["stackTransform"].fillna("").astype(str).str.strip())
-        .replace("", np.nan)
-    )
+    dataset_transform = data["datasetTransform"].fillna("").astype(str).str.strip()
+    stack_transform = data["stackTransform"].fillna("").astype(str).str.strip()
+    data["transform"] = dataset_transform.mask(dataset_transform.eq(""), np.nan).fillna(stack_transform)
+    data["transform"] = data["transform"].mask(data["transform"].eq(""), np.nan)
 
     key_pairs = data[["datasetID", "Key"]].drop_duplicates().copy()
     key_pairs["Key2"] = key_pairs["Key"].str.split(" && ")
@@ -1391,7 +1391,8 @@ def createSyntax(template, database="SocioMap",
     data = pd.merge(data, key_pairs, on=["datasetID", "Key"], how="left")
     data["variable"] = data["variable"].fillna("").astype(str).str.lower()
     data = pd.merge(data, template[["datasetID", "filePath"]], on="datasetID", how="left")
-    data = data.astype(str).replace("None", np.nan)
+    data = data.astype(str)
+    data = data.mask(data.eq("None"), np.nan)
 
     domain = validate_domain_label("CATEGORY", driver=driver)
     data = _backfill_legacy_dataset_transforms(data)

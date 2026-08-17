@@ -1,4 +1,12 @@
 import CM.utils as utils
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def clean_driver_cache():
+    utils.closeAllDrivers()
+    yield
+    utils.closeAllDrivers()
 
 
 class FakeDriver:

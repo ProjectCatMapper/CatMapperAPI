@@ -225,7 +225,7 @@ def test_newuser_existing_enabled_email_still_fails(client, monkeypatch):
 
 def test_confirm_newuser_email_moves_user_to_pending_and_notifies_admin(client, monkeypatch):
     sent = []
-    expires = (user_routes.datetime.utcnow() + user_routes.timedelta(minutes=15)).isoformat() + "Z"
+    expires = (user_routes._utc_now() + user_routes.timedelta(minutes=15)).isoformat() + "Z"
     pending_entry = json.dumps({
         "request_id": "register_abc",
         "verification_code": "123456",
@@ -280,7 +280,7 @@ def test_confirm_newuser_email_moves_user_to_pending_and_notifies_admin(client, 
 
 
 def test_confirm_newuser_email_rejects_bad_code(client, monkeypatch):
-    expires = (user_routes.datetime.utcnow() + user_routes.timedelta(minutes=15)).isoformat() + "Z"
+    expires = (user_routes._utc_now() + user_routes.timedelta(minutes=15)).isoformat() + "Z"
     pending_entry = json.dumps({
         "request_id": "register_abc",
         "verification_code": "123456",
