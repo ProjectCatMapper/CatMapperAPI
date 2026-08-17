@@ -16,6 +16,7 @@ from flask import Flask
 from .extensions import mail
 from .search_routes import *
 from .survey_routes import *
+from .navigation_trail_routes import *
 
 import os
 from flask_cors import CORS
