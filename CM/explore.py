@@ -193,7 +193,6 @@ def _get_queries_for_label(label, database):
                     toInteger(r.sampleSize) AS `Sample size`,
                     r.type AS type,
                     CASE
-                        WHEN r.populationEstimate IS NULL OR r.populationEstimate = 0 THEN null
                         WHEN cTypeCount >= 1 THEN r.categoryType
                         ELSE null
                     END AS cType
