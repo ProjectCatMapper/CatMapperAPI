@@ -1,5 +1,7 @@
 import gzip
 import json
+import re
+import stat
 
 from rdflib import Graph
 
@@ -47,6 +49,9 @@ def test_snapshot_is_parseable_complete_and_atomic(tmp_path):
     assert manifest["resourceCounts"]["datasetAssertions"] == 1
     assert manifest["resourceCounts"]["hierarchyLinks"] == 1
     assert stored_manifest["sha256"] == manifest["sha256"]
+    assert re.fullmatch(r"catmapper-sociomap-\d{4}-\d{2}-\d{2}T\d{6}Z\.nt\.gz", snapshot.name)
+    assert stat.S_IMODE(snapshot.stat().st_mode) == 0o644
+    assert stat.S_IMODE(manifest_path.stat().st_mode) == 0o644
     assert not list(tmp_path.glob(".*"))
 
 

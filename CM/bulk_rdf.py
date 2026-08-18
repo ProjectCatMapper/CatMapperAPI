@@ -135,6 +135,7 @@ def _atomic_json(path: Path, payload):
             json.dump(payload, stream, ensure_ascii=False, indent=2, sort_keys=True)
             stream.write("\n")
             stream.flush()
+            os.fchmod(stream.fileno(), 0o644)
             os.fsync(stream.fileno())
         os.replace(temporary, path)
     except Exception:
@@ -167,7 +168,8 @@ def generate_snapshot(
     output_directory = Path(output_directory)
     output_directory.mkdir(parents=True, exist_ok=True)
     generated = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    stem = f"catmapper-{database}-{generated[:10]}"
+    generated_slug = f"{generated[:10]}T{generated[11:19].replace(':', '')}Z"
+    stem = f"catmapper-{database}-{generated_slug}"
     snapshot_path = output_directory / f"{stem}.nt.gz"
     manifest_path = output_directory / f"{stem}.manifest.json"
     temporary = tempfile.NamedTemporaryFile(
@@ -212,6 +214,7 @@ def generate_snapshot(
                 compressed.flush()
             raw.flush()
             os.fsync(raw.fileno())
+        os.chmod(temporary_path, 0o644)
         os.replace(temporary_path, snapshot_path)
     except BaseException:
         try:
