@@ -55,7 +55,9 @@ def test_entity_content_negotiation_and_headers(client, monkeypatch):
     assert jsonld.mimetype == "application/ld+json"
     assert turtle.headers["Vary"] == "Accept"
     assert 'rel="canonical"' in turtle.headers.getlist("Link")[0]
-    assert any('rel="next"' in value for value in turtle.headers.getlist("Link"))
+    next_link = next(value for value in turtle.headers.getlist("Link") if 'rel="next"' in value)
+    assert "/sociomap/SM1?assertion_offset=1&assertion_limit=100" in next_link
+    assert "/linked-data/" not in next_link
     assert unsupported.status_code == 406
     assert b"https://catmapper.org/sociomap/SM1" in turtle.data
 

@@ -8,8 +8,9 @@ import os
 import re
 import time
 from pathlib import Path
+from urllib.parse import urlencode
 
-from flask import Blueprint, Response, request, url_for
+from flask import Blueprint, Response, request
 
 from CM.linked_data import (
     CONTEXT_IRI,
@@ -128,13 +129,14 @@ def linked_data_resource(database, cmid):
         response.headers.add("Link", f'<{CONTEXT_IRI}>; rel="http://www.w3.org/ns/json-ld#context"')
         if projection["hasMoreAssertions"]:
             next_offset = projection["assertionOffset"] + projection["assertionCount"]
-            next_url = url_for(
-                "linked_data.linked_data_resource",
-                database=database,
-                cmid=cmid,
-                assertion_offset=next_offset,
-                assertion_limit=limit,
-                _external=True,
+            next_url = (
+                f"{request.host_url.rstrip('/')}/{database.lower()}/{cmid}?"
+                + urlencode(
+                    {
+                        "assertion_offset": next_offset,
+                        "assertion_limit": limit,
+                    }
+                )
             )
             response.headers.add("Link", f'<{next_url}>; rel="next"')
         response.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
