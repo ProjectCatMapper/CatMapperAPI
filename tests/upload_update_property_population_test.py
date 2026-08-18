@@ -5,6 +5,7 @@ import CM.upload as upload
 
 def test_update_property_population_estimate_formats_with_string_tokens(monkeypatch):
     queries = []
+    updated_rows = []
 
     monkeypatch.setattr(upload, "getDriver", lambda database: object())
     monkeypatch.setattr(
@@ -29,6 +30,7 @@ def test_update_property_population_estimate_formats_with_string_tokens(monkeypa
                 }
             ]
         if "SET r.status = 'update'" in query:
+            updated_rows.extend(params["rows"])
             return [
                 {
                     "nodeID": "node-1",
@@ -67,6 +69,20 @@ def test_update_property_population_estimate_formats_with_string_tokens(monkeypa
 
     assert isinstance(result, dict)
     assert any("toString(v)" in q for q in queries)
+    assert updated_rows == [{
+        "CMID": "SM1",
+        "datasetID": "SD1",
+        "Key": "K1",
+        "relID": "rel-1",
+        "populationEstimate": "792",
+    }]
+
+
+def test_population_estimate_normalization_removes_only_insignificant_zeros():
+    assert upload._normalize_population_estimate(2.0) == "2"
+    assert upload._normalize_population_estimate("2.500") == "2.5"
+    assert upload._normalize_population_estimate("0.0") == "0"
+    assert upload._normalize_population_estimate("2.05") == "2.05"
 
 
 def test_update_property_uses_relid_does_not_write_locator_fields(monkeypatch):

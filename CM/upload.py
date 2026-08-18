@@ -11,6 +11,7 @@ from .ownership import ownership_metadata, validate_upload_ownership_scope
 import json
 import os
 import ast
+from decimal import Decimal, InvalidOperation
 import pandas as pd
 import numpy as np
 import time
@@ -1166,10 +1167,33 @@ def _normalize_non_json_upload_value(value, property_name, separator=";"):
 
     tokens = _expand_listish_upload_value(value)
     if tokens is None:
-        return "" if _is_missing_upload_value(value) else value
+        if _is_missing_upload_value(value):
+            return ""
+        return _normalize_population_estimate(value) if property_name == "populationEstimate" else value
 
     # De-duplicate while preserving order.
+    if property_name == "populationEstimate":
+        tokens = [_normalize_population_estimate(token) for token in tokens]
     return separator.join(dict.fromkeys(tokens))
+
+
+def _normalize_population_estimate(value):
+    """Return numeric population estimates without insignificant decimal zeros."""
+    if _is_missing_upload_value(value):
+        return value
+
+    try:
+        number = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        return value
+
+    if not number.is_finite():
+        return value
+
+    normalized = format(number, "f")
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    return normalized or "0"
 
 
 def _split_multi_value_cell(value):
@@ -2760,6 +2784,11 @@ def input_Nodes_Uses(
         for col, values in invalid_values.items():
             error_msg += f" - Column '{col}': {values}\n"
         raise ValueError(error_msg)
+
+    if "populationEstimate" in columns_to_check:
+        dataset["populationEstimate"] = dataset["populationEstimate"].apply(
+            _normalize_population_estimate
+        )
     
     # checks for year validities
     if "recordEnd" in dataset.columns and "recordStart" in dataset.columns:
