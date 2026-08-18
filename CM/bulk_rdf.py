@@ -24,6 +24,7 @@ from .utils import getDriver, getQuery
 
 
 LICENSE = "https://creativecommons.org/licenses/by/4.0/"
+VALIDATION_BATCH_TRIPLES = 50_000
 
 NODE_EXPORT_QUERY = """
 MATCH (n)
@@ -144,6 +145,17 @@ def _atomic_json(path: Path, payload):
         raise
 
 
+def _write_validated_batch(graph, compressed):
+    if not len(graph):
+        return 0
+    serialized = graph.serialize(format="nt")
+    parsed = Graph().parse(data=serialized, format="nt")
+    if len(parsed) != len(graph):
+        raise ValueError("RDF batch changed during N-Triples round-trip validation.")
+    compressed.write(serialized.encode("utf-8"))
+    return len(graph)
+
+
 def generate_snapshot(
     database,
     output_directory,
@@ -168,6 +180,8 @@ def generate_snapshot(
 
     counts = Counter()
     triple_count = 0
+    batch = Graph()
+    seen_scheme_triples = set()
     try:
         with temporary_path.open("wb") as raw:
             with gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as compressed:
@@ -185,15 +199,21 @@ def generate_snapshot(
                     elif kind == "hierarchy":
                         counts["hierarchyLinks"] += 1
 
-                    serialized = graph.serialize(format="nt")
-                    Graph().parse(data=serialized, format="nt")
-                    compressed.write(serialized.encode("utf-8"))
-                    triple_count += sum(1 for line in serialized.splitlines() if line.strip())
+                    for triple in graph:
+                        if "/scheme/" in str(triple[0]):
+                            if triple in seen_scheme_triples:
+                                continue
+                            seen_scheme_triples.add(triple)
+                        batch.add(triple)
+                    if len(batch) >= VALIDATION_BATCH_TRIPLES:
+                        triple_count += _write_validated_batch(batch, compressed)
+                        batch = Graph()
+                triple_count += _write_validated_batch(batch, compressed)
                 compressed.flush()
             raw.flush()
             os.fsync(raw.fileno())
         os.replace(temporary_path, snapshot_path)
-    except Exception:
+    except BaseException:
         try:
             temporary_path.unlink()
         except FileNotFoundError:

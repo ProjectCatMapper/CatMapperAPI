@@ -48,3 +48,22 @@ def test_snapshot_is_parseable_complete_and_atomic(tmp_path):
     assert manifest["resourceCounts"]["hierarchyLinks"] == 1
     assert stored_manifest["sha256"] == manifest["sha256"]
     assert not list(tmp_path.glob(".*"))
+
+
+def test_failed_snapshot_removes_temporary_output(tmp_path):
+    def graph_iterator(_database):
+        yield "resource", {"CATEGORY"}, project_resource(
+            "sociomap",
+            {"cmid": "SM1", "labels": ["CATEGORY"], "name": "Aymara"},
+        )
+        raise KeyboardInterrupt
+
+    try:
+        generate_snapshot("sociomap", tmp_path, graph_iterator=graph_iterator)
+    except KeyboardInterrupt:
+        pass
+    else:
+        raise AssertionError("Expected the simulated interrupted export to fail")
+
+    assert not list(tmp_path.glob(".*"))
+    assert not list(tmp_path.glob("*.nt.gz"))
