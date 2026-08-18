@@ -43,7 +43,7 @@ def test_ontology_and_context_routes_are_parseable(client, monkeypatch):
     assert "@context" in context.get_json()
 
 
-def test_entity_content_negotiation_and_headers(client, monkeypatch):
+def test_entity_content_negotiation_headers_and_telemetry(client, monkeypatch, caplog):
     monkeypatch.setattr(routes, "fetch_resource_projection", lambda *args, **kwargs: _projection(has_more=True))
 
     turtle = client.get("/linked-data/sociomap/SM1", headers={"Accept": "text/turtle"})
@@ -60,6 +60,11 @@ def test_entity_content_negotiation_and_headers(client, monkeypatch):
     assert "/linked-data/" not in next_link
     assert unsupported.status_code == 406
     assert b"https://catmapper.org/sociomap/SM1" in turtle.data
+    assert any(
+        "linked_data_response database=sociomap cmid=SM1 status=200 media_type=text/turtle"
+        in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def test_explicit_format_and_deleted_tombstone_behavior(client, monkeypatch):

@@ -26,6 +26,7 @@ from CM.linked_data import (
 
 linked_data_bp = Blueprint("linked_data", __name__)
 _LOGGER = logging.getLogger("catmapper.linked_data")
+_LOGGER.setLevel(logging.INFO)
 _VERSION_PATTERN = re.compile(r"^[0-9]{4}\.[0-9]{2}\.[0-9]{2}(?:\.[1-9][0-9]*)?$")
 _MEDIA_TYPES = ("application/ld+json", "text/turtle")
 
