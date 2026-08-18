@@ -32,6 +32,7 @@ app.register_blueprint(search_bp)
 app.register_blueprint(reconciliation_bp)
 app.register_blueprint(survey_bp)
 app.register_blueprint(navigation_trail_bp)
+app.register_blueprint(linked_data_bp)
 
 def _register_api_legacy_aliases(flask_app):
     """Expose existing routes under /api while canonical REST paths are adopted."""

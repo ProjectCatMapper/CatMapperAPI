@@ -13,6 +13,8 @@ def test_reconciliation_manifest_uses_clean_api_host_urls(client):
     assert body["preview"]["url"] == "https://api.catmapper.org/reconcile/SocioMap/preview/{{id}}"
     assert body["suggest"]["entity"]["service_url"] == "https://api.catmapper.org/reconcile/SocioMap"
     assert body["identifierSpace"] == "https://catmapper.org/sociomap"
+    assert body["schemaSpace"] == "https://catmapper.org/schema/catmapper"
+    assert body["defaultTypes"][0]["id"] == "https://catmapper.org/ontology/catmapper#Concept"
     assert body["view"]["url"] == "https://catmapper.org/sociomap/{{id}}"
 
 
@@ -26,6 +28,7 @@ def test_reconciliation_manifest_alias_advertises_canonical_dev_url(client):
     body = response.get_json()
     assert body["preview"]["url"] == "https://dev-api.catmapper.org/reconcile/ArchaMap/preview/{{id}}"
     assert body["identifierSpace"] == "https://catmapper.org/archamap"
+    assert body["schemaSpace"] == "https://catmapper.org/schema/catmapper"
     assert body["view"]["url"] == "https://dev.catmapper.org/archamap/{{id}}"
 
 
@@ -192,7 +195,10 @@ def test_reconcile_query_batch_maps_search_rows(monkeypatch):
     assert candidate["id"] == "SM1"
     assert candidate["score"] == 100
     assert candidate["match"] is True
-    assert candidate["type"] == [{"id": "ETHNICITY", "name": "Ethnicity"}]
+    assert candidate["type"] == [{
+        "id": "https://catmapper.org/sociomap/scheme/ethnicity",
+        "name": "Ethnicity",
+    }]
 
 
 def test_data_extension_response_encodes_values(monkeypatch):
@@ -244,3 +250,21 @@ def test_reconciliation_rejects_large_batches(client):
 
     assert response.status_code == 413
     assert "batch exceeds" in response.get_json()["error"]
+
+
+def test_reconciliation_properties_use_semantic_ids_and_keep_legacy_input(monkeypatch):
+    monkeypatch.setattr(reconciliation, "getDriver", lambda database: object())
+    monkeypatch.setattr(
+        reconciliation,
+        "getPropertiesMetadata",
+        lambda driver: [{"property": "DatasetCitation", "description": "Citation"}],
+    )
+    properties = reconciliation.get_reconciliation_properties("SocioMap")
+    ids = {entry["id"] for entry in properties}
+    assert "http://www.w3.org/2004/02/skos/core#prefLabel" in ids
+    assert "https://catmapper.org/ontology/catmapper#cmid" in ids
+    assert "https://catmapper.org/schema/catmapper#DatasetCitation" in ids
+    assert reconciliation._internal_property_id("DatasetCitation") == "DatasetCitation"
+    assert reconciliation._internal_property_id(
+        "https://catmapper.org/schema/catmapper#DatasetCitation"
+    ) == "DatasetCitation"

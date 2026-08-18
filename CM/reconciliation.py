@@ -1,6 +1,7 @@
 import math
 import re
 from html import escape
+from urllib.parse import quote, unquote
 
 from .metadata import getPropertiesMetadata, get_public_subdomains
 from .search import search
@@ -15,6 +16,31 @@ _DATABASES = {
     "sociomap": "SocioMap",
     "archamap": "ArchaMap",
 }
+
+_CAT = "https://catmapper.org/ontology/catmapper#"
+_SKOS = "http://www.w3.org/2004/02/skos/core#"
+_SCHEMA = "https://catmapper.org/schema/catmapper#"
+_SEMANTIC_PROPERTY_IDS = {
+    "Name": f"{_SKOS}prefLabel",
+    "CMID": f"{_CAT}cmid",
+    "domain": f"{_CAT}inDomainScheme",
+    "Key": f"{_CAT}key",
+    "dataset": f"{_CAT}assertionDataset",
+    "context": f"{_CAT}contextConcept",
+    "country": f"{_CAT}geographicContext",
+    "yearStart": f"{_CAT}yearStart",
+    "yearEnd": f"{_CAT}yearEnd",
+}
+_INTERNAL_PROPERTY_IDS = {value: key for key, value in _SEMANTIC_PROPERTY_IDS.items()}
+
+
+def _internal_property_id(value):
+    value = str(value or "").strip()
+    if value in _INTERNAL_PROPERTY_IDS:
+        return _INTERNAL_PROPERTY_IDS[value]
+    if value.startswith(_SCHEMA):
+        return unquote(value[len(_SCHEMA):])
+    return value
 
 _BASE_PROPERTIES = [
     {"id": "Name", "name": "Name", "description": "CatMapper node name."},
@@ -51,8 +77,8 @@ def build_manifest(database, base_url, frontend_base_url):
         "serviceVersion": "catmapper-openrefine-0.1",
         "logo": "https://catmapper.org/media/CatMapperLogoAlternate.png",
         "defaultTypes": [
-            {"id": "CATEGORY", "name": "Category"},
-            {"id": "DATASET", "name": "Dataset"},
+            {"id": f"{_CAT}Concept", "name": "Category"},
+            {"id": f"{_CAT}Dataset", "name": "Dataset"},
         ],
         "view": {"url": f"{frontend_base_url}/{frontend_database}/{{{{id}}}}"},
         "preview": {
@@ -84,41 +110,43 @@ def get_reconciliation_types(database):
         seen.add(type_id)
         types.append({"id": type_id, "name": name or _display_name(type_id)})
 
-    add_type("CATEGORY", "Category")
-    add_type("DATASET", "Dataset")
+    add_type(f"{_CAT}Concept", "Category")
+    add_type(f"{_CAT}Dataset", "Dataset")
 
     for row in get_public_subdomains(database):
         if isinstance(row, dict):
-            add_type(row.get("domain"))
+            add_type(_domain_scheme_id(database, row.get("domain")), row.get("domain"))
             for subdomain in row.get("subdomains") or []:
-                add_type(subdomain)
+                add_type(_domain_scheme_id(database, subdomain), subdomain)
 
     return types
 
 
 def get_reconciliation_properties(database):
     database = normalize_database(database)
-    properties = {entry["id"]: dict(entry) for entry in _BASE_PROPERTIES}
-
+    properties = [
+        {**entry, "id": _SEMANTIC_PROPERTY_IDS[entry["id"]]}
+        for entry in _BASE_PROPERTIES
+    ]
+    known = {entry["id"] for entry in _BASE_PROPERTIES}
     try:
         driver = getDriver(database)
         rows = getPropertiesMetadata(driver)
     except Exception:
         rows = []
-
     for row in rows if isinstance(rows, list) else []:
         if not isinstance(row, dict):
             continue
         prop_id = str(row.get("property") or "").strip()
-        if not prop_id or prop_id in properties:
+        if not prop_id or prop_id in known:
             continue
-        properties[prop_id] = {
-            "id": prop_id,
+        known.add(prop_id)
+        properties.append({
+            "id": f"{_SCHEMA}{quote(prop_id, safe='-._~')}",
             "name": prop_id,
             "description": str(row.get("description") or "").strip(),
-        }
-
-    return list(properties.values())
+        })
+    return properties
 
 
 def suggest_entities(database, prefix="", cursor=0, limit=20):
@@ -148,7 +176,7 @@ def suggest_entities(database, prefix="", cursor=0, limit=20):
                 "id": str(row.get("CMID") or ""),
                 "name": str(row.get("CMName") or ""),
                 "description": _candidate_description(row),
-                "notable": _types_from_domain(row.get("domain")),
+                "notable": _types_from_domain(row.get("domain"), database),
             }
             for row in rows
             if row.get("CMID")
@@ -221,7 +249,7 @@ def reconcile_single_query(database, query):
     )
 
     rows = _coerce_rows(result)
-    return [_candidate_from_search_row(row, query_text, search_property, search_term) for row in rows]
+    return [_candidate_from_search_row(row, query_text, search_property, search_term, database) for row in rows]
 
 
 def propose_properties(database, type_id=None, limit=None):
@@ -281,7 +309,8 @@ def build_data_extension_response(database, extension_query):
         if entity_id not in rows:
             continue
         for prop_id in properties:
-            rows[entity_id][prop_id] = _extension_values(_extension_value(row, prop_id))
+            internal_id = _internal_property_id(prop_id)
+            rows[entity_id][prop_id] = _extension_values(_extension_value(row, internal_id))
 
     return {"meta": meta, "rows": rows}
 
@@ -378,6 +407,7 @@ def _extract_property_filters(raw_properties):
         if not isinstance(prop, dict):
             continue
         raw_pid = str(prop.get("pid") or prop.get("id") or "").strip()
+        raw_pid = _internal_property_id(raw_pid)
         pid = aliases.get(raw_pid.lower(), raw_pid)
         if pid not in {"CMID", "Name", "Key", "dataset", "context", "country", "yearStart", "yearEnd"}:
             continue
@@ -402,7 +432,7 @@ def _first_property_value(value):
     return str(value).strip()
 
 
-def _candidate_from_search_row(row, query_text, search_property, search_term):
+def _candidate_from_search_row(row, query_text, search_property, search_term, database):
     distance = _safe_float(row.get("matchingDistance"), default=0)
     score = max(0.0, 100.0 - min(distance, 100.0))
     exact_name = bool(query_text) and _normalize_text(query_text) in {
@@ -415,7 +445,7 @@ def _candidate_from_search_row(row, query_text, search_property, search_term):
         "id": str(row.get("CMID") or ""),
         "name": str(row.get("CMName") or row.get("CMID") or ""),
         "description": _candidate_description(row),
-        "type": _types_from_domain(row.get("domain")),
+        "type": _types_from_domain(row.get("domain"), database),
         "score": round(score, 3),
         "match": bool(exact_name or exact_id),
         "features": [
@@ -445,6 +475,12 @@ def _domain_from_type(value):
     value = str(value or "").strip()
     if not value:
         return None
+    if value == f"{_CAT}Concept":
+        return "ALL NODES"
+    if value == f"{_CAT}Dataset":
+        return "DATASET"
+    if "/scheme/" in value:
+        return value.rsplit("/", 1)[-1].upper()
     if value.upper() in {"CATEGORY", "ENTITY"}:
         return "ALL NODES"
     return value
@@ -457,8 +493,25 @@ def _coerce_rows(result):
     return result if isinstance(result, list) else []
 
 
-def _types_from_domain(value):
-    return [{"id": domain, "name": _display_name(domain)} for domain in _domain_values(value)]
+def _domain_scheme_id(database, domain):
+    database = normalize_database(database).lower()
+    slug = re.sub(r"[^a-z0-9._~-]+", "-", str(domain or "").strip().lower()).strip("-")
+    return f"https://catmapper.org/{database}/scheme/{slug}"
+
+
+def _types_from_domain(value, database=None):
+    result = []
+    for domain in _domain_values(value):
+        if domain == "CATEGORY":
+            type_id = f"{_CAT}Concept"
+        elif domain == "DATASET":
+            type_id = f"{_CAT}Dataset"
+        elif database:
+            type_id = _domain_scheme_id(database, domain)
+        else:
+            type_id = domain
+        result.append({"id": type_id, "name": _display_name(domain)})
+    return result
 
 
 def _domain_values(value):
