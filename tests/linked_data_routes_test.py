@@ -45,10 +45,14 @@ def test_ontology_and_context_routes_are_parseable(client, monkeypatch):
 
 def test_entity_content_negotiation_headers_and_telemetry(client, monkeypatch, caplog):
     monkeypatch.setattr(routes, "fetch_resource_projection", lambda *args, **kwargs: _projection(has_more=True))
+    routes._LOGGER.addHandler(caplog.handler)
 
-    turtle = client.get("/linked-data/sociomap/SM1", headers={"Accept": "text/turtle"})
-    jsonld = client.get("/linked-data/sociomap/SM1", headers={"Accept": "application/ld+json"})
-    unsupported = client.get("/linked-data/sociomap/SM1", headers={"Accept": "application/rdf+xml"})
+    try:
+        turtle = client.get("/linked-data/sociomap/SM1", headers={"Accept": "text/turtle"})
+        jsonld = client.get("/linked-data/sociomap/SM1", headers={"Accept": "application/ld+json"})
+        unsupported = client.get("/linked-data/sociomap/SM1", headers={"Accept": "application/rdf+xml"})
+    finally:
+        routes._LOGGER.removeHandler(caplog.handler)
 
     assert turtle.status_code == jsonld.status_code == 200
     assert turtle.mimetype == "text/turtle"
