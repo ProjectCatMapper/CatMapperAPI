@@ -75,14 +75,16 @@ def test_entity_content_negotiation_headers_and_telemetry(client, monkeypatch, c
 
 def test_explicit_format_and_deleted_tombstone_behavior(client, monkeypatch):
     monkeypatch.setattr(routes, "fetch_resource_projection", lambda *args, **kwargs: _projection(deleted=True, replacement=False))
-    tombstone = client.get("/linked-data/sociomap/SM1?format=ttl")
-    assert tombstone.status_code == 410
-    assert b"DeprecatedResource" in tombstone.data
+    for representation in ("ttl", "jsonld"):
+        tombstone = client.get(f"/linked-data/sociomap/SM1?format={representation}")
+        assert tombstone.status_code == 410
+        assert b"DeprecatedResource" in tombstone.data
 
     monkeypatch.setattr(routes, "fetch_resource_projection", lambda *args, **kwargs: _projection(deleted=True, replacement=True))
-    replacement = client.get("/linked-data/sociomap/SM1?format=jsonld")
-    assert replacement.status_code == 200
-    assert b"replacedBy" in replacement.data
+    for representation in ("ttl", "jsonld"):
+        replacement = client.get(f"/linked-data/sociomap/SM1?format={representation}")
+        assert replacement.status_code == 200
+        assert b"replacedBy" in replacement.data
 
 
 def test_safe_errors_do_not_expose_internal_exception(client, monkeypatch):
