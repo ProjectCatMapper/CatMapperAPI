@@ -58,6 +58,8 @@ def test_entity_content_negotiation_headers_and_telemetry(client, monkeypatch, c
     assert turtle.mimetype == "text/turtle"
     assert jsonld.mimetype == "application/ld+json"
     assert turtle.headers["Vary"] == "Accept"
+    assert "max-age=300" in turtle.headers["Cache-Control"]
+    assert "max-age=300" in jsonld.headers["Cache-Control"]
     assert 'rel="canonical"' in turtle.headers.getlist("Link")[0]
     next_link = next(value for value in turtle.headers.getlist("Link") if 'rel="next"' in value)
     assert "/sociomap/SM1?assertion_offset=1&assertion_limit=100" in next_link

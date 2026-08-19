@@ -2,7 +2,7 @@ import json
 
 import pytest
 from rdflib import Graph, Literal, RDF, URIRef
-from rdflib.namespace import DCAT, DCTERMS, SKOS, XSD
+from rdflib.namespace import DCAT, DCTERMS, OWL, SKOS, XSD
 
 from CM import linked_data
 
@@ -61,6 +61,53 @@ def test_projection_uses_canonical_iri_multi_roles_and_allowlist():
     serialized = graph.serialize(format="nt")
     for forbidden in ("ownerUserId", "must-not-leak", "embedding", "logID", "elementId"):
         assert forbidden not in serialized
+
+
+def test_database_iris_are_separate_and_unicode_labels_are_preserved():
+    record = category_record(name="Aymará – Qhichwa", names=["Aymará – Qhichwa", "Аймара"])
+    sociomap = linked_data.project_resource("sociomap", record)
+    archamap = linked_data.project_resource("archamap", {**record, "cmid": "AM1"})
+    socio_subject = URIRef("https://catmapper.org/sociomap/SM1")
+    archa_subject = URIRef("https://catmapper.org/archamap/AM1")
+
+    assert socio_subject != archa_subject
+    assert (socio_subject, SKOS.prefLabel, Literal("Aymará – Qhichwa", lang="en")) in sociomap
+    assert (socio_subject, SKOS.altLabel, Literal("Аймара")) in sociomap
+    assert (archa_subject, linked_data.CAT.inDatabase, linked_data.CAT.ArchaMap) in archamap
+
+
+def test_multiple_keys_and_one_to_many_assertions_remain_distinct():
+    rows = [
+        assertion_row(key="ethnicity_code", conceptCmid="SM1"),
+        assertion_row(key="language_code", conceptCmid="SM1"),
+        assertion_row(key="ethnicity_code", conceptCmid="SM2"),
+    ]
+    graph = linked_data.project_resource("sociomap", category_record(), rows)
+    assertions = set(graph.subjects(RDF.type, linked_data.CAT.DatasetAssertion))
+
+    assert len(assertions) == 3
+    assert {str(value) for assertion in assertions for value in graph.objects(assertion, linked_data.CAT.key)} == {
+        "ethnicity_code",
+        "language_code",
+    }
+    assert {str(value) for assertion in assertions for value in graph.objects(assertion, linked_data.CAT.assertionConcept)} == {
+        "https://catmapper.org/sociomap/SM1",
+        "https://catmapper.org/sociomap/SM2",
+    }
+
+
+def test_unapproved_external_identity_fields_emit_no_mapping_or_owl_identity():
+    record = category_record(
+        EQUIVALENT=["https://www.wikidata.org/entity/Q123"],
+        exactMatch=["https://example.org/concept"],
+    )
+    graph = linked_data.project_resource("sociomap", record)
+    subject = URIRef("https://catmapper.org/sociomap/SM1")
+
+    assert not list(graph.objects(subject, OWL.sameAs))
+    assert not list(graph.objects(subject, OWL.equivalentClass))
+    assert not list(graph.objects(subject, SKOS.exactMatch))
+    assert not list(graph.objects(subject, SKOS.closeMatch))
 
 
 def test_dataset_stack_is_both_semantic_classes():
