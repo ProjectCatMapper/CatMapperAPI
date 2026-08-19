@@ -21,10 +21,17 @@ def test_dev_nginx_has_explicit_ontology_and_negotiation_routes():
     assert "try_files $uri $uri/ /index.html" in dev
 
 
-def test_production_canonical_server_has_not_been_enabled_by_dev_release():
+def test_production_canonical_server_publishes_ontology_and_negotiates_rdf():
     config = (ROOT / "conf" / "nginx.conf").read_text(encoding="utf-8")
     production_start = config.index("server_name catmapper.org www.catmapper.org;")
     production_end = config.index("server_name api.catmapper.org;", production_start)
     production = config[production_start:production_end]
-    assert "@dev_linked_data" not in production
-    assert "location = /ontology/catmapper" not in production
+    assert "location = /ontology/catmapper" in production
+    assert "versions/$1.ttl" in production
+    assert "location /ontology/catmapper/" in production
+    assert "location = /contexts/catmapper" in production
+    assert "location = /schema/catmapper" in production
+    assert "location /exports/rdf/" in production
+    assert "@prod_linked_data" in production
+    assert "uwsgi_pass api:5000" in production
+    assert "try_files $uri $uri/ /index.html" in production
