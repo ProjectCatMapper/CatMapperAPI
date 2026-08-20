@@ -166,7 +166,9 @@ def _get_queries_for_label(label, database):
                     a.CMID AS CMID,
                     apoc.text.join([i IN labels(a) WHERE NOT i = 'CATEGORY'], ', ') AS Domains,
                     custom.anytoList(collect(split(language, ', ')), true) AS Languages,
-                    custom.anytoList(collect(split(religion, ', ')), true) AS Religions
+                    custom.anytoList(collect(split(religion, ', ')), true) AS Religions,
+                    [comment IN collect(DISTINCT trim(toString(r.comment)))
+                        WHERE comment IS NOT NULL AND comment <> ''] AS UsesComments
             ''',
             
             'samples': '''
