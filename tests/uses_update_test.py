@@ -1,6 +1,31 @@
 import pytest
+import pandas as pd
 
 import CM.USES as uses_module
+
+
+def test_updatelabels_replaces_stale_domain_labels(monkeypatch):
+    queries = []
+
+    monkeypatch.setattr(uses_module, "getDriver", lambda _database: object())
+
+    def fake_get_query(query, driver, **kwargs):
+        queries.append(query)
+        if "return count(distinct c)" in query.lower():
+            return [1]
+        if "return count(distinct c) as count" in query.lower():
+            return [1]
+        return pd.DataFrame()
+
+    monkeypatch.setattr(uses_module, "getQuery", fake_get_query)
+
+    result = uses_module.updateLabels(database="sociomap", CMID="SM21903")
+
+    assert any("Set labels" in log for log in result)
+    label_query = next(query for query in queries if "staleLabels" in query)
+    assert "REMOVE c:$(staleLabels)" in label_query
+    assert "SET c:$(currentLabels)" in label_query
+    assert "NOT label IN currentLabels" in label_query
 
 
 def test_updateuses_runs_full_database_when_cmid_missing(monkeypatch):

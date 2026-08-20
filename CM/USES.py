@@ -290,11 +290,16 @@ def updateLabels(database, CMID=None):
 
         query = f"""
         {unwind}
-        match (c:CATEGORY {match})<-[r:USES]-(:DATASET)
-        where r.label is not null
-        WITH c, apoc.coll.toSet(apoc.coll.flatten(collect(distinct [r.label,"CATEGORY"]), true)) AS labels
-        SET c:$(labels)
-        RETURN count(distinct c) AS count
+        MATCH (c:CATEGORY {match})<-[r:USES]-(:DATASET)
+        WHERE r.label IS NOT NULL
+        WITH c,
+             apoc.coll.toSet(apoc.coll.flatten(collect(DISTINCT [r.label, "CATEGORY"]), true)) AS currentLabels
+        WITH c, currentLabels,
+             [label IN labels(c)
+              WHERE label <> "CATEGORY" AND NOT label IN currentLabels] AS staleLabels
+        REMOVE c:$(staleLabels)
+        SET c:$(currentLabels)
+        RETURN count(DISTINCT c) AS count
         """
         if CMID is not None:
             label_results = getQuery(query=query, driver=driver,
