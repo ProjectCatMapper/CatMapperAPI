@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+version="$(date +%Y.%m.%d.%H%M%S)"
+printf '%s\n' "$version" > VERSION
+git add VERSION
+
 staged_files="$(git diff --cached --name-only --diff-filter=ACMR)"
 if [ -z "$staged_files" ]; then
   exit 0

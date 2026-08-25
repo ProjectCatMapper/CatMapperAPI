@@ -45,8 +45,16 @@ if [ -n "$(run_as_deploy_user git status --porcelain)" ]; then
   exit 1
 fi
 
-# 1. Generate the version number (Year.Month.Day.HourMinute)
-NEW_VERSION=$(date +%Y.%m.%d.%H%M)
+# Use the version embedded by the repository pre-commit hook.
+if [ ! -s VERSION ]; then
+  echo "❌ Error: Missing committed VERSION file. Install the repository Git hooks and commit again."
+  exit 1
+fi
+NEW_VERSION="$(tr -d '[:space:]' < VERSION)"
+if ! printf '%s' "$NEW_VERSION" | grep -Eq '^[0-9]{4}\.[0-9]{2}\.[0-9]{2}\.[0-9]{6}$'; then
+  echo "❌ Error: Invalid committed VERSION: $NEW_VERSION"
+  exit 1
+fi
 
 echo "🚀 Starting deployment for version: $NEW_VERSION"
 
@@ -77,7 +85,7 @@ echo "Restarting nginx container..."
 docker restart nginx
 
 # 5. Git Tagging
-# Tag and push code only. Never commit secret-bearing environment files.
+# Tag and push the already-versioned commit. Never commit environment files.
 echo "Creating Git tag: v$NEW_VERSION"
 
 if run_as_deploy_user git rev-parse "v$NEW_VERSION" >/dev/null 2>&1; then
