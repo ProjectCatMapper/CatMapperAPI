@@ -28,6 +28,21 @@ _JSON_UPLOAD_PROPERTIES = {"parentContext", "geoCoords", "geo"}
 _INTERNAL_OWNER_PROPERTY_NAMES = {"ownerUserId", "modifiedByOtherUser"}
 
 
+def _sync_updated_uses_labels(database, cmids, changed_properties):
+    """Immediately reconcile Neo4j labels after editing a USES label."""
+    if "label" not in set(changed_properties or []):
+        return None
+
+    unique_cmids = list(dict.fromkeys(cmid for cmid in cmids if cmid))
+    if not unique_cmids:
+        return None
+
+    result = updateLabels(database=database, CMID=unique_cmids)
+    if isinstance(result, tuple) and len(result) == 2 and result[1] == 500:
+        raise RuntimeError(f"updateLabels failed: {result[0]}")
+    return result
+
+
 def _get_editable_properties_metadata(driver):
     """Return public upload metadata while remaining compatible with simple test drivers."""
     return [
@@ -3938,6 +3953,12 @@ def input_Nodes_Uses(
                     )
                 # adds CMName to the Name parameter if missing
                 addCMNameRel(database, CMID=cmids_from_result)
+
+                _sync_updated_uses_labels(
+                    database,
+                    cmids_from_result,
+                    linkProperties,
+                )
                 
                 updateLog(
                     f"log/{user}uploadProgress.txt",
