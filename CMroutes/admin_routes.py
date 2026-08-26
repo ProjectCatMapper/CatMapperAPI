@@ -728,6 +728,132 @@ def admin_user_update():
         return jsonify({"error": error_message}), status_code
 
 
+@admin_bp.route('/admin/users/create', methods=['POST'])
+def admin_user_create():
+    try:
+        data = request.get_json(silent=True) or {}
+        credentials = _parse_credentials(data.get("cred")) if isinstance(data, dict) else None
+        claims = verify_request_auth(credentials=credentials, required_role="admin", req=request)
+        acting_userid = str(claims.get("userid") or "")
+
+        username = str(data.get("username") or "").strip()
+        first = str(data.get("first") or "").strip()
+        last = str(data.get("last") or "").strip()
+        email = str(data.get("email") or "").strip()
+        database = _normalize_userdb_database(data.get("database"))
+        role = str(data.get("role") or "").strip().lower()
+        raw_credential = str(data.get("password") or "")
+
+        missing = [
+            field for field, value in {
+                "username": username,
+                "first": first,
+                "last": last,
+                "email": email,
+                "database": database,
+                "role": role,
+                "password": raw_credential,
+            }.items() if not value
+        ]
+        if missing:
+            raise Exception(f"Missing required fields: {', '.join(missing)}")
+        if not _password_meets_policy(raw_credential):
+            raise Exception("Password must be at least 6 characters")
+        if role not in {"user", "admin"}:
+            raise Exception("Role must be 'user' or 'admin'")
+        if not database or any(value not in {"sociomap", "archamap"} for value in database):
+            raise Exception("Database must contain only 'sociomap' or 'archamap'")
+
+        hashed_credential = password_hash(raw_credential)
+        if not isinstance(hashed_credential, str) or hashed_credential.startswith("password hash failed"):
+            raise Exception("Unable to process password")
+
+        driver = getDriver("userdb")
+        duplicate_query = """
+        MATCH (u:USER)
+        WHERE toLower(coalesce(u.username, '')) = toLower($username)
+           OR toLower(coalesce(u.email, '')) = toLower($email)
+        RETURN
+          any(row IN collect(u) WHERE toLower(coalesce(row.username, '')) = toLower($username)) AS usernameExists,
+          any(row IN collect(u) WHERE toLower(coalesce(row.email, '')) = toLower($email)) AS emailExists
+        """
+        duplicate_rows = getQuery(
+            duplicate_query,
+            driver=driver,
+            params={"username": username, "email": email},
+            type="dict",
+        )
+        duplicate = duplicate_rows[0] if duplicate_rows else {}
+        if duplicate.get("usernameExists"):
+            raise Exception("Username already exists")
+        if duplicate.get("emailExists"):
+            raise Exception("Email already exists")
+
+        timestamp = _now_iso()
+        log_entry = f"{timestamp}: admin {acting_userid} created user"
+        create_query = """
+        MATCH (p:USER)
+        WITH coalesce(max(toInteger(p.userid)), 0) + 1 AS id
+        CREATE (u:USER {
+          userid: toString(id),
+          username: $username,
+          first: $first,
+          last: $last,
+          email: $email,
+          database: $database,
+          intendedUse: $intendedUse,
+          access: 'enabled',
+          role: $role,
+          password: $password,
+          createdAt: $timestamp,
+          updatedAt: $timestamp,
+          passwordLastChangedAt: $timestamp,
+          log: [$logEntry]
+        })
+        RETURN
+          toString(u.userid) AS userid,
+          u.first AS first,
+          u.last AS last,
+          u.username AS username,
+          u.email AS email,
+          u.database AS database,
+          u.intendedUse AS intendedUse,
+          u.access AS access,
+          u.role AS role,
+          u.createdAt AS createdAt,
+          u.updatedAt AS updatedAt,
+          size(u.log) AS logCount
+        """
+        created_rows = getQuery(
+            create_query,
+            driver=driver,
+            params={
+                "username": username,
+                "first": first,
+                "last": last,
+                "email": email,
+                "database": database,
+                "intendedUse": "Created by administrator",
+                "role": role,
+                "password": hashed_credential,
+                "timestamp": timestamp,
+                "logEntry": log_entry,
+            },
+            type="dict",
+        )
+        if not created_rows:
+            raise Exception("Unable to create user")
+
+        return jsonify({
+            "message": "User created",
+            "user": _serialize_user_lookup_row(created_rows[0]),
+        }), 201
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message}), status_code
+
+
 @admin_bp.route("/admin_add_edit_delete_nodeproperties", methods=['GET'])
 def admin_nodeproperties():
     CMID = request.args.get('CMID')

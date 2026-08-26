@@ -1,6 +1,59 @@
 import CMroutes.admin_routes as admin_routes
 
 
+def test_admin_user_create_hashes_password_and_creates_enabled_user(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "900", "role": "admin"})
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin_routes, "password_hash", lambda value: f"hashed::{value}")
+    monkeypatch.setattr(admin_routes, "_now_iso", lambda: "2026-08-26T12:00:00Z")
+
+    def fake_get_query(query, driver=None, params=None, type="dict", **kwargs):
+        if "usernameExists" in query:
+            return [{"usernameExists": False, "emailExists": False}]
+        if "CREATE (u:USER" in query:
+            assert params["password"] == "hashed::new-secret"
+            assert params["database"] == ["sociomap"]
+            assert params["role"] == "user"
+            assert "admin 900 created user" in params["logEntry"]
+            return [{
+                "userid": "43", "first": "Grace", "last": "Hopper",
+                "username": "grace", "email": "grace@example.org",
+                "database": ["sociomap"], "intendedUse": "Created by administrator",
+                "access": "enabled", "role": "user",
+                "createdAt": params["timestamp"], "updatedAt": params["timestamp"], "logCount": 1,
+            }]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(admin_routes, "getQuery", fake_get_query)
+    response = client.post("/admin/users/create", headers={"Authorization": "Bearer test-token"}, json={
+        "username": "grace", "first": "Grace", "last": "Hopper",
+        "email": "grace@example.org", "database": "sociomap",
+        "role": "user", "password": "new-secret",
+    })
+
+    assert response.status_code == 201
+    payload = response.get_json()
+    assert payload["message"] == "User created"
+    assert payload["user"]["userid"] == "43"
+    assert payload["user"]["access"] == "enabled"
+
+
+def test_admin_user_create_rejects_duplicate_username(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "900", "role": "admin"})
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin_routes, "password_hash", lambda value: f"hashed::{value}")
+    monkeypatch.setattr(admin_routes, "getQuery", lambda *args, **kwargs: [{"usernameExists": True, "emailExists": False}])
+
+    response = client.post("/admin/users/create", headers={"Authorization": "Bearer test-token"}, json={
+        "username": "existing", "first": "Existing", "last": "User",
+        "email": "new@example.org", "database": "sociomap",
+        "role": "user", "password": "new-secret",
+    })
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "Username already exists"
+
+
 def test_admin_user_status_summary_returns_counts(client, monkeypatch):
     monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "900", "role": "admin"})
     monkeypatch.setattr(admin_routes, "getDriver", lambda database: object())
