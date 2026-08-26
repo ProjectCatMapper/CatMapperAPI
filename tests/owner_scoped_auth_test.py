@@ -83,6 +83,9 @@ def test_admin_edit_rejects_regular_user_node_log_property(client, monkeypatch):
         "add_edit_delete_Node",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("node edit should not run")),
     )
+    monkeypatch.setattr(admin_routes, "_create_change_review", lambda **kwargs: {
+        "requestId": "change-node-log", "database": "archamap", "action": kwargs["action"]
+    })
 
     response = client.post(
         "/admin/edit",
@@ -94,8 +97,8 @@ def test_admin_edit_rejects_regular_user_node_log_property(client, monkeypatch):
         },
     )
 
-    assert response.status_code == 403
-    assert "log properties" in response.get_data(as_text=True).lower()
+    assert response.status_code == 202
+    assert response.get_json()["submittedForReview"] is True
 
 
 def test_admin_edit_rejects_regular_user_uses_log_property(client, monkeypatch):
@@ -105,6 +108,9 @@ def test_admin_edit_rejects_regular_user_uses_log_property(client, monkeypatch):
         "add_edit_delete_USES",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("uses edit should not run")),
     )
+    monkeypatch.setattr(admin_routes, "_create_change_review", lambda **kwargs: {
+        "requestId": "change-uses-log", "database": "archamap", "action": kwargs["action"]
+    })
 
     response = client.post(
         "/admin/edit",
@@ -116,8 +122,8 @@ def test_admin_edit_rejects_regular_user_uses_log_property(client, monkeypatch):
         },
     )
 
-    assert response.status_code == 403
-    assert "this uses property" in response.get_data(as_text=True).lower()
+    assert response.status_code == 202
+    assert response.get_json()["submittedForReview"] is True
 
 
 def test_admin_edit_rejects_regular_user_uses_ownership_metadata_property(client, monkeypatch):
@@ -127,6 +133,9 @@ def test_admin_edit_rejects_regular_user_uses_ownership_metadata_property(client
         "add_edit_delete_USES",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("uses edit should not run")),
     )
+    monkeypatch.setattr(admin_routes, "_create_change_review", lambda **kwargs: {
+        "requestId": "change-owner-metadata", "database": "archamap", "action": kwargs["action"]
+    })
 
     response = client.post(
         "/admin/edit",
@@ -138,8 +147,8 @@ def test_admin_edit_rejects_regular_user_uses_ownership_metadata_property(client
         },
     )
 
-    assert response.status_code == 403
-    assert "this uses property" in response.get_data(as_text=True).lower()
+    assert response.status_code == 202
+    assert response.get_json()["submittedForReview"] is True
 
 
 def test_admin_edit_allows_regular_user_for_owned_uses_key_property(client, monkeypatch):
@@ -249,6 +258,10 @@ def test_admin_edit_returns_admin_review_required_for_blocked_node_delete(client
         "deleteNode",
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("delete should not run")),
     )
+    monkeypatch.setattr(admin_routes, "_create_change_review", lambda **kwargs: {
+        "requestId": "change-delete", "database": "archamap", "action": kwargs["action"],
+        "targetCmid": "AM_DELETE"
+    })
 
     response = client.post(
         "/admin/edit",
@@ -261,14 +274,13 @@ def test_admin_edit_returns_admin_review_required_for_blocked_node_delete(client
     )
 
     body = response.get_json()
-    assert response.status_code == 403
-    assert body["requiresAdminReview"] is True
-    assert body["review"]["cmid"] == "AM_DELETE"
-    assert body["review"]["reasonCode"] == "cmid_referenced_elsewhere"
+    assert response.status_code == 202
+    assert body["submittedForReview"] is True
+    assert body["review"]["targetCmid"] == "AM_DELETE"
 
 
-def test_node_removal_review_request_emails_admin_when_blocked(client, monkeypatch):
-    sent = {}
+def test_legacy_node_removal_review_request_persists_review_when_blocked(client, monkeypatch):
+    saved = {}
 
     def blocked(database, cmid, claims):
         raise ownership.OwnerScopedAdminReviewRequired(
@@ -278,20 +290,13 @@ def test_node_removal_review_request_emails_admin_when_blocked(client, monkeypat
             details={"incidentUses": 2, "unownedIncidentUses": 1},
         )
 
-    def fake_send_email(**kwargs):
-        sent.update(kwargs)
-        return "sent"
-
     monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "7", "role": "user"})
     monkeypatch.setattr(admin_routes, "assert_owner_scoped_node_removal_allowed", blocked)
-    monkeypatch.setattr(admin_routes, "get_default_sender", lambda: "noreply@catmapper.org")
-    monkeypatch.setattr(admin_routes, "getDriver", lambda database: object())
     monkeypatch.setattr(
         admin_routes,
-        "getNodeMergeSummary",
-        lambda cmid, driver: {"CMID": cmid, "CMName": f"Node {cmid}"},
+        "_create_change_review",
+        lambda **kwargs: saved.update(kwargs) or {"requestId": "change-legacy"},
     )
-    monkeypatch.setattr(admin_routes, "sendEmail", fake_send_email)
 
     response = client.post(
         "/admin/node-removal-review-request",
@@ -307,13 +312,11 @@ def test_node_removal_review_request_emails_admin_when_blocked(client, monkeypat
     body = response.get_json()
     assert response.status_code == 200
     assert body["message"] == "Admin review request sent."
-    assert sent["recipients"] == ["admin@catmapper.org"]
-    assert sent["sender"] == "noreply@catmapper.org"
-    assert "merge nodes" in sent["body"]
-    assert "AM_DISCARD" in sent["body"]
-    assert "AM_KEEP" in sent["body"]
-    assert "The duplicate was created during my upload." in sent["body"]
-    assert "unowned_incident_uses" in sent["body"]
+    assert body["changeReview"]["requestId"] == "change-legacy"
+    assert saved["action"] == "merge nodes"
+    assert saved["input_payload"] == {"s1_2": "AM_KEEP", "s1_3": "AM_DISCARD"}
+    assert "The duplicate was created during my upload." in saved["reason"]
+    assert "unowned_incident_uses" in saved["reason"]
 
 
 def test_owner_helper_rejects_node_removal_with_unowned_uses_ties(monkeypatch):

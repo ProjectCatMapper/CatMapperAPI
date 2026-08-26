@@ -9,10 +9,11 @@ from CM.ownership import (
     assert_owned_uses_by_triplets,
     is_admin_claims,
     normalize_actor_claims,
-    owned_uses_relids,
 )
 import json
+import os
 from datetime import datetime, timezone
+from uuid import uuid4
 from .auth_utils import verify_request_auth, classify_auth_error_status
 from .extensions import mail
 
@@ -170,58 +171,6 @@ def _node_removal_review_target(fun, input_payload):
     return ""
 
 
-def _safe_node_summary(database, cmid):
-    if not cmid:
-        return None
-    try:
-        return getNodeMergeSummary(cmid, getDriver(database))
-    except Exception as exc:
-        return {"CMID": cmid, "summaryError": str(exc)}
-
-
-def _format_node_removal_review_email(database, action, actor, input_payload, reason, review):
-    input_payload = input_payload or {}
-    keep_cmid = str(input_payload.get("s1_2") or "").strip() if action == "merge nodes" else ""
-    target_cmid = _node_removal_review_target(action, input_payload)
-    lines = [
-        "A CatMapper user requested admin review for a blocked node action.",
-        "",
-        f"Database: {database}",
-        f"Action: {action}",
-        f"Requested at: {datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z')}",
-        f"Requester user ID: {actor.get('userid')}",
-        f"Requester role: {actor.get('role')}",
-        f"Target CMID: {target_cmid}",
-    ]
-    if keep_cmid:
-        lines.append(f"Keep CMID: {keep_cmid}")
-    lines.extend([
-        "",
-        "User reason:",
-        str(reason or "").strip(),
-        "",
-        "Blocking authorization result:",
-        str(review.get("message") or ""),
-    ])
-    reason_code = review.get("reasonCode")
-    if reason_code:
-        lines.append(f"Reason code: {reason_code}")
-    details = review.get("details") or {}
-    if details:
-        lines.extend(["", "Blocker details:", json.dumps(details, indent=2, sort_keys=True)])
-
-    target_summary = _safe_node_summary(database, target_cmid)
-    if target_summary:
-        lines.extend(["", "Target node summary:", json.dumps(target_summary, indent=2, sort_keys=True, default=str)])
-    if keep_cmid:
-        keep_summary = _safe_node_summary(database, keep_cmid)
-        if keep_summary:
-            lines.extend(["", "Keep node summary:", json.dumps(keep_summary, indent=2, sort_keys=True, default=str)])
-
-    lines.extend(["", "Submitted input:", json.dumps(input_payload, indent=2, sort_keys=True, default=str)])
-    return "\n".join(lines)
-
-
 @admin_bp.route('/admin/node-removal-review-request', methods=['POST'])
 def request_node_removal_admin_review():
     try:
@@ -256,19 +205,24 @@ def request_node_removal_admin_review():
         else:
             raise Exception("This action is eligible for user completion and does not require admin review")
 
-        body = _format_node_removal_review_email(database, action, claims, input_payload, reason, review)
-        sender = get_default_sender() or "admin@catmapper.org"
-        email_result = sendEmail(
-            mail=mail,
-            subject=f"CatMapper admin review requested: {action} {target_cmid}",
-            recipients=["admin@catmapper.org"],
-            body=body,
-            sender=sender,
+        saved_review = _create_change_review(
+            database=database,
+            action=action,
+            input_payload=input_payload,
+            tabledata=[],
+            dataset_id="",
+            claims=claims,
+            reason=(
+                f"{review.get('message') or ''}\n"
+                f"Reason code: {review.get('reasonCode') or ''}\n"
+                f"Details: {json.dumps(review.get('details') or {}, sort_keys=True, default=str)}\n"
+                f"User reason: {reason}"
+            ),
         )
         return jsonify({
             "message": "Admin review request sent.",
             "review": review,
-            "emailResult": email_result,
+            "changeReview": saved_review,
         }), 200
     except Exception as e:
         error_message = str(e)
@@ -278,6 +232,205 @@ def request_node_removal_admin_review():
 
 def _now_iso():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _change_review_database_key(database):
+    normalized = str(database or "").strip().lower()
+    if normalized not in {"sociomap", "archamap"}:
+        raise ValueError("Change review is supported only for SocioMap and ArchaMap")
+    return normalized
+
+
+def _change_review_email_delivery_enabled():
+    return str(os.getenv("CATMAPPER_CHANGE_REVIEW_EMAIL_ENABLED", "0")).strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def _change_review_default_recipient_emails():
+    configured = os.getenv(
+        "CATMAPPER_CHANGE_REVIEW_DEFAULT_RECIPIENTS",
+        "rbischoff@asu.edu,dhruschk@asu.edu",
+    )
+    return {
+        email.strip().lower()
+        for email in str(configured or "").split(",")
+        if email.strip()
+    }
+
+
+def _change_review_email_preference(row, database_key):
+    pref = row.get("socioPref") if database_key == "sociomap" else row.get("archaPref")
+    if pref is not None:
+        return pref is True
+    email = str(row.get("email") or "").strip().lower()
+    return email in _change_review_default_recipient_emails()
+
+
+def _change_review_target(action, input_payload):
+    input_payload = input_payload or {}
+    if action == "merge nodes":
+        return str(input_payload.get("s1_3") or "").strip()
+    return str(input_payload.get("s1_2") or "").strip()
+
+
+def _serialize_change_review(row):
+    def load_json(value, fallback):
+        if not value:
+            return fallback
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    return {
+        "requestId": str(row.get("requestId") or ""),
+        "database": str(row.get("database") or ""),
+        "action": str(row.get("action") or ""),
+        "targetCmid": str(row.get("targetCmid") or ""),
+        "submittedBy": str(row.get("submittedBy") or ""),
+        "submitterName": str(row.get("submitterName") or ""),
+        "submittedAt": row.get("submittedAt") or "",
+        "status": str(row.get("status") or "pending"),
+        "authorizationReason": str(row.get("authorizationReason") or ""),
+        "input": load_json(row.get("inputJson"), {}),
+        "tabledata": load_json(row.get("tabledataJson"), []),
+        "datasetID": row.get("datasetID") or "",
+        "notifyRequester": bool(row.get("notifyRequester", False)),
+        "decisionNote": str(row.get("decisionNote") or ""),
+        "decidedBy": str(row.get("decidedBy") or ""),
+        "decidedAt": row.get("decidedAt") or "",
+        "lastError": str(row.get("lastError") or ""),
+    }
+
+
+def _change_review_admin_recipients(database):
+    database_key = _change_review_database_key(database)
+    rows = getQuery(
+        query="""
+        MATCH (u:USER)
+        WHERE toLower(coalesce(u.role, '')) = 'admin'
+          AND toLower(coalesce(u.access, '')) = 'enabled'
+          AND trim(coalesce(u.email, '')) <> ''
+        RETURN u.email AS email, u.database AS database,
+               properties(u)['changeReviewEmailSocioMap'] AS socioPref,
+               properties(u)['changeReviewEmailArchaMap'] AS archaPref
+        """,
+        driver=getDriver("userdb"),
+        type="dict",
+    )
+    recipients = []
+    for row in rows or []:
+        databases = _normalize_userdb_database(row.get("database"))
+        if databases and database_key not in databases:
+            continue
+        if not _change_review_email_preference(row, database_key):
+            continue
+        email = str(row.get("email") or "").strip()
+        if email and email not in recipients:
+            recipients.append(email)
+    return recipients
+
+
+def _notify_admins_of_change_review(review):
+    if not _change_review_email_delivery_enabled():
+        return {"recipients": 0, "result": "Change-review email delivery is paused"}
+    recipients = _change_review_admin_recipients(review["database"])
+    if not recipients:
+        return {"recipients": 0, "result": "No opted-in administrators"}
+
+    body = (
+        "A CatMapper change is waiting for review.\n\n"
+        f"Request: {review['requestId']}\n"
+        f"Database: {review['database']}\n"
+        f"Action: {review['action']}\n"
+        f"Target CMID: {review['targetCmid']}\n"
+        f"Submitted by user: {review['submittedBy']}\n"
+        f"Submitted at: {review['submittedAt']}\n\n"
+        "Open the Admin page for this database and choose Review proposed changes."
+    )
+    result = sendEmail(
+        mail=mail,
+        subject=f"CatMapper change awaiting review: {review['database']} {review['targetCmid']}",
+        recipients=recipients,
+        body=body,
+        sender=get_default_sender() or "admin@catmapper.org",
+    )
+    return {"recipients": len(recipients), "result": result}
+
+
+def _create_change_review(database, action, input_payload, tabledata, dataset_id, claims, reason):
+    database_key = _change_review_database_key(database)
+    access_rows = getQuery(
+        query="""
+        MATCH (u:USER {userid: $userid})
+        RETURN u.database AS database
+        """,
+        driver=getDriver("userdb"),
+        params={"userid": str(claims.get("userid") or "")},
+        type="dict",
+    )
+    if not access_rows:
+        raise OwnershipError("User account was not found")
+    allowed_databases = _normalize_userdb_database(access_rows[0].get("database"))
+    if allowed_databases and database_key not in allowed_databases:
+        raise OwnershipError("User is not authorized for this database")
+
+    request_id = f"change_{uuid4().hex}"
+    submitted_at = _now_iso()
+    safe_input = dict(input_payload or {})
+    safe_input.pop("_actorClaims", None)
+    safe_tabledata = tabledata if isinstance(tabledata, list) else []
+    params = {
+        "requestId": request_id,
+        "database": database_key,
+        "action": str(action or ""),
+        "targetCmid": _change_review_target(action, safe_input),
+        "submittedBy": str(claims.get("userid") or ""),
+        "submittedAt": submitted_at,
+        "authorizationReason": str(reason or ""),
+        "inputJson": json.dumps(safe_input, sort_keys=True, default=str),
+        "tabledataJson": json.dumps(safe_tabledata, sort_keys=True, default=str),
+        "datasetID": str(dataset_id or ""),
+    }
+    rows = getQuery(
+        query="""
+        MATCH (u:USER {userid: $submittedBy})
+        CREATE (r:CHANGE_REVIEW {
+          requestId: $requestId,
+          database: $database,
+          action: $action,
+          targetCmid: $targetCmid,
+          submittedBy: $submittedBy,
+          submittedAt: $submittedAt,
+          authorizationReason: $authorizationReason,
+          inputJson: $inputJson,
+          tabledataJson: $tabledataJson,
+          datasetID: $datasetID,
+          status: 'pending',
+          notifyRequester: false
+        })
+        CREATE (u)-[:SUBMITTED_CHANGE]->(r)
+        RETURN r.requestId AS requestId, r.database AS database, r.action AS action,
+               r.targetCmid AS targetCmid, r.submittedBy AS submittedBy,
+               coalesce(u.username, u.email, u.userid) AS submitterName,
+               r.submittedAt AS submittedAt, r.status AS status,
+               r.authorizationReason AS authorizationReason,
+               r.inputJson AS inputJson, r.tabledataJson AS tabledataJson,
+               r.datasetID AS datasetID, r.notifyRequester AS notifyRequester
+        """,
+        driver=getDriver("userdb"),
+        params=params,
+        type="dict",
+    )
+    if not rows:
+        raise ValueError("Unable to save the change for review")
+    review = _serialize_change_review(rows[0])
+    try:
+        review["adminNotification"] = _notify_admins_of_change_review(review)
+    except Exception as exc:
+        review["adminNotification"] = {"recipients": 0, "result": f"Notification failed: {exc}"}
+    return review
 
 
 def _normalize_userdb_database(value):
@@ -861,9 +1014,7 @@ def admin_nodeproperties():
     option = request.args.get('option')
     credentials = _parse_credentials(request.args.get("cred"))
     try:
-        claims = normalize_actor_claims(verify_request_auth(credentials=credentials, req=request))
-        if not is_admin_claims(claims):
-            assert_owned_nodes(database, [CMID], claims)
+        verify_request_auth(credentials=credentials, req=request)
     except Exception as e:
         error_message = str(e)
         status_code = classify_auth_error_status(error_message) or 400
@@ -997,24 +1148,6 @@ def admin_usesproperties():
                 "r1": [],
             })
 
-        if not is_admin_claims(claims):
-            owned_rel_ids = owned_uses_relids(
-                database,
-                [record[1].get("id") for record in records_list],
-                claims,
-            )
-            records_list = [
-                record
-                for record in records_list
-                if str(record[1].get("id") or "") in owned_rel_ids
-            ]
-            if not records_list:
-                return jsonify({
-                    "error": "",
-                    "r": [],
-                    "r1": [],
-                })
-        
         category_labels = records_list[0][0].get("labels", []) if records_list else []
         allowed = session.run(q1).data()
         category_domains = None
@@ -1160,9 +1293,7 @@ def check_ambiguous_usesties():
         USES_property = json.loads(input.get('s1_7'))
         rel_id = USES_property[1]["id"]
         driver = getDriver(database)
-        claims = normalize_actor_claims(verify_request_auth(credentials=credentials, req=request))
-        if not is_admin_claims(claims):
-            assert_owned_uses_by_relids(database, [rel_id], claims)
+        verify_request_auth(credentials=credentials, req=request)
 
         result = check_ambiguous_ties_moveUSESties(driver,CMID_from,CMID_to,rel_id)
         return result
@@ -1192,6 +1323,331 @@ def getAdmin():
     """
     headers = {'Content-Type': 'text/html'}
     return make_response(render_template('admin.html'), 200, headers)
+
+
+def _execute_admin_edit(database, fun, acting_user, input_payload, data):
+    result = "Nothing returned"
+    if fun == "mergeNodes":
+        keepcmid = unlist(data.get('keepcmid').strip())
+        deletecmid = unlist(data.get('deletecmid').strip())
+        result = mergeNodes(keepcmid, deletecmid, acting_user, database)
+    elif fun == "processUSES":
+        CMID = cleanCMID(data.get('CMID'))
+        result = processUSES(database=database, CMID=CMID)
+    elif fun == "replaceProperty":
+        cmid = unlist(data.get('cmid'))
+        property = unlist(data.get('property'))
+        old = unlist(data.get('old'))
+        new = unlist(data.get('new'))
+        result = replaceProperty(cmid, property, old, new, database)
+    elif fun == "add/edit/delete node property":
+        result = add_edit_delete_Node(database, acting_user, input_payload)
+    elif fun == "add/edit/delete USES property":
+        result = add_edit_delete_USES(database, acting_user, input_payload)
+    elif fun == "add/edit/delete CATEGORY MERGING property":
+        result = add_edit_delete_CATEGORY_MERGING(database, acting_user, input_payload)
+    elif fun == "merge nodes":
+        result = mergeNodes(input_payload.get('s1_2'), input_payload.get('s1_3'), acting_user, database)
+    elif fun == "create new label":
+        result = createLabel(database, acting_user, input_payload)
+    elif fun == "delete node":
+        result = deleteNode(database, acting_user, input_payload)
+    elif fun == "delete USES relation":
+        result = deleteUSES(database, acting_user, input_payload)
+    elif fun == "delete CATEGORY MERGING relation":
+        result = deleteCATEGORYMERGING(database, acting_user, input_payload)
+    elif fun == "move USES tie":
+        result = moveUSESties(
+            database,
+            acting_user,
+            input_payload,
+            data.get("datasetID"),
+            data.get("tabledata"),
+        )
+    elif fun == "move CATEGORY MERGING tie":
+        result = moveCATEGORYMERGINGties(database, acting_user, input_payload)
+    else:
+        raise Exception("Function does not exist")
+    return result
+
+
+def _load_change_review(request_id):
+    rows = getQuery(
+        query="""
+        MATCH (r:CHANGE_REVIEW {requestId: $requestId})
+        OPTIONAL MATCH (u:USER {userid: r.submittedBy})
+        RETURN r.requestId AS requestId, r.database AS database, r.action AS action,
+               r.targetCmid AS targetCmid, r.submittedBy AS submittedBy,
+               coalesce(u.username, u.email, u.userid) AS submitterName,
+               r.submittedAt AS submittedAt, r.status AS status,
+               r.authorizationReason AS authorizationReason,
+               r.inputJson AS inputJson, r.tabledataJson AS tabledataJson,
+               r.datasetID AS datasetID, coalesce(r.notifyRequester, false) AS notifyRequester,
+               r.decisionNote AS decisionNote, r.decidedBy AS decidedBy,
+               r.decidedAt AS decidedAt, r.lastError AS lastError
+        """,
+        driver=getDriver("userdb"),
+        params={"requestId": str(request_id)},
+        type="dict",
+    )
+    return _serialize_change_review(rows[0]) if rows else None
+
+
+@admin_bp.route('/admin/change-reviews', methods=['GET'])
+def list_change_reviews():
+    try:
+        verify_request_auth(required_role="admin", req=request)
+        database = _change_review_database_key(request.args.get("database"))
+        status = str(request.args.get("status") or "pending").strip().lower()
+        if status not in {"pending", "approved", "rejected", "all"}:
+            raise ValueError("Invalid review status")
+        rows = getQuery(
+            query="""
+            MATCH (r:CHANGE_REVIEW {database: $database})
+            WHERE $status = 'all' OR r.status = $status
+            OPTIONAL MATCH (u:USER {userid: r.submittedBy})
+            RETURN r.requestId AS requestId, r.database AS database, r.action AS action,
+                   r.targetCmid AS targetCmid, r.submittedBy AS submittedBy,
+                   coalesce(u.username, u.email, u.userid) AS submitterName,
+                   r.submittedAt AS submittedAt, r.status AS status,
+                   r.authorizationReason AS authorizationReason,
+                   r.inputJson AS inputJson, r.tabledataJson AS tabledataJson,
+                   r.datasetID AS datasetID, coalesce(r.notifyRequester, false) AS notifyRequester,
+                   r.decisionNote AS decisionNote, r.decidedBy AS decidedBy,
+                   r.decidedAt AS decidedAt, r.lastError AS lastError
+            ORDER BY r.submittedAt ASC
+            """,
+            driver=getDriver("userdb"),
+            params={"database": database, "status": status},
+            type="dict",
+        )
+        reviews = [_serialize_change_review(row) for row in (rows or [])]
+        return jsonify({"reviews": reviews, "count": len(reviews)}), 200
+    except Exception as exc:
+        message = str(exc)
+        return jsonify({"error": message}), classify_auth_error_status(message) or 400
+
+
+@admin_bp.route('/admin/change-reviews/<request_id>/notification', methods=['PATCH'])
+def update_change_review_requester_notification(request_id):
+    try:
+        claims = normalize_actor_claims(verify_request_auth(req=request))
+        payload = request.get_json(silent=True) or {}
+        notify = payload.get("notifyRequester")
+        if not isinstance(notify, bool):
+            raise ValueError("notifyRequester must be true or false")
+        rows = getQuery(
+            query="""
+            MATCH (r:CHANGE_REVIEW {requestId: $requestId, submittedBy: $userid})
+            WHERE r.status = 'pending'
+            SET r.notifyRequester = $notifyRequester
+            RETURN r.requestId AS requestId
+            """,
+            driver=getDriver("userdb"),
+            params={
+                "requestId": str(request_id),
+                "userid": str(claims.get("userid") or ""),
+                "notifyRequester": notify,
+            },
+            type="dict",
+        )
+        if not rows:
+            raise ValueError("Pending change review request not found")
+        return jsonify({
+            "message": "Approval email preference saved.",
+            "requestId": str(request_id),
+            "notifyRequester": notify,
+        }), 200
+    except Exception as exc:
+        message = str(exc)
+        return jsonify({"error": message}), classify_auth_error_status(message) or 400
+
+
+def _send_change_review_approval_email(review):
+    if not review.get("notifyRequester") or not _change_review_email_delivery_enabled():
+        return None
+    rows = getQuery(
+        query="""
+        MATCH (u:USER {userid: $userid})
+        RETURN trim(coalesce(u.email, '')) AS email
+        """,
+        driver=getDriver("userdb"),
+        params={"userid": review.get("submittedBy")},
+        type="dict",
+    )
+    email = str((rows[0] if rows else {}).get("email") or "").strip()
+    if not email:
+        return None
+    return sendEmail(
+        mail=mail,
+        subject=f"Your CatMapper change was approved: {review.get('targetCmid')}",
+        recipients=[email],
+        body=(
+            "Your submitted CatMapper change has been approved.\n\n"
+            f"Request: {review.get('requestId')}\n"
+            f"Database: {review.get('database')}\n"
+            f"Action: {review.get('action')}\n"
+            f"Target CMID: {review.get('targetCmid')}\n"
+        ),
+        sender=get_default_sender() or "admin@catmapper.org",
+    )
+
+
+@admin_bp.route('/admin/change-reviews/<request_id>/decision', methods=['POST'])
+def decide_change_review(request_id):
+    try:
+        claims = normalize_actor_claims(verify_request_auth(required_role="admin", req=request))
+        payload = request.get_json(silent=True) or {}
+        decision = str(payload.get("decision") or "").strip().lower()
+        note = str(payload.get("note") or "").strip()
+        if decision not in {"approve", "reject"}:
+            raise ValueError("Decision must be approve or reject")
+
+        review = _load_change_review(request_id)
+        if not review or review.get("status") != "pending":
+            raise ValueError("Pending change review request not found")
+        now = _now_iso()
+
+        if decision == "reject":
+            rows = getQuery(
+                query="""
+                MATCH (r:CHANGE_REVIEW {requestId: $requestId, status: 'pending'})
+                SET r.status = 'rejected', r.decisionNote = $note,
+                    r.decidedBy = $decidedBy, r.decidedAt = $decidedAt
+                RETURN r.requestId AS requestId
+                """,
+                driver=getDriver("userdb"),
+                params={
+                    "requestId": str(request_id),
+                    "note": note,
+                    "decidedBy": str(claims.get("userid") or ""),
+                    "decidedAt": now,
+                },
+                type="dict",
+            )
+            if not rows:
+                raise ValueError("The review request was already decided")
+            return jsonify({"message": "Change rejected.", "review": _load_change_review(request_id)}), 200
+
+        claimed = getQuery(
+            query="""
+            MATCH (r:CHANGE_REVIEW {requestId: $requestId, status: 'pending'})
+            SET r.status = 'processing', r.decidedBy = $decidedBy, r.decidedAt = $decidedAt,
+                r.decisionNote = $note
+            RETURN r.requestId AS requestId
+            """,
+            driver=getDriver("userdb"),
+            params={
+                "requestId": str(request_id),
+                "decidedBy": str(claims.get("userid") or ""),
+                "decidedAt": now,
+                "note": note,
+            },
+            type="dict",
+        )
+        if not claimed:
+            raise ValueError("The review request was already decided")
+
+        input_payload = dict(review.get("input") or {})
+        input_payload["_actorClaims"] = dict(claims)
+        action_data = {
+            "tabledata": review.get("tabledata") or [],
+            "datasetID": review.get("datasetID") or "",
+        }
+        try:
+            result = _execute_admin_edit(
+                review["database"],
+                review["action"],
+                claims.get("userid"),
+                input_payload,
+                action_data,
+            )
+        except Exception as execute_error:
+            getQuery(
+                query="""
+                MATCH (r:CHANGE_REVIEW {requestId: $requestId, status: 'processing'})
+                SET r.status = 'pending', r.lastError = $lastError
+                RETURN r.requestId AS requestId
+                """,
+                driver=getDriver("userdb"),
+                params={"requestId": str(request_id), "lastError": str(execute_error)},
+                type="dict",
+            )
+            raise
+
+        getQuery(
+            query="""
+            MATCH (r:CHANGE_REVIEW {requestId: $requestId, status: 'processing'})
+            SET r.status = 'approved', r.appliedResult = $appliedResult
+            REMOVE r.lastError
+            RETURN r.requestId AS requestId
+            """,
+            driver=getDriver("userdb"),
+            params={"requestId": str(request_id), "appliedResult": str(result)},
+            type="dict",
+        )
+        approved_review = _load_change_review(request_id)
+        email_result = _send_change_review_approval_email(approved_review)
+        return jsonify({
+            "message": "Change approved and applied.",
+            "review": approved_review,
+            "result": str(result),
+            "requesterEmailResult": email_result,
+        }), 200
+    except Exception as exc:
+        message = str(exc)
+        return jsonify({"error": message}), classify_auth_error_status(message) or 400
+
+
+@admin_bp.route('/admin/change-review-preferences', methods=['GET', 'PATCH'])
+def change_review_preferences():
+    try:
+        claims = normalize_actor_claims(verify_request_auth(required_role="admin", req=request))
+        userid = str(claims.get("userid") or "")
+        driver = getDriver("userdb")
+        if request.method == 'PATCH':
+            payload = request.get_json(silent=True) or {}
+            database = _change_review_database_key(payload.get("database"))
+            enabled = payload.get("enabled")
+            if not isinstance(enabled, bool):
+                raise ValueError("enabled must be true or false")
+            property_name = "changeReviewEmailSocioMap" if database == "sociomap" else "changeReviewEmailArchaMap"
+            query = f"""
+            MATCH (u:USER {{userid: $userid}})
+            SET u.{property_name} = $enabled
+            RETURN u.email AS email,
+                   properties(u)['changeReviewEmailSocioMap'] AS socioPref,
+                   properties(u)['changeReviewEmailArchaMap'] AS archaPref
+            """
+            rows = getQuery(
+                query=query,
+                driver=driver,
+                params={"userid": userid, "enabled": enabled},
+                type="dict",
+            )
+        else:
+            rows = getQuery(
+                query="""
+                MATCH (u:USER {userid: $userid})
+                RETURN u.email AS email,
+                       properties(u)['changeReviewEmailSocioMap'] AS socioPref,
+                       properties(u)['changeReviewEmailArchaMap'] AS archaPref
+                """,
+                driver=driver,
+                params={"userid": userid},
+                type="dict",
+            )
+        if not rows:
+            raise ValueError("Admin user not found")
+        row = rows[0]
+        return jsonify({
+            "sociomap": _change_review_email_preference(row, "sociomap"),
+            "archamap": _change_review_email_preference(row, "archamap"),
+            "deliveryEnabled": _change_review_email_delivery_enabled(),
+        }), 200
+    except Exception as exc:
+        message = str(exc)
+        return jsonify({"error": message}), classify_auth_error_status(message) or 400
 
 
 @admin_bp.route('/admin/edit', methods=['GET', 'POST'])
@@ -1244,67 +1700,56 @@ def getAdminEdit():
         acting_user = claims.get("userid")
         if not acting_user:
             acting_user = user
-        if isinstance(input, dict):
-            input = dict(input)
-            input["_actorClaims"] = dict(claims)
-        _authorize_admin_edit_function(
-            fun=fun,
-            database=database,
-            input_payload=input,
-            tabledata=data.get("tabledata"),
-            dataset_id=data.get("datasetID"),
-            claims=claims,
-        )
-        
-        result = "Nothing returned"
-        if fun == "mergeNodes":
-            keepcmid = unlist(data.get('keepcmid').strip())
-            deletecmid = unlist(data.get('deletecmid').strip())
-            result = mergeNodes(keepcmid, deletecmid, acting_user, database)
-        elif fun == "processUSES":
-            CMID = cleanCMID(data.get('CMID'))
-            result = processUSES(database=database, CMID=CMID)
-        elif fun == "replaceProperty":
-            cmid = unlist(data.get('cmid'))
-            property = unlist(data.get('property'))
-            old = unlist(data.get('old'))
-            new = unlist(data.get('new'))
-            result = replaceProperty(cmid, property, old, new, database)
-        elif fun == "add/edit/delete node property":
-            result = add_edit_delete_Node(
-                database, acting_user, input)
-        elif fun == "add/edit/delete USES property":
-            result = add_edit_delete_USES(
-                database, acting_user, input)
-        elif fun == "add/edit/delete CATEGORY MERGING property":
-            result = add_edit_delete_CATEGORY_MERGING(
-                database, acting_user, input)
-        elif fun == "merge nodes":
-            result = mergeNodes(input.get('s1_2'), input.get(
-                's1_3'), acting_user, database)
-        elif fun == "create new label":
-            result = createLabel(database, acting_user, input)
-        elif fun == "delete node":
-            result = deleteNode(database, acting_user, input)
-        elif fun == "delete USES relation":
-            result = deleteUSES(database, acting_user, input)
-        elif fun == "delete CATEGORY MERGING relation":
-            result = deleteCATEGORYMERGING(database, acting_user, input)
-        elif fun == "move USES tie":
-            tabledata = data.get("tabledata")
-            dataset = data.get("datasetID")
-            result = moveUSESties(database, acting_user, input,dataset,tabledata)
-        elif fun == "move CATEGORY MERGING tie":
-            result = moveCATEGORYMERGINGties(database, acting_user, input)
-        else:
-            raise Exception("Function does not exist")
+        if not isinstance(input, dict):
+            input = {}
+        input = dict(input)
+        try:
+            _authorize_admin_edit_function(
+                fun=fun,
+                database=database,
+                input_payload=input,
+                tabledata=data.get("tabledata"),
+                dataset_id=data.get("datasetID"),
+                claims=claims,
+            )
+        except (OwnerScopedAdminReviewRequired, OwnershipError) as authorization_error:
+            if is_admin_claims(claims):
+                raise
+            review = _create_change_review(
+                database=database,
+                action=fun,
+                input_payload=input,
+                tabledata=data.get("tabledata"),
+                dataset_id=data.get("datasetID"),
+                claims=claims,
+                reason=str(authorization_error),
+            )
+            return jsonify({
+                "message": "Your changes have been submitted for review.",
+                "submittedForReview": True,
+                "review": review,
+            }), 202
+
+        input["_actorClaims"] = dict(claims)
+        result = _execute_admin_edit(database, fun, acting_user, input, data)
         return result
     except OwnerScopedAdminReviewRequired as e:
-        return jsonify({
-            "error": str(e),
-            "requiresAdminReview": True,
-            "review": e.to_dict(),
-        }), 403
+        if claims and not is_admin_claims(claims):
+            review = _create_change_review(
+                database=database,
+                action=fun,
+                input_payload=input,
+                tabledata=data.get("tabledata"),
+                dataset_id=data.get("datasetID"),
+                claims=claims,
+                reason=str(e),
+            )
+            return jsonify({
+                "message": "Your changes have been submitted for review.",
+                "submittedForReview": True,
+                "review": review,
+            }), 202
+        return jsonify({"error": str(e)}), 403
     except Exception as e:
         # In case of an error, return an error response with an appropriate HTTP status code
         data = str(e)
