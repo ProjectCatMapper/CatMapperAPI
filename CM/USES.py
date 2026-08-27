@@ -715,15 +715,13 @@ def waitingUSES(database, BATCH_SIZE=1000):
             return "Error in waitingUSES", 500
 
 
-def addCMNameRel(database, CMID=None, relIDs=None):
+def addCMNameRel(database, CMID=None):
     """
     Add CMName to relationship if new node.
 
     Parameters:
     - database: CatMapper database name
     - CMID: Optional; the CMID to match (default is None)
-    - relIDs: Optional relationship element IDs to update directly. When set,
-      only those USES ties are checked and no default-dataset tie is created.
 
     Returns:
     - None
@@ -744,38 +742,6 @@ def addCMNameRel(database, CMID=None, relIDs=None):
 
         driver = getDriver(database)
 
-        if relIDs is not None:
-            normalized_rel_ids = list(dict.fromkeys(
-                rel_id for rel_id in relIDs if rel_id
-            ))
-            if not normalized_rel_ids:
-                return None
-
-            query = '''
-                MATCH (c:CATEGORY)<-[r:USES]-(:DATASET)
-                WHERE elementId(r) IN $relIDs
-                  AND c.CMName IS NOT NULL
-                  AND NOT c.CMName IN coalesce(r.Name, [])
-                SET r.Name = coalesce(r.Name, []) + [c.CMName]
-                RETURN elementId(r) AS relID
-            '''
-            result = getQuery(
-                query,
-                driver,
-                params={"relIDs": normalized_rel_ids},
-                type="list",
-            )
-            if result:
-                createLog(
-                    id=result,
-                    type="relation",
-                    log=["Added CMName to relationship"],
-                    user="0",
-                    driver=driver,
-                )
-            updateAltNames(database, CMID=CMID)
-            return None
-
         if CMID is None:
             q = ""
         else:
@@ -785,9 +751,10 @@ def addCMNameRel(database, CMID=None, relIDs=None):
 
         query_1 = f'''
             MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET {{CMID: "{datasetID}"}})
-            WHERE {q} NOT c.CMName IN c.names
+            WHERE {q} c.CMName IS NOT NULL
+              AND NOT c.CMName IN coalesce(r.Name, [])
             WITH DISTINCT c, r
-            SET r.Name = r.Name + [c.CMName]
+            SET r.Name = coalesce(r.Name, []) + [c.CMName]
             return elementId(r) as relID
         '''
 
@@ -807,7 +774,8 @@ def addCMNameRel(database, CMID=None, relIDs=None):
 
         query_2 = f'''
             MATCH (c:CATEGORY)
-            WHERE {q} NOT c.CMName IN c.names AND NOT (c)<-[:USES]-(:DATASET {{CMID: "{datasetID}"}})
+            WHERE {q} c.CMName IS NOT NULL
+              AND NOT (c)<-[:USES]-(:DATASET {{CMID: "{datasetID}"}})
             WITH DISTINCT c
             MATCH (d:DATASET) WHERE d.CMID = "{datasetID}"
             CREATE (c)<-[r:USES]-(d)

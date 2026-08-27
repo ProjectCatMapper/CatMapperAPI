@@ -1,88 +1,57 @@
+import pytest
+
 from CM import USES, upload
 
 
-def test_add_cmname_rel_updates_only_requested_uses_ties(monkeypatch):
+@pytest.mark.parametrize(
+    ("database", "default_dataset"),
+    [("SocioMap", "SD11"), ("ArchaMap", "AD941")],
+)
+def test_add_cmname_rel_only_targets_default_dataset(
+    monkeypatch, database, default_dataset
+):
     driver = object()
-    captured = {}
+    queries = []
 
     monkeypatch.setattr(USES, "getDriver", lambda database: driver)
 
     def fake_get_query(query, query_driver, params=None, type=None, **kwargs):
-        captured.update(
-            query=query,
-            driver=query_driver,
-            params=params,
-            type=type,
-        )
-        return ["rel-2"]
+        queries.append({"query": query, "driver": query_driver})
+        return []
 
     monkeypatch.setattr(USES, "getQuery", fake_get_query)
-    monkeypatch.setattr(
-        USES,
-        "createLog",
-        lambda **kwargs: captured.update(log=kwargs),
-    )
-    monkeypatch.setattr(
-        USES,
-        "updateAltNames",
-        lambda database, CMID=None: captured.update(
-            alt_names=(database, CMID)
-        ),
-    )
+    monkeypatch.setattr(USES, "createLog", lambda **kwargs: None)
+    monkeypatch.setattr(USES, "updateAltNames", lambda *args, **kwargs: None)
 
-    result = USES.addCMNameRel(
-        "ArchaMap",
-        CMID=["AM1", "AM2"],
-        relIDs=["rel-1", "rel-2", "rel-1", None],
-    )
+    assert USES.addCMNameRel(database, CMID=["CM1", "CM2"]) is None
 
-    assert result is None
-    assert "elementId(r) IN $relIDs" in captured["query"]
-    assert "NOT c.CMName IN coalesce(r.Name, [])" in captured["query"]
-    assert "coalesce(r.Name, []) + [c.CMName]" in captured["query"]
-    assert captured["params"] == {"relIDs": ["rel-1", "rel-2"]}
-    assert captured["type"] == "list"
-    assert captured["log"]["id"] == ["rel-2"]
-    assert captured["alt_names"] == ("ArchaMap", ["AM1", "AM2"])
+    assert len(queries) == 2
+    assert all(default_dataset in item["query"] for item in queries)
+    assert all("elementId(r) IN $relIDs" not in item["query"] for item in queries)
+    assert "NOT c.CMName IN coalesce(r.Name, [])" in queries[0]["query"]
+    assert "coalesce(r.Name, []) + [c.CMName]" in queries[0]["query"]
+    assert "NOT (c)<-[:USES]-(:DATASET" in queries[1]["query"]
 
 
-def test_add_cmname_rel_skips_empty_relationship_scope(monkeypatch):
-    monkeypatch.setattr(USES, "getDriver", lambda database: object())
-    monkeypatch.setattr(
-        USES,
-        "getQuery",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("query should not run")
-        ),
-    )
-
-    assert USES.addCMNameRel("SocioMap", CMID=["SM1"], relIDs=[]) is None
-
-
-def test_upload_passes_specific_created_relationships_to_add_cmname(monkeypatch):
+def test_upload_passes_only_created_cmids_to_default_uses(monkeypatch):
     captured = {}
     monkeypatch.setattr(
         upload,
         "addCMNameRel",
-        lambda database, CMID=None, relIDs=None: captured.update(
+        lambda database, CMID=None: captured.update(
             database=database,
             cmids=CMID,
-            rel_ids=relIDs,
         ),
     )
 
-    upload._add_cmnames_to_uploaded_uses(
+    upload._add_cmnames_to_default_uses(
         "ArchaMap",
         {
             "result": [
-                {"CMID": "AM1", "relID": "rel-1"},
-                {"CMID": "AM2", "relID": "rel-2"},
+                {"CMID": "AM1", "relID": "uploaded-rel-1"},
+                {"CMID": "AM2", "relID": "uploaded-rel-2"},
             ]
         },
     )
 
-    assert captured == {
-        "database": "ArchaMap",
-        "cmids": ["AM1", "AM2"],
-        "rel_ids": ["rel-1", "rel-2"],
-    }
+    assert captured == {"database": "ArchaMap", "cmids": ["AM1", "AM2"]}

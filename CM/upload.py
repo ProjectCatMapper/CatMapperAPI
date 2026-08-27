@@ -43,12 +43,11 @@ def _sync_updated_uses_labels(database, cmids, changed_properties):
     return result
 
 
-def _add_cmnames_to_uploaded_uses(database, upload_result):
-    """Ensure each uploaded USES tie includes its category's CMName."""
+def _add_cmnames_to_default_uses(database, upload_result):
+    """Ensure uploaded categories have a named SD11 or AD941 USES tie."""
     result_rows = upload_result.get("result", [])
     cmids = [row["CMID"] for row in result_rows]
-    rel_ids = [row["relID"] for row in result_rows]
-    return addCMNameRel(database, CMID=cmids, relIDs=rel_ids)
+    return addCMNameRel(database, CMID=cmids)
 
 
 def _get_editable_properties_metadata(driver):
@@ -3959,9 +3958,9 @@ def input_Nodes_Uses(
                         "adding CMName to Name parameter and updating alternate names",
                         write="a",
                     )
-                # Add each node's CMName only to the specific USES tie returned
-                # by this upload when that tie's Name property is missing it.
-                _add_cmnames_to_uploaded_uses(database, result)
+                # Add each node's CMName only to its SocioMap/ArchaMap default
+                # USES tie (SD11/AD941), never to the uploaded source tie.
+                _add_cmnames_to_default_uses(database, result)
 
                 _sync_updated_uses_labels(
                     database,
