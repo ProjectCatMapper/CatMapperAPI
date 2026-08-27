@@ -43,6 +43,14 @@ def _sync_updated_uses_labels(database, cmids, changed_properties):
     return result
 
 
+def _add_cmnames_to_uploaded_uses(database, upload_result):
+    """Ensure each uploaded USES tie includes its category's CMName."""
+    result_rows = upload_result.get("result", [])
+    cmids = [row["CMID"] for row in result_rows]
+    rel_ids = [row["relID"] for row in result_rows]
+    return addCMNameRel(database, CMID=cmids, relIDs=rel_ids)
+
+
 def _get_editable_properties_metadata(driver):
     """Return public upload metadata while remaining compatible with simple test drivers."""
     return [
@@ -3951,8 +3959,9 @@ def input_Nodes_Uses(
                         "adding CMName to Name parameter and updating alternate names",
                         write="a",
                     )
-                # adds CMName to the Name parameter if missing
-                addCMNameRel(database, CMID=cmids_from_result)
+                # Add each node's CMName only to the specific USES tie returned
+                # by this upload when that tie's Name property is missing it.
+                _add_cmnames_to_uploaded_uses(database, result)
 
                 _sync_updated_uses_labels(
                     database,

@@ -715,14 +715,15 @@ def waitingUSES(database, BATCH_SIZE=1000):
             return "Error in waitingUSES", 500
 
 
-def addCMNameRel(database, CMID=None):
+def addCMNameRel(database, CMID=None, relIDs=None):
     """
     Add CMName to relationship if new node.
 
     Parameters:
-    - driver: CatMapper connection object
+    - database: CatMapper database name
     - CMID: Optional; the CMID to match (default is None)
-    - user: The user identifier (default is "0")
+    - relIDs: Optional relationship element IDs to update directly. When set,
+      only those USES ties are checked and no default-dataset tie is created.
 
     Returns:
     - None
@@ -742,6 +743,38 @@ def addCMNameRel(database, CMID=None):
                 f"database must be either 'SocioMap' or 'ArchaMap', but value was '{database}'")
 
         driver = getDriver(database)
+
+        if relIDs is not None:
+            normalized_rel_ids = list(dict.fromkeys(
+                rel_id for rel_id in relIDs if rel_id
+            ))
+            if not normalized_rel_ids:
+                return None
+
+            query = '''
+                MATCH (c:CATEGORY)<-[r:USES]-(:DATASET)
+                WHERE elementId(r) IN $relIDs
+                  AND c.CMName IS NOT NULL
+                  AND NOT c.CMName IN coalesce(r.Name, [])
+                SET r.Name = coalesce(r.Name, []) + [c.CMName]
+                RETURN elementId(r) AS relID
+            '''
+            result = getQuery(
+                query,
+                driver,
+                params={"relIDs": normalized_rel_ids},
+                type="list",
+            )
+            if result:
+                createLog(
+                    id=result,
+                    type="relation",
+                    log=["Added CMName to relationship"],
+                    user="0",
+                    driver=driver,
+                )
+            updateAltNames(database, CMID=CMID)
+            return None
 
         if CMID is None:
             q = ""
