@@ -1597,9 +1597,14 @@ def _finalize_change_review_approval(request_id, actor_claims):
 
 def run_change_review_approval_job(request_id, actor_claims):
     """RQ entry point; initialize Flask extensions before sending any email."""
-    from app import app
+    # RQ imports this module as ``CMroutes.admin_routes`` from /app.  In that
+    # import layout ``app`` may resolve to the /app package rather than
+    # /app/app.py, while the web process imports the latter directly.
+    from app import app as flask_app
+    if not hasattr(flask_app, "app_context"):
+        from app.app import app as flask_app
 
-    with app.app_context():
+    with flask_app.app_context():
         return _finalize_change_review_approval(request_id, actor_claims)
 
 
