@@ -133,10 +133,15 @@ def test_admin_approval_applies_stored_change_and_marks_it_approved(client, monk
 
     def fake_load(request_id):
         loaded["count"] += 1
-        return _review(status="pending" if loaded["count"] == 1 else "approved")
+        if loaded["count"] == 1:
+            return _review(status="pending")
+        if loaded["count"] == 2:
+            return _review(status="processing")
+        return _review(status="approved")
 
     monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "1", "role": "admin"})
     monkeypatch.setattr(admin_routes, "_load_change_review", fake_load)
+    monkeypatch.setattr(admin_routes, "is_rq_enabled", lambda: False)
     monkeypatch.setattr(admin_routes, "getDriver", lambda database: object())
     monkeypatch.setattr(admin_routes, "getQuery", lambda **kwargs: [{"requestId": "change-123"}])
     monkeypatch.setattr(
@@ -165,6 +170,42 @@ def test_admin_approval_applies_stored_change_and_marks_it_approved(client, monk
         "actingUser": "1",
         "claims": {"userid": "1", "role": "admin"},
     }
+
+
+def test_admin_approval_queues_finalization_without_running_the_edit(client, monkeypatch):
+    queued = {}
+    loaded = {"count": 0}
+
+    def fake_load(request_id):
+        loaded["count"] += 1
+        return _review(status="pending" if loaded["count"] == 1 else "processing")
+
+    monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "1", "role": "admin"})
+    monkeypatch.setattr(admin_routes, "_load_change_review", fake_load)
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin_routes, "getQuery", lambda **kwargs: [{"requestId": "change-123"}])
+    monkeypatch.setattr(admin_routes, "is_rq_enabled", lambda: True)
+    monkeypatch.setattr(
+        admin_routes,
+        "enqueue_change_review_approval",
+        lambda request_id, actor_claims: queued.update({"requestId": request_id, "claims": actor_claims}) or type("Job", (), {"id": "rq-123"})(),
+    )
+    monkeypatch.setattr(
+        admin_routes,
+        "_execute_admin_edit",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("queued approval must not run in request")),
+    )
+
+    response = client.post(
+        "/admin/change-reviews/change-123/decision",
+        headers={"Authorization": "Bearer admin-token"},
+        json={"decision": "approve"},
+    )
+
+    assert response.status_code == 202
+    assert response.get_json()["message"] == "Approval started. The change is being finalized."
+    assert response.get_json()["queued"] is True
+    assert queued == {"requestId": "change-123", "claims": {"userid": "1", "role": "admin"}}
 
 
 def test_admin_can_reject_without_applying_change(client, monkeypatch):

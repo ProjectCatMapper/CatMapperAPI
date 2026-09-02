@@ -64,3 +64,14 @@ def enqueue_waiting_uses_task(waiting_task_id, database):
         queue_name_env="CATMAPPER_WAITING_USES_QUEUE",
         default_queue="catmapper-waiting-uses",
     )
+
+
+def enqueue_change_review_approval(request_id, actor_claims):
+    """Finalize an approved change in the reconciliation worker queue."""
+    return _enqueue(
+        "CMroutes.admin_routes.run_change_review_approval_job",
+        request_id,
+        actor_claims,
+        queue_name_env="CATMAPPER_CHANGE_REVIEW_QUEUE",
+        default_queue="catmapper-waiting-uses",
+    )

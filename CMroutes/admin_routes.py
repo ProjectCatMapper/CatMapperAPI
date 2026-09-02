@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from .auth_utils import verify_request_auth, classify_auth_error_status
 from .extensions import mail
+from .task_queue import enqueue_change_review_approval, is_rq_enabled
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -300,6 +301,8 @@ def _serialize_change_review(row):
         "decisionNote": str(row.get("decisionNote") or ""),
         "decidedBy": str(row.get("decidedBy") or ""),
         "decidedAt": row.get("decidedAt") or "",
+        "startedAt": row.get("startedAt") or "",
+        "backgroundJobId": str(row.get("backgroundJobId") or ""),
         "lastError": str(row.get("lastError") or ""),
     }
 
@@ -1384,7 +1387,8 @@ def _load_change_review(request_id):
                r.inputJson AS inputJson, r.tabledataJson AS tabledataJson,
                r.datasetID AS datasetID, coalesce(r.notifyRequester, false) AS notifyRequester,
                r.decisionNote AS decisionNote, r.decidedBy AS decidedBy,
-               r.decidedAt AS decidedAt, r.lastError AS lastError
+               r.decidedAt AS decidedAt, r.startedAt AS startedAt,
+               r.backgroundJobId AS backgroundJobId, r.lastError AS lastError
         """,
         driver=getDriver("userdb"),
         params={"requestId": str(request_id)},
@@ -1399,12 +1403,14 @@ def list_change_reviews():
         verify_request_auth(required_role="admin", req=request)
         database = _change_review_database_key(request.args.get("database"))
         status = str(request.args.get("status") or "pending").strip().lower()
-        if status not in {"pending", "approved", "rejected", "all"}:
+        if status not in {"pending", "processing", "approved", "rejected", "open", "all"}:
             raise ValueError("Invalid review status")
         rows = getQuery(
             query="""
             MATCH (r:CHANGE_REVIEW {database: $database})
-            WHERE $status = 'all' OR r.status = $status
+            WHERE $status = 'all'
+               OR ($status = 'open' AND r.status IN ['pending', 'processing'])
+               OR r.status = $status
             OPTIONAL MATCH (u:USER {userid: r.submittedBy})
             RETURN r.requestId AS requestId, r.database AS database, r.action AS action,
                    r.targetCmid AS targetCmid, r.submittedBy AS submittedBy,
@@ -1414,7 +1420,8 @@ def list_change_reviews():
                    r.inputJson AS inputJson, r.tabledataJson AS tabledataJson,
                    r.datasetID AS datasetID, coalesce(r.notifyRequester, false) AS notifyRequester,
                    r.decisionNote AS decisionNote, r.decidedBy AS decidedBy,
-                   r.decidedAt AS decidedAt, r.lastError AS lastError
+                   r.decidedAt AS decidedAt, r.startedAt AS startedAt,
+                   r.backgroundJobId AS backgroundJobId, r.lastError AS lastError
             ORDER BY r.submittedAt ASC
             """,
             driver=getDriver("userdb"),
@@ -1511,6 +1518,91 @@ def _send_change_review_rejection_email(review):
     return _send_change_review_decision_email(review, "rejected")
 
 
+def _finalize_change_review_approval(request_id, actor_claims):
+    """Apply one claimed review and run its existing integrity reconciliation."""
+    review = _load_change_review(request_id)
+    if not review or review.get("status") != "processing":
+        return {"skipped": True, "reason": "Review request is no longer processing."}
+
+    getQuery(
+        query="""
+        MATCH (r:CHANGE_REVIEW {requestId: $requestId, status: 'processing'})
+        SET r.startedAt = $startedAt
+        RETURN r.requestId AS requestId
+        """,
+        driver=getDriver("userdb"),
+        params={"requestId": str(request_id), "startedAt": _now_iso()},
+        type="dict",
+    )
+
+    claims = normalize_actor_claims(actor_claims or {})
+    if not is_admin_claims(claims):
+        raise OwnershipError("Only an administrator can finalize a change review")
+
+    input_payload = dict(review.get("input") or {})
+    input_payload["_actorClaims"] = dict(claims)
+    action_data = {
+        "tabledata": review.get("tabledata") or [],
+        "datasetID": review.get("datasetID") or "",
+    }
+    try:
+        result = _execute_admin_edit(
+            review["database"],
+            review["action"],
+            claims.get("userid"),
+            input_payload,
+            action_data,
+        )
+    except Exception as execute_error:
+        getQuery(
+            query="""
+            MATCH (r:CHANGE_REVIEW {requestId: $requestId, status: 'processing'})
+            SET r.status = 'pending', r.lastError = $lastError
+            REMOVE r.startedAt, r.backgroundJobId
+            RETURN r.requestId AS requestId
+            """,
+            driver=getDriver("userdb"),
+            params={"requestId": str(request_id), "lastError": str(execute_error)},
+            type="dict",
+        )
+        raise
+
+    getQuery(
+        query="""
+        MATCH (r:CHANGE_REVIEW {requestId: $requestId, status: 'processing'})
+        SET r.status = 'approved', r.appliedResult = $appliedResult,
+            r.completedAt = $completedAt
+        REMOVE r.lastError
+        RETURN r.requestId AS requestId
+        """,
+        driver=getDriver("userdb"),
+        params={
+            "requestId": str(request_id),
+            "appliedResult": str(result),
+            "completedAt": _now_iso(),
+        },
+        type="dict",
+    )
+    approved_review = _load_change_review(request_id)
+    try:
+        email_result = _send_change_review_approval_email(approved_review)
+    except Exception as email_error:
+        email_result = f"Notification failed: {email_error}"
+    return {
+        "review": approved_review,
+        "result": str(result),
+        "requesterEmailResult": email_result,
+    }
+
+
+def run_change_review_approval_job(request_id, actor_claims):
+    """RQ entry point; initialize Flask extensions before sending any email."""
+    from app import app
+
+    with app.app_context():
+        return _finalize_change_review_approval(request_id, actor_claims)
+
+
 @admin_bp.route('/admin/change-reviews/<request_id>/decision', methods=['POST'])
 def decide_change_review(request_id):
     try:
@@ -1562,7 +1654,7 @@ def decide_change_review(request_id):
             query="""
             MATCH (r:CHANGE_REVIEW {requestId: $requestId, status: 'pending'})
             SET r.status = 'processing', r.decidedBy = $decidedBy, r.decidedAt = $decidedAt,
-                r.decisionNote = $note
+                r.decisionNote = $note, r.startedAt = '', r.backgroundJobId = ''
             RETURN r.requestId AS requestId
             """,
             driver=getDriver("userdb"),
@@ -1577,52 +1669,52 @@ def decide_change_review(request_id):
         if not claimed:
             raise ValueError("The review request was already decided")
 
-        input_payload = dict(review.get("input") or {})
-        input_payload["_actorClaims"] = dict(claims)
-        action_data = {
-            "tabledata": review.get("tabledata") or [],
-            "datasetID": review.get("datasetID") or "",
+        actor_claims = {
+            "userid": str(claims.get("userid") or ""),
+            "role": "admin",
         }
         try:
-            result = _execute_admin_edit(
-                review["database"],
-                review["action"],
-                claims.get("userid"),
-                input_payload,
-                action_data,
-            )
-        except Exception as execute_error:
+            if is_rq_enabled():
+                job = enqueue_change_review_approval(str(request_id), actor_claims)
+                job_id = str(getattr(job, "id", "") or "")
+                if not job_id:
+                    raise RuntimeError("Change-review job was not accepted by the queue")
+                getQuery(
+                    query="""
+                    MATCH (r:CHANGE_REVIEW {requestId: $requestId, status: 'processing'})
+                    SET r.backgroundJobId = $jobId
+                    RETURN r.requestId AS requestId
+                    """,
+                    driver=getDriver("userdb"),
+                    params={"requestId": str(request_id), "jobId": job_id},
+                    type="dict",
+                )
+                return jsonify({
+                    "message": "Approval started. The change is being finalized.",
+                    "review": _load_change_review(request_id),
+                    "queued": True,
+                }), 202
+
+            # Local development without RQ retains the old synchronous behavior.
+            completed = _finalize_change_review_approval(request_id, actor_claims)
+            return jsonify({
+                "message": "Change approved and applied.",
+                **completed,
+                "queued": False,
+            }), 200
+        except Exception as enqueue_error:
             getQuery(
                 query="""
                 MATCH (r:CHANGE_REVIEW {requestId: $requestId, status: 'processing'})
                 SET r.status = 'pending', r.lastError = $lastError
+                REMOVE r.startedAt, r.backgroundJobId
                 RETURN r.requestId AS requestId
                 """,
                 driver=getDriver("userdb"),
-                params={"requestId": str(request_id), "lastError": str(execute_error)},
+                params={"requestId": str(request_id), "lastError": str(enqueue_error)},
                 type="dict",
             )
             raise
-
-        getQuery(
-            query="""
-            MATCH (r:CHANGE_REVIEW {requestId: $requestId, status: 'processing'})
-            SET r.status = 'approved', r.appliedResult = $appliedResult
-            REMOVE r.lastError
-            RETURN r.requestId AS requestId
-            """,
-            driver=getDriver("userdb"),
-            params={"requestId": str(request_id), "appliedResult": str(result)},
-            type="dict",
-        )
-        approved_review = _load_change_review(request_id)
-        email_result = _send_change_review_approval_email(approved_review)
-        return jsonify({
-            "message": "Change approved and applied.",
-            "review": approved_review,
-            "result": str(result),
-            "requesterEmailResult": email_result,
-        }), 200
     except Exception as exc:
         message = str(exc)
         return jsonify({"error": message}), classify_auth_error_status(message) or 400

@@ -60,3 +60,16 @@ def test_enqueue_waiting_uses_task_honors_queue_override(monkeypatch):
     assert len(DummyQueue.instances) == 1
     instance = DummyQueue.instances[0]
     assert instance.name == "custom-waiting"
+
+
+def test_enqueue_change_review_approval_uses_reconciliation_queue(monkeypatch):
+    _setup_queue(monkeypatch)
+    monkeypatch.delenv("CATMAPPER_CHANGE_REVIEW_QUEUE", raising=False)
+
+    task_queue.enqueue_change_review_approval("change-1", {"userid": "1", "role": "admin"})
+
+    assert len(DummyQueue.instances) == 1
+    instance = DummyQueue.instances[0]
+    assert instance.name == "catmapper-waiting-uses"
+    assert instance.enqueued["function_path"] == "CMroutes.admin_routes.run_change_review_approval_job"
+    assert instance.enqueued["args"] == ("change-1", {"userid": "1", "role": "admin"})
