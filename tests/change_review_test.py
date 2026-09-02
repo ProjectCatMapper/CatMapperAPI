@@ -168,10 +168,27 @@ def test_admin_approval_applies_stored_change_and_marks_it_approved(client, monk
 
 
 def test_admin_can_reject_without_applying_change(client, monkeypatch):
+    sent = {}
+    loaded = {"count": 0}
+
+    def fake_load(request_id):
+        loaded["count"] += 1
+        if loaded["count"] == 1:
+            return _review(status="pending")
+        return {
+            **_review(status="rejected", notify=False),
+            "decisionNote": "Insufficient evidence",
+        }
+
     monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "1", "role": "admin"})
-    monkeypatch.setattr(admin_routes, "_load_change_review", lambda request_id: _review(status="pending"))
+    monkeypatch.setattr(admin_routes, "_load_change_review", fake_load)
     monkeypatch.setattr(admin_routes, "getDriver", lambda database: object())
     monkeypatch.setattr(admin_routes, "getQuery", lambda **kwargs: [{"requestId": "change-123"}])
+    monkeypatch.setattr(
+        admin_routes,
+        "_send_change_review_rejection_email",
+        lambda review: sent.update(review) or "sent",
+    )
     monkeypatch.setattr(
         admin_routes,
         "_execute_admin_edit",
@@ -185,7 +202,10 @@ def test_admin_can_reject_without_applying_change(client, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.get_json()["message"] == "Change rejected."
+    assert response.get_json()["message"] == "Change rejected and requester notified."
+    assert response.get_json()["requesterEmailResult"] == "sent"
+    assert sent["status"] == "rejected"
+    assert sent["decisionNote"] == "Insufficient evidence"
 
 
 def test_approval_email_uses_requesters_address_on_file(monkeypatch):
@@ -201,6 +221,26 @@ def test_approval_email_uses_requesters_address_on_file(monkeypatch):
     assert result == "sent"
     assert sent["recipients"] == ["requester@example.org"]
     assert "change-123" in sent["body"]
+
+
+def test_rejection_email_uses_requesters_address_and_includes_comment(monkeypatch):
+    sent = {}
+    monkeypatch.setenv("CATMAPPER_CHANGE_REVIEW_EMAIL_ENABLED", "1")
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin_routes, "getQuery", lambda **kwargs: [{"email": "requester@example.org"}])
+    monkeypatch.setattr(admin_routes, "get_default_sender", lambda: "noreply@example.org")
+    monkeypatch.setattr(admin_routes, "sendEmail", lambda **kwargs: sent.update(kwargs) or "sent")
+
+    review = {
+        **_review(status="rejected", notify=False),
+        "decisionNote": "Please provide a source for this value.",
+    }
+    result = admin_routes._send_change_review_rejection_email(review)
+
+    assert result == "sent"
+    assert sent["recipients"] == ["requester@example.org"]
+    assert sent["subject"] == "Your CatMapper change was rejected: AM1"
+    assert "Please provide a source for this value." in sent["body"]
 
 
 def test_review_email_delivery_is_paused_by_default(monkeypatch):

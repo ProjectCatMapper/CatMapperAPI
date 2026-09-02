@@ -1463,8 +1463,13 @@ def update_change_review_requester_notification(request_id):
         return jsonify({"error": message}), classify_auth_error_status(message) or 400
 
 
-def _send_change_review_approval_email(review):
-    if not review.get("notifyRequester") or not _change_review_email_delivery_enabled():
+def _send_change_review_decision_email(review, decision):
+    decision_key = str(decision or "").strip().lower()
+    if decision_key not in {"approved", "rejected"}:
+        raise ValueError("Change-review email decision must be approved or rejected")
+    if not _change_review_email_delivery_enabled():
+        return None
+    if decision_key == "approved" and not review.get("notifyRequester"):
         return None
     rows = getQuery(
         query="""
@@ -1478,19 +1483,32 @@ def _send_change_review_approval_email(review):
     email = str((rows[0] if rows else {}).get("email") or "").strip()
     if not email:
         return None
+    decision_note = str(review.get("decisionNote") or "").strip()
+    note_block = f"\nReviewer comment: {decision_note}\n" if decision_note else ""
     return sendEmail(
         mail=mail,
-        subject=f"Your CatMapper change was approved: {review.get('targetCmid')}",
+        subject=f"Your CatMapper change was {decision_key}: {review.get('targetCmid')}",
         recipients=[email],
         body=(
-            "Your submitted CatMapper change has been approved.\n\n"
+            f"Your submitted CatMapper change has been {decision_key}.\n\n"
             f"Request: {review.get('requestId')}\n"
             f"Database: {review.get('database')}\n"
             f"Action: {review.get('action')}\n"
             f"Target CMID: {review.get('targetCmid')}\n"
+            f"{note_block}"
         ),
         sender=get_default_sender() or "admin@catmapper.org",
     )
+
+
+def _send_change_review_approval_email(review):
+    return _send_change_review_decision_email(review, "approved")
+
+
+def _send_change_review_rejection_email(review):
+    # Rejection notices are always sent when delivery is enabled; they are not
+    # governed by the requester's optional approval-notification preference.
+    return _send_change_review_decision_email(review, "rejected")
 
 
 @admin_bp.route('/admin/change-reviews/<request_id>/decision', methods=['POST'])
@@ -1502,6 +1520,8 @@ def decide_change_review(request_id):
         note = str(payload.get("note") or "").strip()
         if decision not in {"approve", "reject"}:
             raise ValueError("Decision must be approve or reject")
+        if len(note) > 2000:
+            raise ValueError("Decision comment must be 2000 characters or fewer")
 
         review = _load_change_review(request_id)
         if not review or review.get("status") != "pending":
@@ -1527,7 +1547,16 @@ def decide_change_review(request_id):
             )
             if not rows:
                 raise ValueError("The review request was already decided")
-            return jsonify({"message": "Change rejected.", "review": _load_change_review(request_id)}), 200
+            rejected_review = _load_change_review(request_id)
+            try:
+                email_result = _send_change_review_rejection_email(rejected_review)
+            except Exception as email_error:
+                email_result = f"Notification failed: {email_error}"
+            return jsonify({
+                "message": "Change rejected and requester notified.",
+                "review": rejected_review,
+                "requesterEmailResult": email_result,
+            }), 200
 
         claimed = getQuery(
             query="""
