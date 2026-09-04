@@ -7,17 +7,36 @@ from CM.utils import *
 from CM.email import *
 from CM.USES import *
 from CM.metadata import *
-from CM.ownership import reconcile_owner_edit_metadata
 import pandas as pd
 import json
 import tempfile
 import warnings
+from decimal import Decimal, InvalidOperation
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Response, stream_with_context
 from flask_mail import Mail
 from configparser import ConfigParser
 config = ConfigParser()
 config.read('config.ini')
+
+
+def _format_routine_email_cell(routine_name, value):
+    """Render a routine summary value with email-friendly status highlighting."""
+    style = "color: #000000;"
+
+    # Modifications is a report count, rather than a validation status.
+    if routine_name != "Modifications":
+        try:
+            numeric_value = Decimal(str(value).strip())
+        except (InvalidOperation, ValueError):
+            numeric_value = None
+
+        if numeric_value == 0:
+            style += " background-color: #c6efce;"
+        elif numeric_value is not None and numeric_value > 1:
+            style += " background-color: #ffc7ce;"
+
+    return f"<td style=\"{style}\">{value}</td>"
 
 def is_valid_json(value):
     """
@@ -1751,7 +1770,8 @@ def reportChanges(database, dateStart=None, dateEnd=None, action="default", user
     Supported filters include:
       - **Date range**: defaults to yesterday through today if not provided.
       - **Action type**: defaults to all major actions 
-        ("created node", "created relationship", "deleted", "merged", "changed").
+        ("created node", "created relationship", "deleted", "merged", "changed",
+        "moved relationship").
       - **User**: restricts results to changes by a given user.
 
     Results include counts of actions grouped by date and user. If valid 
@@ -1769,7 +1789,7 @@ def reportChanges(database, dateStart=None, dateEnd=None, action="default", user
     action : str or list of str, default="default"
         Action(s) to filter on. 
         - "default": include ["created node", "created relationship", 
-          "deleted", "merged", "changed"].
+          "deleted", "merged", "changed", "moved relationship"].
         - str: a single action string.
         - list: list of action strings.
     user : str, optional
@@ -1818,7 +1838,14 @@ def reportChanges(database, dateStart=None, dateEnd=None, action="default", user
     try:
         driver = getDriver(database)
         if action == "default":
-            action = ["created node","created relationship", "deleted", "merged", "changed"]
+            action = [
+                "created node",
+                "created relationship",
+                "deleted",
+                "merged",
+                "changed",
+                "moved relationship",
+            ]
         elif isinstance(action, str):
             action = [action]
         elif not isinstance(action, list):
@@ -2732,7 +2759,6 @@ def runRoutinesStream(databases="all", mail=None):
             ("Glottocode Checks", lambda db: getBadGlottocodes(db, mail=None, return_type="info"), True),
             ("Process Waiting USES", lambda db: waitingUSES(db), False),
             ("Process USES", lambda db: processUSES(db, detailed=False), False),
-            ("Owner Edit Metadata", lambda db: reconcile_owner_edit_metadata(db, return_type="info"), False),
             ("Invalid Node and USES properties", lambda db: getInappropriateprops_Nodes_Rels(db, mail=None, return_type="info"), True),
             ("Empty Node properties", lambda db: get_empty_nodeprops(db, mail=None, return_type="info"), True),
             ("Label Checks", lambda db: get_label_check(db, mail=None, return_type="info"), True),
@@ -2798,7 +2824,7 @@ def runRoutinesStream(databases="all", mail=None):
         rows = []
         for name in results:
             row = f"<tr><td>{name}</td>" + "".join(
-                [f"<td>{results[name][db]}</td>" for db in dbs]
+                [_format_routine_email_cell(name, results[name][db]) for db in dbs]
             ) + "</tr>"
             rows.append(row)
         table_html = "<table border='1'>" + header + "".join(rows) + "</table>"
@@ -2808,7 +2834,6 @@ def runRoutinesStream(databases="all", mail=None):
         <br><h2>Routine Descriptions</h2>
         <table border="1">
           <tr><th>Label</th><th>Function Name</th><th>Description</th></tr>
-          <tr><td>Owner Edit Metadata</td><td>reconcile_owner_edit_metadata</td><td>Maintains owner-only edit authorization, permanently locks objects modified by another human, removes deprecated ownership fields, and verifies internal PROPERTY definitions.</td></tr>
           <tr><td>Modifications</td><td>reportChanges</td><td>Generates a report of logged changes (nodes, relationships, merges, deletions, edits) within a date range, optionally grouped by user.</td></tr>
           <tr><td>Check Domains</td><td>checkDomains</td><td>Detects missing or inconsistent domain/subdomain assignments in USES relationships.</td></tr>
           <tr><td>Bad Domains</td><td>getBadDomains</td><td>Identifies invalid or missing labels: bad subdomain labels, nodes missing CATEGORY, or nodes missing DATASET.</td></tr>
