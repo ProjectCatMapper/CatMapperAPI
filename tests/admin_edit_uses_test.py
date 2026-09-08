@@ -32,7 +32,18 @@ def test_admin_uses_edit_rejects_internal_authorization_property(monkeypatch):
     payload["s1_8"] = "ownerUserId"
     monkeypatch.setattr(admin, "getDriver", lambda database: object())
 
-    with pytest.raises(PermissionError, match="internal authorization metadata"):
+    with pytest.raises(PermissionError, match="internal USES metadata"):
+        admin.add_edit_delete_USES("sociomap", "tester", payload)
+
+
+@pytest.mark.parametrize("property_name", ["logID", " log ", "CREATEDBYUSERID", "contributionId"])
+def test_admin_uses_delete_rejects_internal_uses_metadata_property(monkeypatch, property_name):
+    payload = _base_input()
+    payload["s1_1"] = "delete"
+    payload["s1_8"] = property_name
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+
+    with pytest.raises(PermissionError, match="internal USES metadata"):
         admin.add_edit_delete_USES("sociomap", "tester", payload)
 
 

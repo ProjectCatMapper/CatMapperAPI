@@ -36,6 +36,18 @@ _ADMIN_MULTI_VALUE_SEPARATOR = re.compile(r"\s*(?:\|{2,}|,|;)\s*")
 _USES_SELF_CONTEXT_PROPERTY_EXCEPTIONS = {"district", "parent"}
 _USES_SELF_CONTEXT_RELATIONSHIP_EXCEPTIONS = {"AREA_OF", "CONTAINS"}
 _INTERNAL_OWNER_PROPERTY_NAMES = {"ownerUserId", "modifiedByOtherUser"}
+_PROTECTED_USES_PROPERTY_NAMES = {
+    "createdAt",
+    "createdByUserId",
+    "contributionId",
+    "log",
+    "logID",
+    "modifiedByOtherUser",
+    "ownerUserId",
+}
+_PROTECTED_USES_PROPERTY_LOOKUP = {
+    property_name.lower() for property_name in _PROTECTED_USES_PROPERTY_NAMES
+}
 
 
 def _split_admin_multi_value(value):
@@ -506,9 +518,10 @@ def add_edit_delete_USES(database,user,input):
 
     driver = getDriver(database)
     actor_user_id = _owner_scoped_actor(input)
-    if USES_property in _INTERNAL_OWNER_PROPERTY_NAMES:
+    normalized_uses_property = str(USES_property or "").strip().lower()
+    if normalized_uses_property in _PROTECTED_USES_PROPERTY_LOOKUP:
         raise PermissionError(
-            f"{USES_property} is internal authorization metadata and cannot be edited directly."
+            f"{USES_property} is internal USES metadata and cannot be edited directly."
         )
 
     metaTypes = getPropertiesMetadata(driver)
