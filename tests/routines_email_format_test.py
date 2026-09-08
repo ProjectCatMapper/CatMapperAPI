@@ -20,6 +20,14 @@ def test_non_numeric_routine_email_cell_remains_unhighlighted():
     assert cell == '<td style="color: #000000;">Exception: unavailable</td>'
 
 
+def test_multipart_routine_cell_is_green_only_when_all_components_are_zero():
+    all_zero = "Non-generic parent to generic node: 0,Mutliple USES ties labels: 0,Nodes with multiple group labels: 0"
+    has_issue = "Non-generic parent to generic node: 0,Mutliple USES ties labels: 1,Nodes with multiple group labels: 0"
+
+    assert "background-color: #c6efce;" in _format_routine_email_cell("Label Checks", all_zero)
+    assert "background-color: #ffc7ce;" in _format_routine_email_cell("Label Checks", has_issue)
+
+
 def test_report_changes_default_includes_moved_relationship(monkeypatch):
     captured = {}
 

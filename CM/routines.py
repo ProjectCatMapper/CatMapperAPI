@@ -3,6 +3,7 @@
 # This is a module for automatic routines in CatMapper
 
 import os
+import re
 from CM.utils import *
 from CM.email import *
 from CM.USES import *
@@ -26,15 +27,27 @@ def _format_routine_email_cell(routine_name, value):
 
     # Modifications is a report count, rather than a validation status.
     if routine_name != "Modifications":
-        try:
-            numeric_value = Decimal(str(value).strip())
-        except (InvalidOperation, ValueError):
+        value_text = str(value).strip()
+        multipart_values = [
+            Decimal(component)
+            for component in re.findall(r":\s*(-?\d+(?:\.\d+)?)", value_text)
+        ]
+        if len(multipart_values) > 1:
             numeric_value = None
+            if all(component == 0 for component in multipart_values):
+                style += " background-color: #c6efce;"
+            elif any(component != 0 for component in multipart_values):
+                style += " background-color: #ffc7ce;"
+        else:
+            try:
+                numeric_value = Decimal(value_text)
+            except (InvalidOperation, ValueError):
+                numeric_value = None
 
-        if numeric_value == 0:
-            style += " background-color: #c6efce;"
-        elif numeric_value is not None and numeric_value > 1:
-            style += " background-color: #ffc7ce;"
+            if numeric_value == 0:
+                style += " background-color: #c6efce;"
+            elif numeric_value is not None and numeric_value > 1:
+                style += " background-color: #ffc7ce;"
 
     return f"<td style=\"{style}\">{value}</td>"
 
