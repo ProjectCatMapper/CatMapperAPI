@@ -167,7 +167,8 @@ def _get_queries_for_label(label, database):
                     apoc.text.join([i IN labels(a) WHERE NOT i = 'CATEGORY'], ', ') AS Domains,
                     custom.anytoList(collect(split(language, ', ')), true) AS Languages,
                     custom.anytoList(collect(split(religion, ', ')), true) AS Religions,
-                    apoc.coll.flatten(collect([comment IN apoc.coll.flatten([r.comment], true)
+                    apoc.coll.flatten(collect([comment IN apoc.coll.flatten(
+                        CASE WHEN r.comment IS NULL THEN [] ELSE [r.comment] END, true)
                         WHERE comment IS NOT NULL AND trim(toString(comment)) <> '' |
                         d.CMID + ': ' + trim(toString(comment))]), true) AS UsesComments
             ''',
