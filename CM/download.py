@@ -202,7 +202,6 @@ def getAdvancedDownload(database,domain, properties,CMIDs):
             + ", ".join(properties)
         )
     
-    prop_query = ", ".join(node_query2 + relationship_query)  
     if node_query1: 
         node_query1 = "," + ", ".join(node_query1)
     else: 
@@ -213,10 +212,17 @@ def getAdvancedDownload(database,domain, properties,CMIDs):
         match (c:DATASET) where c.CMID = cmid
         return c.CMID as CMID, c.CMName as CMName {node_query1} 
         """
+    category_return = [
+        "c.CMID as CMID",
+        "c.CMName as CMName",
+        "labels(c) as domains",
+        'apoc.text.join(collect(distinct d.CMID), "; ") as datasets',
+    ]
+    category_return.extend(node_query2 + relationship_query)
     query2 = f"""
         unwind $CMID as cmid
         match (c:CATEGORY)<-[r:USES]-(d:DATASET) where c.CMID = cmid
-        return c.CMID as CMID, c.CMName as CMName, labels(c) as domains, apoc.text.join(collect(distinct d.CMID),"; ") as datasets, {prop_query} 
+        return {", ".join(category_return)}
         """
     
     result1 = getQuery(query=query1, driver=driver, CMID=CMIDs, type = "df")

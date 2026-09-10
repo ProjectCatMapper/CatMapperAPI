@@ -46,7 +46,7 @@ def parse_bearer_token(req=None):
     return payload
 
 
-def _is_active_user(userid, required_role=None):
+def _get_active_user(userid):
     driver = getDriver("userdb")
     query = """
     MATCH (u:USER {userid: toString($userid)})
@@ -54,15 +54,18 @@ def _is_active_user(userid, required_role=None):
     """
     rows = getQuery(query, driver=driver, params={"userid": str(userid)})
     if not rows:
-        return False
+        return None
     row = rows[0] or {}
     access = str(row.get("access", "")).lower()
     role = str(row.get("role", "")).lower()
     if access != "enabled":
-        return False
-    if required_role and role != str(required_role).lower():
-        return False
-    return True
+        return None
+    return {"access": access, "role": role or "user"}
+
+
+def _is_active_user(userid, required_role=None):
+    current = _get_active_user(userid)
+    return bool(current and (not required_role or current["role"] == str(required_role).lower()))
 
 
 def _verify_api_key_credentials(userid, credential_key, required_role=None):
@@ -183,14 +186,17 @@ def verify_request_auth(required_userid=None, credentials=None, required_role=No
     claims = parse_bearer_token(req=req)
     if claims:
         token_userid = str(claims.get("userid", ""))
-        token_role = str(claims.get("role", "")).lower()
         if required_userid is not None and token_userid != str(required_userid):
             raise Exception("Credentials do not match requested user")
-        if required_role and token_role != str(required_role).lower():
-            raise Exception("User is not authorized")
-        if not _is_active_user(token_userid, required_role=required_role):
+        # The role in a bearer token is only a historical claim.  Always
+        # resolve the current role so demotions take effect immediately.
+        current = _get_active_user(token_userid)
+        if not current:
             raise Exception("User is not verified")
-        return {"userid": token_userid, "role": token_role}
+        current_role = current["role"]
+        if required_role and current_role != str(required_role).lower():
+            raise Exception("User is not authorized")
+        return {"userid": token_userid, "role": current_role}
 
     # API key in request headers can authenticate without an explicit userid.
     request_api_key = _extract_request_api_key(req=req)
@@ -248,14 +254,15 @@ def verify_bearer_auth(required_userid=None, required_role=None, req=None):
     if not claims:
         return None
     token_userid = str(claims.get("userid", ""))
-    token_role = str(claims.get("role", "")).lower()
     if required_userid is not None and token_userid != str(required_userid):
         raise Exception("Credentials do not match requested user")
-    if required_role and token_role != str(required_role).lower():
-        raise Exception("User is not authorized")
-    if not _is_active_user(token_userid, required_role=required_role):
+    current = _get_active_user(token_userid)
+    if not current:
         raise Exception("User is not verified")
-    return {"userid": token_userid, "role": token_role}
+    current_role = current["role"]
+    if required_role and current_role != str(required_role).lower():
+        raise Exception("User is not authorized")
+    return {"userid": token_userid, "role": current_role}
 
 
 def classify_auth_error_status(error):

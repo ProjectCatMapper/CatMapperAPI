@@ -1935,17 +1935,9 @@ def getUpdateWaitingUSES():
         status_code = classify_auth_error_status(error_message) or 500
         return jsonify({"error": error_message}), status_code
 
-@admin_bp.route('/mergeUSESties', methods=['GET','POST'])
+@admin_bp.route('/mergeUSESties', methods=['POST'])
 def getMergeUSESties():
     try:
-        if request.method == 'GET':
-            database = request.args.get('database')
-            CMID = request.args.get('CMID')
-            Key = request.args.get('Key')
-            datasetID = request.args.get('datasetID')
-            result = mergeUSESties(database, CMID, Key, datasetID)
-            return jsonify(result)
-
         data = request.get_json(silent=True)
         if data is None:
             data = json.loads(request.get_data() or "{}")

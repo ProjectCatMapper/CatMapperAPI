@@ -1,4 +1,5 @@
 import json
+import re
 
 import CMroutes.user_routes as user_routes
 
@@ -25,6 +26,21 @@ def _fake_getquery_factory(users):
     def fake_getQuery(query, driver=None, params=None, type="dict", **kwargs):
         payload = dict(params or {})
         payload.update(kwargs)
+
+        entries_match = re.search(r"RETURN coalesce\(u\.([A-Za-z0-9_]+), \[\]\) as entries", query)
+        if entries_match:
+            user = users.get(str(payload["userid"]))
+            if not user:
+                return []
+            return [{"entries": list(user.get(entries_match.group(1), []))}]
+
+        entries_match = re.search(r"SET u\.([A-Za-z0-9_]+) = \$entries", query)
+        if entries_match:
+            user = users.get(str(payload["userid"]))
+            if not user:
+                return []
+            user[entries_match.group(1)] = list(payload["entries"])
+            return [{"userid": str(payload["userid"])}]
 
         if "MATCH (u:USER {userid: toString($userid)})" in query and "u.password as password" in query:
             user = users.get(str(payload["userid"]))
@@ -146,8 +162,6 @@ def test_profile_update_request_and_confirm(client, monkeypatch):
         }
     }
 
-    user_routes.PROFILE_UPDATE_REQUESTS.clear()
-
     monkeypatch.delenv("PROFILE_DEBUG_CODES", raising=False)
     monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
     monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
@@ -174,7 +188,8 @@ def test_profile_update_request_and_confirm(client, monkeypatch):
     request_payload = request_response.get_json()
     assert request_payload["requestId"].startswith("profile_")
     assert "debugVerificationCode" not in request_payload
-    stored_code = user_routes.PROFILE_UPDATE_REQUESTS[request_payload["requestId"]]["verification_code"]
+    stored_request = json.loads(users["100"]["pendingProfileUpdateRequests"][0])
+    stored_code = stored_request["verification_code"]
     assert len(stored_code) == 6
 
     confirm_response = client.post(
@@ -192,6 +207,7 @@ def test_profile_update_request_and_confirm(client, monkeypatch):
     assert confirm_payload["lastName"] == "Byron"
     assert confirm_payload["username"] == "ada-byron"
     assert confirm_payload["database"] == "archamap"
+    assert users["100"]["pendingProfileUpdateRequests"] == []
 
 
 def test_password_change_request_and_confirm(client, monkeypatch):
@@ -207,8 +223,6 @@ def test_password_change_request_and_confirm(client, monkeypatch):
             "password": "old-pass",
         }
     }
-
-    user_routes.PASSWORD_CHANGE_REQUESTS.clear()
 
     monkeypatch.delenv("PROFILE_DEBUG_CODES", raising=False)
     monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
@@ -232,7 +246,8 @@ def test_password_change_request_and_confirm(client, monkeypatch):
     request_payload = request_response.get_json()
     assert request_payload["requestId"].startswith("password_")
     assert "debugVerificationCode" not in request_payload
-    stored_code = user_routes.PASSWORD_CHANGE_REQUESTS[request_payload["requestId"]]["verification_code"]
+    stored_request = json.loads(users["100"]["pendingPasswordChangeRequests"][0])
+    stored_code = stored_request["verification_code"]
     assert len(stored_code) == 6
 
     confirm_response = client.post(
@@ -249,6 +264,7 @@ def test_password_change_request_and_confirm(client, monkeypatch):
     payload = confirm_response.get_json()
     assert payload["passwordLastChangedAt"]
     assert users["100"]["password"] == "hashed::NewStrong"
+    assert users["100"]["pendingPasswordChangeRequests"] == []
 
 
 def test_password_change_rejects_short_password(client, monkeypatch):
@@ -396,8 +412,6 @@ def test_request_update_includes_debug_code_when_enabled(client, monkeypatch):
             "password": "old-pass",
         }
     }
-
-    user_routes.PROFILE_UPDATE_REQUESTS.clear()
 
     monkeypatch.setenv("PROFILE_DEBUG_CODES", "true")
     monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
@@ -573,8 +587,6 @@ def test_request_and_confirm_api_key_creation(client, monkeypatch):
         }
     }
 
-    user_routes.API_KEY_CREATE_REQUESTS.clear()
-
     monkeypatch.setattr(user_routes, "getDriver", lambda database: object())
     monkeypatch.setattr(user_routes, "verifyUser", lambda user, key, role=None: "verified")
     monkeypatch.setattr(user_routes, "getQuery", _fake_getquery_factory(users))
@@ -592,7 +604,21 @@ def test_request_and_confirm_api_key_creation(client, monkeypatch):
     request_payload = request_response.get_json()
     assert request_payload["requestId"].startswith("apikey_")
 
-    stored_request = user_routes.API_KEY_CREATE_REQUESTS[request_payload["requestId"]]
+    stored_request = json.loads(users["100"]["pendingApiKeyCreateRequests"][0])
+    assert "api_key" not in stored_request
+    assert "api_key_hash" not in stored_request
+    invalid_response = client.post(
+        "/profile/confirm-api-key",
+        json={
+            "userId": "100",
+            "credentials": _auth_cred("100"),
+            "requestId": request_payload["requestId"],
+            "verificationCode": "000000" if stored_request["verification_code"] != "000000" else "999999",
+        },
+    )
+    assert invalid_response.status_code == 400
+    assert len(users["100"]["pendingApiKeyCreateRequests"]) == 1
+
     confirm_response = client.post(
         "/profile/confirm-api-key",
         json={
@@ -608,6 +634,7 @@ def test_request_and_confirm_api_key_creation(client, monkeypatch):
     assert confirm_payload["apiKey"].startswith("cmk_")
     assert confirm_payload["apiKeyCreatedAt"]
     assert users["100"]["apiKeyHash"] == f"hashed::{confirm_payload['apiKey']}"
+    assert users["100"]["pendingApiKeyCreateRequests"] == []
 
 
 def test_get_profile_accepts_api_key_credentials(client, monkeypatch):

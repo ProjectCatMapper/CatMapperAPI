@@ -341,8 +341,12 @@ def getMetdataProperties(CMID):
         resultS = getQuery(query=query, driver=driverS, params={"CMID": CMID},type = "records")
         resultA = getQuery(query=query, driver=driverA, params={"CMID": CMID},type = "records")
         nodes = []
-        nodes.append({"SocioMap": serialize_node(resultS[0]['n'])})
-        nodes.append({"ArchaMap": serialize_node(resultA[0]['n'])})
+        if resultS:
+            nodes.append({"SocioMap": serialize_node(resultS[0]['n'])})
+        if resultA:
+            nodes.append({"ArchaMap": serialize_node(resultA[0]['n'])})
+        if not nodes:
+            return jsonify({"error": "Metadata node not found", "CMID": CMID}), 404
         return nodes
     
     except Exception as e:

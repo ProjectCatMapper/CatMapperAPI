@@ -15,7 +15,6 @@ from CM import (
 )
 import json
 from datetime import datetime, timedelta, timezone
-from threading import Lock
 import secrets
 import uuid
 import os
@@ -25,10 +24,6 @@ from .auth_utils import issue_auth_token, verify_request_auth, verify_bearer_aut
 
 user_bp = Blueprint('user', __name__)
 
-PROFILE_UPDATE_REQUESTS = {}
-PASSWORD_CHANGE_REQUESTS = {}
-API_KEY_CREATE_REQUESTS = {}
-REQUEST_LOCK = Lock()
 REQUEST_TTL_MINUTES = 15
 logger = logging.getLogger(__name__)
 
@@ -170,13 +165,22 @@ def _send_new_registration_admin_email(first_name, last_name, email, database, i
     )
 
 
-def _cleanup_requests():
-    now = _utc_now()
-    with REQUEST_LOCK:
-        for store in (PROFILE_UPDATE_REQUESTS, PASSWORD_CHANGE_REQUESTS, API_KEY_CREATE_REQUESTS):
-            expired = [key for key, value in store.items() if value["expires_at"] < now]
-            for key in expired:
-                store.pop(key, None)
+def _persist_request(userid, field_name, request):
+    """Store confirmation state on the USER node so workers share it."""
+    entries = _cleanup_persistent_requests(_get_user_entries(userid, field_name))
+    entries = [entry for entry in entries if entry.get("request_id") != request.get("request_id")]
+    entries.append(request)
+    _set_user_entries(userid, field_name, entries)
+
+
+def _take_persisted_request(userid, field_name, request_id, verification_code=None):
+    entries = _cleanup_persistent_requests(_get_user_entries(userid, field_name))
+    pending = next((entry for entry in entries if entry.get("request_id") == request_id), None)
+    if pending and verification_code is not None and pending.get("verification_code") != verification_code:
+        return pending
+    remaining = [entry for entry in entries if entry.get("request_id") != request_id]
+    _set_user_entries(userid, field_name, remaining)
+    return pending
 
 
 def _cleanup_persistent_requests(entries):
@@ -773,7 +777,6 @@ def getLogin():
 def request_forgot_password():
     """Request a password-reset verification code."""
     try:
-        _cleanup_requests()
         data = _read_json_payload()
         user_identifier = unlist(data.get("user"))
         email_identifier = unlist(data.get("email"))
@@ -841,7 +844,6 @@ def request_forgot_password():
 def confirm_forgot_password():
     """Confirm a password reset with a verification code."""
     try:
-        _cleanup_requests()
         data = _read_json_payload()
         user_identifier = unlist(data.get("user"))
         email_identifier = unlist(data.get("email"))
@@ -910,7 +912,6 @@ def get_profile(userid):
 def request_profile_update():
     """Request email verification before profile updates are applied."""
     try:
-        _cleanup_requests()
         data = _read_json_payload()
         userid = unlist(data.get("userId"))
         updates = data.get("updates") or {}
@@ -958,13 +959,14 @@ def request_profile_update():
 
         request_id = f"profile_{uuid.uuid4().hex[:12]}"
         verification_code = f"{secrets.randbelow(900000) + 100000}"
-        with REQUEST_LOCK:
-            PROFILE_UPDATE_REQUESTS[request_id] = {
-                "userid": str(userid),
-                "updates": updates,
-                "verification_code": verification_code,
-                "expires_at": _utc_now() + timedelta(minutes=REQUEST_TTL_MINUTES),
-            }
+        pending_request = {
+            "request_id": request_id,
+            "userid": str(userid),
+            "updates": updates,
+            "verification_code": verification_code,
+            "expires_at": (_utc_now() + timedelta(minutes=REQUEST_TTL_MINUTES)).isoformat(),
+        }
+        _persist_request(userid, "pendingProfileUpdateRequests", pending_request)
 
         target_email = updates.get("email") or existing.get("email")
         _send_verification_email(target_email, verification_code, "Profile Update")
@@ -992,7 +994,6 @@ def request_profile_update():
 def confirm_profile_update():
     """Confirm and apply a pending profile update."""
     try:
-        _cleanup_requests()
         data = _read_json_payload()
         userid = unlist(data.get("userId"))
         request_id = unlist(data.get("requestId"))
@@ -1003,14 +1004,12 @@ def confirm_profile_update():
             raise Exception("Missing required confirmation fields")
         _verify_profile_credentials(userid, credentials)
 
-        with REQUEST_LOCK:
-            pending = PROFILE_UPDATE_REQUESTS.get(request_id)
-            if not pending or pending.get("userid") != str(userid):
-                raise Exception("Profile update request not found. Please request a new verification email.")
-            if pending.get("verification_code") != verification_code:
-                raise Exception("Invalid verification code.")
-            updates = pending.get("updates", {})
-            PROFILE_UPDATE_REQUESTS.pop(request_id, None)
+        pending = _take_persisted_request(userid, "pendingProfileUpdateRequests", request_id, verification_code)
+        if not pending or pending.get("userid") != str(userid):
+            raise Exception("Profile update request not found. Please request a new verification email.")
+        if pending.get("verification_code") != verification_code:
+            raise Exception("Invalid verification code.")
+        updates = pending.get("updates", {})
 
         driver = getDriver("userdb")
         query = """
@@ -1061,7 +1060,6 @@ def confirm_profile_update():
 def request_password_change():
     """Request email verification before changing a logged-in user's password."""
     try:
-        _cleanup_requests()
         data = _read_json_payload()
         userid = unlist(data.get("userId"))
         current_password = unlist(data.get("currentPassword"))
@@ -1083,13 +1081,14 @@ def request_password_change():
 
         request_id = f"password_{uuid.uuid4().hex[:12]}"
         verification_code = f"{secrets.randbelow(900000) + 100000}"
-        with REQUEST_LOCK:
-            PASSWORD_CHANGE_REQUESTS[request_id] = {
-                "userid": str(userid),
-                "password_hash": password_hash(new_password),
-                "verification_code": verification_code,
-                "expires_at": _utc_now() + timedelta(minutes=REQUEST_TTL_MINUTES),
-            }
+        pending_request = {
+            "request_id": request_id,
+            "userid": str(userid),
+            "password_hash": password_hash(new_password),
+            "verification_code": verification_code,
+            "expires_at": (_utc_now() + timedelta(minutes=REQUEST_TTL_MINUTES)).isoformat(),
+        }
+        _persist_request(userid, "pendingPasswordChangeRequests", pending_request)
 
         target_email = existing.get("email")
         _send_verification_email(target_email, verification_code, "Password Change")
@@ -1117,7 +1116,6 @@ def request_password_change():
 def confirm_password_change():
     """Confirm and apply a logged-in password change."""
     try:
-        _cleanup_requests()
         data = _read_json_payload()
         userid = unlist(data.get("userId"))
         request_id = unlist(data.get("requestId"))
@@ -1128,14 +1126,12 @@ def confirm_password_change():
             raise Exception("Missing required confirmation fields")
         _verify_profile_credentials(userid, credentials)
 
-        with REQUEST_LOCK:
-            pending = PASSWORD_CHANGE_REQUESTS.get(request_id)
-            if not pending or pending.get("userid") != str(userid):
-                raise Exception("Password change request not found. Please request a new verification email.")
-            if pending.get("verification_code") != verification_code:
-                raise Exception("Invalid verification code.")
-            password_hash_value = pending.get("password_hash")
-            PASSWORD_CHANGE_REQUESTS.pop(request_id, None)
+        pending = _take_persisted_request(userid, "pendingPasswordChangeRequests", request_id, verification_code)
+        if not pending or pending.get("userid") != str(userid):
+            raise Exception("Password change request not found. Please request a new verification email.")
+        if pending.get("verification_code") != verification_code:
+            raise Exception("Invalid verification code.")
+        password_hash_value = pending.get("password_hash")
 
         driver = getDriver("userdb")
         query = """
@@ -1163,7 +1159,6 @@ def confirm_password_change():
 def request_api_key_creation():
     """Request email verification before creating a user API key."""
     try:
-        _cleanup_requests()
         data = _read_json_payload()
         userid = unlist(data.get("userId"))
         credentials = data.get("credentials")
@@ -1179,19 +1174,13 @@ def request_api_key_creation():
 
         request_id = f"apikey_{uuid.uuid4().hex[:12]}"
         verification_code = f"{secrets.randbelow(900000) + 100000}"
-        api_key = f"cmk_{secrets.token_urlsafe(32)}"
-        api_key_hash = password_hash(api_key)
-        if not isinstance(api_key_hash, str) or api_key_hash.startswith("password hash failed"):
-            raise Exception("Unable to generate API key.")
-
-        with REQUEST_LOCK:
-            API_KEY_CREATE_REQUESTS[request_id] = {
-                "userid": str(userid),
-                "api_key": api_key,
-                "api_key_hash": api_key_hash,
-                "verification_code": verification_code,
-                "expires_at": _utc_now() + timedelta(minutes=REQUEST_TTL_MINUTES),
-            }
+        pending_request = {
+            "request_id": request_id,
+            "userid": str(userid),
+            "verification_code": verification_code,
+            "expires_at": (_utc_now() + timedelta(minutes=REQUEST_TTL_MINUTES)).isoformat(),
+        }
+        _persist_request(userid, "pendingApiKeyCreateRequests", pending_request)
 
         _send_verification_email(
             target_email,
@@ -1223,7 +1212,6 @@ def request_api_key_creation():
 def confirm_api_key_creation():
     """Confirm and create a user API key."""
     try:
-        _cleanup_requests()
         data = _read_json_payload()
         userid = unlist(data.get("userId"))
         request_id = unlist(data.get("requestId"))
@@ -1234,15 +1222,15 @@ def confirm_api_key_creation():
             raise Exception("Missing required confirmation fields")
         _verify_profile_credentials(userid, credentials)
 
-        with REQUEST_LOCK:
-            pending = API_KEY_CREATE_REQUESTS.get(request_id)
-            if not pending or pending.get("userid") != str(userid):
-                raise Exception("API key request not found. Please request a new verification email.")
-            if pending.get("verification_code") != verification_code:
-                raise Exception("Invalid verification code.")
-            api_key = pending.get("api_key")
-            api_key_hash = pending.get("api_key_hash")
-            API_KEY_CREATE_REQUESTS.pop(request_id, None)
+        pending = _take_persisted_request(userid, "pendingApiKeyCreateRequests", request_id, verification_code)
+        if not pending or pending.get("userid") != str(userid):
+            raise Exception("API key request not found. Please request a new verification email.")
+        if pending.get("verification_code") != verification_code:
+            raise Exception("Invalid verification code.")
+        api_key = f"cmk_{secrets.token_urlsafe(32)}"
+        api_key_hash = password_hash(api_key)
+        if not isinstance(api_key_hash, str) or api_key_hash.startswith("password hash failed"):
+            raise Exception("Unable to generate API key.")
 
         updated_at = _now_iso()
         driver = getDriver("userdb")

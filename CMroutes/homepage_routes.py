@@ -1,6 +1,7 @@
-from flask import Blueprint, request
+from flask import Blueprint, request, jsonify
 import pandas as pd
 from CM import getDriver, getQuery
+from .auth_utils import verify_request_auth, classify_auth_error_status
 
 homepage_bp = Blueprint('homepage', __name__)
 
@@ -57,12 +58,15 @@ return custom.getName(foci) as Focus, custom.getDisplayName(label) as domain, n 
         return result, 500
 
 
-@homepage_bp.route('/addFoci', methods=['GET'])
+@homepage_bp.route('/addFoci', methods=['POST'])
 def addFoci():
     try:
-        database = request.args.get('database')
-        datasetID = request.args.get('datasetID')
-        foci = request.args.get('foci')
+        data = request.get_json(silent=True) or request.args
+        credentials = data.get('cred') if hasattr(data, 'get') else None
+        verify_request_auth(credentials=credentials, required_role='admin', req=request)
+        database = data.get('database')
+        datasetID = data.get('datasetID')
+        foci = data.get('foci')
 
         driver = getDriver(database)
 
@@ -82,11 +86,11 @@ def addFoci():
         else:
             raise Exception("foci does not exist - please check the CMID")
 
-        return result
+        return jsonify(result)
 
     except Exception as e:
         result = str(e)
-        return result, 500
+        return result, classify_auth_error_status(e) or 500
     
 @homepage_bp.route('/homepagecount/<database>',methods=['GET'])
 def gethomepageCount(database):

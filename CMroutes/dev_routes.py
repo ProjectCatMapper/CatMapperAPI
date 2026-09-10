@@ -1,6 +1,7 @@
 from CM import *
-from flask import Blueprint, jsonify, render_template
+from flask import Blueprint, jsonify, render_template, request
 from .extensions import mail
+from .auth_utils import verify_request_auth, classify_auth_error_status
 import pandas as pd
 
 dev_bp = Blueprint('dev', __name__)
@@ -9,14 +10,16 @@ dev_bp = Blueprint('dev', __name__)
 def testmsg(database, msg):
     return "This is a test message from the " + database + " database that says: " + msg
 
-@dev_bp.route('/send_test_email/<email>', methods=['GET'])
+@dev_bp.route('/send_test_email/<email>', methods=['POST'])
 def send_test_email(email):
     try:
+        data = request.get_json(silent=True) or {}
+        verify_request_auth(credentials=data.get('cred'), required_role='admin', req=request)
         msg = sendEmail(mail, "Test Email", [
             email], "This is a test email sent from a Flask application. Have fun.", get_default_sender())
         return msg
     except Exception as e:
-        return str(e), 500
+        return str(e), classify_auth_error_status(e) or 500
     
 @dev_bp.route('/admin/graph', methods=['GET'])
 def get_graph():

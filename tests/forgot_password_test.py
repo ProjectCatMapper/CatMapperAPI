@@ -123,8 +123,6 @@ def test_forgot_password_confirm_survives_in_memory_request_store_reset(client, 
             }
         ]
     }
-    user_routes.PASSWORD_CHANGE_REQUESTS.clear()
-
     monkeypatch.setattr(
         user_routes,
         "_load_user_by_identifier",

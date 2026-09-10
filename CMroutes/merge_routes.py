@@ -131,9 +131,11 @@ def submit_merge():
 @merge_bp.route('/api/merge/code-downloads', methods=['POST'])
 @merge_bp.route('/downloadMergeCode', methods=['POST'])
 def get_merge_code():
-    """Legacy placeholder for merge-code download requests."""
-    data = request.get_data()
-    data = json.loads(data)
+    """Legacy endpoint retained with an explicit unsupported response."""
+    return jsonify({
+        "error": "merge-code downloads are not currently available",
+        "code": "merge_code_download_unavailable",
+    }), 501
 
 
 @merge_bp.route('/api/merge/dataset-joins', methods=['POST'])
