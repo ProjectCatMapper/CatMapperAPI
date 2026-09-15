@@ -98,7 +98,32 @@ def test_descendant_candidate_limit_is_applied_after_depth_order(monkeypatch):
 
     assert selection_order < selection_limit < result_projection
     assert "WHERE length(candidatePath) = depth" in query
+    assert 'none(rel IN relationships(path)' in query
+    assert '"SPLITMERGE" IN' in query
+    assert "valueType(rel.eventType) STARTS WITH \"LIST\"" in query
     assert captured["params"] == {"cmid": "SM1", "node_limit": 5000}
+
+
+def test_descendant_summary_excludes_splitmerge_contains_paths(monkeypatch):
+    captured = {}
+
+    def fake_get_query(query, driver, params=None, **kwargs):
+        captured["query"] = " ".join(query.split())
+        captured["params"] = params
+        return [{"totalNodeCount": 0, "depthCounts": []}]
+
+    monkeypatch.setattr(explore, "getQuery", fake_get_query)
+
+    assert explore._get_descendant_map_node_summary(object(), "SM1", 7) == {
+        "totalNodeCount": 0,
+        "depthCounts": [],
+    }
+
+    query = captured["query"]
+    assert 'none(rel IN relationships(path)' in query
+    assert '"SPLITMERGE" IN' in query
+    assert "valueType(rel.eventType) STARTS WITH \"LIST\"" in query
+    assert captured["params"] == {"cmid": "SM1"}
 
 
 def test_explore_geometry_related_layer_adds_provenance_without_direct(monkeypatch):

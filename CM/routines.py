@@ -798,13 +798,39 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
         """
         results3 = getQuery(query, driver, type="df")
 
-        # Keep "Bad JSON" constrained to JSON-bearing USES relationships only.
-        # Non-JSON CONTAINS/event consistency checks are intentionally skipped here.
         results4 = pd.DataFrame()
         results5 = pd.DataFrame()
         results6 = pd.DataFrame()
         results7 = pd.DataFrame()
-        results8 = pd.DataFrame()
+
+        query = """
+                MATCH (source)-[r:CONTAINS]->(target)
+                WHERE r.eventType IS NOT NULL
+                WITH source, target, r,
+                    CASE
+                        WHEN valueType(r.eventType) STARTS WITH 'LIST'
+                            THEN [eventType IN r.eventType | toString(eventType)]
+                        ELSE [toString(r.eventType)]
+                    END AS eventTypes
+                UNWIND eventTypes AS eventType
+                WITH source, target, r, eventType
+                WHERE NOT (eventType IN [
+                    "SPLIT",
+                    "HIERARCHY",
+                    "SPLITMERGE",
+                    "MERGED",
+                    "FOLLOWS"
+                ])
+                RETURN
+                    source.CMID AS sourceCMID,
+                    source.CMName AS sourceCMName,
+                    target.CMID AS targetCMID,
+                    target.CMName AS targetCMName,
+                    eventType AS invalidEventType,
+                    r.eventType AS eventTypes
+                ORDER BY sourceCMID, targetCMID, invalidEventType
+                 """
+        results8 = getQuery(query, driver, type="df")
         results9 = pd.DataFrame()
 
         parent_context_fallback_cache = None
@@ -1061,10 +1087,12 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                 "invalid_geoCoords_count": len(results1),
                 "invalid_parentContext_count": len(results2),
                 "parentContext_parent_not_in_parent_count": len(results3),
+                "invalid_contains_eventType_count": len(results8),
                 "invalid_parentContext_parent_cmid_count": len(results11),
                 "invalid_geoCoords": results1,
                 "invalid_parentContext": results2,
                 "parentContext_parent_not_in_parent": results3.to_dict(orient="records"),
+                "invalid_contains_eventType": results8.to_dict(orient="records"),
                 "invalid_parentContext_parent_cmid": results11.to_dict(orient="records"),
                 "emailSent": mailSent,
             }
@@ -1081,10 +1109,11 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                     f"Invalid geoCoords: {len(results1)}; "
                     f"Invalid parentContext: {len(results2)}; "
                     f"CMID in parentContext but not in parent: {len(results3)}; "
+                    f"Invalid CONTAINS eventType: {len(results8)}; "
                     f"Invalid parentContext parent CMID: {len(results11)}"
                     f"{fallback_info}"
                 ),
-                "filepath": [fp1, fp2, fp3, fp11],
+                "filepath": [fp1, fp2, fp3, fp8, fp11],
             }
     except Exception as e:
         result = str(e)
@@ -2031,7 +2060,7 @@ def getBadContextual(database, mail=None, return_type="data"):
         
         query = """
                 MATCH (n)-[r:CONTAINS]->(n)
-                WITH n,r,[ref in r.referenceKeys | split(ref," Key")[0]] AS names 
+                WITH n,r,[ref in coalesce(r.referenceKey, []) | split(ref," Key")[0]] AS names
                 WHERE ANY(name IN names 
                                 WHERE NOT (name IN ['GADM3.6','GeoNames202005']))
                 RETURN n.CMID AS startCMID, [n.CMID] AS relatedNodes, 'Self-loop' AS issueType, 'CONTAINS' AS relType

@@ -82,6 +82,40 @@ def test_getBadComplexProperties_allows_negative_eventDate(monkeypatch):
     assert "invalid_parentContext_json_shape" not in result
 
 
+def test_getBadComplexProperties_restores_contains_eventType_check(monkeypatch):
+    queries = []
+
+    monkeypatch.setattr(routines, "validateJSON", lambda database, property, path: [])
+    monkeypatch.setattr(routines, "getDriver", lambda _database: object())
+
+    def fake_get_query(query, driver, type=None, **kwargs):
+        queries.append(query)
+        if type == "df" and "invalidEventType" in query:
+            return pd.DataFrame([
+                {
+                    "sourceCMID": "SM1",
+                    "sourceCMName": "Parent",
+                    "targetCMID": "SM2",
+                    "targetCMName": "Child",
+                    "invalidEventType": "SPLIT ",
+                    "eventTypes": ["SPLIT "],
+                }
+            ])
+        return pd.DataFrame()
+
+    monkeypatch.setattr(routines, "getQuery", fake_get_query)
+
+    result = routines.getBadComplexProperties(database="SocioMap", return_type="info")
+
+    assert "Invalid CONTAINS eventType: 1" in result["info"]
+    event_type_query = next(query for query in queries if "invalidEventType" in query)
+    assert "MATCH (source)-[r:CONTAINS]->(target)" in event_type_query
+    assert "valueType(r.eventType) STARTS WITH 'LIST'" in event_type_query
+    assert "WITH source, target, r, eventType" in event_type_query
+    assert '"SPLIT"' in event_type_query
+    assert '"FOLLOWS"' in event_type_query
+
+
 def test_get_duplicate_triplets_suppresses_email_when_send_email_false(monkeypatch):
     class FakeMail:
         pass
@@ -163,6 +197,27 @@ def test_getDuplicateNodeCMIDs_checks_category_dataset_and_deleted(monkeypatch, 
     assert "n:CATEGORY OR n:DATASET OR n:DELETED" in captured["query"]
     assert "trim(toString(n.CMID)) <> \"\"" in captured["query"]
     assert "OPTIONAL MATCH (n)-[:IS]->(replacement)" in captured["query"]
+
+
+def test_getBadContextual_self_loop_uses_referenceKey_property(monkeypatch):
+    queries = []
+
+    monkeypatch.setattr(routines, "getDriver", lambda _database: object())
+
+    def fake_get_query(query, driver, type=None, **kwargs):
+        queries.append(query)
+        return pd.DataFrame()
+
+    monkeypatch.setattr(routines, "getQuery", fake_get_query)
+
+    result = routines.getBadContextual(database="SocioMap", return_type="info")
+
+    assert result["filepath"] == [None, None, None]
+    self_loop_query = next(query for query in queries if "MATCH (n)-[r:CONTAINS]->(n)" in query)
+    assert "coalesce(r.referenceKey, [])" in self_loop_query
+    assert "referenceKeys" not in self_loop_query
+    assert "GADM3.6" in self_loop_query
+    assert "GeoNames202005" in self_loop_query
 
 
 def test_getInappropriateprops_Nodes_Rels_includes_uses_key(monkeypatch):

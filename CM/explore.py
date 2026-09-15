@@ -835,6 +835,17 @@ def _get_descendant_map_nodes(driver, cmid, max_depth, node_limit):
     MATCH (n:CATEGORY {{CMID: $cmid}})
     MATCH path=(n)-[:CONTAINS*1..{max_depth}]->(descendant:CATEGORY)
     WHERE descendant.CMID <> $cmid
+      AND none(rel IN relationships(path)
+        WHERE "SPLITMERGE" IN (
+          CASE
+            WHEN valueType(rel.eventType) STARTS WITH "LIST"
+              THEN [eventType IN rel.eventType | toString(eventType)]
+            WHEN rel.eventType IS NULL
+              THEN []
+            ELSE [toString(rel.eventType)]
+          END
+        )
+      )
     WITH
         descendant,
         min(length(path)) AS depth,
@@ -868,6 +879,17 @@ def _get_descendant_map_node_summary(driver, cmid, max_depth):
     MATCH (n:CATEGORY {{CMID: $cmid}})
     MATCH path=(n)-[:CONTAINS*1..{max_depth}]->(descendant:CATEGORY)
     WHERE descendant.CMID <> $cmid
+      AND none(rel IN relationships(path)
+        WHERE "SPLITMERGE" IN (
+          CASE
+            WHEN valueType(rel.eventType) STARTS WITH "LIST"
+              THEN [eventType IN rel.eventType | toString(eventType)]
+            WHEN rel.eventType IS NULL
+              THEN []
+            ELSE [toString(rel.eventType)]
+          END
+        )
+      )
     WITH descendant, min(length(path)) AS depth
     WITH depth, count(descendant) AS nodeCount
     ORDER BY depth
