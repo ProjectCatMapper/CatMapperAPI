@@ -51,5 +51,6 @@ def health():
     APP_VERSION = os.getenv('VERSION', 'dev-build')
     return jsonify({
         "status": "healthy",
-        "version": APP_VERSION
+        "version": APP_VERSION,
+        "revision": os.getenv('GIT_COMMIT', 'unknown')
     })
