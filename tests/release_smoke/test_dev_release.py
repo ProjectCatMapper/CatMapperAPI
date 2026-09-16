@@ -14,7 +14,13 @@ pytestmark = pytest.mark.skipif(
 
 
 def _get(path):
-    request = Request(f"{BASE.rstrip('/')}{path}", headers={"Accept": "application/json"})
+    request = Request(
+        f"{BASE.rstrip('/')}{path}",
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "CatMapper release smoke/1.0",
+        },
+    )
     with urlopen(request, timeout=15) as response:
         return response.status, json.load(response)
 
