@@ -4,7 +4,7 @@ from pathlib import Path
 from owlrl import DeductiveClosure, OWLRL_Semantics
 from rdflib import Graph, Literal, RDF, URIRef
 from rdflib.collection import Collection
-from rdflib.namespace import DCTERMS, OWL, XSD
+from rdflib.namespace import DCTERMS, OWL, RDFS, SKOS, XSD
 
 from CM.linked_data import CAT
 
@@ -53,6 +53,20 @@ def test_property_chain_inference_and_no_identity_inference():
     assert not [target for target in graph.objects(concept, OWL.sameAs) if target != concept]
     assert not list(graph.triples((concept, OWL.equivalentClass, None)))
     assert not list(graph.subjects(RDF.type, OWL.Nothing))
+
+
+def test_contains_event_type_vocabulary_keeps_sequence_out_of_skos_hierarchy():
+    graph = _ontology_graph()
+
+    assert (CAT.HierarchyEventType, SKOS.inScheme, CAT.ContainsEventTypeScheme) in graph
+    assert (CAT.FollowsEventType, SKOS.inScheme, CAT.ContainsEventTypeScheme) in graph
+    assert (CAT.SplitEventType, SKOS.inScheme, CAT.ContainsEventTypeScheme) in graph
+    assert (CAT.MergedEventType, SKOS.inScheme, CAT.ContainsEventTypeScheme) in graph
+    assert (CAT.SplitMergeEventType, SKOS.inScheme, CAT.ContainsEventTypeScheme) in graph
+    assert (CAT.containsConcept, RDFS.subPropertyOf, SKOS.narrower) in graph
+    assert (CAT.followsConcept, RDFS.subPropertyOf, SKOS.narrower) not in graph
+    assert (CAT.mergedWithConcept, RDF.type, OWL.SymmetricProperty) in graph
+    assert (CAT.transformedWithConcept, RDF.type, OWL.SymmetricProperty) in graph
 
 
 def test_immutable_release_checksums():

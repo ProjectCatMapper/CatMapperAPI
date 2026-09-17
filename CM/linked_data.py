@@ -50,6 +50,13 @@ CONTEXT_PROPERTIES = {
     "culture": CAT.contextConcept,
 }
 
+CONTAINS_EVENT_TYPE_PREDICATES = {
+    "FOLLOWS": CAT.followsConcept,
+    "SPLIT": CAT.splitIntoConcept,
+    "MERGED": CAT.mergedWithConcept,
+    "SPLITMERGE": CAT.transformedWithConcept,
+}
+
 _SAFE_CATALOG_ID = re.compile(r"^[A-Za-z0-9._~-]+$")
 _INTEGER = re.compile(r"^[+-]?[0-9]+$")
 
@@ -118,12 +125,14 @@ RETURN datasetCmid, key, conceptCmid, multiplicity
 
 HIERARCHY_QUERY = """
 MATCH (n:CATEGORY {CMID: $cmid})
-OPTIONAL MATCH (n)-[:CONTAINS]->(child:CATEGORY)
+OPTIONAL MATCH (n)-[outRel:CONTAINS]->(child:CATEGORY)
 WITH n, collect({direction: 'out', otherCmid: child.CMID,
-                 sourceLabels: labels(n), targetLabels: labels(child)}) AS outgoing
-OPTIONAL MATCH (parent:CATEGORY)-[:CONTAINS]->(n)
+                 sourceLabels: labels(n), targetLabels: labels(child),
+                 eventType: outRel.eventType}) AS outgoing
+OPTIONAL MATCH (parent:CATEGORY)-[inRel:CONTAINS]->(n)
 WITH outgoing, collect({direction: 'in', otherCmid: parent.CMID,
-                        sourceLabels: labels(parent), targetLabels: labels(n)}) AS incoming
+                        sourceLabels: labels(parent), targetLabels: labels(n),
+                        eventType: inRel.eventType}) AS incoming
 RETURN outgoing + incoming AS links
 """
 
@@ -195,6 +204,10 @@ def _as_values(value):
     return result
 
 
+def _normalized_event_types(value):
+    return [event_type.upper() for event_type in _as_values(value)]
+
+
 def _add_text(graph, subject, predicate, value, *, lang=None):
     for text in _as_values(value):
         graph.add((subject, predicate, Literal(text, lang=lang)))
@@ -259,6 +272,19 @@ def _semantic_contains_allowed(database, source_labels, target_labels):
     return source_rank is not None and target_rank is not None and source_rank < target_rank
 
 
+def _add_contains_event_type_triples(graph, database, source, target, row):
+    event_types = _normalized_event_types(row.get("eventType"))
+    if (
+        (not event_types or "HIERARCHY" in event_types)
+        and _semantic_contains_allowed(database, row.get("sourceLabels"), row.get("targetLabels"))
+    ):
+        graph.add((source, CAT.containsConcept, target))
+    for event_type in event_types:
+        predicate = CONTAINS_EVENT_TYPE_PREDICATES.get(event_type)
+        if predicate is not None:
+            graph.add((source, predicate, target))
+
+
 def _add_assertion(graph, database, row, multiplicities):
     row = dict(row)
     row["database"] = database
@@ -316,11 +342,9 @@ def project_hierarchy_link(database, row):
     database = normalize_database(database)
     graph = Graph()
     _bind_namespaces(graph)
-    if not _semantic_contains_allowed(database, row.get("sourceLabels"), row.get("targetLabels")):
-        return graph
     source = canonical_resource_iri(database, row.get("sourceCmid"))
     target = canonical_resource_iri(database, row.get("targetCmid"))
-    graph.add((source, CAT.containsConcept, target))
+    _add_contains_event_type_triples(graph, database, source, target, row)
     return graph
 
 
@@ -397,9 +421,9 @@ def project_resource(database, record, assertions=None, multiplicities=None, hie
             continue
         other = canonical_resource_iri(database, other_cmid)
         if link.get("direction") == "out":
-            graph.add((subject, CAT.containsConcept, other))
+            _add_contains_event_type_triples(graph, database, subject, other, link)
         else:
-            graph.add((other, CAT.containsConcept, subject))
+            _add_contains_event_type_triples(graph, database, other, subject, link)
 
     return graph
 

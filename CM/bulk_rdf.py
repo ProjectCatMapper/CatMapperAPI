@@ -82,11 +82,12 @@ RETURN datasetCmid, key, conceptCmid, multiplicity
 """
 
 HIERARCHY_EXPORT_QUERY = """
-MATCH (source:CATEGORY)-[:CONTAINS]->(target:CATEGORY)
+MATCH (source:CATEGORY)-[r:CONTAINS]->(target:CATEGORY)
 RETURN source.CMID AS sourceCmid,
        target.CMID AS targetCmid,
        labels(source) AS sourceLabels,
-       labels(target) AS targetLabels
+       labels(target) AS targetLabels,
+       r.eventType AS eventType
 """
 
 

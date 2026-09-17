@@ -171,6 +171,40 @@ def test_only_approved_contains_meanings_are_projected():
     assert (subject, linked_data.CAT.containsConcept, URIRef("https://catmapper.org/archamap/AM3")) not in graph
 
 
+def test_contains_event_types_have_distinct_owl_mappings():
+    graph = linked_data.project_hierarchy_link(
+        "sociomap",
+        {
+            "sourceCmid": "SM1",
+            "targetCmid": "SM2",
+            "sourceLabels": ["CATEGORY", "LANGUAGE"],
+            "targetLabels": ["CATEGORY", "DIALECT"],
+            "eventType": ["Hierarchy", "SPLIT "],
+        },
+    )
+    source = URIRef("https://catmapper.org/sociomap/SM1")
+    target = URIRef("https://catmapper.org/sociomap/SM2")
+
+    assert (source, linked_data.CAT.containsConcept, target) in graph
+    assert (source, linked_data.CAT.splitIntoConcept, target) in graph
+
+    follows_graph = linked_data.project_hierarchy_link(
+        "sociomap",
+        {
+            "sourceCmid": "SM3",
+            "targetCmid": "SM4",
+            "sourceLabels": ["CATEGORY", "PERIOD"],
+            "targetLabels": ["CATEGORY", "PERIOD"],
+            "eventType": "FOLLOWS",
+        },
+    )
+    follows_source = URIRef("https://catmapper.org/sociomap/SM3")
+    follows_target = URIRef("https://catmapper.org/sociomap/SM4")
+
+    assert (follows_source, linked_data.CAT.followsConcept, follows_target) in follows_graph
+    assert (follows_source, linked_data.CAT.containsConcept, follows_target) not in follows_graph
+
+
 def test_turtle_and_jsonld_are_semantically_equivalent(monkeypatch):
     graph = linked_data.project_resource("sociomap", category_record(), [assertion_row()])
     context = linked_data.load_jsonld_context()
