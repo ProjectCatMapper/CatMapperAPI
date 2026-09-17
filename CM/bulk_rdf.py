@@ -15,6 +15,7 @@ from rdflib import Graph
 
 from .linked_data import (
     ONTOLOGY_VERSION,
+    enrich_assertion_geometries,
     normalize_database,
     project_assertion,
     project_hierarchy_link,
@@ -71,6 +72,8 @@ RETURN d.CMID AS datasetCmid,
        properties(r)['variable'] AS variable,
        properties(r)['period'] AS period,
        properties(r)['culture'] AS culture,
+       properties(r)['geoCoords'] AS geoCoords,
+       properties(r)['geoPolygon'] AS geoPolygon,
        r.logID AS stableDiscriminator
 """
 
@@ -98,6 +101,17 @@ def _stream_query(driver, query):
             yield dict(record)
 
 
+def _batched(iterable, size=500):
+    batch = []
+    for item in iterable:
+        batch.append(item)
+        if len(batch) >= size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
 def iter_bulk_graphs(database):
     """Stream independently serializable graph fragments for a full snapshot."""
     database = normalize_database(database)
@@ -115,13 +129,14 @@ def iter_bulk_graphs(database):
         labels = set(row.get("labels") or [])
         yield "resource", labels, project_resource(database, row)
 
-    for row in _stream_query(driver, ASSERTION_EXPORT_QUERY):
-        identity = (
-            str(row.get("datasetCmid") or ""),
-            str(row.get("key") or ""),
-            str(row.get("conceptCmid") or ""),
-        )
-        yield "assertion", set(), project_assertion(database, row, collisions.get(identity, 1))
+    for batch in _batched(_stream_query(driver, ASSERTION_EXPORT_QUERY)):
+        for row in enrich_assertion_geometries(batch):
+            identity = (
+                str(row.get("datasetCmid") or ""),
+                str(row.get("key") or ""),
+                str(row.get("conceptCmid") or ""),
+            )
+            yield "assertion", set(), project_assertion(database, row, collisions.get(identity, 1))
 
     for row in _stream_query(driver, HIERARCHY_EXPORT_QUERY):
         graph = project_hierarchy_link(database, row)

@@ -1,10 +1,13 @@
 import json
 
 import pytest
-from rdflib import Graph, Literal, RDF, URIRef
+from rdflib import Graph, Literal, Namespace, RDF, URIRef
 from rdflib.namespace import DCAT, DCTERMS, OWL, SKOS, XSD
 
 from CM import linked_data
+
+
+GEO = Namespace("http://www.opengis.net/ont/geosparql#")
 
 
 def category_record(**overrides):
@@ -203,6 +206,38 @@ def test_contains_event_types_have_distinct_owl_mappings():
 
     assert (follows_source, linked_data.CAT.followsConcept, follows_target) in follows_graph
     assert (follows_source, linked_data.CAT.containsConcept, follows_target) not in follows_graph
+
+
+def test_assertion_geometry_uses_geosparql_geojson_literals():
+    row = assertion_row(
+        geoCoords='{"type":"Point","coordinates":[-111.93,33.42]}',
+        geoPolygon="geom-1",
+        geoPolygonGeoJSON={
+            "geom-1": {
+                "type": "MultiPolygon",
+                "coordinates": [[[[-1.0, 1.0], [-1.0, 2.0], [0.0, 2.0], [-1.0, 1.0]]]],
+            }
+        },
+    )
+    graph = linked_data.project_assertion("sociomap", row)
+    assertion = linked_data.assertion_iri({**row, "database": "sociomap"})
+    geometries = set(graph.objects(assertion, GEO.hasGeometry))
+
+    assert (assertion, RDF.type, GEO.Feature) in graph
+    assert len(geometries) == 2
+    assert all((geometry, RDF.type, GEO.Geometry) in graph for geometry in geometries)
+    assert all((geometry, linked_data.CAT.geometryRole, linked_data.CAT.DatasetAssertionGeometry) in graph for geometry in geometries)
+    assert any(str(value).startswith('{"coordinates":[-111.93,33.42]') for geometry in geometries for value in graph.objects(geometry, GEO.asGeoJSON))
+    polygon = next(geometry for geometry in geometries if (geometry, linked_data.CAT.geometryIdentifier, Literal("geom-1")) in graph)
+    assert list(graph.objects(polygon, GEO.asGeoJSON))
+
+
+def test_enrich_assertion_geometries_keeps_polygon_ids_when_gisdb_is_unavailable(monkeypatch):
+    monkeypatch.setattr(linked_data, "getDriver", lambda _database: (_ for _ in ()).throw(RuntimeError("gisdb down")))
+    rows = linked_data.enrich_assertion_geometries([assertion_row(geoPolygon="geom-1")])
+
+    assert rows[0]["geoPolygon"] == "geom-1"
+    assert rows[0].get("geoPolygonGeoJSON") == {}
 
 
 def test_turtle_and_jsonld_are_semantically_equivalent(monkeypatch):

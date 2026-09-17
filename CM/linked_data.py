@@ -19,6 +19,7 @@ ONTOLOGY_IRI = "https://catmapper.org/ontology/catmapper"
 CONTEXT_IRI = "https://catmapper.org/contexts/catmapper"
 RESOURCE_BASE = "https://catmapper.org"
 CAT = Namespace(f"{ONTOLOGY_IRI}#")
+GEO = Namespace("http://www.opengis.net/ont/geosparql#")
 MAX_ASSERTIONS_PER_RESPONSE = 500
 MAX_HIERARCHY_LINKS = 500
 
@@ -59,6 +60,14 @@ CONTAINS_EVENT_TYPE_PREDICATES = {
 
 _SAFE_CATALOG_ID = re.compile(r"^[A-Za-z0-9._~-]+$")
 _INTEGER = re.compile(r"^[+-]?[0-9]+$")
+_GEOJSON_GEOMETRY_TYPES = {
+    "Point",
+    "MultiPoint",
+    "LineString",
+    "MultiLineString",
+    "Polygon",
+    "MultiPolygon",
+}
 
 
 NODE_QUERY = """
@@ -108,6 +117,8 @@ RETURN d.CMID AS datasetCmid,
        properties(r)['variable'] AS variable,
        properties(r)['period'] AS period,
        properties(r)['culture'] AS culture,
+       properties(r)['geoCoords'] AS geoCoords,
+       properties(r)['geoPolygon'] AS geoPolygon,
        r.logID AS stableDiscriminator
 ORDER BY datasetCmid, key, conceptCmid,
          coalesce(apoc.convert.toJson(r.logID), '')
@@ -224,6 +235,7 @@ def _bind_namespaces(graph: Graph) -> None:
     graph.bind("cat", CAT)
     graph.bind("dcat", DCAT)
     graph.bind("dcterms", DCTERMS)
+    graph.bind("geo", GEO)
     graph.bind("owl", OWL)
     graph.bind("prov", PROV)
     graph.bind("skos", SKOS)
@@ -254,6 +266,36 @@ def assertion_iri(assertion, multiplicity=1) -> URIRef:
         encoded = json.dumps(discriminator, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
         suffix = "-" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
     return URIRef(f"{RESOURCE_BASE}/{parts[0]}/assertion/uses/{base_digest}{suffix}")
+
+
+def geometry_iri(database: str, assertion, geometry_key: str) -> URIRef:
+    assertion_id = str(assertion_iri({**dict(assertion), "database": normalize_database(database)})).rsplit("/", 1)[-1]
+    digest = hashlib.sha256(str(geometry_key).encode("utf-8")).hexdigest()[:24]
+    return URIRef(f"{RESOURCE_BASE}/{normalize_database(database)}/geometry/uses/{assertion_id}/{digest}")
+
+
+def _valid_geojson_geometry(value):
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    elif isinstance(value, dict):
+        parsed = value
+    else:
+        return None
+    if parsed.get("type") not in _GEOJSON_GEOMETRY_TYPES:
+        return None
+    if "coordinates" not in parsed:
+        return None
+    return parsed
+
+
+def _canonical_geojson_literal(value):
+    parsed = _valid_geojson_geometry(value)
+    if parsed is None:
+        return None
+    return json.dumps(parsed, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _semantic_contains_allowed(database, source_labels, target_labels):
@@ -298,6 +340,7 @@ def _add_assertion(graph, database, row, multiplicities):
     concept = canonical_resource_iri(database, row.get("conceptCmid"))
 
     graph.add((assertion, RDF.type, CAT.DatasetAssertion))
+    graph.add((assertion, RDF.type, GEO.Feature))
     graph.add((assertion, CAT.assertionDataset, dataset))
     graph.add((assertion, CAT.assertionConcept, concept))
     graph.add((dataset, CAT.hasDatasetAssertion, assertion))
@@ -321,6 +364,62 @@ def _add_assertion(graph, database, row, multiplicities):
             except MalformedPublicResource:
                 continue
             graph.add((assertion, predicate, context_iri))
+
+    _add_assertion_geometries(graph, database, row, assertion)
+
+
+def _add_assertion_geometries(graph, database, row, assertion):
+    for index, geojson_value in enumerate(_as_values(row.get("geoCoords"))):
+        literal = _canonical_geojson_literal(geojson_value)
+        if literal is None:
+            continue
+        geometry = geometry_iri(database, row, f"geoCoords:{index}:{literal}")
+        graph.add((assertion, GEO.hasGeometry, geometry))
+        graph.add((geometry, RDF.type, GEO.Geometry))
+        graph.add((geometry, GEO.asGeoJSON, Literal(literal, datatype=GEO.geoJSONLiteral)))
+        graph.add((geometry, CAT.geometryRole, CAT.DatasetAssertionGeometry))
+
+    for geom_id in _as_values(row.get("geoPolygon")):
+        geometry = geometry_iri(database, row, f"geoPolygon:{geom_id}")
+        graph.add((assertion, GEO.hasGeometry, geometry))
+        graph.add((geometry, RDF.type, GEO.Geometry))
+        graph.add((geometry, CAT.geometryRole, CAT.DatasetAssertionGeometry))
+        graph.add((geometry, CAT.geometryIdentifier, Literal(geom_id)))
+        literal = _canonical_geojson_literal((row.get("geoPolygonGeoJSON") or {}).get(geom_id))
+        if literal is not None:
+            graph.add((geometry, GEO.asGeoJSON, Literal(literal, datatype=GEO.geoJSONLiteral)))
+
+
+def enrich_assertion_geometries(assertion_rows):
+    rows = [dict(row) for row in assertion_rows or []]
+    geom_ids = sorted({geom_id for row in rows for geom_id in _as_values(row.get("geoPolygon"))})
+    if not geom_ids:
+        return rows
+    try:
+        geometry_rows = getQuery(
+            """
+            UNWIND $geomIDs AS geomID
+            MATCH (g:GEOMETRY {geomID: geomID})
+            RETURN g.geomID AS geomID, g.geometry AS geometry
+            """,
+            driver=getDriver("gisdb"),
+            params={"geomIDs": geom_ids},
+            type="dict",
+        )
+    except Exception:
+        geometry_rows = []
+    geometries = {
+        str(row.get("geomID")): row.get("geometry")
+        for row in geometry_rows or []
+        if row.get("geomID") and row.get("geometry")
+    }
+    for row in rows:
+        row["geoPolygonGeoJSON"] = {
+            geom_id: geometries[geom_id]
+            for geom_id in _as_values(row.get("geoPolygon"))
+            if geom_id in geometries
+        }
+    return rows
 
 
 def project_assertion(database, row, multiplicity=1):
@@ -417,7 +516,7 @@ def project_resource(database, record, assertions=None, multiplicities=None, hie
         source_labels = link.get("sourceLabels") or []
         target_labels = link.get("targetLabels") or []
         other_cmid = link.get("otherCmid")
-        if not other_cmid or not _semantic_contains_allowed(database, source_labels, target_labels):
+        if not other_cmid:
             continue
         other = canonical_resource_iri(database, other_cmid)
         if link.get("direction") == "out":
@@ -461,7 +560,7 @@ def fetch_resource_projection(
         type="dict",
     ) if limit and include_assertions else []
     has_more = len(assertion_rows) > limit
-    assertion_rows = assertion_rows[:limit]
+    assertion_rows = enrich_assertion_geometries(assertion_rows[:limit])
     collisions = getQuery(
         COLLISION_QUERY,
         driver=driver,

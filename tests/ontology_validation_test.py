@@ -2,7 +2,7 @@ import hashlib
 from pathlib import Path
 
 from owlrl import DeductiveClosure, OWLRL_Semantics
-from rdflib import Graph, Literal, RDF, URIRef
+from rdflib import Graph, Literal, Namespace, RDF, URIRef
 from rdflib.collection import Collection
 from rdflib.namespace import DCTERMS, OWL, RDFS, SKOS, XSD
 
@@ -12,6 +12,7 @@ from CM.linked_data import CAT
 ROOT = Path(__file__).resolve().parents[2]
 ONTOLOGY = ROOT / "ontology" / "catmapper.ttl"
 VERSIONS = ROOT / "ontology" / "versions"
+GEO = Namespace("http://www.opengis.net/ont/geosparql#")
 
 
 def _ontology_graph():
@@ -67,6 +68,18 @@ def test_contains_event_type_vocabulary_keeps_sequence_out_of_skos_hierarchy():
     assert (CAT.followsConcept, RDFS.subPropertyOf, SKOS.narrower) not in graph
     assert (CAT.mergedWithConcept, RDF.type, OWL.SymmetricProperty) in graph
     assert (CAT.transformedWithConcept, RDF.type, OWL.SymmetricProperty) in graph
+
+
+def test_geometry_vocabulary_uses_geosparql_without_catmapper_shadow_terms():
+    graph = _ontology_graph()
+
+    assert (GEO.Feature, RDF.type, OWL.Class) in graph
+    assert (GEO.Geometry, RDF.type, OWL.Class) in graph
+    assert (GEO.hasGeometry, RDF.type, OWL.ObjectProperty) in graph
+    assert (GEO.asGeoJSON, RDF.type, OWL.DatatypeProperty) in graph
+    assert (CAT.geometryRole, RDFS.domain, GEO.Geometry) in graph
+    assert (CAT.geometryIdentifier, RDFS.domain, GEO.Geometry) in graph
+    assert (CAT.DatasetAssertionGeometry, SKOS.inScheme, CAT.GeometryRoleScheme) in graph
 
 
 def test_immutable_release_checksums():
