@@ -12,7 +12,10 @@ class FakeMail:
         self.sent_messages.append(msg)
 
 
-def test_send_email_uses_custom_trace_header_not_message_id():
+def test_send_email_uses_custom_trace_header_not_message_id(monkeypatch):
+    # Keep this Flask-Mail test independent of developer/deployment Brevo
+    # configuration loaded into the test process.
+    monkeypatch.delenv("BREVO_" + "API_KEY", raising=False)
     fake_mail = FakeMail()
 
     result = sendEmail(
