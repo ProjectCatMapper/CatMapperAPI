@@ -2523,7 +2523,13 @@ def input_Nodes_Uses(
     # trim whitespace
     dataset = dataset.map(lambda x: x.strip() if isinstance(x, str) else x)
 
-    dataset = dataset.dropna(how="all").reset_index(drop=True).copy()
+    # Keep the source spreadsheet row through validation.  Dropping blank rows
+    # and resetting the dataframe index must not change the row shown to users.
+    source_rows = pd.Series(dataset.index + 2, index=dataset.index)
+    nonempty_rows = dataset.drop(columns=["importID"]).dropna(how="all").index
+    dataset = dataset.loc[nonempty_rows].copy()
+    dataset["_spreadsheet_row"] = source_rows.loc[nonempty_rows].to_numpy()
+    dataset = dataset.reset_index(drop=True)
 
     updateLog(f"log/{user}uploadProgress.txt", f"working on data validation", write="a")
 
@@ -2823,24 +2829,41 @@ def input_Nodes_Uses(
         if not invalid_rows.empty:
             raise ValueError(f"Found {len(invalid_rows)} invalid rows where 'yearEnd' < 'yearStart'")
                 
-    #Confirms that all latitude and longitudes are in range
+    #Confirms that all latitude and longitudes are in range.
+    #Blank coordinates are allowed (a tie may have no recorded coordinates).
     if {"latitude", "longitude"}.issubset(dataset.columns):
-        for index, row in dataset.iterrows():
-            try:
-                lat = float(row["latitude"])
-                if lat < -90 or lat > 90:
-                    raise ValueError(f"Latitude at row {index} is illogical (value: {lat}).")
-            except (ValueError, TypeError):
-                raise ValueError(f"Latitude at row {index} is not a valid number (value: {row['latitude']}).")
 
+        def _is_blank_coordinate(value):
             try:
-                lon = float(row["longitude"])
-                if lon < -180 or lon > 180:
-                    raise ValueError(f"Longitude at row {index} is illogical (value: {lon}).")
+                if pd.isna(value):
+                    return True
             except (ValueError, TypeError):
-                raise ValueError(f"Longitude at row {index} is not a valid number (value: {row['longitude']}).")
+                return False
+            return str(value).strip() == ""
+
+        for index, row in dataset.iterrows():
+            # Report spreadsheet row numbers so users can locate the row:
+            # the header is spreadsheet row 1, so the first data row is row 2.
+            spreadsheet_row = int(row["_spreadsheet_row"])
+
+            if not _is_blank_coordinate(row["latitude"]):
+                try:
+                    lat = float(str(row["latitude"]).strip())
+                except (ValueError, TypeError):
+                    raise ValueError(f"Latitude at row {spreadsheet_row} is not a valid number (value: {row['latitude']}).")
+                if lat < -90 or lat > 90:
+                    raise ValueError(f"Latitude at row {spreadsheet_row} is illogical (value: {lat}).")
+
+            if not _is_blank_coordinate(row["longitude"]):
+                try:
+                    lon = float(str(row["longitude"]).strip())
+                except (ValueError, TypeError):
+                    raise ValueError(f"Longitude at row {spreadsheet_row} is not a valid number (value: {row['longitude']}).")
+                if lon < -180 or lon > 180:
+                    raise ValueError(f"Longitude at row {spreadsheet_row} is illogical (value: {lon}).")
             
     """Convert true missing values to empty strings while preserving literal text."""
+    dataset = dataset.drop(columns=["_spreadsheet_row"])
     dataset = _stringify_upload_values(dataset)
 
     """ CMID checks """

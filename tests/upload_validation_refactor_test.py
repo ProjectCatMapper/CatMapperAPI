@@ -1129,3 +1129,179 @@ def test_summarize_upload_log_payload_avoids_large_json():
     payload = [{"a": 1}, {"b": 2}]
     summary = upload._summarize_upload_log_payload(payload)
     assert summary == "<list len=2>"
+
+
+def _coordinate_test_mocks(monkeypatch):
+    monkeypatch.setattr(upload, "updateLog", lambda *args, **kwargs: None)
+    monkeypatch.setattr(upload, "check_query_cancellation", lambda: None)
+    monkeypatch.setattr(upload, "getDriver", lambda database: object())
+
+    def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='node'" in query:
+            return []
+        if "MATCH (p:PROPERTY) WHERE p.type='relationship'" in query:
+            return []
+        if "MATCH (l:LABEL) return l.CMName as label" in query:
+            return ["DIALECT"]
+        raise AssertionError(f"Unexpected query: {query}")
+
+    monkeypatch.setattr(upload, "getQuery", fake_get_query)
+
+
+def test_input_nodes_uses_allows_blank_coordinates(monkeypatch):
+    _coordinate_test_mocks(monkeypatch)
+
+    # The duplicate datasetID/Key pair short-circuits the upload after the
+    # coordinate checks. Reaching that error proves blank latitude/longitude
+    # values no longer fail coordinate validation.
+    with pytest.raises(ValueError, match="Duplicate datasetID \\+ Key values in upload"):
+        upload.input_Nodes_Uses(
+            dataset=[
+                {
+                    "CMID": "AM1",
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "label": "DIALECT",
+                    "Name": "Alpha",
+                    "latitude": "",
+                    "longitude": None,
+                },
+                {
+                    "CMID": "AM2",
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "label": "DIALECT",
+                    "Name": "Beta",
+                    "latitude": float("nan"),
+                    "longitude": "   ",
+                },
+            ],
+            database="ArchaMap",
+            uploadOption="add_uses",
+            formatKey=False,
+            optionalProperties=[],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
+
+
+def test_input_nodes_uses_coordinate_errors_report_spreadsheet_row_numbers(monkeypatch):
+    _coordinate_test_mocks(monkeypatch)
+
+    # The header is spreadsheet row 1, so the third data row is row 4.
+    # The invalid latitude is on the third data row (index 2).
+    with pytest.raises(ValueError, match="Latitude at row 4 is not a valid number"):
+        upload.input_Nodes_Uses(
+            dataset=[
+                {
+                    "CMID": "AM1",
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "label": "DIALECT",
+                    "Name": "Alpha",
+                    "latitude": "",
+                    "longitude": "",
+                },
+                {
+                    "CMID": "AM2",
+                    "datasetID": "AD2",
+                    "Key": "Type == Beta",
+                    "label": "DIALECT",
+                    "Name": "Beta",
+                    "latitude": None,
+                    "longitude": None,
+                },
+                {
+                    "CMID": "AM3",
+                    "datasetID": "AD3",
+                    "Key": "Type == Gamma",
+                    "label": "DIALECT",
+                    "Name": "Gamma",
+                    "latitude": "abc",
+                    "longitude": "",
+                },
+                {
+                    "CMID": "AM4",
+                    "datasetID": "AD4",
+                    "Key": "Type == Delta",
+                    "label": "DIALECT",
+                    "Name": "Delta",
+                    "latitude": "",
+                    "longitude": "200",
+                },
+            ],
+            database="ArchaMap",
+            uploadOption="add_uses",
+            formatKey=False,
+            optionalProperties=[],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
+
+
+def test_input_nodes_uses_coordinate_errors_preserve_rows_after_blank_spreadsheet_rows(monkeypatch):
+    _coordinate_test_mocks(monkeypatch)
+
+    # Rows 2 and 3 are completely blank spreadsheet rows. The invalid value is
+    # in spreadsheet row 5 and must not be reported as the compacted row 3.
+    with pytest.raises(ValueError, match="Latitude at row 5 is not a valid number"):
+        upload.input_Nodes_Uses(
+            dataset=[
+                {"CMID": "AM1", "datasetID": "AD1", "Key": "Type == Alpha", "label": "DIALECT", "Name": "Alpha", "latitude": "", "longitude": ""},
+                {"CMID": None, "datasetID": None, "Key": None, "label": None, "Name": None, "latitude": None, "longitude": None},
+                {"CMID": None, "datasetID": None, "Key": None, "label": None, "Name": None, "latitude": None, "longitude": None},
+                {"CMID": "AM2", "datasetID": "AD2", "Key": "Type == Beta", "label": "DIALECT", "Name": "Beta", "latitude": "abc", "longitude": ""},
+            ],
+            database="ArchaMap",
+            uploadOption="add_uses",
+            formatKey=False,
+            optionalProperties=[],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
+
+
+def test_input_nodes_uses_rejects_out_of_range_coordinates_with_spreadsheet_row(monkeypatch):
+    _coordinate_test_mocks(monkeypatch)
+
+    # Out-of-range values report "illogical" (not "not a valid number") and
+    # use the spreadsheet row number (second data row = row 3).
+    with pytest.raises(ValueError, match="Longitude at row 3 is illogical"):
+        upload.input_Nodes_Uses(
+            dataset=[
+                {
+                    "CMID": "AM1",
+                    "datasetID": "AD1",
+                    "Key": "Type == Alpha",
+                    "label": "DIALECT",
+                    "Name": "Alpha",
+                    "latitude": "",
+                    "longitude": "",
+                },
+                {
+                    "CMID": "AM2",
+                    "datasetID": "AD2",
+                    "Key": "Type == Beta",
+                    "label": "DIALECT",
+                    "Name": "Beta",
+                    "latitude": None,
+                    "longitude": "200",
+                },
+            ],
+            database="ArchaMap",
+            uploadOption="add_uses",
+            formatKey=False,
+            optionalProperties=[],
+            user="tester",
+            addDistrict=False,
+            addRecordYear=False,
+            geocode=False,
+        )
