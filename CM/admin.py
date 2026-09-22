@@ -74,24 +74,33 @@ def _normalize_uses_property_name(value):
     return str(value or "").strip().casefold()
 
 
-def _cmid_reference_uses_properties(properties_metadata):
-    """Return USES properties whose metadata declares a category reference.
+def _cmid_reference_uses_relationships(properties_metadata):
+    """Return metadata mappings for CMID-bearing USES properties.
 
     A PROPERTY node's ``relationship`` describes the relationship created from
     its CMID value.  Deleting the referenced category must remove that value
-    from every ``CONTAINS`` and ``*_OF`` USES property.  ``parentContext`` is
-    structured JSON rather than a declared relationship, but contains the
-    same parent CMID and therefore needs the same cleanup.
+    from every ``CONTAINS`` and ``*_OF`` USES property.
     """
-    properties = {"parentContext"}
+    mappings = set()
     for metadata in properties_metadata or []:
         relationship = _normalize_contextual_tie_token(metadata.get("relationship"))
         property_name = str(metadata.get("property") or "").strip()
         if property_name and (
             relationship == "CONTAINS" or relationship.endswith("_OF")
         ):
-            properties.add(property_name)
-    return sorted(properties)
+            mappings.add((property_name, relationship))
+    return [
+        {"property": property_name, "relationship": relationship}
+        for property_name, relationship in sorted(mappings)
+    ]
+
+
+def _cmid_reference_uses_properties(properties_metadata):
+    """Return all category-reference USES properties, including parentContext."""
+    return sorted({"parentContext"} | {
+        mapping["property"]
+        for mapping in _cmid_reference_uses_relationships(properties_metadata)
+    })
 
 
 def _owner_scoped_actor(input_payload):
@@ -1730,7 +1739,8 @@ def deleteNode(database,user,input):
         # in all USES ties (district, country, parent, language, culture….) and 
         # from dataset nodes (District)
         else:
-            props = _cmid_reference_uses_properties(getPropertiesMetadata(driver=driver))
+            properties_metadata = getPropertiesMetadata(driver=driver)
+            reference_mappings = _cmid_reference_uses_relationships(properties_metadata)
 
             query = """
                     MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
@@ -1753,19 +1763,33 @@ def deleteNode(database,user,input):
             print("1")
 
             rels_query = """
-                UNWIND $keys AS key
-                MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
-                WITH key, d, c, $cmid AS cmid, r
-                WHERE r[key] IS NOT NULL AND (
-                    (key <> 'parentContext' AND cmid IN r[key])
-                    OR (key = 'parentContext' AND ANY(
-                        i IN r.parentContext
-                        WHERE toString(i) CONTAINS '\"parent\":\"' + cmid
-                    ))
-                )
-                RETURN elementId(r) AS id, r[key] AS val, cmid, key
+                CALL () {
+                    WITH $cmid AS cmid, $referenceMappings AS referenceMappings
+                    UNWIND referenceMappings AS reference
+                    MATCH (deleted:CATEGORY {CMID: cmid})-[contextual]->(c:CATEGORY)<-[r:USES]-(d:DATASET)
+                    WHERE type(contextual) = reference.relationship
+                      AND r[reference.property] IS NOT NULL
+                      AND cmid IN r[reference.property]
+                    RETURN elementId(r) AS id, r[reference.property] AS val, reference.property AS key
+
+                    UNION
+
+                    WITH $cmid AS cmid
+                    MATCH (:DATASET)-[r:USES]->(:CATEGORY)
+                    WHERE r.parentContext IS NOT NULL
+                      AND ANY(i IN r.parentContext WHERE toString(i) CONTAINS '\"parent\":\"' + cmid)
+                    RETURN elementId(r) AS id, r.parentContext AS val, 'parentContext' AS key
+                }
+                RETURN DISTINCT id, val, key
             """
-            rels = getQuery(rels_query, driver = driver, params={"keys": props, "cmid": input.get('s1_2')})
+            rels = getQuery(
+                rels_query,
+                driver=driver,
+                params={
+                    "referenceMappings": reference_mappings,
+                    "cmid": input.get('s1_2'),
+                },
+            )
 
             datasetIDs_query = f"""
                 MATCH (d:DATASET)

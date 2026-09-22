@@ -28,16 +28,24 @@ def test_uses_self_context_exception_uses_district_property_name():
 
 
 def test_cmid_reference_uses_properties_selects_contains_and_of_metadata():
-    properties = admin._cmid_reference_uses_properties([
+    metadata = [
         {"property": "parent", "relationship": "CONTAINS"},
         {"property": "country", "relationship": "AREA_OF"},
         {"property": "religion", "relationship": "RELIGION_OF"},
         {"property": "language", "relationship": "LANGUOID_OF"},
         {"property": "comment", "relationship": "ANNOTATES"},
         {"property": "unrelated", "relationship": None},
-    ])
+    ]
 
-    assert properties == ["country", "language", "parent", "parentContext", "religion"]
+    assert admin._cmid_reference_uses_relationships(metadata) == [
+        {"property": "country", "relationship": "AREA_OF"},
+        {"property": "language", "relationship": "LANGUOID_OF"},
+        {"property": "parent", "relationship": "CONTAINS"},
+        {"property": "religion", "relationship": "RELIGION_OF"},
+    ]
+    assert admin._cmid_reference_uses_properties(metadata) == [
+        "country", "language", "parent", "parentContext", "religion"
+    ]
 
 
 def test_delete_category_cleans_all_metadata_declared_uses_cmid_references(monkeypatch):
@@ -63,8 +71,12 @@ def test_delete_category_cleans_all_metadata_declared_uses_cmid_references(monke
         queries.append((query, params))
         if "RETURN DISTINCT" in query and "e.stack" in query:
             return []
-        if "UNWIND $keys AS key" in query:
-            assert params["keys"] == ["country", "parent", "parentContext", "religion"]
+        if "UNWIND referenceMappings AS reference" in query:
+            assert params["referenceMappings"] == [
+                {"property": "country", "relationship": "AREA_OF"},
+                {"property": "parent", "relationship": "CONTAINS"},
+                {"property": "religion", "relationship": "RELIGION_OF"},
+            ]
             return [
                 {"id": "uses-country", "val": ["SM7542", "SM7400"], "key": "country"},
                 {"id": "uses-parent", "val": ["SM7542"], "key": "parent"},
