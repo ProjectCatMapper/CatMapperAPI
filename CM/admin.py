@@ -74,6 +74,26 @@ def _normalize_uses_property_name(value):
     return str(value or "").strip().casefold()
 
 
+def _cmid_reference_uses_properties(properties_metadata):
+    """Return USES properties whose metadata declares a category reference.
+
+    A PROPERTY node's ``relationship`` describes the relationship created from
+    its CMID value.  Deleting the referenced category must remove that value
+    from every ``CONTAINS`` and ``*_OF`` USES property.  ``parentContext`` is
+    structured JSON rather than a declared relationship, but contains the
+    same parent CMID and therefore needs the same cleanup.
+    """
+    properties = {"parentContext"}
+    for metadata in properties_metadata or []:
+        relationship = _normalize_contextual_tie_token(metadata.get("relationship"))
+        property_name = str(metadata.get("property") or "").strip()
+        if property_name and (
+            relationship == "CONTAINS" or relationship.endswith("_OF")
+        ):
+            properties.add(property_name)
+    return sorted(properties)
+
+
 def _owner_scoped_actor(input_payload):
     claims = (input_payload or {}).get("_actorClaims") or {}
     userid = str(claims.get("userid") or "").strip()
@@ -1710,14 +1730,7 @@ def deleteNode(database,user,input):
         # in all USES ties (district, country, parent, language, culture….) and 
         # from dataset nodes (District)
         else:
-            props = getPropertiesMetadata(driver=driver)
-            # ``parent`` is stored on USES ties, but its metadata does not always
-            # declare a relationship type.  Keep it in the cleanup set so deleting
-            # a category cannot leave a stale parent reference on another tie.
-            props = list(set(
-                [p['property'] for p in props if p['relationship'] is not None]
-                + ["parent", "parentContext"]
-            ))
+            props = _cmid_reference_uses_properties(getPropertiesMetadata(driver=driver))
 
             query = """
                     MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
@@ -1744,8 +1757,11 @@ def deleteNode(database,user,input):
                 MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
                 WITH key, d, c, $cmid AS cmid, r
                 WHERE r[key] IS NOT NULL AND (
-                    toString(cmid) IN r[key] OR 
-                    (r.parentContext IS NOT NULL AND ANY(i IN r.parentContext WHERE i CONTAINS '\"parent\":\"' + cmid))
+                    (key <> 'parentContext' AND cmid IN r[key])
+                    OR (key = 'parentContext' AND ANY(
+                        i IN r.parentContext
+                        WHERE toString(i) CONTAINS '\"parent\":\"' + cmid
+                    ))
                 )
                 RETURN elementId(r) AS id, r[key] AS val, cmid, key
             """
@@ -1783,53 +1799,46 @@ def deleteNode(database,user,input):
             # getting all the affected relationships and extracting the safe data and setting it back
             if len(rels) > 0:
 
-                sepRels = []
                 for row in rels:
                     vals = row['val']
                     if isinstance(vals, list):
-                        vals = vals  # already a list
+                        vals = vals
                     else:
-                        vals = re.split(r' \|\|', vals)  # split string
+                        vals = re.split(r' \|\|', vals)
 
+                    key = row["key"]
+                    cmid = str(input.get('s1_2'))
+                    remaining_values = []
                     for val in vals:
-                        val = val.strip()
-                        if input.get('s1_2') not in val:
-                            sepRels.append({"id": row["id"], "key": row["key"], "val": val})
-                    # for val in re.split(r' \|\|', row['val']):
-                    # #for val in row['val']:
-                    #     val = val.strip()
-                    #     if input.get('s1_2') not in val:
-                    #         sepRels.append({"id": row["id"], "key": row["key"], "val": val})
-                                
-                # if there's saved data, it is set back before removing the purely unsaved data
-                if len(sepRels) > 0:
-                    grouped = {}
-                    for r in sepRels:
-                        grouped.setdefault((r['id'], r['key']), []).append(r['val'])
+                        text = str(val).strip()
+                        is_deleted_reference = (
+                            cmid in text
+                            if key == "parentContext"
+                            else text == cmid
+                        )
+                        if not is_deleted_reference:
+                            remaining_values.append(text)
 
-                    for (id_val, key), vals in grouped.items():
-                        safe_id_val = sanitize_cypher_element_id(id_val, "relationship elementId")
-                        safe_key = sanitize_cypher_identifier(key, "property")
+                    safe_row_id = sanitize_cypher_element_id(
+                        row["id"], "relationship elementId"
+                    )
+                    safe_row_key = sanitize_cypher_identifier(key, "property")
+                    if remaining_values:
                         set_query = f"""
                             MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE elementId(r) = $id
-                            SET r.{safe_key} = $vals
+                            SET r.{safe_row_key} = $vals
                         """
-                        getQuery(set_query,driver=driver, params={"id": safe_id_val, "vals": vals})
-                        nullify_empty_query = f"""
-                            MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE elementId(r) = $id AND size(r.{safe_key}) = 0
-                            SET r.{safe_key} = NULL
-                        """
-                        getQuery(nullify_empty_query,driver=driver, params={"id": safe_id_val})
-                # removing the purely unsaved data
-                else:
-                    for row in rels:
-                        safe_row_id = sanitize_cypher_element_id(row["id"], "relationship elementId")
-                        safe_row_key = sanitize_cypher_identifier(row["key"], "property")
+                        getQuery(
+                            set_query,
+                            driver=driver,
+                            params={"id": safe_row_id, "vals": remaining_values},
+                        )
+                    else:
                         nullify_query = f"""
                             MATCH (:DATASET)-[r:USES]->(:CATEGORY) WHERE elementId(r) = $id
                             SET r.{safe_row_key} = NULL
                         """
-                        getQuery(nullify_query,driver=driver, params={"id": safe_row_id})
+                        getQuery(nullify_query, driver=driver, params={"id": safe_row_id})
 
                 createLog(id=[row["id"] for row in rels], type="relation",
                       log=f"removed reference to deleted node {input.get('s1_2')}",

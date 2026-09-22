@@ -27,7 +27,20 @@ def test_uses_self_context_exception_uses_district_property_name():
     assert not admin._is_uses_self_context_exception("language", "LANGUOID_OF")
 
 
-def test_delete_category_cleans_parent_reference_on_uses_tie(monkeypatch):
+def test_cmid_reference_uses_properties_selects_contains_and_of_metadata():
+    properties = admin._cmid_reference_uses_properties([
+        {"property": "parent", "relationship": "CONTAINS"},
+        {"property": "country", "relationship": "AREA_OF"},
+        {"property": "religion", "relationship": "RELIGION_OF"},
+        {"property": "language", "relationship": "LANGUOID_OF"},
+        {"property": "comment", "relationship": "ANNOTATES"},
+        {"property": "unrelated", "relationship": None},
+    ])
+
+    assert properties == ["country", "language", "parent", "parentContext", "religion"]
+
+
+def test_delete_category_cleans_all_metadata_declared_uses_cmid_references(monkeypatch):
     queries = []
 
     monkeypatch.setattr(admin, "getDriver", lambda database: object())
@@ -35,7 +48,12 @@ def test_delete_category_cleans_parent_reference_on_uses_tie(monkeypatch):
     monkeypatch.setattr(
         admin,
         "getPropertiesMetadata",
-        lambda driver: [{"property": "parent", "relationship": None}],
+        lambda driver: [
+            {"property": "parent", "relationship": "CONTAINS"},
+            {"property": "country", "relationship": "AREA_OF"},
+            {"property": "religion", "relationship": "RELIGION_OF"},
+            {"property": "comment", "relationship": "ANNOTATES"},
+        ],
     )
     monkeypatch.setattr(admin, "getID", lambda *args, **kwargs: "node-7542")
     monkeypatch.setattr(admin, "deleteID", lambda *args, **kwargs: "Deleted 1 of type node")
@@ -46,8 +64,13 @@ def test_delete_category_cleans_parent_reference_on_uses_tie(monkeypatch):
         if "RETURN DISTINCT" in query and "e.stack" in query:
             return []
         if "UNWIND $keys AS key" in query:
-            assert "parent" in params["keys"]
-            return [{"id": "uses-7540", "val": ["SM7542"], "key": "parent"}]
+            assert params["keys"] == ["country", "parent", "parentContext", "religion"]
+            return [
+                {"id": "uses-country", "val": ["SM7542", "SM7400"], "key": "country"},
+                {"id": "uses-parent", "val": ["SM7542"], "key": "parent"},
+                {"id": "uses-religion", "val": ["SM7542", "SM7401"], "key": "religion"},
+                {"id": "uses-context", "val": ['{\"parent\":\"SM7542\"}'], "key": "parentContext"},
+            ]
         if "WHERE $cmid IN d.District" in query:
             return []
         if "CREATE (n2:DELETED)" in query:
@@ -57,10 +80,10 @@ def test_delete_category_cleans_parent_reference_on_uses_tie(monkeypatch):
     monkeypatch.setattr(admin, "getQuery", fake_get_query)
 
     assert admin.deleteNode("sociomap", "tester", {"s1_2": "SM7542"}) == "done"
-    assert any(
-        "SET r.parent = NULL" in query and params == {"id": "uses-7540"}
-        for query, params in queries
-    )
+    assert any("SET r.country = $vals" in query and params == {"id": "uses-country", "vals": ["SM7400"]} for query, params in queries)
+    assert any("SET r.religion = $vals" in query and params == {"id": "uses-religion", "vals": ["SM7401"]} for query, params in queries)
+    assert any("SET r.parent = NULL" in query and params == {"id": "uses-parent"} for query, params in queries)
+    assert any("SET r.parentContext = NULL" in query and params == {"id": "uses-context"} for query, params in queries)
 
 
 def test_admin_uses_edit_rejects_internal_authorization_property(monkeypatch):
