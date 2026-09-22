@@ -93,6 +93,17 @@ def test_invalid_key_format_error_includes_guidance_and_row_messages():
     assert 'Row 1: Found "==" without spaces around it' in message
 
 
+@pytest.mark.parametrize("upload_option", ["add_node", "add_uses"])
+def test_add_upload_rejects_newkey(upload_option):
+    with pytest.raises(ValueError, match="NewKey is only supported"):
+        upload.input_Nodes_Uses(
+            dataset=[{"NewKey": "Type == Replacement"}],
+            database="sociomap",
+            uploadOption=upload_option,
+            user="tester",
+        )
+
+
 def test_key_format_warning_messages_include_rows_and_columns():
     messages = key_format_warning_messages(["Type == 1==2"], "Key")
 
