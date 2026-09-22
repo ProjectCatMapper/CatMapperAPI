@@ -1711,7 +1711,13 @@ def deleteNode(database,user,input):
         # from dataset nodes (District)
         else:
             props = getPropertiesMetadata(driver=driver)
-            props = list(set([p['property'] for p in props if p['relationship'] is not None] + ["parentContext"]))
+            # ``parent`` is stored on USES ties, but its metadata does not always
+            # declare a relationship type.  Keep it in the cleanup set so deleting
+            # a category cannot leave a stale parent reference on another tie.
+            props = list(set(
+                [p['property'] for p in props if p['relationship'] is not None]
+                + ["parent", "parentContext"]
+            ))
 
             query = """
                     MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)

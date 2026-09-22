@@ -27,6 +27,42 @@ def test_uses_self_context_exception_uses_district_property_name():
     assert not admin._is_uses_self_context_exception("language", "LANGUOID_OF")
 
 
+def test_delete_category_cleans_parent_reference_on_uses_tie(monkeypatch):
+    queries = []
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin, "getLabel", lambda *args, **kwargs: ["CATEGORY"])
+    monkeypatch.setattr(
+        admin,
+        "getPropertiesMetadata",
+        lambda driver: [{"property": "parent", "relationship": None}],
+    )
+    monkeypatch.setattr(admin, "getID", lambda *args, **kwargs: "node-7542")
+    monkeypatch.setattr(admin, "deleteID", lambda *args, **kwargs: "Deleted 1 of type node")
+    monkeypatch.setattr(admin, "createLog", lambda *args, **kwargs: None)
+
+    def fake_get_query(query, driver=None, params=None, **kwargs):
+        queries.append((query, params))
+        if "RETURN DISTINCT" in query and "e.stack" in query:
+            return []
+        if "UNWIND $keys AS key" in query:
+            assert "parent" in params["keys"]
+            return [{"id": "uses-7540", "val": ["SM7542"], "key": "parent"}]
+        if "WHERE $cmid IN d.District" in query:
+            return []
+        if "CREATE (n2:DELETED)" in query:
+            return [{"nodeID": "deleted-7542"}]
+        return []
+
+    monkeypatch.setattr(admin, "getQuery", fake_get_query)
+
+    assert admin.deleteNode("sociomap", "tester", {"s1_2": "SM7542"}) == "done"
+    assert any(
+        "SET r.parent = NULL" in query and params == {"id": "uses-7540"}
+        for query, params in queries
+    )
+
+
 def test_admin_uses_edit_rejects_internal_authorization_property(monkeypatch):
     payload = _base_input()
     payload["s1_8"] = "ownerUserId"

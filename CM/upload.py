@@ -2484,6 +2484,12 @@ def input_Nodes_Uses(
     
     dataset = pd.DataFrame(dataset)
 
+    if uploadOption in {"add_node", "add_uses"} and "NewKey" in dataset.columns:
+        raise ValueError(
+            "NewKey is only supported when replacing a USES property; "
+            "use Key when adding nodes or USES ties."
+        )
+
     # Since APIs remove empty columns, and a user can submit a fully empty column of CMIDS for function 2,
     # we need to re-add CMID column if it doesn't exist in this case
     if uploadOption == "add_uses":
