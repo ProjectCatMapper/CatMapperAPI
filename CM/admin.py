@@ -1966,6 +1966,23 @@ def deleteCATEGORYMERGING(database, user, input):
 
     return "done"
 
+def deleteMERGING(database, user, input):
+    driver = getDriver(database)
+    try:
+        selected_tie = json.loads(input.get('s1_7'))
+        rel_id = sanitize_cypher_element_id(selected_tie[1]["id"], "relationship elementId")
+    except Exception as exc:
+        raise ValueError("Invalid MERGING tie payload.") from exc
+    q = """MATCH (from)-[r:MERGING]->(to)
+    WHERE elementId(r) = $id
+      AND ((from:STACK AND to:DATASET) OR (from:MERGING AND to:STACK))
+    DELETE r RETURN count(*) AS count"""
+    result = getQuery(q, driver=driver, params={"id": rel_id})
+    deleted_count = result[0]["count"] if result and "count" in result[0] else 0
+    if deleted_count == 0:
+        raise ValueError("No MERGING tie was deleted. Verify the selected relation still exists.")
+    return "done"
+
 ############################
 #section for creating a new label
 def createLabel(database,user,input):
