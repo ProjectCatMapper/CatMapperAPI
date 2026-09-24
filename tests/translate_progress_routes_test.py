@@ -72,3 +72,25 @@ def test_translate_status_returns_404_for_unknown_task(client, monkeypatch):
 
     assert response.status_code == 404
     assert response.get_json()["error"] == "Task not found"
+
+
+def test_translate_status_reports_processing_error(client, monkeypatch):
+    monkeypatch.setattr(search_routes, "get_redis_connection", lambda: None)
+
+    def failing_translate(**kwargs):
+        raise ValueError("dataset column contains no matching IDs")
+
+    monkeypatch.setattr(search_routes, "translate", failing_translate)
+    start_response = client.post("/translate/start", json=_translate_payload())
+    task_id = start_response.get_json()["taskId"]
+
+    deadline = time.monotonic() + 1.5
+    payload = None
+    while time.monotonic() < deadline:
+        payload = client.post("/translate/status", json={"taskId": task_id}).get_json()
+        if payload.get("status") == "failed":
+            break
+        time.sleep(0.01)
+
+    assert payload["message"] == "Propose translate failed during processing."
+    assert payload["error"] == "Propose translate failed during processing: dataset column contains no matching IDs"

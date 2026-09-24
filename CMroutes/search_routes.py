@@ -250,8 +250,8 @@ def _run_translate_task(task_id, translate_kwargs, batch_size):
         _update_translate_task(
             task_id,
             status="canceled" if is_canceled else "failed",
-            message="Translation canceled." if is_canceled else "",
-            error="" if is_canceled else error_message,
+            message="Translation canceled." if is_canceled else "Propose translate failed during processing.",
+            error="" if is_canceled else f"Propose translate failed during processing: {error_message}",
             stage="completed",
             percent=100 if is_canceled else 0,
             elapsedSeconds=round(time.time() - started_at_ts, 1),
