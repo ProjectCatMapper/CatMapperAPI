@@ -26,6 +26,7 @@ _UPLOAD_LOG_LISTENER = threading.local()
 _UPLOAD_LOG_TIMING = threading.local()
 _JSON_UPLOAD_PROPERTIES = {"parentContext", "geoCoords", "geo"}
 _INTERNAL_OWNER_PROPERTY_NAMES = {"ownerUserId", "modifiedByOtherUser"}
+_RESERVED_USES_UPLOAD_PROPERTIES = {"dataset"}
 
 
 def _sync_updated_uses_labels(database, cmids, changed_properties):
@@ -2493,6 +2494,16 @@ def input_Nodes_Uses(
     # Since APIs remove empty columns, and a user can submit a fully empty column of CMIDS for function 2,
     # we need to re-add CMID column if it doesn't exist in this case
     if uploadOption == "add_uses":
+        reserved_columns = [
+            column
+            for column in dataset.columns
+            if str(column).strip().casefold() in _RESERVED_USES_UPLOAD_PROPERTIES
+        ]
+        if reserved_columns:
+            raise ValueError(
+                "Dataset is reserved USES metadata and cannot be uploaded as a property. "
+                "Use datasetID to identify the dataset for each USES tie."
+            )
         if "CMID" not in dataset.columns:
             dataset["CMID"] = ""
 
