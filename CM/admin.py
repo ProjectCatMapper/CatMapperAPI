@@ -553,6 +553,31 @@ def add_edit_delete_USES(database,user,input):
             f"{USES_property} is internal USES metadata and cannot be edited directly."
         )
 
+    # The admin form submits both a category CMID and a relationship ID. The
+    # relationship ID is authoritative for the write, so verify that the
+    # selected relationship still belongs to the category shown by the form
+    # before validating values or mutating anything.
+    if not relID:
+        raise ValueError("Selected USES tie is missing its relationship ID.")
+    category_query = """
+        MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+        WHERE elementId(r) = $relID AND c.CMID = $CMID
+        {owner_guard}
+        RETURN c.CMID AS CMID
+    """.format(owner_guard=_owner_scoped_uses_guard("r", actor_user_id))
+    category_params = {"relID": relID, "CMID": CMID}
+    if actor_user_id:
+        category_params["actorUserId"] = actor_user_id
+    selected_category = getQuery(category_query, driver=driver, params=category_params)
+    if not selected_category:
+        raise ValueError(
+            "Selected USES tie no longer exists, is not available to this user, "
+            "or does not belong to the selected category. Refresh the tie list and try again."
+        )
+    actual_cmid = str(selected_category[0].get("CMID") or "").strip()
+    if not actual_cmid:
+        raise ValueError("Selected USES tie has no category CMID.")
+
     metaTypes = getPropertiesMetadata(driver)
     metaType = [item['metaType'] for item in metaTypes if item["type"] == "relationship" and item["property"] == USES_property]
     is_list_meta = any(isinstance(mt, str) and "list" in mt.lower() for mt in metaType)
@@ -710,48 +735,50 @@ def add_edit_delete_USES(database,user,input):
             updated_rows = update_result.get("result")
             if isinstance(updated_rows, list) and len(updated_rows) == 0:
                 raise Exception("No USES ties were updated. Verify the selected relation still exists.")
+        updated_rows = update_result.get("result") if isinstance(update_result, dict) else None
+        processed_cmids = list(dict.fromkeys(
+            str(row.get("CMID") or "").strip()
+            for row in (updated_rows or [])
+            if isinstance(row, dict) and str(row.get("CMID") or "").strip()
+        ))
+        if not processed_cmids:
+            raise Exception("Updated USES tie did not return its category CMID; processing was not started.")
         _require_process_uses_success(
-            processUSES(CMID=CMID, database=database, user=user)
+            processUSES(CMID=processed_cmids, database=database, user=user)
         )
     elif addOrEditNode == "delete":
-        if relID:
-            q = """
-                    MATCH ()-[r:USES]->()
-                    WHERE elementId(r) = $relID
-                    {owner_guard}
-                    REMOVE r[$USES_property]
-                    RETURN DISTINCT elementId(r) as relID
-                """.format(
-                    owner_guard=_owner_scoped_uses_guard(
-                        "r",
-                        actor_user_id,
-                    )
+        q = """
+                MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
+                WHERE elementId(r) = $relID
+                {owner_guard}
+                REMOVE r[$USES_property]
+                RETURN DISTINCT elementId(r) as relID, c.CMID AS CMID
+            """.format(
+                owner_guard=_owner_scoped_uses_guard(
+                    "r",
+                    actor_user_id,
                 )
-            params = {
-                "relID": relID,
-                "USES_property": USES_property
-            }
-        else:
-            q = f"""
-                    MATCH (a:CATEGORY {{CMID: $CMID}})<-[r:USES {{Key: $key}}]-(d:DATASET {{CMID: $datasetID}})
-                    WHERE true {_owner_scoped_uses_guard("r", actor_user_id)}
-                    REMOVE r[$USES_property] RETURN elementId(r) as relID
-                """
-            params = {
-                "CMID": CMID,
-                "key": key,
-                "datasetID": datasetID,
-                "USES_property": USES_property
-            }
+            )
+        params = {
+            "relID": relID,
+            "USES_property": USES_property
+        }
         if actor_user_id:
             params["actorUserId"] = actor_user_id
         result = getQuery(q,driver=driver,params = params)
-        _require_process_uses_success(
-            processUSES(CMID=CMID, database=database, user=user)
-        )
         rel_ids = list(dict.fromkeys(row["relID"] for row in result)) if isinstance(result, list) else []
         if not rel_ids:
             raise Exception("No USES ties were updated. Verify the selected relation still exists.")
+        processed_cmids = list(dict.fromkeys(
+            str(row.get("CMID") or "").strip()
+            for row in result
+            if isinstance(row, dict) and str(row.get("CMID") or "").strip()
+        ))
+        if not processed_cmids:
+            raise Exception("Updated USES tie did not return its category CMID; processing was not started.")
+        _require_process_uses_success(
+            processUSES(CMID=processed_cmids, database=database, user=user)
+        )
         log_message = f"deleted USES property {input.get('s1_8')}"
         createLog(
             id=rel_ids,

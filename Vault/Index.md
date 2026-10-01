@@ -3,6 +3,7 @@ Up: [[../Vault/Index]]
 # Index
 
 ## Notes
+- [[Admin_USES_Parent_Immediate_Processing_2026_10_01]]
 - [[ArchaMap_Explore_BuiltFeatures_Download_CMID_Error_2026_03_28]]
 - [[ArchaMap_Explore_Download_RestoredSearch_Missing_CMIDs_2026_03_28]]
 - [[ArchaMap_Built_Feature_USES_Label_Updated_To_NATURAL_2026_03_28]]
