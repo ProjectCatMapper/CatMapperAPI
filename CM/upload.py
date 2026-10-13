@@ -2631,14 +2631,9 @@ def input_Nodes_Uses(
         if duplicate_CMIDs:
             raise ValueError(f"Duplicate CMIDs found in CMID column: \n{duplicate_CMIDs}")
     
-    # When uploading category nodes, need to make sure that CMName is added to names in case, it is not included in Name column.
-    if uploadOption == "add_node" and not isDataset:
-        dataset['Name'] = dataset.apply(
-                        lambda row: row['Name'] if pd.isna(row['CMName']) or str(row['CMName']) in str(row['Name'])
-                        else f"{row['Name']},{row['CMName']}",
-                        axis=1
-                    )
-       
+    # Preserve the source Name values. The default-dataset routine adds CMName
+    # as a native list element after upload, without parsing its punctuation.
+
     # When simple upload is used, convert raw selected key column values into
     # CatMapper key format before key validation (e.g., "Key == value").
     if formatKey is True:
