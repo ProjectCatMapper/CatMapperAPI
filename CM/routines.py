@@ -5,6 +5,7 @@
 import os
 import re
 from CM.utils import *
+from CM.event_types import get_allowed_event_types, validate_parent_context_events, parent_context_entries
 from CM.email import *
 from CM.USES import *
 from CM.metadata import *
@@ -782,13 +783,7 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                     END AS eventTypes
                 UNWIND eventTypes AS eventType
                 WITH source, target, r, eventType
-                WHERE NOT (eventType IN [
-                    "SPLIT",
-                    "HIERARCHY",
-                    "SPLITMERGE",
-                    "MERGED",
-                    "FOLLOWS"
-                ])
+                WHERE NOT (eventType IN $allowedEventTypes)
                 RETURN
                     source.CMID AS sourceCMID,
                     source.CMName AS sourceCMName,
@@ -798,7 +793,8 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                     r.eventType AS eventTypes
                 ORDER BY sourceCMID, targetCMID, invalidEventType
                  """
-        results8 = getQuery(query, driver, type="df")
+        allowed_event_types = get_allowed_event_types(driver)
+        results8 = getQuery(query, driver, type="df", allowedEventTypes=list(allowed_event_types))
         results9 = pd.DataFrame()
 
         parent_context_cache = None
@@ -827,42 +823,23 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
 
             for row in raw_rows:
                 raw_context = row.get("parentContext")
-
-                if isinstance(raw_context, list):
-                    context_entries = raw_context
-                else:
-                    context_entries = [raw_context]
-
-                for entry in context_entries:
-                    parsed_obj = None
-                    entry_text = None
-
-                    if isinstance(entry, dict):
-                        parsed_obj = entry
-                        entry_text = json.dumps(entry)
-                    elif isinstance(entry, str):
-                        candidate = entry.strip()
-                        if not candidate:
-                            continue
-                        entry_text = candidate
-                        try:
-                            parsed_obj = json.loads(candidate)
-                        except Exception:
-                            continue
-                    else:
+                raw_entries = raw_context if isinstance(raw_context, list) else [raw_context]
+                for raw_entry in raw_entries:
+                    try:
+                        entries = parent_context_entries(raw_entry)
+                    except ValueError:
+                        # Invalid JSON is already included in validateJSON's report;
+                        # still check other valid entries on this same USES tie.
                         continue
-
-                    if not isinstance(parsed_obj, dict):
-                        continue
-
-                    parsed_rows.append({
-                        "datasetID": row.get("datasetID"),
-                        "CMID": row.get("CMID"),
-                        "Key": row.get("Key"),
-                        "parentContextEntry": entry_text,
-                        "parentContextMap": parsed_obj,
-                        "parentValues": row.get("parentValues"),
-                    })
+                    for entry in entries:
+                        parsed_rows.append({
+                            "datasetID": row.get("datasetID"),
+                            "CMID": row.get("CMID"),
+                            "Key": row.get("Key"),
+                            "parentContextEntry": json.dumps(entry),
+                            "parentContextMap": entry,
+                            "parentValues": row.get("parentValues"),
+                        })
 
             parent_context_cache = parsed_rows
             return parent_context_cache
@@ -1015,6 +992,24 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
             "parentContext parent CMID validation",
         )
 
+        invalid_source_events = []
+        for row in _load_parent_context_rows():
+            try:
+                validate_parent_context_events(row["parentContextMap"], allowed_event_types)
+            except ValueError as exc:
+                invalid_source_events.append({
+                    "datasetID": row["datasetID"], "CMID": row["CMID"],
+                    "Key": row["Key"], "contextEntry": row["parentContextEntry"],
+                    "error": str(exc),
+                })
+        results12 = pd.DataFrame(invalid_source_events)
+        fp12 = None
+        if not results12.empty:
+            with tempfile.NamedTemporaryFile(delete=False,
+                    prefix=f"Invalid_source_eventTypes_{database}_", suffix=".xlsx", dir="/tmp") as tmpfile:
+                fp12 = tmpfile.name
+                results12.to_excel(fp12, index=False)
+
         mailSent = "False"
 
         if isinstance(mail, Mail):
@@ -1088,11 +1083,13 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                 "invalid_parentContext_count": len(results2),
                 "parentContext_parent_not_in_parent_count": len(results3),
                 "invalid_contains_eventType_count": len(results8),
+                "invalid_source_eventType_count": len(results12),
                 "invalid_parentContext_parent_cmid_count": len(results11),
                 "invalid_geoCoords": results1,
                 "invalid_parentContext": results2,
                 "parentContext_parent_not_in_parent": results3.to_dict(orient="records"),
                 "invalid_contains_eventType": results8.to_dict(orient="records"),
+                "invalid_source_eventType": results12.to_dict(orient="records"),
                 "invalid_parentContext_parent_cmid": results11.to_dict(orient="records"),
                 "emailSent": mailSent,
             }
@@ -1110,10 +1107,11 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                     f"Invalid parentContext: {len(results2)}; "
                     f"CMID in parentContext but not in parent: {len(results3)}; "
                     f"Invalid CONTAINS eventType: {len(results8)}; "
+                    f"Invalid source eventType: {len(results12)}; "
                     f"Invalid parentContext parent CMID: {len(results11)}"
                     f"{fallback_info}"
                 ),
-                "filepath": [fp1, fp2, fp3, fp8, fp11],
+                "filepath": [fp1, fp2, fp3, fp8, fp11, fp12],
             }
     except Exception as e:
         result = str(e)

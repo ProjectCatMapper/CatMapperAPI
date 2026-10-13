@@ -2,6 +2,9 @@ import CM.admin as admin
 import pytest
 
 
+pytestmark = pytest.mark.usefixtures("metadata_event_vocabulary")
+
+
 def _base_input():
     return {
         "s1_1": "edit",
@@ -140,6 +143,8 @@ def test_add_edit_delete_uses_uses_relid_for_selected_relation(monkeypatch):
     monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "WHERE elementId(r) = $relID AND c.CMID = $CMID" in query:
+            return [{"CMID": params["CMID"]}]
         if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
             return [{"groupLabel": None}]
         raise AssertionError(f"Unexpected query: {query}")
@@ -149,7 +154,7 @@ def test_add_edit_delete_uses_uses_relid_for_selected_relation(monkeypatch):
     def fake_update_property(df, optionalProperties, isDataset, database, user, updateType, propertyType="USES", sep="||||"):
         captured["df"] = df.copy()
         captured["optionalProperties"] = list(optionalProperties)
-        return {"result": [{"relID": "rel-123"}], "df": df.to_dict(orient="records")}
+        return {"result": [{"relID": "rel-123", "CMID": "SM254496"}], "df": df.to_dict(orient="records")}
 
     monkeypatch.setattr(admin, "updateProperty", fake_update_property)
 
@@ -171,6 +176,8 @@ def test_add_edit_delete_uses_raises_when_no_rows_are_updated(monkeypatch):
     monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "WHERE elementId(r) = $relID AND c.CMID = $CMID" in query:
+            return [{"CMID": params["CMID"]}]
         if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
             return [{"groupLabel": None}]
         raise AssertionError(f"Unexpected query: {query}")
@@ -231,6 +238,8 @@ def test_add_edit_delete_uses_handles_list_population_meta_type(monkeypatch):
     monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "WHERE elementId(r) = $relID AND c.CMID = $CMID" in query:
+            return [{"CMID": params["CMID"]}]
         if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
             return [{"groupLabel": None}]
         raise AssertionError(f"Unexpected query: {query}")
@@ -239,7 +248,7 @@ def test_add_edit_delete_uses_handles_list_population_meta_type(monkeypatch):
 
     def fake_update_property(df, optionalProperties, isDataset, database, user, updateType, propertyType="USES", sep="||||"):
         captured["df"] = df.copy()
-        return {"result": [{"relID": "rel-123"}], "df": df.to_dict(orient="records")}
+        return {"result": [{"relID": "rel-123", "CMID": "SM254496"}], "df": df.to_dict(orient="records")}
 
     monkeypatch.setattr(admin, "updateProperty", fake_update_property)
 
@@ -259,6 +268,8 @@ def test_add_edit_delete_uses_rejects_invalid_key_format(monkeypatch):
     monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [])
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "WHERE elementId(r) = $relID AND c.CMID = $CMID" in query:
+            return [{"CMID": params["CMID"]}]
         if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
             return [{"groupLabel": None}]
         raise AssertionError(f"Unexpected query: {query}")
@@ -305,6 +316,8 @@ def test_add_edit_delete_uses_accepts_valid_key_format(monkeypatch):
     monkeypatch.setattr(admin, "processUSES", lambda **kwargs: None)
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "WHERE elementId(r) = $relID AND c.CMID = $CMID" in query:
+            return [{"CMID": params["CMID"]}]
         if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
             return [{"groupLabel": None}]
         raise AssertionError(f"Unexpected query: {query}")
@@ -314,7 +327,7 @@ def test_add_edit_delete_uses_accepts_valid_key_format(monkeypatch):
     def fake_update_property(df, optionalProperties, isDataset, database, user, updateType, propertyType="USES", sep="||||"):
         captured["df"] = df.copy()
         captured["optionalProperties"] = list(optionalProperties)
-        return {"result": [{"relID": "rel-123"}], "df": df.to_dict(orient="records")}
+        return {"result": [{"relID": "rel-123", "CMID": "SM254496"}], "df": df.to_dict(orient="records")}
 
     monkeypatch.setattr(admin, "updateProperty", fake_update_property)
 
@@ -327,22 +340,30 @@ def test_add_edit_delete_uses_accepts_valid_key_format(monkeypatch):
     assert captured["duplicate_rows"]["NewKey"] == "EC == 16981"
 
 
-def test_add_edit_delete_uses_delete_logs_multiple_rel_ids(monkeypatch):
+def test_delete_uses_parent_processes_returned_category_cmid(monkeypatch):
     captured = {}
+    processed = {}
 
     payload = _base_input()
     payload["s1_1"] = "delete"
+    payload["s1_8"] = "parent"
 
     monkeypatch.setattr(admin, "getDriver", lambda database: object())
     monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [])
-    monkeypatch.setattr(admin, "processUSES", lambda **kwargs: None)
+    monkeypatch.setattr(admin, "processUSES", lambda **kwargs: processed.update(kwargs))
     monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "WHERE elementId(r) = $relID AND c.CMID = $CMID" in query:
+            return [{"CMID": params["CMID"]}]
         if "REMOVE r[$USES_property]" in query:
-            assert "MATCH ()-[r:USES]->()" in query
-            assert "RETURN DISTINCT elementId(r) as relID" in query
-            return [{"relID": "rel-1"}, {"relID": "rel-1"}, {"relID": "rel-2"}]
+            assert "MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)" in query
+            assert "RETURN DISTINCT elementId(r) as relID, c.CMID AS CMID" in query
+            return [
+                {"relID": "rel-1", "CMID": "SM254496"},
+                {"relID": "rel-1", "CMID": "SM254496"},
+                {"relID": "rel-2", "CMID": "SM254496"},
+            ]
         raise AssertionError(f"Unexpected query: {query}")
 
     monkeypatch.setattr(admin, "getQuery", fake_get_query)
@@ -361,9 +382,60 @@ def test_add_edit_delete_uses_delete_logs_multiple_rel_ids(monkeypatch):
     assert captured["type"] == "relation"
     assert captured["id"] == ["rel-1", "rel-2"]
     assert captured["log"] == [
-        "deleted USES property populationEstimate",
-        "deleted USES property populationEstimate",
+        "deleted USES property parent",
+        "deleted USES property parent",
     ]
+    assert processed["CMID"] == ["SM254496"]
+
+
+def test_add_edit_delete_uses_rejects_category_mismatch_before_write(monkeypatch):
+    payload = _base_input()
+    payload["s1_4"][0][0]["CMID"] = "SM-OTHER"
+    writes = []
+    queries = []
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    def fake_get_query(query, driver=None, params=None, **kwargs):
+        queries.append((query, params))
+        assert "WHERE elementId(r) = $relID AND c.CMID = $CMID" in query
+        if params["CMID"] == "SM-OTHER":
+            return [{"CMID": "SM-OTHER"}]
+        return []
+
+    monkeypatch.setattr(admin, "getQuery", fake_get_query)
+    monkeypatch.setattr(admin, "updateProperty", lambda *args, **kwargs: writes.append(kwargs))
+
+    with pytest.raises(ValueError, match="does not belong to the selected category"):
+        admin.add_edit_delete_USES("sociomap", "tester", payload)
+
+    assert writes == []
+    assert queries[0][1] == {"relID": "rel-123", "CMID": "SM254496"}
+
+
+@pytest.mark.parametrize("action", ["add", "edit"])
+def test_add_edit_delete_uses_processes_category_returned_by_update(monkeypatch, action):
+    payload = _base_input()
+    payload["s1_1"] = action
+    payload["s1_8"] = "parent"
+    payload["s1_3"] = "SM-PARENT"
+    processed = {}
+
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [])
+    monkeypatch.setattr(admin, "getGroupLabels", lambda cmid, driver: "ETHNICITY")
+    monkeypatch.setattr(admin, "getQuery", lambda query, driver=None, params=None, **kwargs: (
+        [{"CMID": params["CMID"]}] if "elementId(r) = $relID" in query else [{"groupLabel": None}]
+    ))
+    monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        admin,
+        "updateProperty",
+        lambda *args, **kwargs: {"result": [{"relID": "rel-123", "CMID": "SM-RETURNED"}]},
+    )
+    monkeypatch.setattr(admin, "processUSES", lambda **kwargs: processed.update(kwargs))
+
+    assert admin.add_edit_delete_USES("sociomap", "tester", payload) == "done"
+    assert processed["CMID"] == ["SM-RETURNED"]
 
 
 def test_add_edit_delete_uses_normalizes_variable_category_type(monkeypatch):
@@ -383,6 +455,8 @@ def test_add_edit_delete_uses_normalizes_variable_category_type(monkeypatch):
     monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "WHERE elementId(r) = $relID AND c.CMID = $CMID" in query:
+            return [{"CMID": params["CMID"]}]
         if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
             return [{"groupLabel": None}]
         raise AssertionError(f"Unexpected query: {query}")
@@ -391,7 +465,7 @@ def test_add_edit_delete_uses_normalizes_variable_category_type(monkeypatch):
 
     def fake_update_property(df, optionalProperties, isDataset, database, user, updateType, propertyType="USES", sep="||||"):
         captured["df"] = df.copy()
-        return {"result": [{"relID": "rel-123"}], "df": df.to_dict(orient="records")}
+        return {"result": [{"relID": "rel-123", "CMID": "SM254496"}], "df": df.to_dict(orient="records")}
 
     monkeypatch.setattr(admin, "updateProperty", fake_update_property)
 
@@ -414,6 +488,11 @@ def test_add_edit_delete_uses_rejects_invalid_variable_category_type(monkeypatch
         admin,
         "getNodeMergeSummary",
         lambda cmid, driver: {"primaryDomain": "VARIABLE"},
+    )
+    monkeypatch.setattr(
+        admin,
+        "getQuery",
+        lambda query, driver=None, params=None, **kwargs: [{"CMID": params["CMID"]}],
     )
 
     with pytest.raises(ValueError, match="Invalid categoryType"):
@@ -450,6 +529,8 @@ def test_add_edit_delete_uses_parent_validation_reports_invalid_current_cmid(mon
     monkeypatch.setattr(admin, "getPropertiesMetadata", lambda driver: [])
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "WHERE elementId(r) = $relID AND c.CMID = $CMID" in query:
+            return [{"CMID": params["CMID"]}]
         if "RETURN labels(n)" in query:
             return []
         raise AssertionError(f"Unexpected query: {query}")
@@ -479,6 +560,8 @@ def test_add_edit_delete_uses_parent_context_accepts_single_json_string_and_sync
     monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "WHERE elementId(r) = $relID AND c.CMID = $CMID" in query:
+            return [{"CMID": params["CMID"]}]
         if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
             return [{"groupLabel": None}]
         if "RETURN EXISTS" in query:
@@ -490,7 +573,7 @@ def test_add_edit_delete_uses_parent_context_accepts_single_json_string_and_sync
     def fake_update_property(df, optionalProperties, isDataset, database, user, updateType, propertyType="USES", sep="||||"):
         captured["df"] = df.copy()
         captured["optionalProperties"] = list(optionalProperties)
-        return {"result": [{"relID": "rel-123"}], "df": df.to_dict(orient="records")}
+        return {"result": [{"relID": "rel-123", "CMID": "SM254496"}], "df": df.to_dict(orient="records")}
 
     monkeypatch.setattr(admin, "updateProperty", fake_update_property)
 
@@ -518,12 +601,17 @@ def test_add_edit_delete_uses_parent_sends_multi_parent_list(monkeypatch):
         ],
     )
     monkeypatch.setattr(admin, "processUSES", lambda **kwargs: None)
+    monkeypatch.setattr(
+        admin,
+        "getQuery",
+        lambda query, driver=None, params=None, **kwargs: [{"CMID": params["CMID"]}],
+    )
     monkeypatch.setattr(admin, "getGroupLabels", lambda cmid, driver: "DATASET")
     monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
 
     def fake_update_property(df, optionalProperties, isDataset, database, user, updateType, propertyType="USES", sep="||||"):
         captured["df"] = df.copy()
-        return {"result": [{"relID": "rel-123"}], "df": df.to_dict(orient="records")}
+        return {"result": [{"relID": "rel-123", "CMID": "SM254496"}], "df": df.to_dict(orient="records")}
 
     monkeypatch.setattr(admin, "updateProperty", fake_update_property)
 
@@ -537,6 +625,7 @@ def test_add_edit_delete_uses_parent_sends_multi_parent_list(monkeypatch):
 def test_add_edit_delete_uses_rejects_same_domain_contextual_property(monkeypatch):
     payload = _base_input()
     payload["s1_2"] = "SM-LANG"
+    payload["s1_4"][0][0]["CMID"] = "SM-LANG"
     payload["s1_3"] = "SM-OTHER-LANG"
     payload["s1_8"] = "language"
 
@@ -550,6 +639,8 @@ def test_add_edit_delete_uses_rejects_same_domain_contextual_property(monkeypatc
     )
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "WHERE elementId(r) = $relID AND c.CMID = $CMID" in query:
+            return [{"CMID": params["CMID"]}]
         if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
             return [{"groupLabel": None, "relationship": "LANGUOID_OF"}]
         raise AssertionError(f"Unexpected query: {query}")
@@ -569,6 +660,7 @@ def test_add_edit_delete_uses_allows_district_same_domain_exception(monkeypatch)
     captured = {}
     payload = _base_input()
     payload["s1_2"] = "SM-AREA"
+    payload["s1_4"][0][0]["CMID"] = "SM-AREA"
     payload["s1_3"] = "SM-OTHER-AREA"
     payload["s1_8"] = "district"
 
@@ -592,6 +684,8 @@ def test_add_edit_delete_uses_allows_district_same_domain_exception(monkeypatch)
     monkeypatch.setattr(admin, "validatePropertyCMID", fake_validate_property_cmid)
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "WHERE elementId(r) = $relID AND c.CMID = $CMID" in query:
+            return [{"CMID": params["CMID"]}]
         if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
             return [{"groupLabel": None, "relationship": "AREA_OF"}]
         raise AssertionError(f"Unexpected query: {query}")
@@ -601,7 +695,7 @@ def test_add_edit_delete_uses_allows_district_same_domain_exception(monkeypatch)
     def fake_update_property(df, optionalProperties, isDataset, database, user, updateType, propertyType="USES", sep="||||"):
         captured["df"] = df.copy()
         captured["optionalProperties"] = list(optionalProperties)
-        return {"result": [{"relID": "rel-123"}], "df": df.to_dict(orient="records")}
+        return {"result": [{"relID": "rel-123", "CMID": "SM254496"}], "df": df.to_dict(orient="records")}
 
     monkeypatch.setattr(admin, "updateProperty", fake_update_property)
 
@@ -621,6 +715,7 @@ def test_add_edit_delete_uses_allows_district_same_domain_exception(monkeypatch)
 def test_add_edit_delete_uses_checks_actual_labels_for_language_of(monkeypatch):
     payload = _base_input()
     payload["s1_2"] = "SM-DIALECT"
+    payload["s1_4"][0][0]["CMID"] = "SM-DIALECT"
     payload["s1_3"] = "SM-FAMILY"
     payload["s1_8"] = "language"
 
@@ -630,6 +725,8 @@ def test_add_edit_delete_uses_checks_actual_labels_for_language_of(monkeypatch):
     monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
 
     def fake_get_query(query, driver=None, params=None, type=None, **kwargs):
+        if "WHERE elementId(r) = $relID AND c.CMID = $CMID" in query:
+            return [{"CMID": params["CMID"]}]
         if "MATCH (n:PROPERTY)" in query and "RETURN n.groupLabel as groupLabel" in query:
             # LANGUAGE_OF cannot reliably reveal the LANGUOID primary domain by
             # parsing its name, so the endpoint-label validator must decide.
@@ -672,8 +769,13 @@ def test_add_edit_delete_uses_reports_process_uses_failure(monkeypatch):
     monkeypatch.setattr(admin, "validatePropertyCMID", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         admin,
+        "getQuery",
+        lambda query, driver=None, params=None, **kwargs: [{"CMID": params["CMID"]}],
+    )
+    monkeypatch.setattr(
+        admin,
         "updateProperty",
-        lambda *args, **kwargs: {"result": [{"relID": "rel-123"}]},
+        lambda *args, **kwargs: {"result": [{"relID": "rel-123", "CMID": "SM254496"}]},
     )
     monkeypatch.setattr(
         admin,
