@@ -1,6 +1,7 @@
 ''' USES.py '''
 
 from .utils import *
+from .event_types import get_allowed_event_types, validate_parent_context_events, validate_stored_event_contexts
 from .metadata import getPropertiesMetadata
 from .log import createLog
 
@@ -137,6 +138,8 @@ def mergeUSES(database, CMID, Key, datasetID, properties = None):
     datasetID = unlist(datasetID)
     properties = unlist(properties)
     
+    validate_stored_event_contexts(driver, [CMID])
+
     if properties is None:
         properties = "{properties: {`.*`: 'combine'}}"
         
@@ -154,6 +157,9 @@ def mergeUSES(database, CMID, Key, datasetID, properties = None):
     """
     result = getQuery(query, driver=driver, params={"CMID": CMID, "Key": Key, "datasetID": datasetID}, type = 'list')
 
+    refreshed = processUSES(database=database, CMID=[CMID])
+    if isinstance(refreshed, tuple) and len(refreshed) == 2 and refreshed[1] == 500:
+        raise RuntimeError(f"processUSES failed after merging USES: {refreshed[0]}")
     return "Merged " + str(count[0]) + " relationship(s) into " + str(result[0]) + " relationship(s) for CMID " + f"'{CMID}' with Key '{Key}' and datasetID (CMID) '{datasetID}' using properties combined as {properties}" + "."
         
 # merges duplicate contextual ties - not USES ties
@@ -337,111 +343,58 @@ def updateLabels(database, CMID=None):
 
 
 def updateContains(database, CMID=None):
+    """Rebuild event pairs from USES for each individual CONTAINS edge."""
     try:
         driver = getDriver(database)
-        if CMID is not None:
-            qFiltera = "unwind $cmid as cmid"
-            qFilterb = "where a.CMID = cmid"
-        else:
-            qFiltera = ""
-            qFilterb = ""
+        cmids = CMID if isinstance(CMID, list) or CMID is None else [CMID]
+        allowed = get_allowed_event_types(driver)
+        rows = getQuery("""
+            MATCH (parent:CATEGORY)-[r:CONTAINS]->(child:CATEGORY)
+            WHERE $cmids IS NULL OR child.CMID IN $cmids
+            WITH child, collect({relID: elementId(r), parent: parent.CMID,
+                eventType: r.eventType, eventDate: r.eventDate}) AS ties
+            OPTIONAL MATCH (:DATASET)-[u:USES]->(child)
+            RETURN child.CMID AS CMID, ties,
+                collect(u.parentContext) AS contexts
+        """, driver, params={"cmids": cmids})
+        updates = []
+        # Prepare and validate every row before writing any derived event data.
+        for row in rows:
+            pairs_by_parent = {}
+            for context in row["contexts"]:
+                for entry in validate_parent_context_events(context, allowed, normalize_legacy=True):
+                    event_type = entry.get("eventType")
+                    if not event_type:
+                        continue
+                    parent = entry.get("parent")
+                    if not isinstance(parent, str) or not parent:
+                        raise ValueError(f"Invalid parentContext parent for {row['CMID']}")
+                    date = entry.get("eventDate")
+                    pair = (event_type, str(date) if date not in (None, "") else "NULL")
+                    pairs = pairs_by_parent.setdefault(parent, [])
+                    if pair not in pairs:
+                        pairs.append(pair)
+            for tie in row["ties"]:
+                pairs = pairs_by_parent.get(tie["parent"], [])
+                event_types = [pair[0] for pair in pairs] or None
+                event_dates = [pair[1] for pair in pairs] or None
+                if event_types != tie["eventType"] or event_dates != tie["eventDate"]:
+                    updates.append({"relID": tie["relID"],
+                                    "eventType": event_types, "eventDate": event_dates})
+        result = [{"updatedRelationships": 0}]
+        if updates:
+            result = getQuery("""
+                UNWIND $updates AS update
+                MATCH ()-[r:CONTAINS]->()
+                WHERE elementId(r) = update.relID
+                SET r.eventType = update.eventType, r.eventDate = update.eventDate
+                RETURN count(r) AS updatedRelationships
+            """, driver, params={"updates": updates})
+        return {"query1": result, "query2": [{"count": sum(
+            update["eventType"] is None for update in updates)}]}
+    except Exception as exc:
+        return str(exc), 500
 
-        query1 = qFiltera + """
-        match (:DATASET)-[rU:USES]->(a:CATEGORY)
-        """ + qFilterb + """
-        unwind rU.parentContext as propsL
-        // Filter out non-string types if necessary
-        with a, propsL where valueType(propsL) STARTS WITH "STRING"
-
-        // Parse JSON strings into lists or maps
-        with a, 
-        case 
-            when propsL contains '[' then apoc.convert.fromJsonList(propsL) 
-            when propsL contains '{' then apoc.convert.fromJsonMap(propsL) 
-            else NULL 
-        end as prop
-        unwind prop as p
-
-        // Match categories using parent CMID and prepare for collecting events
-        match (a)<-[rC:CONTAINS]-(c:CATEGORY {CMID: p.parent})
-        WITH rC, p,
-                CASE
-                    WHEN p.eventType IS NULL THEN []
-                    WHEN valueType(p.eventType) STARTS WITH "STRING" THEN [p.eventType]
-                    ELSE p.eventType
-                END AS eventType,
-                CASE
-                    WHEN p.eventDate IS NULL THEN []
-                    WHEN valueType(p.eventDate) STARTS WITH "STRING" THEN [p.eventDate]
-                    ELSE p.eventDate
-                END AS eventDate
-
-        WITH rC, eventType, eventDate, range(0, size(eventType)-1) AS idxs
-        UNWIND idxs AS i
-        WITH rC, eventType[i] AS et,
-            CASE WHEN size(eventDate) <= i THEN NULL ELSE eventDate[i] END AS ed
-        WHERE et IS NOT NULL
-
-        WITH rC,collect([et,ed]) AS eventPairs
-        WITH rC,
-            reduce(acc = [], pair IN eventPairs |
-                CASE WHEN NOT pair IN acc THEN acc + [pair] ELSE acc END
-            ) AS uniquePairs
-        WITH rC,
-                [p in uniquePairs | p[0]] AS eventType,
-                [p in uniquePairs | p[1]] AS eventDate
-        WITH rC,eventType,[x IN eventDate | coalesce(x, "NULL")] AS eventDate
-        
-        SET rC.eventType = eventType,
-            rC.eventDate = eventDate
-        
-        RETURN count(rC) AS updatedRelationships
-        """
-
-        # apoc.coll.toSet(apoc.coll.flatten(collect(p.eventType))) as eventType, 
-        # apoc.coll.toSet(apoc.coll.flatten(collect(p.eventDate))) as eventDate
-
-        # // Update rC properties with events data using APOC
-        # call {
-        # with rC, eventDate
-        # Conditional updates handled below using native Cypher.
-        #     size(eventDate) > 0,
-        #     "set rC.eventDate = $eventDate",
-        #     "set rC.eventDate = NULL",
-        #     {rC: rC, eventDate: eventDate}
-        # ) yield value
-        # }
-        # with rC, eventType
-        # call {
-        # with rC, eventType
-        # Conditional updates handled below using native Cypher.
-        #     size(eventType) > 0,
-        #     "set rC.eventType = $eventType",
-        #     "set rC.eventType = NULL",
-        #     {rC: rC, eventType: eventType}
-        # ) yield value
-        # }
-        # return count(*)
-
-        # When a contains tie going to node "a" has a non-empty eventDate list or eventType list, but there are no USES ties to "a" with a parentContext, then remove eventDate and eventType lists.
-        query2 = qFiltera + """
-        match (d:DATASET)-[rU:USES]->(a:CATEGORY)<-[rC:CONTAINS]-(p:CATEGORY) 
-        """ + qFilterb + """
-        with a,p, apoc.coll.flatten(collect(coalesce(rU.parentContext, [])),true) as pProps, apoc.coll.flatten(collect(coalesce(rC.eventDate, [])),true) as eds, apoc.coll.flatten(collect(coalesce(rC.eventType, [])),true) as ets
-        with a,p, [i in pProps where i is not null and not i = ""] as pProps, [i in eds where i is not null and not i = ""] as eds, [i in ets where i is not null and not i = ""] as ets
-        where isEmpty(pProps) and (not isEmpty(eds) or not isEmpty(ets))
-        match (a)<-[r:CONTAINS]-(p) set r.eventDate = NULL, r.eventType = NULL
-        return count(*) as count
-        """
-
-        result1 = getQuery(query1, driver, params={'cmid': CMID})
-        result2 = getQuery(query2, driver, params={'cmid': CMID})
-
-        return {"query1": result1, "query2": result2}
-    except Exception as e:
-        # In case of an error, return an error response with an appropriate HTTP status code
-        result = str(e)
-        return result, 500
 
 # if no CMID is set, it updates names for all
 def updateAltNames(database, CMID=None, domain = "CATEGORY"):
@@ -552,6 +505,9 @@ def processUSES(database, CMID=None, user="0", detailed = True):
         cmid_list = CMID
         if CMID is not None and not isinstance(CMID, list):
             cmid_list = [CMID]
+
+        # Validate source events before any reconciliation step mutates data.
+        validate_stored_event_contexts(driver, cmid_list)
 
         def unwrap_step(result, step_name):
             if isinstance(result, tuple) and len(result) == 2 and result[1] == 500:

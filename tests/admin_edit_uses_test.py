@@ -2,6 +2,9 @@ import CM.admin as admin
 import pytest
 
 
+pytestmark = pytest.mark.usefixtures("metadata_event_vocabulary")
+
+
 def _base_input():
     return {
         "s1_1": "edit",

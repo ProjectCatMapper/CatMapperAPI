@@ -180,3 +180,22 @@ def verify_realdb_test_cleanup(request):
         type="list",
     )
     assert remaining == [0], f"realdb test leaked TEST_TMP nodes: {remaining}"
+
+
+@pytest.fixture
+def metadata_event_vocabulary(monkeypatch):
+    """Provide the metadata database response for tests that mock graph writes."""
+    import CM.event_types as event_types
+
+    def query(query, driver):
+        assert "RETURN p.allowedValues AS allowedValues" in query
+        return [{"allowedValues": ["SPLIT", "MERGED", "SPLITMERGE", "HIERARCHY", "FOLLOWS"]}]
+
+    monkeypatch.setattr(event_types, "getQuery", query)
+
+
+@pytest.fixture
+def mock_context_processing(monkeypatch):
+    """Formatter tests validate submitted rows; processing has its own tests."""
+    import CM.upload as upload
+    monkeypatch.setattr(upload, "processUSES", lambda **kwargs: "processed")

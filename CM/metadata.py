@@ -151,7 +151,7 @@ def getPropertiesMetadata(driver, include_internal=True):
     n.relationship as relationship, n.description as description, 
     n.display as display, n.group as group,
     n.metaType as metaType, n.search as search,
-    n.translation as translation,
+    n.translation as translation, n.allowedValues as allowedValues,
     n.nodeType as nodeType,
     coalesce(n.internal, false) as internal,
     coalesce(n.editable, true) as editable

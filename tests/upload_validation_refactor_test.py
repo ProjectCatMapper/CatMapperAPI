@@ -54,6 +54,9 @@ def test_key_format_validator_allows_reserved_tokens_inside_key_parts(key):
     assert is_valid_key_format(key) is True
 
 
+pytestmark = pytest.mark.usefixtures("metadata_event_vocabulary", "mock_context_processing")
+
+
 def test_invalid_key_row_numbers_are_one_based():
     rows = ["Type == Alpha", "Type == Alpha &&", "Type==Beta"]
 

@@ -14,6 +14,7 @@
 from .utils import *
 from .metadata import *
 from .log import createLog
+from .event_types import get_allowed_event_types, validate_event_type, validate_event_rows
 from .USES import processUSES
 from .USES import (
     addCMNameRel,
@@ -424,13 +425,7 @@ def validate_parent_context_list(driver,parent_context_list):
     parent_context_list: list of JSON strings
     """
 
-    VALID_EVENT_TYPES = {
-    "SPLIT",
-    "HIERARCHY",
-    "SPLITMERGE",
-    "MERGED",
-    "FOLLOWS",
-    }
+    allowed_event_types = get_allowed_event_types(driver)
 
     CURRENT_YEAR = datetime.now().year
 
@@ -495,8 +490,10 @@ def validate_parent_context_list(driver,parent_context_list):
 
         # 4️⃣ eventType validation. eventType is optional unless eventDate exists.
         if event_type not in (None, ""):
-            if not isinstance(event_type, str) or event_type not in VALID_EVENT_TYPES:
-                errors.append((idx, f"Invalid eventType: {event_type}"))
+            try:
+                validate_event_type(event_type, allowed_event_types)
+            except ValueError as exc:
+                errors.append((idx, str(exc)))
                 continue
 
         # 5️⃣ eventDate validation
@@ -1228,6 +1225,16 @@ def mergeNodes(keepcmid,deletecmid,user,database):
         results = results + ["relID to keep"]
         results = results + relID
 
+        validate_event_rows(getQuery("""
+            MATCH (:DATASET)-[r:USES]->(c:CATEGORY)
+            WHERE r.parentContext IS NOT NULL AND (
+                c.CMID IN $cmids OR ANY(value IN
+                    CASE WHEN valueType(r.parentContext) STARTS WITH 'LIST<'
+                         THEN r.parentContext ELSE [r.parentContext] END
+                    WHERE toString(value) CONTAINS $deletecmid))
+            RETURN r.parentContext AS parentContext
+        """, driver, params={"cmids": [keepcmid, deletecmid], "deletecmid": deletecmid}), driver)
+
         # replace the CMID in the USES relationships
         contextProps = getQuery(
             "match (m:PROPERTY) where m.relationship is not null return m.CMName as property", driver, type = "list")
@@ -1379,7 +1386,7 @@ def mergeNodes(keepcmid,deletecmid,user,database):
         createLog(id=id, type="node",
                   log=f"merged {deletecmid} into {keepcmid}", user=user, driver=driver)
 
-        processUSES(database = database, CMID=keepcmid, user="0")
+        _require_process_uses_success(processUSES(database=database, CMID=keepcmid, user="0"))
 
         results = results + \
             [f"Completed combining {deletecmid} into {keepcmid}"]
@@ -1518,6 +1525,13 @@ def moveUSESties(database,user,input,dataset,tabledata):
     # only need to revise operation if user wants to keep some parent-child ties with the FROM node.
     USES_to_change = [row for row in tabledata if row['optionA'] != 'From']
     
+    validate_event_rows(getQuery("""
+        MATCH (:DATASET)-[r:USES]->(c:CATEGORY)
+        WHERE elementId(r) = $relID OR c.CMID IN $cmids
+        RETURN r.parentContext AS parentContext
+    """, driver, params={"relID": rel_id, "cmids": [CMID_from, CMID_to] + [
+        row['CMID'] for row in USES_to_change]}), driver)
+
     if len(USES_to_change) > 0:
 
         try:
@@ -1587,7 +1601,7 @@ def moveUSESties(database,user,input,dataset,tabledata):
 
             print("completed moving props")
 
-            processUSES(CMID=[row['CMID']for row in USES_to_change], database=database)
+            _require_process_uses_success(processUSES(CMID=[row['CMID'] for row in USES_to_change], database=database))
         except Exception as e:
             return "Error occurred while moving USES ties."
     
@@ -1643,7 +1657,7 @@ def moveUSESties(database,user,input,dataset,tabledata):
             
     # Final updates and notifications
     print("move completed: updating USES ties")
-    processUSES(CMID=[CMID_from, CMID_to], database=database)
+    _require_process_uses_success(processUSES(CMID=[CMID_from, CMID_to], database=database))
 
     print("Completed USES ties update")
 
@@ -2017,7 +2031,7 @@ def deleteUSES(database,user,input):
             "User is not authorized to delete this USES tie or it no longer exists."
         )
 
-    processUSES(database,CMID)
+    _require_process_uses_success(processUSES(database, CMID))
 
     return "done"
 

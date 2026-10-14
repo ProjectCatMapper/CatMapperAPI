@@ -75,6 +75,8 @@ def test_merge_nodes_uses_variable_label_for_variable_domain(monkeypatch):
     monkeypatch.setattr(admin_module, "replaceProperty", lambda **kwargs: None)
     monkeypatch.setattr(admin_module, "createLog", lambda **kwargs: None)
 
+    monkeypatch.setattr(admin_module, "processUSES", lambda **kwargs: "processed")
+
     queries = []
 
     def fake_get_query(query, driver, params=None, type=None, **kwargs):

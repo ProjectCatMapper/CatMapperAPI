@@ -1,6 +1,7 @@
 """upload.py"""
 
 from .utils import *
+from .event_types import validate_event_rows
 from .USES import *
 from .keys import *
 from .GIS import *
@@ -42,6 +43,18 @@ def _sync_updated_uses_labels(database, cmids, changed_properties):
     if isinstance(result, tuple) and len(result) == 2 and result[1] == 500:
         raise RuntimeError(f"updateLabels failed: {result[0]}")
     return result
+
+
+def _sync_updated_uses_context(database, rows, changed_properties, user):
+    """Refresh the categories actually returned by a parent/context write."""
+    if not {"parent", "parentContext", "eventType", "eventDate"}.intersection(changed_properties):
+        return
+    cmids = list(dict.fromkeys(row["CMID"] for row in rows if row.get("CMID")))
+    if not cmids:
+        return
+    result = processUSES(database=database, CMID=cmids, user=user)
+    if isinstance(result, tuple) and len(result) == 2 and result[1] == 500:
+        raise RuntimeError(f"processUSES failed after contextual write: {result[0]}")
 
 
 def _add_cmnames_to_default_uses(database, upload_result):
@@ -354,6 +367,7 @@ def createUSES(links, database, user, ownershipMetadata=None):
 
         # Database connection assumed via driver
         driver = getDriver(database)
+        validate_event_rows(links.to_dict(orient="records"), driver)
 
         # Checks that all columns in links represent valid CatMapper relationship properties.        
         # We get all columns that need to be set as properties for realtionships
@@ -475,7 +489,7 @@ def createUSES(links, database, user, ownershipMetadata=None):
 
         # Update alternate names
         CMIDs = [item["CMID"] for item in result]
-        updateAltNames(driver, CMIDs)
+        updateAltNames(database=database, CMID=CMIDs)
         
         updateLog(
             f"log/{user}uploadProgress.txt", "adding logs to USES ties", write="a"
@@ -519,6 +533,7 @@ def createUSES(links, database, user, ownershipMetadata=None):
             write="a",
         )
 
+        _sync_updated_uses_context(database, result, vars, user)
         return {"result": result, "links": links_dict}
 
     except Exception as e:
@@ -554,6 +569,8 @@ def updateProperty(
             df = df.drop("importID")
 
         driver = getDriver(database)
+        if propertyType == "USES":
+            validate_event_rows(df.to_dict(orient="records"), driver)
         actor_claims = actorClaims or {}
         actor_user_id = str(actor_claims.get("userid") or "").strip()
         owner_scoped = (
@@ -900,6 +917,8 @@ def updateProperty(
         # this format is how it is recieved at the function call, dont remove or alter.
         # df_dict is for direct API call returns.
         # ask robert
+        if propertyType == "USES":
+            _sync_updated_uses_context(database, result, vars, user)
         return {"result": result, "df": df_dict}
     except Exception as e:
         return f"Error: {str(e)}"
@@ -2525,6 +2544,9 @@ def input_Nodes_Uses(
         else None
     )
 
+    # Reject invalid event columns and embedded JSON before any database write.
+    validate_event_rows(dataset.to_dict(orient="records"), driver)
+
     # adhoc ID used for joining and filtering output purposes.
     updateLog(f"log/{user}uploadProgress.txt", "Creating import ID", write="a")
     getQuery("MATCH (a) WHERE a.importID IS NOT NULL SET a.importID = NULL", driver)
@@ -3116,40 +3138,7 @@ def input_Nodes_Uses(
         _validate_parent_label_compatibility(dataset, cmid_metadata, driver, user)
         check_query_cancellation()
             
-    # checks if the eventType value is valid
-
-    if "eventType" in dataset.columns:
-        updateLog(
-            f"log/{user}uploadProgress.txt",
-            "validating eventType values",
-            write="a",
-        )
-
-        valid_event_types = {
-            "SPLIT",
-            "MERGED",
-            "SPLITMERGE",
-            "HIERARCHY",
-            "FOLLOWS",
-            "",
-        }
-
-        invalid_event_types = dataset.loc[
-            ~dataset["eventType"].isin(valid_event_types), ["eventType"]
-        ]
-
-        invalid_event_entries = []
-        for idx, row in invalid_event_types.iterrows():
-            invalid_event_entries.append(("eventType", idx, row["eventType"]))
-
-        if invalid_event_entries:
-            error_message = "Invalid 'eventType' values found:\n" + "\n".join(
-                [
-                    f"Row {idx}, Column '{col}': {val}"
-                    for col, idx, val in invalid_event_entries
-                ]
-            )
-            raise ValueError(error_message)
+    validate_event_rows(dataset.to_dict(orient="records"), driver)
 
     if "eventType" in dataset.columns and "eventDate" not in dataset.columns:
         dataset["eventDate"] = np.nan
@@ -3729,6 +3718,8 @@ def input_Nodes_Uses(
             write="a",
         )
         dataset = combine_names_and_altNames(dataset, "Name", "altNames")
+
+    validate_event_rows(dataset.to_dict(orient="records"), driver)
 
     #cleans parentContext json strings by removing parentContext if no parent or no eventData or eventType
     if "parentContext" in dataset.columns: 

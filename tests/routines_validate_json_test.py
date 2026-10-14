@@ -1,5 +1,9 @@
+import pytest
 import CM.routines as routines
 import pandas as pd
+
+
+pytestmark = pytest.mark.usefixtures("metadata_event_vocabulary")
 
 
 def test_is_valid_json_accepts_json_string_and_mapping():
@@ -112,8 +116,7 @@ def test_getBadComplexProperties_restores_contains_eventType_check(monkeypatch):
     assert "MATCH (source)-[r:CONTAINS]->(target)" in event_type_query
     assert "valueType(r.eventType) STARTS WITH 'LIST'" in event_type_query
     assert "WITH source, target, r, eventType" in event_type_query
-    assert '"SPLIT"' in event_type_query
-    assert '"FOLLOWS"' in event_type_query
+    assert "$allowedEventTypes" in event_type_query
 
 
 def test_get_duplicate_triplets_suppresses_email_when_send_email_false(monkeypatch):
