@@ -248,3 +248,49 @@ def test_getInappropriateprops_Nodes_Rels_includes_uses_key(monkeypatch):
     invalid_uses = result["USES with invalid props"]
     assert invalid_uses[0]["Key"] == "Name == example"
     assert any("r.Key AS Key" in query for query in queries)
+
+
+def test_parent_context_missing_parent_is_reported_in_nightly_summary(monkeypatch):
+    import json
+
+    monkeypatch.setattr(routines, "validateJSON", lambda **kwargs: [])
+    monkeypatch.setattr(routines, "getDriver", lambda _database: object())
+    contexts = [
+        {"parent": "SM3913", "eventType": "SPLIT", "eventDate": "2008"},
+        {"parent": "SM4639", "eventType": "HIERARCHY"},
+    ]
+    source_rows = [
+        {"datasetID": "SD11", "CMID": "SM599", "Key": "Name == Barh el Ghazel",
+         "parentValues": ["SM3913"], "parentContext": [json.dumps(c) for c in contexts]},
+        # Existing scalar JSON and mapping representations must also be checked.
+        {"datasetID": "SD12", "CMID": "SM600", "Key": "scalar",
+         "parentValues": None, "parentContext": json.dumps(contexts[1])},
+        {"datasetID": "SD13", "CMID": "SM601", "Key": "map",
+         "parentValues": [], "parentContext": contexts[1]},
+        {"datasetID": "SD14", "CMID": "SM602", "Key": "maps",
+         "parentValues": "SM3913, SM4639", "parentContext": contexts},
+        # Bad JSON must not suppress findings from other valid entries.
+        {"datasetID": "SD15", "CMID": "SM603", "Key": "mixed",
+         "parentValues": ["SM3913"],
+         "parentContext": ["{bad json}", json.dumps(contexts[1]), "{}", "[]", ""]},
+    ]
+
+    def fake_get_query(query, driver, type=None, **kwargs):
+        if type == "dict" and "r.parentContext AS parentContext" in query:
+            assert "r.parent AS parentValues" in query
+            return source_rows
+        return pd.DataFrame() if type == "df" else []
+
+    monkeypatch.setattr(routines, "getQuery", fake_get_query)
+    result = routines.getBadComplexProperties("SocioMap", return_type="data")
+    assert result["parentContext_parent_not_in_parent_count"] == 4
+    findings = result["parentContext_parent_not_in_parent"]
+    assert [r["CMID"] for r in findings] == ["SM599", "SM600", "SM601", "SM603"]
+    assert findings[0]["contextParent"] == "SM4639"
+    assert findings[0]["parentValues"] == ["SM3913"]
+
+    summary = routines.getBadComplexProperties("SocioMap", return_type="info")
+    assert "CMID in parentContext but not in parent: 4" in summary["info"]
+    attachment = next(p for p in summary["filepath"] if p and "CMID_in_parentContext_not_in_parent" in p)
+    sheet = pd.read_excel(attachment)
+    assert sheet["CMID"].tolist() == ["SM599", "SM600", "SM601", "SM603"]
