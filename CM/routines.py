@@ -765,38 +765,6 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
             database=database, property='parentContext', path=fp2)
         
         driver = getDriver(database)
-        query = """
-        MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
-        WHERE r.parentContext IS NOT NULL
-        WITH d, c, r,
-
-            CASE
-                WHEN valueType(r.parent) STARTS WITH 'LIST<STRING'
-                    THEN r.parent
-                WHEN valueType(r.parent) STARTS WITH 'STRING'
-                    THEN apoc.text.split(r.parent, ",")
-                ELSE []
-            END AS parentList,
-
-            CASE
-                WHEN valueType(r.parentContext) STARTS WITH 'LIST<MAP'
-                    THEN r.parentContext
-                ELSE []
-            END AS ctxList
-
-        UNWIND ctxList AS ctxEntry
-        WITH d, c, r, parentList, ctxEntry
-        WHERE NOT ctxEntry.parent IN parentList
-        RETURN
-            d.CMID AS datasetID,
-            c.CMID AS CMID,
-            r.Key AS Key,
-            parentList AS parentValues,
-            ctxEntry.parent AS contextParent,
-            ctxEntry AS contextEntry
-        ORDER BY datasetID, CMID;
-        """
-        results3 = getQuery(query, driver, type="df")
 
         results4 = pd.DataFrame()
         results5 = pd.DataFrame()
@@ -833,27 +801,28 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
         results8 = getQuery(query, driver, type="df")
         results9 = pd.DataFrame()
 
-        parent_context_fallback_cache = None
+        parent_context_cache = None
         fallback_notes = []
 
-        def _load_parent_context_rows_for_fallback():
+        def _load_parent_context_rows():
             """
-            Load parentContext entries once for python-side fallback checks.
+            Load and parse parentContext entries once for Python-side checks.
             """
-            nonlocal parent_context_fallback_cache
-            if parent_context_fallback_cache is not None:
-                return parent_context_fallback_cache
+            nonlocal parent_context_cache
+            if parent_context_cache is not None:
+                return parent_context_cache
 
-            fallback_source_query = """
+            parent_context_source_query = """
                 MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
                 WHERE r.parentContext IS NOT NULL
                 RETURN
                     d.CMID AS datasetID,
                     c.CMID AS CMID,
                     r.Key AS Key,
-                    r.parentContext AS parentContext
+                    r.parentContext AS parentContext,
+                    r.parent AS parentValues
             """
-            raw_rows = getQuery(fallback_source_query, driver, type="dict")
+            raw_rows = getQuery(parent_context_source_query, driver, type="dict")
             parsed_rows = []
 
             for row in raw_rows:
@@ -892,16 +861,47 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                         "Key": row.get("Key"),
                         "parentContextEntry": entry_text,
                         "parentContextMap": parsed_obj,
+                        "parentValues": row.get("parentValues"),
                     })
 
-            parent_context_fallback_cache = parsed_rows
-            return parent_context_fallback_cache
+            parent_context_cache = parsed_rows
+            return parent_context_cache
+
+        # Neo4j stores parentContext as JSON strings, not relationship maps.
+        # Reuse the tolerant parser so malformed JSON is reported by validateJSON
+        # without preventing valid entries from being checked for missing parents.
+        parent_mismatches = []
+        for row in _load_parent_context_rows():
+            parents = row["parentValues"]
+            if isinstance(parents, str):
+                parents = parents.split(",")
+            elif not isinstance(parents, list):
+                parents = []
+            parents = [str(parent).strip() for parent in parents if parent is not None]
+            context_parent = row["parentContextMap"].get("parent")
+            if context_parent is None or not str(context_parent).strip():
+                continue
+            context_parent = str(context_parent).strip()
+            if context_parent not in parents:
+                parent_mismatches.append({
+                    "datasetID": row["datasetID"],
+                    "CMID": row["CMID"],
+                    "Key": row["Key"],
+                    "parentValues": parents,
+                    "contextParent": context_parent,
+                    "contextEntry": row["parentContextMap"],
+                })
+        results3 = pd.DataFrame(parent_mismatches, columns=[
+            "datasetID", "CMID", "Key", "parentValues", "contextParent", "contextEntry",
+        ])
+        if not results3.empty:
+            results3 = results3.sort_values(["datasetID", "CMID"], kind="stable")
 
         def _fallback_parent_cmid_check():
             """
             Fallback for results11 using indexed CMID lookups on known labels.
             """
-            rows = _load_parent_context_rows_for_fallback()
+            rows = _load_parent_context_rows()
             parents = set()
 
             for row in rows:
