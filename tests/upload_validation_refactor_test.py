@@ -104,6 +104,17 @@ def test_add_upload_rejects_newkey(upload_option):
         )
 
 
+@pytest.mark.parametrize("column_name", ["Dataset", " dataset ", "DATASET"])
+def test_add_uses_rejects_reserved_dataset_property(column_name):
+    with pytest.raises(ValueError, match="reserved USES metadata"):
+        upload.input_Nodes_Uses(
+            dataset=[{column_name: "AD123", "datasetID": "AD456"}],
+            database="sociomap",
+            uploadOption="add_uses",
+            user="tester",
+        )
+
+
 def test_key_format_warning_messages_include_rows_and_columns():
     messages = key_format_warning_messages(["Type == 1==2"], "Key")
 
