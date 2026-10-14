@@ -1085,6 +1085,21 @@ def add_edit_delete_Node(database,user,input):
 #section for merging nodes
 # when a node is merged, this finds all instances of that CMID in other
 # USES tie properties and edits them to reflect the change
+def _replace_parent_context_cmid(value, old, new):
+    """Replace exact parent IDs without changing event metadata or other text."""
+    entries = value if isinstance(value, list) else [value]
+    updated = []
+    for entry in entries:
+        context = json.loads(entry) if isinstance(entry, str) else entry
+        if not isinstance(context, dict):
+            raise ValueError("parentContext entry must be a JSON object")
+        if context.get("parent") == old:
+            context = dict(context, parent=new)
+            entry = json.dumps(context) if isinstance(entry, str) else context
+        updated.append(entry)
+    return updated if isinstance(value, list) else updated[0]
+
+
 def replaceProperty(cmid, property, old, new, database, datasetID = None, Key = None):
     """
     Replace a specified property value in relationships for a given CMID.
@@ -1106,6 +1121,32 @@ def replaceProperty(cmid, property, old, new, database, datasetID = None, Key = 
     """
     try:
         driver = getDriver(database)
+        if property == "parentContext":
+            # Select stored values and decode JSON rather than comparing the
+            # entire serialized object with a bare CMID.
+            rows = getQuery("""
+                MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+                WHERE c.CMID IN $cmids AND r.parentContext IS NOT NULL
+                  AND ($datasetID IS NULL OR d.CMID = $datasetID)
+                  AND ($key IS NULL OR r.Key = $key)
+                RETURN elementId(r) AS relID, r.parentContext AS value
+            """, driver, type="dict", params={
+                "cmids": cmid if isinstance(cmid, list) else [cmid],
+                "datasetID": datasetID, "key": Key,
+            })
+            updates = []
+            for row in rows:
+                value = _replace_parent_context_cmid(row["value"], old, new)
+                if value != row["value"]:
+                    updates.append({"relID": row["relID"], "value": value})
+            if updates:
+                getQuery("""
+                    UNWIND $updates AS update
+                    MATCH ()-[r:USES]->()
+                    WHERE elementId(r) = update.relID
+                    SET r.parentContext = update.value
+                """, driver, params={"updates": updates})
+            return f"Completed {cmid} property {property}"
         if datasetID is None and Key is None:
             query = f"""
             unwind $cmid as cmid
@@ -1192,17 +1233,24 @@ def mergeNodes(keepcmid,deletecmid,user,database):
             "match (m:PROPERTY) where m.relationship is not null return m.CMName as property", driver, type = "list")
         contextProps.append("parentContext") 
 
-        cmids = getQuery(
-            "match (:CATEGORY {CMID: $deletecmid})-[rel]->(c:CATEGORY) return c.CMID as cmid", driver, params={
-                "deletecmid": deletecmid
-            },
-            type="list"
-        )
+        # Find references in source USES properties directly. Derived graph
+        # edges may be absent or stale, especially for parentContext-only refs.
+        cmids = getQuery("""
+            MATCH (c:CATEGORY)<-[r:USES]-(:DATASET)
+            WHERE ANY(prop IN $contextProps WHERE
+                ANY(value IN CASE WHEN valueType(r[prop]) STARTS WITH 'LIST<'
+                    THEN r[prop] ELSE [r[prop]] END
+                    WHERE toString(value) CONTAINS $deletecmid))
+            RETURN DISTINCT c.CMID AS cmid
+        """, driver, params={"deletecmid": deletecmid, "contextProps": contextProps},
+            type="list")
 
         for property in contextProps:
             results = results + [f"updating {property} with new CMID"]
-            replaceProperty(cmid=cmids, property=property,
-                            old=deletecmid, new=keepcmid, database=database)
+            replacement = replaceProperty(cmid=cmids, property=property,
+                                         old=deletecmid, new=keepcmid, database=database)
+            if isinstance(replacement, tuple) and replacement[1] == 500:
+                raise RuntimeError(f"Failed to update {property}: {replacement[0]}")
 
         # determine the merge label from the resolved primary domain
         if len(keepcmid) > 1 and keepcmid[1] == "D":
