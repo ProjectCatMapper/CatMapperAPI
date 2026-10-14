@@ -1249,6 +1249,33 @@ def admin_category_merging_properties():
 
 
 
+@admin_bp.route("/admin_delete_merging_ties", methods=['GET'])
+def admin_merging_ties():
+    CMID = request.args.get('CMID')
+    database = request.args.get('database')
+    credentials = _parse_credentials(request.args.get("cred"))
+    try:
+        verify_request_auth(credentials=credentials, required_role="admin", req=request)
+    except Exception as e:
+        error_message = str(e)
+        status_code = classify_auth_error_status(error_message) or 400
+        return jsonify({"error": error_message, "r": []}), status_code
+    driver = getDriver(database)
+    q = """MATCH (from)-[r:MERGING]->(to)
+    WHERE (from:STACK AND to:DATASET AND to.CMID = $cmid)
+       OR (from:MERGING AND to:STACK AND to.CMID = $cmid)
+    RETURN {CMName: from.CMName, CMID: from.CMID, elementId: elementId(from)} AS n,
+           r, {CMName: to.CMName, CMID: to.CMID, elementId: elementId(to)} AS d
+    ORDER BY n.CMName, d.CMName"""
+    with driver.session() as session:
+        records_list = []
+        for record in session.run(q, cmid=CMID):
+            relation = dict(record["r"].items())
+            relation["id"] = record["r"].element_id
+            records_list.append((dict(record["n"].items()), relation, dict(record["d"].items())))
+    return {"r": records_list, "error": ""}
+
+
 @admin_bp.route('/create_label_helper', methods=['GET'])
 def create_label():
     database = request.args.get('database')
@@ -1359,6 +1386,8 @@ def _execute_admin_edit(database, fun, acting_user, input_payload, data):
         result = deleteUSES(database, acting_user, input_payload)
     elif fun == "delete CATEGORY MERGING relation":
         result = deleteCATEGORYMERGING(database, acting_user, input_payload)
+    elif fun == "delete MERGING relation":
+        result = deleteMERGING(database, acting_user, input_payload)
     elif fun == "move USES tie":
         result = moveUSESties(
             database,
