@@ -143,3 +143,94 @@ def test_merge_nodes_allows_variable_domain_when_isvalidcmid_would_reject(monkey
 
     assert isinstance(result, list)
     assert any("Completed combining AM2 into AM1" in str(item) for item in result)
+
+
+def test_replace_parent_context_updates_only_exact_parent_ids():
+    import json
+
+    original = [
+        '{"parent": "AM2", "eventType": "SPLIT", "eventDate": "2008", "note": "AM2"}',
+        '{"parent":"AM20","eventType":"HIERARCHY"}',
+    ]
+    result = admin_module._replace_parent_context_cmid(original, "AM2", "AM1")
+    assert json.loads(result[0]) == {
+        "parent": "AM1", "eventType": "SPLIT", "eventDate": "2008", "note": "AM2",
+    }
+    assert result[1] == original[1]
+    assert json.loads(original[0])["parent"] == "AM2"
+    assert admin_module._replace_parent_context_cmid(original[0], "AM2", "AM1") == result[0]
+    assert admin_module._replace_parent_context_cmid(
+        {"parent": "AM2", "eventType": "FOLLOWS"}, "AM2", "AM1",
+    ) == {"parent": "AM1", "eventType": "FOLLOWS"}
+
+
+def test_merge_rewrites_context_only_references_before_dropping_node(monkeypatch):
+    import json
+
+    monkeypatch.setattr(admin_module, "getDriver", lambda _: object())
+    monkeypatch.setattr(admin_module, "getNodeMergeSummary", lambda cmid, _: {
+        "CMID": cmid, "CMName": cmid, "primaryDomain": "AREA",
+    })
+    monkeypatch.setattr(admin_module, "addCMNameRel", lambda *args: None)
+    monkeypatch.setattr(admin_module, "createLog", lambda **kwargs: None)
+    monkeypatch.setattr(admin_module, "processUSES", lambda **kwargs: None)
+    context = ['{"parent":"AM2","eventType":"HIERARCHY"}']
+    rewritten = []
+
+    def fake_get_query(query, driver, params=None, type=None, **kwargs):
+        if "return m.CMName as property" in query:
+            return ["parent"]
+        if "RETURN DISTINCT c.CMID AS cmid" in query:
+            assert "MATCH (c:CATEGORY)<-[r:USES]-(:DATASET)" in query
+            assert params["deletecmid"] == "AM2"
+            assert "parentContext" in params["contextProps"]
+            # No derived CONTAINS tie connects AM2 to this child.
+            return ["AM99"]
+        if "r.parentContext AS value" in query:
+            assert params["cmids"] == ["AM99"]
+            return [{"relID": "context-only-ref", "value": context}]
+        if "UNWIND $updates AS update" in query:
+            rewritten.extend(params["updates"])
+        if "CALL apoc.refactor.mergeNodes" in query:
+            assert json.loads(rewritten[0]["value"][0])["parent"] == "AM1"
+            return ["AM1"]
+        return []
+
+    monkeypatch.setattr(admin_module, "getQuery", fake_get_query)
+    result = admin_module.mergeNodes("AM1", "AM2", "admin", "ArchaMap")
+    assert isinstance(result, list), result
+    assert rewritten[0]["relID"] == "context-only-ref"
+    assert json.loads(rewritten[0]["value"][0])["eventType"] == "HIERARCHY"
+
+
+def test_merge_stops_if_context_replacement_fails(monkeypatch):
+    monkeypatch.setattr(admin_module, "getDriver", lambda _: object())
+    monkeypatch.setattr(admin_module, "getNodeMergeSummary", lambda cmid, _: {
+        "CMID": cmid, "CMName": cmid, "primaryDomain": "AREA",
+    })
+    monkeypatch.setattr(admin_module, "addCMNameRel", lambda *args: None)
+    monkeypatch.setattr(admin_module, "replaceProperty", lambda **kwargs: ("invalid JSON", 500))
+
+    def fake_get_query(query, driver, **kwargs):
+        assert "CALL apoc.refactor.mergeNodes" not in query
+        return []
+
+    monkeypatch.setattr(admin_module, "getQuery", fake_get_query)
+    result = admin_module.mergeNodes("AM1", "AM2", "admin", "ArchaMap")
+    assert result[1] == 500
+    assert "Failed to update parentContext: invalid JSON" in result[0]
+
+
+def test_parent_context_decode_failure_prevents_partial_replacement(monkeypatch):
+    monkeypatch.setattr(admin_module, "getDriver", lambda _: object())
+
+    def fake_get_query(query, driver, **kwargs):
+        assert "SET r.parentContext" not in query
+        return [
+            {"relID": "valid", "value": ['{"parent":"AM2"}']},
+            {"relID": "invalid", "value": ["{bad JSON}"]},
+        ]
+
+    monkeypatch.setattr(admin_module, "getQuery", fake_get_query)
+    result = admin_module.replaceProperty(["AM99"], "parentContext", "AM2", "AM1", "ArchaMap")
+    assert result[1] == 500

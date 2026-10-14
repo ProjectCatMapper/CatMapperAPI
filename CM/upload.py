@@ -27,6 +27,7 @@ _UPLOAD_LOG_LISTENER = threading.local()
 _UPLOAD_LOG_TIMING = threading.local()
 _JSON_UPLOAD_PROPERTIES = {"parentContext", "geoCoords", "geo"}
 _INTERNAL_OWNER_PROPERTY_NAMES = {"ownerUserId", "modifiedByOtherUser"}
+_RESERVED_USES_UPLOAD_PROPERTIES = {"dataset"}
 
 
 def _sync_updated_uses_labels(database, cmids, changed_properties):
@@ -2512,6 +2513,16 @@ def input_Nodes_Uses(
     # Since APIs remove empty columns, and a user can submit a fully empty column of CMIDS for function 2,
     # we need to re-add CMID column if it doesn't exist in this case
     if uploadOption == "add_uses":
+        reserved_columns = [
+            column
+            for column in dataset.columns
+            if str(column).strip().casefold() in _RESERVED_USES_UPLOAD_PROPERTIES
+        ]
+        if reserved_columns:
+            raise ValueError(
+                "Dataset is reserved USES metadata and cannot be uploaded as a property. "
+                "Use datasetID to identify the dataset for each USES tie."
+            )
         if "CMID" not in dataset.columns:
             dataset["CMID"] = ""
 
@@ -2642,14 +2653,9 @@ def input_Nodes_Uses(
         if duplicate_CMIDs:
             raise ValueError(f"Duplicate CMIDs found in CMID column: \n{duplicate_CMIDs}")
     
-    # When uploading category nodes, need to make sure that CMName is added to names in case, it is not included in Name column.
-    if uploadOption == "add_node" and not isDataset:
-        dataset['Name'] = dataset.apply(
-                        lambda row: row['Name'] if pd.isna(row['CMName']) or str(row['CMName']) in str(row['Name'])
-                        else f"{row['Name']},{row['CMName']}",
-                        axis=1
-                    )
-       
+    # Preserve the source Name values. The default-dataset routine adds CMName
+    # as a native list element after upload, without parsing its punctuation.
+
     # When simple upload is used, convert raw selected key column values into
     # CatMapper key format before key validation (e.g., "Key == value").
     if formatKey is True:
