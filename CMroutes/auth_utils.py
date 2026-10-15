@@ -7,6 +7,11 @@ from CM import getDriver, getQuery, verifyUser, verifyPassword
 
 AUTH_TOKEN_TTL_SECONDS = int(os.getenv("CATMAPPER_AUTH_TOKEN_TTL_SECONDS", "2592000"))
 AUTH_TOKEN_SALT = "catmapper-auth-v1"
+API_KEY_AUTH_ERROR = (
+    "API key authentication failed. Check that you are using the latest key "
+    "and that its account has the required access. Generating a new key "
+    "invalidates the previous key."
+)
 
 
 def _auth_secret():
@@ -209,7 +214,7 @@ def verify_request_auth(required_userid=None, credentials=None, required_role=No
             if required_userid is not None and str(api_key_claims.get("userid")) != str(required_userid):
                 raise Exception("Credentials do not match requested user")
             return api_key_claims
-        raise Exception("User is not verified")
+        raise Exception(API_KEY_AUTH_ERROR)
 
     # Backward-compatible fallback: credential object in payload/query.
     if not credentials:
@@ -246,6 +251,8 @@ def verify_request_auth(required_userid=None, credentials=None, required_role=No
                 raise Exception("Credentials do not match requested user")
             return api_key_claims
 
+    if not credential_userid or str(credential_key).startswith("cmk_"):
+        raise Exception(API_KEY_AUTH_ERROR)
     raise Exception("User is not verified")
 
 
@@ -283,6 +290,7 @@ def classify_auth_error_status(error):
         "missing credential fields",
         "user is not verified",
         "api key matched multiple users",
+        "api key authentication failed",
         "invalid credentials",
         "invalid token",
         "authentication failed",

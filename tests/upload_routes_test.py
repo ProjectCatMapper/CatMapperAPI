@@ -4,6 +4,9 @@ import CMroutes.upload_routes as upload_routes
 from CMroutes.task_store import get_task_store
 
 
+REPLACED_KEY = "cmk_replaced_key"
+
+
 @pytest.fixture(autouse=True)
 def _clear_task_state():
     store = get_task_store()
@@ -757,3 +760,26 @@ def test_upload_waiting_uses_status_rejects_user_mismatch(client, monkeypatch):
     assert response.status_code == 403
     body = response.get_data(as_text=True).lower()
     assert "does not match authenticated api key/token owner" in body
+
+
+def test_upload_replaced_api_key_returns_actionable_401(client, monkeypatch):
+    import CMroutes.auth_utils as auth_utils
+
+    monkeypatch.setattr(auth_utils, "_verify_api_key_only", lambda **kwargs: None)
+    monkeypatch.setattr(
+        upload_routes, "_start_upload_task",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("upload must not execute")),
+    )
+
+    response = client.post(
+        "/uploadInputNodes", json=_base_payload(),
+        headers={"X-API-Key": REPLACED_KEY},
+    )
+
+    assert response.status_code == 401
+    body = response.get_json()
+    assert body["code"] == "NOT_AUTHORIZED"
+    assert body["detail"] == auth_utils.API_KEY_AUTH_ERROR
+    assert "latest key" in body["error"]
+    assert "not verified" not in body["error"].lower()
+    assert REPLACED_KEY not in response.get_data(as_text=True)
