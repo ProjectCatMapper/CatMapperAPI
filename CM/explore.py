@@ -1605,6 +1605,8 @@ def _point_payload(entry, coord, preserve_metadata=False):
     }
     cmid = entry.get("CMID") or entry.get("sourceNodeCMID")
     cmname = entry.get("CMName") or entry.get("sourceNodeName")
+    if "sourceNodeLabels" in entry:
+        payload["sourceNodeLabels"] = entry["sourceNodeLabels"]
     if cmid:
         payload["CMID"] = cmid
     if cmname:

@@ -518,3 +518,12 @@ def test_map_layer_options_route(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["layers"] == [{"id": "direct", "available": False}]
+
+
+def test_direct_geometry_retains_domain_labels_for_map_filter():
+    points, _ = explore._validate_points([{
+        "geometry": json.dumps({"type": "Point", "coordinates": [10, 20]}),
+        "source": "Dataset",
+        "sourceNodeLabels": ["CATEGORY", "AREA", "ADM0"],
+    }])
+    assert points[0]["sourceNodeLabels"] == ["CATEGORY", "AREA", "ADM0"]

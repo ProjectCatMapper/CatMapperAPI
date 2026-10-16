@@ -133,7 +133,8 @@ def getPoints(CMID, driver):
         coalesce(d.shortName, d.CMName, d.CMID) AS source,
         r.Key AS Key,
         c.CMID AS CMID,
-        coalesce(c.CMName, c.Name, c.CMID) AS CMName
+        coalesce(c.CMName, c.Name, c.CMID) AS CMName,
+        labels(c) AS sourceNodeLabels
     """
     result = getQuery(query, driver, params={"CMID": CMID})
     points = [dict(record) for record in result]
@@ -148,7 +149,8 @@ def getDatasetPoints(CMID, driver):
         coalesce(c.CMName, c.Name, c.CMID) AS source,
         r.Key AS Key,
         c.CMID AS CMID,
-        coalesce(c.CMName, c.Name, c.CMID) AS CMName
+        coalesce(c.CMName, c.Name, c.CMID) AS CMName,
+        labels(c) AS sourceNodeLabels
     """
     result = getQuery(query, driver, params={"CMID": CMID})
     points = [dict(record) for record in result]
