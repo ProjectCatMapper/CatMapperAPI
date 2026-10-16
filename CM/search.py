@@ -8,6 +8,16 @@ def _format_translate_cell(value):
     return str(value)
 
 
+def _resolve_deleted_matches(with_row=False):
+    prefix = "row, " if with_row else ""
+    return f"""
+    match replacementPath = (a)-[:IS*0..]->(replacement)
+    where not replacement:DELETED
+      and all(previous in nodes(replacementPath)[..-1] where previous:DELETED)
+    with distinct {prefix}replacement as a, matching, score
+    """
+
+
 def search(
         database,
         term,
@@ -143,14 +153,10 @@ def search(
             qStart = f"match (a:{domain}) with a, '' as matching, 0 as score"
 
     elif property == "Key":
-        domain2 = domain
-        if domain == "ALLNODES":
-            domain2 = "CATEGORY"
-
         qStart = f"""
                 call db.index.fulltext.queryRelationships('keys','"' + custom.escapeText($term) + '"') yield relationship
                 with endnode(relationship) as a, relationship.Key as matching, case when $term contains " == " then $term else " == " + $term end as term
-                where '{domain2}' in labels(a) and matching ends with term
+                where matching ends with term
                 with a, matching, 0 as score
                 """
         
@@ -174,13 +180,7 @@ def search(
     elif property == "CMID":
         qStart = """
     match (a) where a.CMID = $term
-    optional match (a)-[:IS]->(b)
-    with a as sourceNode,
-    case
-      when "DELETED" in labels(a) and b is not null then b
-      else a
-    end as a
-    with a, sourceNode.CMID as matching, 0 as score
+    with a, a.CMID as matching, 0 as score
     """
 
     else:
@@ -291,10 +291,10 @@ def search(
     country order by matchingDistance
     """
 
-    cypher_query = qStart + qDomain + qUnique + qCountryFilter + \
+    cypher_query = qStart + _resolve_deleted_matches() + qDomain + qUnique + qCountryFilter + \
         qContext + qDataset + qYear + qLimit + qCountry + qReturn
         
-    cypher_query_count = qStart + qDomain + qUnique + qCountryFilter + \
+    cypher_query_count = qStart + _resolve_deleted_matches() + qDomain + qUnique + qCountryFilter + \
         qContext + qDataset + qYear + """WITH collect(DISTINCT a.CMID) AS allCMIDs
         RETURN size(allCMIDs) AS totalCount, allCMIDs AS CMID"""
     
@@ -480,7 +480,7 @@ def translate(
             WHEN NOT term CONTAINS ' == ' AND matching ENDS WITH ' == ' + term THEN true
             ELSE false
         END AS isMatch
-    where '{domain}' in labels(a) and isMatch
+    where isMatch
     AND ( (matching CONTAINS " && " AND row.term CONTAINS " && ") OR NOT matching CONTAINS " && " )
     with row, a, matching,0 as score
     """
@@ -494,13 +494,7 @@ def translate(
     with row call db.index.fulltext.queryNodes('{indx}','"' + toupper(row.term) + '"') yield node
     with row, node as a, toupper(node['{property}']) as matching, toupper(row.term) as term
     where matching = term
-    optional match (a)-[:IS]->(b)
-    with row, a as sourceNode,
-    case
-      when "DELETED" in labels(a) and b is not null then b
-      else a
-    end as a
-    with row, a, sourceNode.CMID as matching, 0 as score
+    with row, a, matching, 0 as score
     """
 
     elif property == "Name":
@@ -525,8 +519,8 @@ def translate(
     else:
         qStart = f""" 
     with row
-    match (a:{domain})
-    where a.{property} is not null and tolower(toString(a.{property})) = tolower(toString(row.term))
+    match (a)
+    where (a:{domain} or a:DELETED) and a.{property} is not null and tolower(toString(a.{property})) = tolower(toString(row.term))
     with row, a, a.{property} as matching, 0 as score
     """
 
@@ -634,7 +628,7 @@ def translate(
     return distinct row.CMuniqueCategoryID as CMuniqueCategoryID, row.CMuniqueRowID as CMuniqueRowID, row.term as term,row.country as country,row.context as context, a.CMID as CMID, a.CMName as CMName, custom.getLabel(a) as label, 
     matching, score as matchingDistance,CMcountry, apoc.text.join(collect(Key),'; ') as Key order by matchingDistance
     """
-    cypher_query = qLoad + qStart + qDomain + qCountryFilter + \
+    cypher_query = qLoad + qStart + _resolve_deleted_matches(with_row=True) + qDomain + qCountryFilter + \
         qContext + qDataset + qYear + qLimit + qCountry + qKey + qReturn
 
     if query == "true":
