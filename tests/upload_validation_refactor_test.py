@@ -1348,3 +1348,42 @@ def test_input_nodes_uses_rejects_out_of_range_coordinates_with_spreadsheet_row(
             addRecordYear=False,
             geocode=False,
         )
+
+
+@pytest.mark.parametrize("value", ["12.75", 0.25, "1e3", ""])
+def test_input_nodes_uses_accepts_float_areakm2(monkeypatch, value):
+    _areakm2_upload_mocks(monkeypatch)
+    # Duplicate-key validation runs after numeric validation, before writes.
+    with pytest.raises(ValueError, match=r"Duplicate datasetID \+ Key values in upload"):
+        _upload_areakm2_rows(value)
+
+
+@pytest.mark.parametrize("value", ["twelve", "12 km2", "1;2"])
+def test_input_nodes_uses_rejects_non_numeric_areakm2(monkeypatch, value):
+    _areakm2_upload_mocks(monkeypatch)
+    with pytest.raises(ValueError, match=r"Invalid float values found:[\s\S]*areakm2"):
+        _upload_areakm2_rows(value)
+
+
+def _areakm2_upload_mocks(monkeypatch):
+    _coordinate_test_mocks(monkeypatch)
+    original = upload.getQuery
+
+    def get_query(query, *args, **kwargs):
+        if "MATCH (p:PROPERTY) WHERE p.type='relationship'" in query:
+            return ["areakm2"]
+        return original(query, *args, **kwargs)
+
+    monkeypatch.setattr(upload, "getQuery", get_query)
+
+
+def _upload_areakm2_rows(value):
+    return upload.input_Nodes_Uses(
+        dataset=[{
+            "CMID": cmid, "datasetID": "AD1", "Key": "Type == Alpha",
+            "label": "DIALECT", "Name": "Alpha", "areakm2": value,
+        } for cmid in ["AM1", "AM2"]],
+        database="ArchaMap", uploadOption="add_uses", formatKey=False,
+        optionalProperties=["areakm2"], user="tester", addDistrict=False,
+        addRecordYear=False, geocode=False,
+    )

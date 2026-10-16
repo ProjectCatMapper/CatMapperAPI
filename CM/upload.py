@@ -2832,7 +2832,7 @@ def input_Nodes_Uses(
     
     # checks if following column values are float values
     #Dan. Should simply have this info in the metadata nodes and do a query to get them?
-    columns_to_check = ["populationEstimate", "latitude", "longitude"]
+    columns_to_check = ["populationEstimate", "areakm2", "latitude", "longitude"]
 
     columns_to_check = [col for col in columns_to_check if col in linkProperties]
 
