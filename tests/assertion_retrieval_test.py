@@ -159,3 +159,15 @@ def test_empty_database_backfill_can_be_marked_complete():
     from CM.assertion_index import backfill_complete
     assert backfill_complete("sociomap", mark=True)
     assert lookup_assertion("sociomap", "f" * 64) is None
+
+
+def test_published_identity_registration_does_not_need_a_write_lock():
+    import sqlite3
+    from contextlib import closing
+    from CM.assertion_index import index_path
+    remember_assertions("sociomap", [row()])
+    with closing(sqlite3.connect(index_path())) as competing_writer:
+        competing_writer.execute("BEGIN IMMEDIATE")
+        remember_assertions("sociomap", [row()])
+        assert lookup_assertion("sociomap", identifier(row()))["key"] == "code"
+        competing_writer.rollback()
