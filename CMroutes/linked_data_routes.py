@@ -12,6 +12,8 @@ from urllib.parse import urlencode
 
 from flask import Blueprint, Response, request
 
+from CM.assertion_index import AssertionIndexUnavailable
+
 from CM.linked_data import (
     CONTEXT_IRI,
     MalformedPublicResource,
@@ -20,6 +22,7 @@ from CM.linked_data import (
     domain_scheme_iri,
     fetch_domain_scheme_projection,
     fetch_resource_projection,
+    fetch_assertion_projection,
     serialize_graph,
 )
 
@@ -210,3 +213,34 @@ def linked_data_domain_scheme(database, slug):
             status=500,
             content_type="application/json",
         )
+
+
+@linked_data_bp.route("/linked-data/<database>/assertion/uses/<assertion_id>", methods=["GET", "HEAD"])
+@linked_data_bp.route("/linked-data/<database>/geometry/uses/<assertion_id>/<geometry_id>", methods=["GET", "HEAD"])
+def linked_data_assertion(database, assertion_id, geometry_id=None):
+    # These generated resources have no HTML application page. Turtle is their default.
+    media_type = _requested_media_type() if request.args.get("format") or request.headers.get("Accept") else "text/turtle"
+    if request.headers.get("Accept", "").strip() == "*/*" and not request.args.get("format"):
+        media_type = "text/turtle"
+    try:
+        if media_type is None:
+            return Response(json.dumps({"error": "Request application/ld+json or text/turtle."}),
+                            status=406, content_type="application/json", headers={"Vary": "Accept"})
+        graph = fetch_assertion_projection(database, assertion_id, geometry_id)
+        kind = f"geometry/uses/{assertion_id}/{geometry_id}" if geometry_id else f"assertion/uses/{assertion_id}"
+        response = Response(serialize_graph(graph, media_type), content_type=f"{media_type}; charset=utf-8")
+        response.headers["Link"] = f'<https://catmapper.org/{database.lower()}/{kind}>; rel="canonical"'
+        response.headers["Cache-Control"] = "public, max-age=300, must-revalidate"
+        response.headers["Vary"] = "Accept"
+        return response
+    except ResourceNotFound as exc:
+        status, message = 404, str(exc)
+    except (MalformedPublicResource, ValueError) as exc:
+        status, message = 422, str(exc)
+    except AssertionIndexUnavailable:
+        status, message = 503, "Assertion lookup index is unavailable."
+    except Exception:
+        _LOGGER.exception("linked_data_assertion_failed database=%s", database)
+        status, message = 500, "Linked-data representation failed."
+    return Response(json.dumps({"error": message}), status=status,
+                    content_type="application/json", headers={"Vary": "Accept"})

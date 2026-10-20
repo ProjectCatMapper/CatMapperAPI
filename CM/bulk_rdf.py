@@ -22,6 +22,7 @@ from .linked_data import (
     project_resource,
 )
 from .utils import getDriver, getQuery
+from .assertion_index import remember_assertions
 
 
 LICENSE = "https://creativecommons.org/licenses/by/4.0/"
@@ -130,6 +131,7 @@ def iter_bulk_graphs(database):
         yield "resource", labels, project_resource(database, row)
 
     for batch in _batched(_stream_query(driver, ASSERTION_EXPORT_QUERY)):
+        remember_assertions(database, batch)
         for row in enrich_assertion_geometries(batch):
             identity = (
                 str(row.get("datasetCmid") or ""),

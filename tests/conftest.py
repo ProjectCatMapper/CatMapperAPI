@@ -199,3 +199,9 @@ def mock_context_processing(monkeypatch):
     """Formatter tests validate submitted rows; processing has its own tests."""
     import CM.upload as upload
     monkeypatch.setattr(upload, "processUSES", lambda **kwargs: "processed")
+
+
+@pytest.fixture(autouse=True)
+def isolate_assertion_lookup_index(tmp_path, monkeypatch):
+    """Tests must never read or modify the deployed persistent URI index."""
+    monkeypatch.setenv("CATMAPPER_ASSERTION_INDEX", str(tmp_path / "assertions.sqlite3"))
