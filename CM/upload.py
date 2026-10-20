@@ -667,10 +667,26 @@ def updateProperty(
                     params={"rows": df.to_dict(orient="records")}, type="df"
                 )
 
+                locator_columns = ["CMID", "Key", "datasetID"]
+                if id_values.empty:
+                    raise ValueError(
+                        "No matching USES ties found for this batch. Check CMID, "
+                        "Key and datasetID against the selected database: "
+                        f"{df[locator_columns].head(5).to_dict(orient='records')}; "
+                        "no rows in this batch were changed."
+                    )
                 df = df.merge(
                         id_values,
-                        on=["CMID", "Key", "datasetID"],
-                        how="left"
+                        on=locator_columns,
+                        how="left",
+                        validate="many_to_one",
+                    )
+                missing = df.loc[df["relID"].isna(), locator_columns]
+                if not missing.empty:
+                    raise ValueError(
+                        "No matching USES ties found for "
+                        f"{missing.head(5).to_dict(orient='records')}. "
+                        "No rows in this batch were changed."
                     )
                         
         if "NewKey" in df.columns:
@@ -2832,7 +2848,7 @@ def input_Nodes_Uses(
     
     # checks if following column values are float values
     #Dan. Should simply have this info in the metadata nodes and do a query to get them?
-    columns_to_check = ["populationEstimate", "latitude", "longitude"]
+    columns_to_check = ["populationEstimate", "areakm2", "latitude", "longitude"]
 
     columns_to_check = [col for col in columns_to_check if col in linkProperties]
 
@@ -4136,23 +4152,11 @@ def input_Nodes_Uses(
             #     updateLabels(CMID=CMID, database=database)
 
     except Exception as e:
-        try:
-            if isinstance(e, tuple):
-                error_message = ", ".join(map(str, e))
-            else:
-                error_message = str(e)
-            warnings.warn(error_message)
-            updateLog(f"log/{user}uploadProgress.txt", f"Error: {error_message}", write="a")
-
-            # Return None
-        except Exception as internal_error:
-            warnings.warn(f"Failed to process the exception: {internal_error}")
-            updateLog(
-                f"log/{user}uploadProgress.txt",
-                f"Failed to process the exception: {internal_error}",
-                write="a",
-            )
-        return None
+        # UserWarnings are configured as errors in this module. Logging must
+        # preserve the original failure rather than raise another exception.
+        error_message = str(e)
+        updateLog(f"log/{user}uploadProgress.txt", f"Error: {error_message}", write="a")
+        raise
     
     ''' Download spreadsheet '''
 
