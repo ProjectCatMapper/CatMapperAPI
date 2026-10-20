@@ -12,7 +12,7 @@ from CM.utils import getDriver, getQuery
 DATABASES = ("SocioMap", "ArchaMap")
 FIELDS = {
     "CMName": "areakm2", "property": "areakm2", "type": "relationship",
-    "relationship": "USES", "description": "Surface area (km2)",
+    "description": "Surface area (km2)",
     # USES numeric fields use string tokens with numeric upload validation.
     "metaType": "string", "translation": "areakm2", "public": "TRUE",
     "display": "TRUE", "internal": False, "editable": True,
@@ -35,7 +35,8 @@ def main():
             raise RuntimeError(f"Duplicate areakm2 metadata in {database}")
         if existing:
             prop = existing[0]["property"]
-            if any(prop.get(key) != value for key, value in FIELDS.items()):
+            if (any(prop.get(key) != value for key, value in FIELDS.items())
+                    or prop.get("relationship") is not None):
                 raise RuntimeError(f"Conflicting areakm2 metadata in {database}")
             existing_ids.add(prop["CMID"])
         rows = getQuery(
@@ -65,7 +66,7 @@ def main():
             verified = getQuery(
                 "MATCH (p:PROPERTY {CMName: 'areakm2'}) RETURN properties(p) AS property", driver
             )
-            if len(verified) != 1 or any(
+            if len(verified) != 1 or verified[0]["property"].get("relationship") is not None or any(
                 verified[0]["property"].get(key) != value
                 for key, value in {**FIELDS, "CMID": cmid}.items()
             ):

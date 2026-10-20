@@ -6,6 +6,25 @@ from .metadata import getPropertiesMetadata
 from .log import createLog
 
 
+# These are derived category-to-category links. Source assertions (USES),
+# merging templates, and audit links must never enter this reconciliation path.
+DERIVED_CONTEXTUAL_RELATIONSHIPS = frozenset({
+    "AREA_OF", "CONTAINS", "CULTURE_OF", "LANGUAGE_OF", "LANGUOID_OF", "OCCUPATION_OF",
+    "PERIOD_OF", "POLITY_OF", "RELIGION_OF", "VARIABLE_OF",
+})
+
+
+def _validate_derived_relationship(property, relationship):
+    if property == "areakm2":
+        raise ValueError("areakm2 is a value-only property and cannot trigger relationship updates.")
+    if relationship not in DERIVED_CONTEXTUAL_RELATIONSHIPS:
+        raise ValueError(
+            f"Unsafe derived relationship mapping {property!r} -> {relationship!r}. "
+            "USES source ties cannot be reconciled or deleted by processUSES."
+        )
+    return relationship
+
+
 def contextual_tie_primary_domain_conflicts(driver, source_cmid, target_cmids, relationship):
     """Return target nodes sharing a Neo4j domain label with the source node."""
     if not isinstance(target_cmids, (list, tuple, set)):
@@ -192,6 +211,8 @@ def mergeDupRelations(database, CMID=None):
 # ensures reference Keys in contextual ties are correct.
 def fixUsesRels(database, property, relationship, CMID=None):
     try:
+        # Validate before opening a driver or executing even the first query.
+        relationship = _validate_derived_relationship(property, relationship)
         driver = getDriver(database)
         conflicts = _contextual_tie_primary_domain_conflicts(
             driver,
@@ -236,12 +257,16 @@ return count(*) as count
 
         query2 = f"""
         {qFiltera}
-      match (n)-[rel:{relationship}]->(a:CATEGORY)<-[r:USES]-(:DATASET)
+      match (n:CATEGORY)-[rel:{relationship}]->(a:CATEGORY)<-[r:USES]-(:DATASET)
       {qFilterb}
       with a, apoc.coll.toSet([x in apoc.coll.flatten({qProp}, true) where x is not null and not x = ""]) as current, 
       apoc.coll.toSet(apoc.coll.flatten(collect(distinct n.CMID),true)) as exists, collect(distinct rel) as rels, collect(n) as nodes
       with a, rels, nodes, [i in exists where not i in current] as extra
-      unwind nodes as n unwind rels as rel with n,  rel, extra where n.CMID in extra and elementId(startNode(rel)) = elementId(n)
+      unwind nodes as n unwind rels as rel with n,  rel, extra
+      where n.CMID in extra and elementId(startNode(rel)) = elementId(n)
+        AND type(rel) <> 'USES'
+        AND startNode(rel):CATEGORY AND NOT startNode(rel):DATASET
+        AND endNode(rel):CATEGORY AND NOT endNode(rel):DATASET
       delete rel
 """
 
@@ -494,6 +519,12 @@ def updateAltNames(database, CMID=None, domain = "CATEGORY"):
 def processUSES(database, CMID=None, user="0", detailed = True):
     try:
         driver = getDriver(database)
+        # Fail closed on bad metadata before any reconciliation step can write.
+        # PROPERTY.relationship names derived links, not property storage types.
+        properties = [item for item in getPropertiesMetadata(driver=driver)
+                      if item.get('relationship') is not None]
+        for item in properties:
+            _validate_derived_relationship(item.get('property'), item['relationship'])
         mergeDupRelationsResults = None
         propertiesResults = []
         updateContainsResults = None
@@ -542,9 +573,6 @@ def processUSES(database, CMID=None, user="0", detailed = True):
             )
 
         # Update structural properties and referenceKeys
-        properties = getPropertiesMetadata(driver=driver)
-        properties = [item for item in properties if item.get(
-            'relationship') is not None]
         for property, relationship in zip([item['property'] for item in properties if 'property' in item], [item['relationship'] for item in properties if 'relationship' in item]):
             print(f"{property} {relationship} {cmid_list}")
 
