@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from CM.assertion_index import backfill_complete, remember_assertions
+from CM.assertion_index import assertion_index_writer, backfill_complete, remember_assertions
 from CM.bulk_rdf import _batched, _stream_query
 from CM.utils import getDriver
 
@@ -28,11 +28,12 @@ def main():
             print(json.dumps({"database": database, "backfill": "already complete"}), flush=True)
             continue
         count = 0
-        for batch in _batched(_stream_query(getDriver(database), QUERY), size=25000):
-            remember_assertions(database, batch)
-            count += len(batch)
-            if count % 100000 == 0:
-                print(json.dumps({"database": database, "relationshipsProcessed": count}), flush=True)
+        with assertion_index_writer() as connection:
+            for batch in _batched(_stream_query(getDriver(database), QUERY), size=1000):
+                remember_assertions(database, batch, connection=connection)
+                count += len(batch)
+                if count % 100000 == 0:
+                    print(json.dumps({"database": database, "relationshipsProcessed": count}), flush=True)
         backfill_complete(database, mark=True)
         print(json.dumps({"database": database, "relationshipsIndexed": count}), flush=True)
 
