@@ -12,6 +12,7 @@ from rdflib import Graph, Literal, Namespace, RDF, RDFS, URIRef
 from rdflib.namespace import DCAT, DCTERMS, OWL, PROV, SKOS, XSD
 
 from .utils import getDriver, getQuery
+from .assertion_index import assertion_digest, lookup_assertion, remember_assertions
 
 
 ONTOLOGY_VERSION = "2026.08.18"
@@ -125,6 +126,11 @@ ORDER BY datasetCmid, key, conceptCmid,
 SKIP $offset
 LIMIT $limit
 """
+
+ASSERTION_LOOKUP_QUERY = ASSERTION_QUERY.replace(
+    "WHERE d.CMID = $cmid OR c.CMID = $cmid",
+    "WHERE d.CMID = $datasetCmid AND c.CMID = $conceptCmid AND r.Key = $key",
+).replace("SKIP $offset\nLIMIT $limit", "")
 
 COLLISION_QUERY = """
 MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
@@ -255,7 +261,7 @@ def assertion_iri(assertion, multiplicity=1) -> URIRef:
     parts = _identity_tuple(assertion)
     if any(not part.strip() for part in parts):
         raise MalformedPublicResource("USES assertion is missing dataset, key, or concept identity.")
-    base_digest = hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
+    base_digest = assertion_digest(*parts)
     suffix = ""
     if int(multiplicity or 1) > 1:
         discriminator = assertion.get("stableDiscriminator")
@@ -436,6 +442,34 @@ def project_assertion(database, row, multiplicity=1):
     return graph
 
 
+def fetch_assertion_projection(database, assertion_id, geometry_id=None):
+    """Resolve a published hash, then project only matching current source data."""
+    database = normalize_database(database)
+    if not re.fullmatch(r"[0-9a-f]{64}(?:-[0-9a-f]{16})?", assertion_id):
+        raise ResourceNotFound("Public assertion not found.")
+    if geometry_id is not None and not re.fullmatch(r"[0-9a-f]{24}", geometry_id):
+        raise ResourceNotFound("Public geometry not found.")
+    identity = lookup_assertion(database, assertion_id.split("-", 1)[0])
+    if identity is None:
+        raise ResourceNotFound("Public assertion not found.")
+    rows = getQuery(ASSERTION_LOOKUP_QUERY, driver=getDriver(database), params=identity, type="dict")
+    graph = Graph()
+    _bind_namespaces(graph)
+    wanted = URIRef(f"{RESOURCE_BASE}/{database}/assertion/uses/{assertion_id}")
+    geometry = URIRef(f"{RESOURCE_BASE}/{database}/geometry/uses/{assertion_id}/{geometry_id}")
+    for row in enrich_assertion_geometries(rows):
+        actual = assertion_iri({**row, "database": database}, len(rows))
+        if geometry_id is None and actual != wanted:
+            continue
+        fragment = project_assertion(database, row, len(rows))
+        if geometry_id is not None and not list(fragment.triples((geometry, RDF.type, GEO.Geometry))):
+            continue
+        graph += fragment
+    if not len(graph):
+        raise ResourceNotFound("Public geometry not found." if geometry_id else "Public assertion not found.")
+    return graph
+
+
 def project_hierarchy_link(database, row):
     """Project one approved broader-to-narrower CONTAINS relationship."""
     database = normalize_database(database)
@@ -577,6 +611,7 @@ def fetch_resource_projection(
     hierarchy = (hierarchy_rows[0].get("links") or [])[:MAX_HIERARCHY_LINKS] if hierarchy_rows else []
     hierarchy = [link for link in hierarchy if link and link.get("otherCmid")]
 
+    remember_assertions(database, assertion_rows)
     graph = project_resource(
         database,
         rows[0],

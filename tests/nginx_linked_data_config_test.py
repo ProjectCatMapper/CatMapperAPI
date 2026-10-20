@@ -35,3 +35,13 @@ def test_production_canonical_server_publishes_ontology_and_negotiates_rdf():
     assert "@prod_linked_data" in production
     assert "uwsgi_pass api:5000" in production
     assert "try_files $uri $uri/ /index.html" in production
+
+
+def test_generated_resource_routes_bypass_frontend_in_both_environments():
+    config = (ROOT / "conf" / "nginx.conf").read_text(encoding="utf-8")
+    for upstream in ("api", "api-dev"):
+        pattern = "location ~ ^/(sociomap|archamap)/(assertion/uses/[^/]+|geometry/uses/[^/]+/[^/]+)$ {"
+        blocks = [part.split("}", 1)[0] for part in config.split(pattern)[1:]]
+        block = next(part for part in blocks if f"uwsgi_pass {upstream}:5000;" in part)
+        assert "rewrite ^/(sociomap|archamap)/(.*)$ /linked-data/$1/$2 break;" in block
+        assert "try_files" not in block
