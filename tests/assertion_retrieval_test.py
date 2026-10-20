@@ -143,3 +143,19 @@ def test_bulk_publication_registers_assertion_identity(monkeypatch):
     monkeypatch.setattr(bulk_rdf, "_stream_query", stream)
     assert list(bulk_rdf.iter_bulk_graphs("sociomap"))
     assert lookup_assertion("sociomap", identifier(row()))["datasetCmid"] == "SD1"
+
+
+def test_only_successful_backfills_are_marked_complete():
+    from CM.assertion_index import backfill_complete
+    assert not backfill_complete("sociomap")
+    remember_assertions("sociomap", [row()])
+    assert not backfill_complete("sociomap")
+    assert backfill_complete("sociomap", mark=True)
+    assert backfill_complete("sociomap")
+    assert not backfill_complete("archamap")
+
+
+def test_empty_database_backfill_can_be_marked_complete():
+    from CM.assertion_index import backfill_complete
+    assert backfill_complete("sociomap", mark=True)
+    assert lookup_assertion("sociomap", "f" * 64) is None
