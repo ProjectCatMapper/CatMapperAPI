@@ -64,6 +64,14 @@ for container in "${containers[@]}"; do
     stopped_container=""
 done
 
+# Neo4j startup can reset the bind-mounted backup directories to 0700.
+# Restore upload-account group access AFTER all containers have restarted.
+# Keep backups private to the owner and the operational catmapper group.
+for container in "${containers[@]}"; do
+    chgrp -R catmapper "$app_root/db/$container/backups"
+    chmod -R g+rX,o-rwx "$app_root/db/$container/backups"
+done
+
 # A failed archive must not replace the previous copy or reach S3. Failed
 # uploads propagate to the caller, which must not start routines afterward.
 if [[ "$(id -un)" == "rjbischo" ]]; then

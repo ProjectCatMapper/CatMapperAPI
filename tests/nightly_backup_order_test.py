@@ -48,6 +48,8 @@ if os.environ.get('TAR_FAIL')==db:sys.exit(9)
     executable(bin_dir / "sleep", "#!/bin/sh\nexit 0\n")
     executable(api / "syncBackups.sh", '#!/bin/sh\necho upload >> "$EVENTS"\nexit "${SYNC_EXIT:-0}"\n')
     executable(api / "routines.sh", '#!/bin/sh\necho routines >> "$EVENTS"\nexit "${ROUTINES_EXIT:-0}"\n')
+    executable(api / "notifyMaintenanceFailure.sh", '#!/bin/sh\nprintf "notice %s %s\\n" "$1" "$2" >> "$EVENTS"\nexit "${NOTICE_EXIT:-0}"\n')
+    executable(bin_dir / "chgrp", '#!/bin/sh\necho permissions >> "$EVENTS"\n')
 
     def run(**changes):
         return subprocess.run([str(ROOT / "nightlyMaintenance.sh")], env={**env, **changes},
@@ -62,7 +64,7 @@ def test_backups_and_upload_finish_before_readiness_and_routines(maintenance):
     assert events.read_text().splitlines() == [
         event for db in ["sociomap1", "archamap1", "gisdb", "userdb"]
         for event in [f"docker stop {db}", f"archive {db}", f"docker start {db}"]
-    ] + ["upload", "docker exec api", "routines"]
+    ] + ["permissions"] * 4 + ["upload", "docker exec api", "routines"]
     assert (app / "CatMapperAPI/log/dbBackup.out").exists()
     assert (app / "CatMapperAPI/log/cronRoutines.out").exists()
 
@@ -77,14 +79,14 @@ def test_archive_failure_restarts_database_and_preserves_previous_backup(mainten
     assert result.returncode != 0 and "routines were not started" in result.stderr
     assert previous.read_text() == "previous successful backup"
     assert not list(backups.glob("*.partial.*"))
-    assert events.read_text().splitlines() == ["docker stop sociomap1", "archive sociomap1", "docker start sociomap1"]
+    assert events.read_text().splitlines() == ["docker stop sociomap1", "archive sociomap1", "docker start sociomap1", "notice backup or AWS upload 1"]
 
 
 def test_failed_aws_upload_prevents_readiness_checks_and_routines(maintenance):
     _, events, _, run = maintenance
     result = run(SYNC_EXIT="42")
     assert result.returncode != 0
-    assert events.read_text().splitlines()[-1] == "upload"
+    assert events.read_text().splitlines()[-2:] == ["upload", "notice backup or AWS upload 1"]
     assert "routines" not in events.read_text()
 
 
@@ -92,21 +94,21 @@ def test_database_stop_failure_prevents_archiving_and_routines(maintenance):
     _, events, _, run = maintenance
     result = run(STOP_FAIL="sociomap1")
     assert result.returncode != 0
-    assert events.read_text().splitlines() == ["docker stop sociomap1", "docker start sociomap1"]
+    assert events.read_text().splitlines() == ["docker stop sociomap1", "docker start sociomap1", "notice backup or AWS upload 1"]
 
 
 def test_database_readiness_failure_prevents_routines(maintenance):
     _, events, _, run = maintenance
     result = run(CATMAPPER_DATABASE_READY_TIMEOUT="0")
     assert result.returncode != 0 and "readiness checks failed" in result.stderr
-    assert events.read_text().splitlines()[-1] == "upload"
+    assert events.read_text().splitlines()[-2:] == ["upload", "notice database readiness 1"]
 
 
 def test_routine_failure_is_reported_after_a_successful_backup(maintenance):
     _, events, _, run = maintenance
     result = run(ROUTINES_EXIT="1")
     assert result.returncode != 0 and "Routines failed" in result.stderr
-    assert events.read_text().splitlines()[-3:] == ["upload", "docker exec api", "routines"]
+    assert events.read_text().splitlines()[-4:] == ["upload", "docker exec api", "routines", "notice routines 1"]
 
 
 def test_overlapping_nightly_runs_are_rejected_without_running_a_backup(maintenance):
@@ -123,4 +125,42 @@ def test_selected_database_backup_does_not_stop_unselected_databases(maintenance
     _, events, env, _ = maintenance
     result = subprocess.run([str(ROOT / "dbBackup.sh"), selection], env=env, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    assert events.read_text().splitlines() == [f"docker stop {container}", f"archive {container}", f"docker start {container}", "upload"]
+    assert events.read_text().splitlines() == [f"docker stop {container}", f"archive {container}", f"docker start {container}", "permissions", "upload"]
+
+
+def test_notification_failure_preserves_failed_job_status(maintenance):
+    _, _, _, run = maintenance
+    result = run(SYNC_EXIT="42", NOTICE_EXIT="9")
+    assert result.returncode == 1
+    assert "FAILURE NOTIFICATION COULD NOT BE SUBMITTED" in result.stderr
+
+
+def test_host_mail_cli_does_not_require_api_dependencies():
+    result = subprocess.run(["/usr/bin/python3", str(ROOT / "send_transactional_email.py"), "--help"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_backup_directory_is_readable_by_upload_group_without_public_access(maintenance):
+    app, _, _, run = maintenance
+    backups = app / "db/sociomap1/backups"
+    backups.mkdir(parents=True, mode=0o700)
+    result = run()
+    assert result.returncode == 0, result.stderr
+    assert backups.stat().st_mode & 0o777 == 0o750
+    assert (backups / "neo4j-backup.tar.zst").stat().st_mode & 0o777 == 0o640
+
+
+def test_failure_notifier_uses_host_mail_cli(maintenance):
+    app, events, env, _ = maintenance
+    api = app / "CatMapperAPI"
+    shutil.copy2(ROOT / "notifyMaintenanceFailure.sh", api / "notifyMaintenanceFailure.sh")
+    executable(Path(env["PATH"].split(os.pathsep)[0]) / "python3",
+               '#!/bin/sh\nprintf "%s\\n" "$*" >> "$EVENTS"\n')
+    result = subprocess.run([str(api / "notifyMaintenanceFailure.sh"), "backup or AWS upload", "1"],
+                            env={**env, "BREVO_API_KEY": str(123), "CATMAPPER_MAINTENANCE_EMAIL": "test@example.invalid"},
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    notice = events.read_text()
+    assert "--to test@example.invalid" in notice
+    assert "Stage: backup or AWS upload" in notice
+    assert "--tag maintenance-failure" in notice

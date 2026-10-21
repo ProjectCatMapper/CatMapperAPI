@@ -14,6 +14,22 @@ mkdir -p "$log_dir"
 exec 9>"$log_dir/nightlyMaintenance.lock"
 flock -n 9 || { echo "Nightly maintenance is already running." >&2; exit 75; }
 
+stage="backup or AWS upload"
+failure_notice() {
+    local status=$?
+    trap - EXIT
+    if (( status != 0 )); then
+        echo "Nightly maintenance failed during $stage (exit $status)." >&2
+        if ! "$api_dir/notifyMaintenanceFailure.sh" "$stage" "$status"; then
+            echo "FAILURE NOTIFICATION COULD NOT BE SUBMITTED." >&2
+        fi
+    fi
+    exit "$status"
+}
+trap failure_notice EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 echo "Nightly backup-before-routines started at $(date --iso-8601=seconds)"
 if ! "$api_dir/dbBackup.sh" >"$log_dir/dbBackup.out" 2>&1; then
     echo "Backup or AWS upload failed; routines were not started. See $log_dir/dbBackup.out" >&2
@@ -22,6 +38,7 @@ fi
 
 # A successful docker start does not mean Bolt is ready. Wait for all four
 # databases before the API is allowed to perform nightly maintenance.
+stage="database readiness"
 ready_timeout="${CATMAPPER_DATABASE_READY_TIMEOUT:-120}"
 [[ "$ready_timeout" =~ ^[0-9]+$ ]] || { echo "Invalid database readiness timeout." >&2; exit 2; }
 deadline=$((SECONDS + ready_timeout))
@@ -43,6 +60,7 @@ if [[ "$ready" != true ]]; then
 fi
 
 echo "Backup and AWS upload succeeded; starting routines at $(date --iso-8601=seconds)"
+stage="routines"
 if ! "$api_dir/routines.sh" >"$log_dir/cronRoutines.out" 2>&1; then
     echo "Routines failed. See $log_dir/cronRoutines.out" >&2
     exit 1
