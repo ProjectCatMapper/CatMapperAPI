@@ -183,3 +183,40 @@ def test_legacy_case_and_date_only_contexts_do_not_introduce_unapproved_events(v
         events.validate_parent_context_events(context, vocabulary)
     assert 'eventType' not in events.validate_parent_context_events(
         context, vocabulary, normalize_legacy=True)[0]
+
+
+@pytest.mark.parametrize('parent', [None, '', '   ', [], 123])
+def test_new_contexts_reject_missing_or_invalid_parent_but_legacy_is_retained(vocabulary, parent):
+    context = {'eventType': 'HIERARCHY'}
+    if parent is not None:
+        context['parent'] = parent
+    with pytest.raises(ValueError, match='parent must be a nonempty CMID string'):
+        events.validate_event_rows([{'parentContext': json.dumps(context)}], object())
+    assert events.validate_parent_context_events(context, vocabulary, normalize_legacy=True) == [context]
+
+
+def test_reconciliation_skips_parentless_placeholders_preserving_valid_events(vocabulary, monkeypatch):
+    import copy
+    monkeypatch.setattr(uses, 'getDriver', lambda _: object())
+    contexts = [[json.dumps({'eventType': 'HIERARCHY', **extra}) for extra in
+                 [{}, {'parent': None}, {'parent': ''}, {'parent': '  '}, {'parent': []},
+                  {'parent': 123}, {'parent': 'SMvalid', 'eventDate': '2018'}]]]
+    original = copy.deepcopy(contexts)
+    changes = []
+    def query(query, driver, params):
+        if 'collect(u.parentContext) AS contexts' in query:
+            return [{'CMID': 'SMchild', 'ties': [
+                {'relID': 'valid', 'parent': 'SMvalid', 'eventType': None, 'eventDate': None},
+                {'relID': 'stale', 'parent': 'SMold', 'eventType': ['SPLIT'], 'eventDate': ['1999']},
+            ], 'contexts': contexts}]
+        assert 'SET r.eventType' in query and 'USES' not in query
+        changes.extend(params['updates'])
+        return [{'updatedRelationships': len(changes)}]
+    monkeypatch.setattr(uses, 'getQuery', query)
+    result = uses.updateContains('SocioMap', 'SMchild')
+    assert isinstance(result, dict)
+    assert changes == [
+        {'relID': 'valid', 'eventType': ['HIERARCHY'], 'eventDate': ['2018']},
+        {'relID': 'stale', 'eventType': None, 'eventDate': None},
+    ]
+    assert contexts == original

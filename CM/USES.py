@@ -392,8 +392,10 @@ def updateContains(database, CMID=None):
                     if not event_type:
                         continue
                     parent = entry.get("parent")
-                    if not isinstance(parent, str) or not parent:
-                        raise ValueError(f"Invalid parentContext parent for {row['CMID']}")
+                    if not isinstance(parent, str) or not parent.strip():
+                        # Keep incomplete source placeholders untouched. Nightly
+                        # validation reports them; they cannot identify an edge.
+                        continue
                     date = entry.get("eventDate")
                     pair = (event_type, str(date) if date not in (None, "") else "NULL")
                     pairs = pairs_by_parent.setdefault(parent, [])

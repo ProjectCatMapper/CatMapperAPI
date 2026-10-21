@@ -72,13 +72,16 @@ def parent_context_entries(value):
     return [value]
 
 
-def validate_parent_context_events(value, allowed_values, *, normalize_legacy=False):
+def validate_parent_context_events(value, allowed_values, *, normalize_legacy=False, require_parent=True):
     entries = [dict(entry) for entry in parent_context_entries(value)]
     for entry in entries:
         canonical = validate_event_type(entry.get("eventType"), allowed_values,
                                         normalize_legacy=normalize_legacy)
         if canonical is not None and canonical != entry.get("eventType"):
             entry["eventType"] = canonical
+        parent = entry.get("parent")
+        if require_parent and not normalize_legacy and (not isinstance(parent, str) or not parent.strip()):
+            raise ValueError("parentContext parent must be a nonempty CMID string")
         if not is_empty_event_value(entry.get("eventDate")) and is_empty_event_value(entry.get("eventType")):
             # Legacy date-only entries contribute no event. New writes reject
             # them, while reconciliation clears obsolete derived event data.
