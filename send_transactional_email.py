@@ -2,8 +2,15 @@
 
 import argparse
 import sys
+import importlib.util
+from pathlib import Path
 
-from CM.brevo import send_transactional_email
+# This host utility must work with system Python, without importing CM's
+# application initializer (which requires Neo4j and other API dependencies).
+spec = importlib.util.spec_from_file_location("catmapper_brevo", Path(__file__).parent / "CM" / "brevo.py")
+brevo = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(brevo)
+send_transactional_email = brevo.send_transactional_email
 
 
 def main() -> int:
