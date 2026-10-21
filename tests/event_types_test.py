@@ -151,6 +151,7 @@ def test_nightly_checks_source_and_derived_events_against_metadata(vocabulary, m
 
 def test_process_uses_validates_before_any_reconciliation_write(vocabulary, monkeypatch):
     monkeypatch.setattr(uses, "getDriver", lambda _: object())
+    monkeypatch.setattr(uses, "getPropertiesMetadata", lambda **_: [])
     def query(query, driver, params=None):
         assert "RETURN r.parentContext AS parentContext" in query
         return [{"parentContext": '{"parent":"SM2","eventType":"WRONG"}'}]
