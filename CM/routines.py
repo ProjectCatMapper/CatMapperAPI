@@ -883,7 +883,7 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
 
             for row in rows:
                 parent_val = row["parentContextMap"].get("parent")
-                if parent_val is None:
+                if not isinstance(parent_val, str):
                     continue
                 parent_cmid = str(parent_val).strip()
                 if parent_cmid:
@@ -917,7 +917,7 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
             fallback_results = []
             for row in rows:
                 parent_val = row["parentContextMap"].get("parent")
-                if parent_val is None:
+                if not isinstance(parent_val, str):
                     continue
                 parent_cmid = str(parent_val).strip()
                 if parent_cmid and parent_cmid not in existing:
@@ -973,7 +973,8 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
                 WHERE pc <> ""
                 WITH d, c, r, apoc.convert.fromJsonMap(pc) AS m
                 WITH d, c, r,
-                    CASE WHEN m.parent IS NULL THEN NULL ELSE trim(toString(m.parent)) END AS parentCMID
+                    CASE WHEN valueType(m.parent) STARTS WITH 'STRING'
+                         THEN trim(m.parent) ELSE NULL END AS parentCMID
                 WHERE parentCMID IS NOT NULL
                     AND parentCMID <> ""
                     AND NOT EXISTS { MATCH (:CATEGORY {CMID: parentCMID}) }
@@ -992,10 +993,29 @@ def getBadComplexProperties(database, mail=None, return_type="data"):
             "parentContext parent CMID validation",
         )
 
+        # The CMID lookup above only finds nonempty references to absent nodes.
+        # Missing/null/blank/non-string parents must also appear in the nightly
+        # count and its existing spreadsheet attachment, even without eventType.
+        missing_context_parents = []
+        for row in _load_parent_context_rows():
+            parent = row["parentContextMap"].get("parent")
+            if not isinstance(parent, str) or not parent.strip():
+                missing_context_parents.append({
+                    "datasetID": row["datasetID"], "CMID": row["CMID"],
+                    "Key": row["Key"], "parentValues": row["parentValues"],
+                    "contextEntry": row["parentContextEntry"],
+                    "missingParent": parent,
+                    "error": "parentContext parent must be a nonempty CMID string",
+                })
+        if missing_context_parents:
+            results11 = pd.concat([results11, pd.DataFrame(missing_context_parents)],
+                                  ignore_index=True)
+
         invalid_source_events = []
         for row in _load_parent_context_rows():
             try:
-                validate_parent_context_events(row["parentContextMap"], allowed_event_types)
+                validate_parent_context_events(row["parentContextMap"], allowed_event_types,
+                                               require_parent=False)
             except ValueError as exc:
                 invalid_source_events.append({
                     "datasetID": row["datasetID"], "CMID": row["CMID"],

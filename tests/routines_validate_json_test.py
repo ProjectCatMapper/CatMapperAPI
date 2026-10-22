@@ -297,3 +297,32 @@ def test_parent_context_missing_parent_is_reported_in_nightly_summary(monkeypatc
     attachment = next(p for p in summary["filepath"] if p and "CMID_in_parentContext_not_in_parent" in p)
     sheet = pd.read_excel(attachment)
     assert sheet["CMID"].tolist() == ["SM599", "SM600", "SM601", "SM603"]
+
+
+@pytest.mark.parametrize('force_fallback', [False, True])
+def test_parentless_placeholders_appear_in_nightly_count_and_attachment(monkeypatch, force_fallback):
+    import json
+    monkeypatch.setattr(routines, 'validateJSON', lambda **kwargs: [])
+    monkeypatch.setattr(routines, 'getDriver', lambda _: object())
+    invalid = [{}, {'parent': None}, {'parent': ''}, {'parent': '   '}, {'parent': []}, {'parent': 123}]
+    rows = [{'datasetID': 'SD11', 'CMID': f'SM{i}', 'Key': f'Name == example{i}',
+             'parentValues': None, 'parentContext': [json.dumps({**entry, 'eventType': 'HIERARCHY'})]}
+            for i, entry in enumerate(invalid)]
+    def query(query, driver, type=None, **kwargs):
+        if type == 'dict' and 'r.parentContext AS parentContext' in query:
+            return rows
+        if type == 'df' and 'parentCMID AS missingParent' in query and force_fallback:
+            raise RuntimeError('force Python fallback')
+        return pd.DataFrame() if type == 'df' else []
+    monkeypatch.setattr(routines, 'getQuery', query)
+    result = routines.getBadComplexProperties('SocioMap', return_type='data')
+    assert result['invalid_parentContext_parent_cmid_count'] == 6
+    assert result['invalid_source_eventType_count'] == 0
+    assert [r['CMID'] for r in result['invalid_parentContext_parent_cmid']] == [r['CMID'] for r in rows]
+    summary = routines.getBadComplexProperties('SocioMap', return_type='info')
+    assert 'Invalid parentContext parent CMID: 6' in summary['info']
+    attachment = next(p for p in summary['filepath'] if p and 'Valid_parent_CMID' in p)
+    report = pd.read_excel(attachment)
+    assert report['CMID'].tolist() == [r['CMID'] for r in rows]
+    assert report['Key'].tolist() == [r['Key'] for r in rows]
+    assert report['contextEntry'].str.contains('HIERARCHY').all()
