@@ -1,3 +1,5 @@
+import pytest
+
 import CMroutes.routine_routes as routine_routes
 
 
@@ -86,7 +88,8 @@ def test_routines_admin_endpoint_does_not_pass_mail_object(client, monkeypatch):
     }
 
 
-def test_runRoutines_includes_duplicate_node_cmid_check(client, monkeypatch):
+@pytest.mark.parametrize("metatype_failure", [False, True])
+def test_runRoutines_includes_duplicate_node_cmid_check(client, monkeypatch, metatype_failure):
     called = []
 
     def fake_info(name):
@@ -125,6 +128,14 @@ def test_runRoutines_includes_duplicate_node_cmid_check(client, monkeypatch):
     for name in routine_names:
         monkeypatch.setattr(routine_routes.routines_module, name, fake_info(name))
 
+    if metatype_failure:
+        monkeypatch.setattr(routine_routes.routines_module, "fixMetaTypes", lambda *args, **kwargs: (
+            {"status": "failed", "info": "Storage verification failed"}, 500))
+
+    # Exercise successful mail reporting without contacting a provider.
+    monkeypatch.setattr(routine_routes.routines_module, "sendEmail", lambda *args, **kwargs: {
+        "status": "Email sent successfully", "recipients": []})
+
     response = client.get("/runRoutines/TestDB")
     body = response.get_data(as_text=True)
 
@@ -138,3 +149,13 @@ def test_runRoutines_includes_duplicate_node_cmid_check(client, monkeypatch):
     assert "Glottocode Checks for TestDB" in body
     assert "getBadGlottocodes-ok" in body
     assert "getBadGlottocodes" in called
+
+    assert ("CATMAPPER_ROUTINES_STATUS=failed" if metatype_failure else "CATMAPPER_ROUTINES_STATUS=ok") in body
+
+
+def test_metatype_failure_returns_http_error_to_admin(client, monkeypatch):
+    monkeypatch.setattr(routine_routes.routines_module, "fixMetaTypes", lambda *args, **kwargs: (
+        {"status": "failed", "errors": ["Storage verification failed"]}, 500))
+    response = client.get("/routines/fixMetaTypes/archamap")
+    assert response.status_code == 500
+    assert response.get_json()["status"] == "failed"

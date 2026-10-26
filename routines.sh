@@ -10,7 +10,7 @@ if [ -f "$repo_root/.brevo.env" ]; then
     set +a
 fi
 
-mkdir -p /mnt/storage/app/CatMapperAPI/log
+mkdir -p "$script_dir/log"
 
 api_url="${CATMAPPER_ROUTINES_URL:-https://127.0.0.1/runRoutines/all}"
 api_host_header="${CATMAPPER_ROUTINES_HOST:-api.catmapper.org}"
@@ -55,6 +55,14 @@ mail_status=""
 if [[ $curl_exit -ne 0 ]]; then
     run_status="failed"
     failure_reason="curl exited with status $curl_exit"
+fi
+
+# A completed HTTP stream or delivered summary email does not prove that the
+# maintenance routines succeeded. Require the server's explicit outcome.
+if ! grep -qx 'CATMAPPER_ROUTINES_STATUS=ok' "$tmp_output" \
+    || grep -qx 'CATMAPPER_ROUTINES_STATUS=failed' "$tmp_output"; then
+    run_status="failed"
+    failure_reason="${failure_reason:+$failure_reason; }routine completion status was failed or missing"
 fi
 
 mail_status_line="$(grep -o 'Mail sent with status:[^<]*' "$tmp_output" | tail -n 1 || true)"

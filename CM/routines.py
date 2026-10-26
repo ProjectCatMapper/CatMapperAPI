@@ -5,6 +5,7 @@
 import os
 import re
 from CM.utils import *
+from CM.metatypes import metadata_metatypes, normalize_metatype, storage_predicate, verify_storage
 from CM.event_types import get_allowed_event_types, validate_parent_context_events, parent_context_entries
 from CM.email import *
 from CM.USES import *
@@ -1485,11 +1486,12 @@ def CMNameNotInName(database, mail=None, return_type="data"):
 
 def _repair_property_metatype(driver, prop, meta_type, *, relationship=False):
     """Repair one metadata field without stringifying Boolean ownership locks."""
+    meta_type = normalize_metatype(meta_type)
     alias = "rel" if relationship else "n"
     match = "MATCH ()-[rel]->()" if relationship else "MATCH (n)"
     value = f"{alias}.`{prop}`"
+    predicate = storage_predicate(value, meta_type)
     if meta_type == "BOOLEAN":
-        predicate = f'valueType({value}) STARTS WITH "BOOLEAN"'
         conversion = f"toBooleanOrNull(toString({value}))"
         # Invalid locks must remain present. A null SET would delete the lock and
         # coalesce(lock, false) in authorization would then allow editing.
@@ -1505,11 +1507,6 @@ def _repair_property_metatype(driver, prop, meta_type, *, relationship=False):
             raise ValueError(f"{invalid} value(s) cannot be safely converted to BOOLEAN")
         conversion_guard = f'AND valueType({value}) STARTS WITH "STRING" AND {conversion} IS NOT NULL'
     else:
-        predicate = (
-            f'valueType({value}) STARTS WITH "LIST<STRING"'
-            if meta_type == "LIST"
-            else f'valueType({value}) STARTS WITH "STRING"'
-        )
         conversion = f"""custom.formatProperties(
             [v IN apoc.coll.flatten([{value}], true) WHERE v IS NOT NULL | toString(v)],
             '{meta_type}', ';'
@@ -1518,108 +1515,57 @@ def _repair_property_metatype(driver, prop, meta_type, *, relationship=False):
     result = getQuery(
         f"""{match}
         WHERE {value} IS NOT NULL AND NOT ({predicate}) {conversion_guard}
-        SET {value} = {conversion}
+        SET {value} = coalesce({conversion}, {value})
         RETURN count(*) AS count""",
         driver, type="list",
     )
     return result[0] if result else 0
 
 
+def verifyMetaTypes(database, return_type="data"):
+    """Read-only verification of declared metadata against the shared storage contract."""
+    try:
+        driver = getDriver(database)
+        definitions = metadata_metatypes(getPropertiesMetadata(driver))
+        issues, evidence = verify_storage(driver, definitions, getQuery)
+        result = {"status": "failed" if issues else "success", "errors": issues,
+                  "verification": evidence,
+                  "info": "; ".join(issues) if issues else "Meta type storage verified"}
+        return (result, 500) if issues else result
+    except Exception as exc:
+        return {"status": "failed", "errors": [str(exc)], "info": str(exc)}, 500
+
+
 def fixMetaTypes(database, return_type="data"):
-    """
-    Validate and correct property types for nodes and relationships 
-    in a Neo4j database based on metadata definitions.
+    """Repair declared storage types, then independently read back all fields.
 
-    This function retrieves property metadata (from `getPropertiesMetadata`) 
-    and ensures that stored values match their expected `metaType`. If a 
-    property’s type does not match, it is reformatted using 
-    `custom.formatProperties` to conform to the correct type.
-
-    Specifically:
-      - Node properties and relationship properties are validated separately.
-      - Each property is checked against its expected stored Neo4j type:
-          * "LIST" → Neo4j string list
-          * "BOOLEAN" → native Neo4j Boolean, preserving true/false values
-          * other metaTypes → Neo4j string
-      - Unconvertible Boolean values are reported and retained, never removed.
-      - Before formatting, values are coerced into string tokens so
-        `custom.formatProperties` can safely process non-string values.
-      - Properties with mismatched types are reformatted and updated in place.
-
-    Parameters
-    ----------
-    database : str
-        The database name used to obtain a Neo4j driver instance.
-    mail : Mail, optional
-        Currently unused in this function (included for consistency with 
-        other validation functions).
-    return_type : {"data", "info"}, default="data"
-        Determines the format of the return value:
-        - "data" : return a status dictionary confirming the updates.
-        - "info" : return a simplified dictionary with a completion message.
-
-    Returns
-    -------
-    dict or tuple
-        If return_type == "data":
-            {"status": "success" or "partial", "message": "...", "errors": [...]}
-        If return_type == "info":
-            {"info": "Completed updating metatypes ..."}
-        If an error occurs:
-            A tuple of (error_message, 500).
-
-    Side Effects
-    ------------
-    - Executes Cypher queries to reformat and update properties 
-      on nodes and relationships whose stored types do not match 
-      their expected metaTypes.
-    - Logs the number of updated values for each property via `print`.
-
-    Raises
-    ------
-    None directly. Exceptions are caught and returned as error messages 
-    with HTTP status 500.
+    The shared contract explicitly supports STRING, LIST and BOOLEAN. Unknown or
+    conflicting metadata stops maintenance before writing. Conversion never removes
+    a property on a null result. Any repair or verification error fails the routine
+    and therefore the nightly job, including when requested with return_type=info.
     """
     try:
         driver = getDriver(database)
-        properties = getPropertiesMetadata(driver)
-        properties = pd.DataFrame(properties)
-        properties = properties[properties['metaType'].notna()]
-        node_properties = properties[properties['type'] == 'node']
-        relationship_properties = properties[properties['type']
-                                             == 'relationship']
-
+        definitions = metadata_metatypes(getPropertiesMetadata(driver))
         errors = []
-
-        for kind, definitions in (("node", node_properties), ("relationship", relationship_properties)):
-            for property, metaType in zip(definitions['property'], definitions['metaType']):
-                metaType = str(metaType).upper().strip()
-                prop = str(property).replace("`", "")
+        for kind, fields in definitions.items():
+            for prop, meta_type in fields.items():
                 try:
                     updated = _repair_property_metatype(
-                        driver, prop, metaType, relationship=(kind == "relationship")
+                        driver, prop, meta_type, relationship=(kind == "relationship")
                     )
-                    print(f"Updated {kind} property {prop} to {metaType}: {updated}")
-                except Exception as e:
-                    msg = f"Failed {kind} property {prop} ({metaType}): {e}"
-                    print(msg)
-                    errors.append(msg)
-
-        if return_type == "data":
-            status = "success" if len(errors) == 0 else "partial"
-            message = (
-                "Meta types updated successfully"
-                if len(errors) == 0
-                else f"Meta types update completed with {len(errors)} error(s)"
-            )
-            return {"status": status, "message": message, "errors": errors}
-        elif return_type == "info":
-            if len(errors) == 0:
-                return {"info": "Completed updating metatypes"}
-            return {"info": f"Completed updating metatypes with {len(errors)} error(s)"}
-    except Exception as e:
-        result = str(e)
-        return result, 500
+                    print(f"Updated {kind} property {prop} to {meta_type}: {updated}")
+                except Exception as exc:
+                    errors.append(f"Failed {kind} property {prop} ({meta_type}): {exc}")
+        verification_errors, evidence = verify_storage(driver, definitions, getQuery)
+        errors.extend(verification_errors)
+        message = ("Meta types updated and storage verified" if not errors
+                   else "Meta type maintenance failed: " + "; ".join(errors))
+        result = {"status": "failed" if errors else "success", "message": message,
+                  "errors": errors, "info": message, "verification": evidence}
+        return (result, 500) if errors else result
+    except Exception as exc:
+        return {"status": "failed", "errors": [str(exc)], "info": str(exc)}, 500
 
 def noUSES(database, save=True, mail=None, return_type="data"):
     """
@@ -2787,6 +2733,7 @@ def runRoutinesStream(databases="all", mail=None):
     files = []
     info = []  # keeps full streaming log
     results = {}  # keeps table values
+    failures = []
 
     def emit(msg):
         info.append(msg)
@@ -2857,6 +2804,11 @@ def runRoutinesStream(databases="all", mail=None):
             for db in dbs:
                 yield emit(f"<h2>{name} for {db}:</h2>")
                 res = routine_outputs.get(db)
+                if isinstance(res, tuple) and len(res) == 2 and isinstance(res[1], int) and res[1] >= 400:
+                    failures.append((name, db))
+                    res = res[0]
+                if isinstance(res, Exception) or (isinstance(res, dict) and res.get("status") in {"failed", "partial", "error"}):
+                    failures.append((name, db))
                 if isinstance(res, Exception):
                     results[name][db] = f"Exception: {res}"
                     yield emit(results[name][db])
@@ -2871,6 +2823,10 @@ def runRoutinesStream(databases="all", mail=None):
                 else:
                     results[name][db] = str(res)
                     yield emit(results[name][db])
+
+        # HTTP headers are already sent for a stream. The nightly wrapper must
+        # use this explicit outcome rather than infer success from mail delivery.
+        yield emit("CATMAPPER_ROUTINES_STATUS=" + ("failed" if failures else "ok"))
 
         # flatten file list
         flattened = []
