@@ -1,6 +1,7 @@
 """upload.py"""
 
 from .utils import *
+from . import context_policy
 from .event_types import validate_event_rows
 from .USES import *
 from .keys import *
@@ -373,6 +374,7 @@ def createUSES(links, database, user, ownershipMetadata=None):
 
         # Database connection assumed via driver
         driver = getDriver(database)
+        context_policy.validate_rows(driver, links.to_dict(orient="records"))
         validate_event_rows(links.to_dict(orient="records"), driver)
 
         # Checks that all columns in links represent valid CatMapper relationship properties.        
@@ -409,6 +411,8 @@ def createUSES(links, database, user, ownershipMetadata=None):
             "period",
             "culture",
             "polity",
+            "occupation",
+            "variable",
         ]
         for column_name in multi_value_columns:
             if column_name in links.columns:
@@ -576,6 +580,8 @@ def updateProperty(
 
         driver = getDriver(database)
         if propertyType == "USES":
+            if not isDataset:
+                context_policy.validate_rows(driver, df.to_dict(orient="records"))
             validate_event_rows(df.to_dict(orient="records"), driver)
         actor_claims = actorClaims or {}
         actor_user_id = str(actor_claims.get("userid") or "").strip()
@@ -2569,6 +2575,7 @@ def input_Nodes_Uses(
 
     # Reject invalid event columns and embedded JSON before any database write.
     validate_event_rows(dataset.to_dict(orient="records"), driver)
+    context_policy.validate_rows(driver, dataset.to_dict(orient="records"))
 
     # adhoc ID used for joining and filtering output purposes.
     updateLog(f"log/{user}uploadProgress.txt", "Creating import ID", write="a")
@@ -2980,6 +2987,8 @@ def input_Nodes_Uses(
         "period",
         "culture",
         "polity",
+        "occupation",
+        "variable",
     ]
     
     # Checks CMID-based columns for validity of the CMIDs in the columns, checks to see if CMID are in the database.

@@ -138,7 +138,10 @@ def getLabelsMetadata(driver):
     return n.CMName as label, n.groupLabel as groupLabel, 
     n.relationship as relationship, n.public as public, 
     n.default as default, n.description as description, 
-    n.displayName as displayName, n.remove as remove, n.color as color  
+    n.displayName as displayName, n.remove as remove, n.color as color,
+    n.contextualTargetMode as contextualTargetMode,
+    n.contextualTargetDomains as contextualTargetDomains,
+    n.contextualOrder as contextualOrder
     """
     data = getQuery(query=query, driver=driver)
     return data
@@ -152,7 +155,7 @@ def getPropertiesMetadata(driver, include_internal=True):
     n.display as display, n.group as group,
     n.metaType as metaType, n.search as search,
     n.translation as translation, n.allowedValues as allowedValues,
-    n.nodeType as nodeType,
+    n.nodeType as nodeType, n.groupLabel as groupLabel,
     coalesce(n.internal, false) as internal,
     coalesce(n.editable, true) as editable
     """

@@ -5,6 +5,7 @@
 import os
 import re
 from CM.utils import *
+from CM import context_policy
 from CM.metatypes import metadata_metatypes, normalize_metatype, storage_predicate, verify_storage
 from CM.event_types import get_allowed_event_types, validate_parent_context_events, parent_context_entries
 from CM.email import *
@@ -1336,10 +1337,9 @@ def getBadRelations(database, mail=None, return_type="data"):
     try:
         driver = getDriver(database)
         labels = getQuery(
-            "match (l:LABEL) where not l.relationship is null return distinct l.groupLabel as group, l.relationship as relationship", driver)
-
-        if database.lower() == "sociomap":
-            labels.append({'group': 'ETHNICITY', 'relationship': ''})
+            "MATCH (l:LABEL) WHERE l.CMName = l.groupLabel "
+            "AND NOT l.CMName IN ['CATEGORY','DATASET','USER','ALL NODES','ANY DOMAIN'] "
+            "RETURN DISTINCT l.groupLabel AS group, l.relationship AS relationship", driver)
         groups = list(set(item['group'] for item in labels))
 
         results = []
@@ -1351,7 +1351,7 @@ def getBadRelations(database, mail=None, return_type="data"):
                 matchContains = getQuery(
                     f"MATCH (p:CATEGORY)-[:CONTAINS]->(c:{group}) WHERE NOT 'GENERIC' IN labels(p) WITH p, c,[x IN labels(p) WHERE x IN {groups}] AS parentLabels,[y IN labels(c) WHERE y IN {groups}] AS childLabels UNWIND parentLabels AS parentLabel UNWIND childLabels AS childLabel WITH p, c, parentLabel, childLabel WHERE parentLabel <> '{group}' AND childLabel = '{group}' RETURN DISTINCT p.CMID AS parentCMID, p.CMName AS parentCMName, parentLabel + '->' + childLabel AS domains, c.CMID AS childCMID, c.CMName AS childCMName, 'CONTAINS' AS relationship", driver)
                 contains.append(matchContains)
-            else:
+            elif relationship:
                 matches = getQuery(
                     f"match (p:CATEGORY)-[:{relationship}]->(c:  {group})<-[r:USES]-(d:DATASET) where not '{group}' in labels(p) unwind keys(r) as property with p.CMID as parentCMID, p.CMName as parentCMName, c.CMID as childCMID, c.CNName as childCMName, r.Key as Key, d.datasetID as datasetID, d.shortName as shortName, '{relationship}' as relationship, apoc.text.join([i in labels(p) where not i in ['CATEGORY']],'; ') as domains, property, r[property] as value where parentCMID = value or parentCMID in value return distinct parentCMID, parentCMName, childCMID, childCMName, Key, datasetID, shortName, relationship, domains, property, value", driver)
                 results.append(matches)
@@ -1360,7 +1360,9 @@ def getBadRelations(database, mail=None, return_type="data"):
                 f"MATCH (p:CATEGORY)-[:CONTAINS]->(c:CATEGORY) WHERE NOT 'GENERIC' IN labels(p) WITH p, c, [x IN labels(p) WHERE x IN {groups}] AS parentLabels, [y IN labels(c) WHERE y IN {groups}] AS childLabels UNWIND parentLabels AS parentLabel UNWIND childLabels AS childLabel WITH p, c, parentLabel, childLabel WHERE NOT parentLabel = $group AND childLabel = $group RETURN DISTINCT p.CMID AS parentCMID, p.CMName AS parentCMName, parentLabel + '->' + childLabel AS domains, c.CMID AS childCMID, c.CMName AS childCMName, 'CONTAINS' AS relationship", driver, params={'group': group})
             contains.append(matchContains)
 
-        results = pd.concat([pd.DataFrame(item) for item in results])
+        if context_policy.enabled():
+            results.append(context_policy.stored_conflicts(driver))
+        results = pd.concat([pd.DataFrame(item) for item in results], ignore_index=True) if results else pd.DataFrame()
         contains = pd.concat([pd.DataFrame(item) for item in contains])
         results = pd.concat([results, contains])
         results = results.map(lambda x: '; '.join(str(v) for v in x) if isinstance(x, list) else x)

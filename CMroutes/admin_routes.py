@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, render_template, make_response
 from CM import *
+from CM import context_policy
 from CM.ownership import (
     OwnershipError,
     OwnerScopedAdminReviewRequired,
@@ -66,6 +67,11 @@ def _validate_uses_edit_request(database, action, input_payload):
         raise InvalidUsesEdit("The selected USES tie changed or no longer exists. Refresh the tie list.")
     if operation in {"edit", "delete"} and prop not in rows[0]["properties"]:
         raise InvalidUsesEdit("The selected property no longer exists on this USES tie. Refresh the tie list.")
+    if operation != "delete":
+        try:
+            context_policy.validate_rows(getDriver(database), [{"CMID": cmid, prop: payload.get("s1_3")}])
+        except ValueError as exc:
+            raise InvalidUsesEdit(str(exc)) from exc
 
 _ADMIN_USES_NON_ADDABLE_COMPONENT_PROPERTIES = {
     "eventdate",
@@ -1238,10 +1244,22 @@ def admin_usesproperties():
             allowed_props.append(property_name)
 
         allowed_props = sorted(set(allowed_props))
+        allowed_edit_props = None
+        if context_policy.enabled():
+            policy = context_policy.load_policy(driver)
+            domains = context_policy.node_domains(category_labels, policy)
+            if len(domains) != 1:
+                raise ValueError(f"Cannot resolve one primary domain for {CMID}")
+            domain = next(iter(domains))
+            allowed_props = [prop for prop in allowed_props if context_policy.property_allowed(domain, prop, policy)]
+            existing_props = {prop for record in records_list for prop in record[1]}
+            allowed_edit_props = sorted(prop for prop in existing_props
+                                        if context_policy.property_allowed(domain, prop, policy))
         
     return {
         "r": records_list,
         "r1": allowed_props,
+        "allowedEditProperties": allowed_edit_props,
         "error": ""
     }
 
