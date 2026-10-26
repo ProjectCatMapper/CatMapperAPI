@@ -122,8 +122,8 @@ def test_admin_edit_rejects_regular_user_uses_log_property(client, monkeypatch):
         },
     )
 
-    assert response.status_code == 202
-    assert response.get_json()["submittedForReview"] is True
+    assert response.status_code == 400
+    assert "Select a valid USES tie" in response.get_json()["error"]
 
 
 def test_admin_edit_rejects_regular_user_uses_ownership_metadata_property(client, monkeypatch):
@@ -147,12 +147,14 @@ def test_admin_edit_rejects_regular_user_uses_ownership_metadata_property(client
         },
     )
 
-    assert response.status_code == 202
-    assert response.get_json()["submittedForReview"] is True
+    assert response.status_code == 400
+    assert "Select a valid USES tie" in response.get_json()["error"]
 
 
 def test_admin_edit_allows_regular_user_for_owned_uses_key_property(client, monkeypatch):
     seen = {}
+    monkeypatch.setattr(admin_routes, "getDriver", lambda db: object())
+    monkeypatch.setattr(admin_routes, "getQuery", lambda **kw: [{"properties": {"Key": "Type == A"}}])
     selected_relation = [
         {"CMID": "AM1", "CMName": "Node"},
         {"id": "rel-owned", "Key": "Type == A"},
