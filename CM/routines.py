@@ -1483,6 +1483,48 @@ def CMNameNotInName(database, mail=None, return_type="data"):
         return result, 500
 
 
+def _repair_property_metatype(driver, prop, meta_type, *, relationship=False):
+    """Repair one metadata field without stringifying Boolean ownership locks."""
+    alias = "rel" if relationship else "n"
+    match = "MATCH ()-[rel]->()" if relationship else "MATCH (n)"
+    value = f"{alias}.`{prop}`"
+    if meta_type == "BOOLEAN":
+        predicate = f'valueType({value}) STARTS WITH "BOOLEAN"'
+        conversion = f"toBooleanOrNull(toString({value}))"
+        # Invalid locks must remain present. A null SET would delete the lock and
+        # coalesce(lock, false) in authorization would then allow editing.
+        invalid = getQuery(
+            f"""{match}
+            WHERE {value} IS NOT NULL AND NOT ({predicate})
+              AND (NOT (valueType({value}) STARTS WITH "STRING")
+                   OR {conversion} IS NULL)
+            RETURN count(*) AS count""",
+            driver, type="list",
+        )[0]
+        if invalid:
+            raise ValueError(f"{invalid} value(s) cannot be safely converted to BOOLEAN")
+        conversion_guard = f'AND valueType({value}) STARTS WITH "STRING" AND {conversion} IS NOT NULL'
+    else:
+        predicate = (
+            f'valueType({value}) STARTS WITH "LIST<STRING"'
+            if meta_type == "LIST"
+            else f'valueType({value}) STARTS WITH "STRING"'
+        )
+        conversion = f"""custom.formatProperties(
+            [v IN apoc.coll.flatten([{value}], true) WHERE v IS NOT NULL | toString(v)],
+            '{meta_type}', ';'
+        )[0].prop"""
+        conversion_guard = ""
+    result = getQuery(
+        f"""{match}
+        WHERE {value} IS NOT NULL AND NOT ({predicate}) {conversion_guard}
+        SET {value} = {conversion}
+        RETURN count(*) AS count""",
+        driver, type="list",
+    )
+    return result[0] if result else 0
+
+
 def fixMetaTypes(database, return_type="data"):
     """
     Validate and correct property types for nodes and relationships 
@@ -1496,8 +1538,10 @@ def fixMetaTypes(database, return_type="data"):
     Specifically:
       - Node properties and relationship properties are validated separately.
       - Each property is checked against its expected stored Neo4j type:
-          * "LIST" → Neo4j type "LIST OF STRING"
-          * all other metaTypes → Neo4j type "STRING"
+          * "LIST" → Neo4j string list
+          * "BOOLEAN" → native Neo4j Boolean, preserving true/false values
+          * other metaTypes → Neo4j string
+      - Unconvertible Boolean values are reported and retained, never removed.
       - Before formatting, values are coerced into string tokens so
         `custom.formatProperties` can safely process non-string values.
       - Properties with mismatched types are reformatted and updated in place.
@@ -1547,61 +1591,19 @@ def fixMetaTypes(database, return_type="data"):
 
         errors = []
 
-        for property, metaType in zip(node_properties['property'], node_properties['metaType']):
-            metaType = str(metaType).upper().strip()
-            prop = str(property).replace("`", "")
-            meta_type_predicate = (
-                f'valueType(n.`{prop}`) STARTS WITH "LIST<STRING"'
-                if metaType == "LIST"
-                else f'valueType(n.`{prop}`) STARTS WITH "STRING"'
-            )
-            query = f"""
-            MATCH (n)
-            WHERE n.`{prop}` IS NOT NULL
-              AND NOT ({meta_type_predicate})
-            SET n.`{prop}` = custom.formatProperties(
-              [v IN apoc.coll.flatten([n.`{prop}`], true) WHERE v IS NOT NULL | toString(v)],
-              '{metaType}',
-              ';'
-            )[0].prop
-            RETURN count(*) as count
-            """
-            try:
-                result = getQuery(query, driver, type="list")
-                updated = result[0] if isinstance(result, list) and len(result) > 0 else 0
-                print(f"Updated node property {prop} to {metaType}: {updated}")
-            except Exception as e:
-                msg = f"Failed node property {prop} ({metaType}): {e}"
-                print(msg)
-                errors.append(msg)
-
-        for property, metaType in zip(relationship_properties['property'], relationship_properties['metaType']):
-            metaType = str(metaType).upper().strip()
-            prop = str(property).replace("`", "")
-            meta_type_predicate = (
-                f'valueType(rel.`{prop}`) STARTS WITH "LIST<STRING"'
-                if metaType == "LIST"
-                else f'valueType(rel.`{prop}`) STARTS WITH "STRING"'
-            )
-            query = f"""
-            MATCH (n)-[rel]->(m)
-            WHERE rel.`{prop}` IS NOT NULL
-              AND NOT ({meta_type_predicate})
-            SET rel.`{prop}` = custom.formatProperties(
-              [v IN apoc.coll.flatten([rel.`{prop}`], true) WHERE v IS NOT NULL | toString(v)],
-              '{metaType}',
-              ';'
-            )[0].prop
-            RETURN count(*) as count
-            """
-            try:
-                result = getQuery(query, driver, type="list")
-                updated = result[0] if isinstance(result, list) and len(result) > 0 else 0
-                print(f"Updated relationship property {prop} to {metaType}: {updated}")
-            except Exception as e:
-                msg = f"Failed relationship property {prop} ({metaType}): {e}"
-                print(msg)
-                errors.append(msg)
+        for kind, definitions in (("node", node_properties), ("relationship", relationship_properties)):
+            for property, metaType in zip(definitions['property'], definitions['metaType']):
+                metaType = str(metaType).upper().strip()
+                prop = str(property).replace("`", "")
+                try:
+                    updated = _repair_property_metatype(
+                        driver, prop, metaType, relationship=(kind == "relationship")
+                    )
+                    print(f"Updated {kind} property {prop} to {metaType}: {updated}")
+                except Exception as e:
+                    msg = f"Failed {kind} property {prop} ({metaType}): {e}"
+                    print(msg)
+                    errors.append(msg)
 
         if return_type == "data":
             status = "success" if len(errors) == 0 else "partial"
