@@ -14,11 +14,58 @@ import json
 import os
 from datetime import datetime, timezone
 from uuid import uuid4
+from CM.admin import _selected_admin_relation
+from CM.keys import key_format_issue
 from .auth_utils import verify_request_auth, classify_auth_error_status
 from .extensions import mail
 from .task_queue import enqueue_change_review_approval, is_rq_enabled
 
 admin_bp = Blueprint('admin', __name__)
+
+
+class InvalidUsesEdit(ValueError):
+    """An incomplete or stale target must never become an approval request."""
+
+
+def _validate_uses_edit_request(database, action, input_payload):
+    if action != "add/edit/delete USES property":
+        return
+    payload = input_payload or {}
+    selection = payload.get("s1_7")
+    if (isinstance(selection, bool) or not isinstance(selection, (int, str))
+            or not str(selection).strip().isdecimal()):
+        raise InvalidUsesEdit("Select a valid USES tie before submitting.")
+    try:
+        selected, props, dataset_id = _selected_admin_relation(payload, "USES")
+    except (ValueError, TypeError, KeyError) as exc:
+        raise InvalidUsesEdit(str(exc)) from exc
+    cmid = str(payload.get("s1_2") or "").strip()
+    if not isinstance(selected[0], dict) or selected[0].get("CMID") != cmid or not props.get("id"):
+        raise InvalidUsesEdit("The selected USES tie does not match this category. Refresh the tie list.")
+    prop = str(payload.get("s1_8") or "").strip()
+    if not prop:
+        raise InvalidUsesEdit("Select a USES property before submitting.")
+    operation = payload.get("s1_1")
+    if operation not in {"add", "edit", "delete"}:
+        raise InvalidUsesEdit("Select add, edit, or delete for the USES property.")
+    if prop == "Key" and operation != "delete":
+        issue = key_format_issue(payload.get("s1_3"))
+        if issue:
+            raise InvalidUsesEdit(issue)
+    rows = getQuery(
+        query="""
+        MATCH (d:DATASET {CMID: $datasetID})-[r:USES]->(c:CATEGORY {CMID: $CMID})
+        WHERE elementId(r) = $relID
+        RETURN properties(r) AS properties
+        """,
+        driver=getDriver(database),
+        params={"datasetID": dataset_id, "CMID": cmid, "relID": props["id"]},
+        type="dict",
+    )
+    if len(rows or []) != 1 or rows[0]["properties"].get("Key") != props.get("Key"):
+        raise InvalidUsesEdit("The selected USES tie changed or no longer exists. Refresh the tie list.")
+    if operation in {"edit", "delete"} and prop not in rows[0]["properties"]:
+        raise InvalidUsesEdit("The selected property no longer exists on this USES tie. Refresh the tie list.")
 
 _ADMIN_USES_NON_ADDABLE_COMPONENT_PROPERTIES = {
     "eventdate",
@@ -363,6 +410,7 @@ def _notify_admins_of_change_review(review):
 
 
 def _create_change_review(database, action, input_payload, tabledata, dataset_id, claims, reason):
+    _validate_uses_edit_request(database, action, input_payload)
     database_key = _change_review_database_key(database)
     access_rows = getQuery(
         query="""
@@ -1575,6 +1623,7 @@ def _finalize_change_review_approval(request_id, actor_claims):
         "datasetID": review.get("datasetID") or "",
     }
     try:
+        _validate_uses_edit_request(review["database"], review["action"], input_payload)
         result = _execute_admin_edit(
             review["database"],
             review["action"],
@@ -1652,6 +1701,8 @@ def decide_change_review(request_id):
         review = _load_change_review(request_id)
         if not review or review.get("status") != "pending":
             raise ValueError("Pending change review request not found")
+        if decision == "approve":
+            _validate_uses_edit_request(review["database"], review["action"], review.get("input"))
         now = _now_iso()
 
         if decision == "reject":
@@ -1858,6 +1909,7 @@ def getAdminEdit():
         if not isinstance(input, dict):
             input = {}
         input = dict(input)
+        _validate_uses_edit_request(database, fun, input)
         try:
             _authorize_admin_edit_function(
                 fun=fun,
@@ -1888,6 +1940,8 @@ def getAdminEdit():
         input["_actorClaims"] = dict(claims)
         result = _execute_admin_edit(database, fun, acting_user, input, data)
         return result
+    except InvalidUsesEdit as e:
+        return jsonify({"error": str(e)}), 400
     except OwnerScopedAdminReviewRequired as e:
         if claims and not is_admin_claims(claims):
             review = _create_change_review(
