@@ -223,12 +223,18 @@ def createNodes(df, database,isDataset, user, uniqueID=None, ownershipMetadata=N
 
         isDataset = isDataset
 
-        #Assigns appropriate label(s) to node, adding CATEGORY if the label is a CATEGORY domain.
+        # Assign the subtype and its domain together. A subsequent upload must
+        # not wait for background USES processing to recognize PPL as AREA, etc.
         idlabel = "CATEGORY"
         if isDataset:
             idlabel = "DATASET"
         else:
-            df["label"] = df["label"].apply(lambda x: f"CATEGORY:{x}")
+            label_domains = _fetch_label_domain_map(driver, df["label"])
+            df["label"] = df["label"].apply(
+                lambda label: ":".join(dict.fromkeys(
+                    ["CATEGORY", label, label_domains.get(label, label)]
+                ))
+            )
 
         # check for uniqueID
         if not uniqueID in df.columns or uniqueID is None:
@@ -3102,15 +3108,16 @@ def input_Nodes_Uses(
 
             mismatch = None
             if combine:
-                query = """
-                UNWIND keys($rows) AS cmid
-                MATCH (n:CATEGORY {CMID: cmid})
-                WHERE NOT $rows[cmid] IN labels(n)
-                RETURN n.CMID AS CMID
-                LIMIT 1
-                """
-                term_mismatch = getQuery(query, driver, params={"rows": combine})
-                mismatch = term_mismatch[0] if term_mismatch else None
+                # Existing categories may predate label reconciliation. Resolve
+                # domains from their actual subtypes rather than rejecting a
+                # valid PPL node just because AREA has not been materialized.
+                existing_metadata = _fetch_cmid_metadata(driver, combine)
+                for cmid, expected_label in combine.items():
+                    metadata = existing_metadata[cmid]
+                    actual_labels = metadata["labels"] | metadata["groupLabels"]
+                    if expected_label not in actual_labels:
+                        mismatch = {"CMID": cmid}
+                        break
 
             if mismatch:
                 raise ValueError(

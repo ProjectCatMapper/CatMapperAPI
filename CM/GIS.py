@@ -146,7 +146,7 @@ def getDatasetPoints(CMID, driver):
     WHERE r.geoCoords IS NOT NULL
     RETURN DISTINCT
         r.geoCoords AS geometry,
-        coalesce(c.CMName, c.Name, c.CMID) AS source,
+        coalesce(d.shortName, d.CMName, d.CMID) AS source,
         r.Key AS Key,
         c.CMID AS CMID,
         coalesce(c.CMName, c.Name, c.CMID) AS CMName,

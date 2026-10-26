@@ -1111,7 +1111,7 @@ def getMapLayerOptions(database, cmid, max_depth=DEFAULT_MAP_DESCENDANT_DEPTH, n
         layers.append(
             _build_layer_option(
                 f"{MAP_LAYER_USES_CATEGORIES}:CATEGORY",
-                "USES category locations",
+                "Category locations recorded in this dataset",
                 MAP_LAYER_USES_CATEGORIES,
                 used_category_nodes,
                 used_category_counts,
@@ -1426,7 +1426,7 @@ def exploreGeometry(
                 _build_inherited_geometry_layer(
                     driver,
                     f"{MAP_LAYER_USES_CATEGORIES}:CATEGORY",
-                    "USES category locations",
+                    "Category locations recorded in this dataset",
                     MAP_LAYER_USES_CATEGORIES,
                     used_category_nodes,
                     "USES",

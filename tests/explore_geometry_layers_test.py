@@ -232,6 +232,7 @@ def test_explore_geometry_dataset_uses_category_layer_adds_provenance(monkeypatc
     uses_layer = payload["maplayers"][0]
     assert uses_layer["id"] == "uses:CATEGORY"
     assert uses_layer["mode"] == "uses"
+    assert uses_layer["label"] == "Category locations recorded in this dataset"
     assert uses_layer["relationship"] == "USES"
     assert uses_layer["pointCount"] == 1
     assert uses_layer["points"][0]["cood"] == [30, 40]
@@ -431,7 +432,7 @@ def test_map_layer_options_summarize_dataset_used_categories(monkeypatch):
     layers = {layer["id"]: layer for layer in payload["layers"]}
 
     assert layers["uses:CATEGORY"]["available"] is True
-    assert layers["uses:CATEGORY"]["label"] == "USES category locations"
+    assert layers["uses:CATEGORY"]["label"] == "Category locations recorded in this dataset"
     assert layers["uses:CATEGORY"]["pointCount"] == 3
     assert layers["uses:CATEGORY"]["polygonCount"] == 1
     assert layers["uses:CATEGORY"]["displayedNodeCount"] == 2
@@ -527,3 +528,23 @@ def test_direct_geometry_retains_domain_labels_for_map_filter():
         "sourceNodeLabels": ["CATEGORY", "AREA", "ADM0"],
     }])
     assert points[0]["sourceNodeLabels"] == ["CATEGORY", "AREA", "ADM0"]
+
+
+def test_dataset_point_source_identifies_dataset_and_preserves_category_identity(monkeypatch):
+    import CM.GIS as gis
+
+    def query(query, driver, params=None, **kwargs):
+        assert "coalesce(d.shortName, d.CMName, d.CMID) AS source" in query
+        assert "c.CMID AS CMID" in query
+        assert params == {"CMID": "SD2247"}
+        return [{
+            "geometry": json.dumps({"type": "Point", "coordinates": [10, 20]}),
+            "source": "Dataset A", "CMID": "SM2", "CMName": "Basti",
+        }]
+
+    monkeypatch.setattr(gis, "getQuery", query)
+    points = explore._transform_dataset_points(gis.getDatasetPoints("SD2247", object()))
+    assert points == [{
+        "geometry": json.dumps({"type": "Point", "coordinates": [10, 20]}),
+        "source": "Dataset A", "CMID": "SM2", "CMName": "Basti", "cood": [10, 20],
+    }]
