@@ -1,6 +1,7 @@
 ''' USES.py '''
 
 from .utils import *
+from . import context_policy
 from .event_types import get_allowed_event_types, validate_parent_context_events, validate_stored_event_contexts
 from .metadata import getPropertiesMetadata
 from .log import createLog
@@ -214,6 +215,7 @@ def fixUsesRels(database, property, relationship, CMID=None):
         # Validate before opening a driver or executing even the first query.
         relationship = _validate_derived_relationship(property, relationship)
         driver = getDriver(database)
+        context_policy.validate_stored(driver, CMID, [property])
         conflicts = _contextual_tie_primary_domain_conflicts(
             driver,
             CMID,
@@ -522,6 +524,7 @@ def processUSES(database, CMID=None, user="0", detailed = True):
     try:
         driver = getDriver(database)
         # Fail closed on bad metadata before any reconciliation step can write.
+        context_policy.validate_stored(driver, CMID)
         # PROPERTY.relationship names derived links, not property storage types.
         properties = [item for item in getPropertiesMetadata(driver=driver)
                       if item.get('relationship') is not None]

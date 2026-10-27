@@ -12,6 +12,7 @@
 ############################
 
 from .utils import *
+from . import context_policy
 from .metadata import *
 from .log import createLog
 from .event_types import get_allowed_event_types, validate_event_type, validate_event_rows
@@ -1118,6 +1119,10 @@ def replaceProperty(cmid, property, old, new, database, datasetID = None, Key = 
     """
     try:
         driver = getDriver(database)
+        context_policy.validate_rows(driver, [
+            {"CMID": category, property: new}
+            for category in (cmid if isinstance(cmid, list) else [cmid])
+        ])
         if property == "parentContext":
             # Select stored values and decode JSON rather than comparing the
             # entire serialized object with a bare CMID.
@@ -2080,6 +2085,9 @@ def createLabel(database,user,input):
     label_name = str(input.get('s1_2', "")).strip()
     group_label_input = str(input.get('s1_7', "")).strip()
     relationship_value = str(input.get('s1_3', "")).strip()
+    if context_policy.enabled() and relationship_value:
+        raise ValueError("New labels inherit contextual relationships from their primary domain. "
+                         "Configure a new domain's permissions through reviewed policy metadata.")
     description = str(input.get('s1_4', "")).strip()
     display_name = str(input.get('s1_5', "")).strip()
     color = str(input.get('s1_6', "")).strip() or "#404040"
@@ -2114,40 +2122,19 @@ def createLabel(database,user,input):
         "color": color,
         "label": display_name,
         "displayOrder": str(displayOrder),
+        "public": "TRUE",
     }
 
-    if relationship_value != "":
+    if relationship_value:
         create_params["relationship"] = relationship_value
-        q = """
-        CREATE (n:METADATA:LABEL {
-            CMID: $CMID,
-            CMName: $CMName,
-            groupLabel: $groupLabel,
-            relationship: $relationship,
-            description: $description,
-            displayName: $displayName,
-            color: $color,
-            label: $label,
-            displayOrder: $displayOrder,
-            public: "TRUE"
-        })
-        """
-    else:
-        q = """
-        CREATE (n:METADATA:LABEL {
-            CMID: $CMID,
-            CMName: $CMName,
-            groupLabel: $groupLabel,
-            description: $description,
-            displayName: $displayName,
-            color: $color,
-            label: $label,
-            displayOrder: $displayOrder,
-            public: "TRUE"
-        })
-        """
+    if context_policy.enabled():
+        if grouplabel == label_name:
+            create_params["contextualTargetMode"] = "NONE"
+        elif grouplabel not in context_policy.load_policy(driver)["domains"]:
+            raise ValueError("Choose an existing primary domain for the new subtype.")
 
-    result = getQuery(q,driver=driver, params=create_params)
+    getQuery("CREATE (n:METADATA:LABEL) SET n=$properties RETURN n.CMID AS CMID",
+             driver=driver, params={"properties": create_params})
 
     # create index after creation
 

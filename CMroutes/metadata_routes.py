@@ -1,10 +1,42 @@
 import json
 from CM import *
+from CM import context_policy
 from flask import jsonify, request, Blueprint
 
 metadata_bp = Blueprint('metadata', __name__)
 
 ALLOWED_PROPERTY_METADATA_DATABASES = {"sociomap", "archamap"}
+
+
+@metadata_bp.route('/api/databases/<database>/metadata/contextual-policy', methods=['GET'])
+def get_contextual_policy(database):
+    if database.lower() not in ALLOWED_PROPERTY_METADATA_DATABASES:
+        return jsonify({"error": "Unsupported database"}), 400
+    try:
+        policy = context_policy.load_policy(getDriver(database))
+        return jsonify({"database": database, "enabled": context_policy.enabled(), **policy})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@metadata_bp.route('/api/databases/<database>/metadata/contextual-policy/validate', methods=['POST'])
+def validate_contextual_policy(database):
+    """Read-only preflight for proposed source assertions; never enqueue or write."""
+    if database.lower() not in ALLOWED_PROPERTY_METADATA_DATABASES:
+        return jsonify({"error": "Unsupported database"}), 400
+    try:
+        if not context_policy.enabled():
+            raise ValueError("Metadata contextual validation is not enabled on this endpoint")
+        payload = request.get_json(silent=True) or {}
+        if not isinstance(payload, dict):
+            raise ValueError("Supply an object containing rows")
+        rows = payload.get("rows")
+        if not isinstance(rows, list) or len(rows) > 1000 or any(not isinstance(row, dict) for row in rows):
+            raise ValueError("Supply rows as a list of at most 1000 objects")
+        context_policy.validate_rows(getDriver(database), rows)
+        return jsonify({"valid": True, "writes": 0})
+    except ValueError as exc:
+        return jsonify({"valid": False, "error": str(exc), "writes": 0}), 400
 
 
 def _parse_node_scope(value):
