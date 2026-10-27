@@ -52,7 +52,36 @@ def test_missing_metadata_fails_closed(monkeypatch):
         policy.load_policy(object())
 
 
-@pytest.mark.parametrize("mode,targets", [(None, []), ("ONLY", "AREA"), ("ALL_EXCEPT", ["UNKNOWN"]), ("NONE", ["AREA"])])
+@pytest.mark.parametrize("mode,relationship,expected", [
+    ("NONE", None, []),
+    ("ALL_EXCEPT", "AREA_OF", ["AREA"]),
+    ("ONLY", "AREA_OF", []),
+])
+@pytest.mark.parametrize("stored_list", ["absent", "null", "empty"])
+def test_intentionally_absent_target_list_has_empty_semantics(mode, relationship, expected, stored_list):
+    row = {"label": "AREA", "groupLabel": "AREA", "relationship": relationship,
+           "contextualTargetMode": mode}
+    if stored_list != "absent":
+        row["contextualTargetDomains"] = None if stored_list == "null" else []
+    resolved = policy.parse_policy([row], [])
+    assert resolved["domains"]["AREA"]["targets"] == []
+    assert resolved["domains"]["AREA"]["allowed"] == expected
+
+
+@pytest.mark.parametrize("database", ["archamap", "sociomap"])
+def test_migration_is_stable_after_empty_property_cleanup(database):
+    rows = [{"id": name, "properties": {"CMName": name, "groupLabel": name}}
+            for name in ["GENERIC", "AREA", "ATTRIBUTE", "VARIABLE"]]
+    desired = migration.desired_labels(rows, database)
+    for row in desired:
+        assert row["properties"].get("contextualTargetDomains") != []
+    assert migration.desired_labels(desired, database) == desired
+    resolved = migration.parsed_policy(desired, [])
+    assert resolved["domains"]["GENERIC"]["allowed"] == []
+    assert resolved["domains"]["AREA"]["allowed"] == sorted(resolved["domains"])
+
+
+@pytest.mark.parametrize("mode,targets", [(None, []), ("ONLY", "AREA"), ("ALL_EXCEPT", ["UNKNOWN"]), ("NONE", ["AREA"]), ("ONLY", ""), ("ALL_EXCEPT", False)])
 def test_invalid_policy_rejected(mode, targets):
     with pytest.raises(ValueError):
         policy.parse_policy([{"label": "AREA", "groupLabel": "AREA", "relationship": "AREA_OF",
@@ -227,7 +256,7 @@ def test_new_primary_domain_defaults_to_no_contextual_relationships(monkeypatch)
     monkeypatch.setattr(admin, "getQuery", query)
     admin.createLabel("ArchaMap", "test", {"s1_2": "NEW_DOMAIN", "s1_7": "NA", "s1_5": "NEW_DOMAIN"})
     assert created[0]["contextualTargetMode"] == "NONE"
-    assert created[0]["contextualTargetDomains"] == []
+    assert "contextualTargetDomains" not in created[0]
     assert created[0]["public"] == "TRUE"
     assert "relationship" not in created[0]
 

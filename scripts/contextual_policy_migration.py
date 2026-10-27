@@ -56,7 +56,11 @@ def desired_labels(rows, database):
         name, group = p.get("CMName"), p.get("groupLabel")
         if name == group and name not in context_policy.STRUCTURAL:
             relationship, mode, targets = RULES[database].get(name, (None, "NONE", []))
-            p.update(contextualTargetMode=mode, contextualTargetDomains=targets)
+            p["contextualTargetMode"] = mode
+            if targets:
+                p["contextualTargetDomains"] = targets
+            else:
+                p.pop("contextualTargetDomains", None)
             if relationship:
                 p["relationship"] = relationship
                 p["contextualOrder"] = str(list(RULES[database]).index(name) + 1)

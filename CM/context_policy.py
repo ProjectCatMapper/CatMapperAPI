@@ -37,6 +37,10 @@ def parse_policy(labels, properties):
         if domain in domains:
             raise ValueError(f"Duplicate domain metadata for {domain}")
         mode, targets = row.get("contextualTargetMode"), row.get("contextualTargetDomains")
+        # An absent list intentionally has no entries. This is the canonical
+        # stored representation used by metadata writers and nightly cleanup.
+        if targets is None:
+            targets = []
         relationship = row.get("relationship")
         if mode not in {"ALL_EXCEPT", "ONLY", "NONE"} or not isinstance(targets, list):
             raise ValueError(f"Missing or invalid contextual policy for {domain}")

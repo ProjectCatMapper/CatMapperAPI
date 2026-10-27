@@ -2129,7 +2129,7 @@ def createLabel(database,user,input):
         create_params["relationship"] = relationship_value
     if context_policy.enabled():
         if grouplabel == label_name:
-            create_params.update(contextualTargetMode="NONE", contextualTargetDomains=[])
+            create_params["contextualTargetMode"] = "NONE"
         elif grouplabel not in context_policy.load_policy(driver)["domains"]:
             raise ValueError("Choose an existing primary domain for the new subtype.")
 
