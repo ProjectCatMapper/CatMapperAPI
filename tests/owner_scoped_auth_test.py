@@ -192,6 +192,7 @@ def test_admin_edit_allows_regular_user_for_owned_uses_key_property(client, monk
 
 
 def test_admin_edit_allows_regular_user_merge_for_owned_isolated_discard_node(client, monkeypatch):
+    monkeypatch.setattr(admin_routes, "_validate_merge_edit_request", lambda *args: None)
     seen = {}
 
     monkeypatch.setattr(admin_routes, "verify_request_auth", lambda **kwargs: {"userid": "7", "role": "user"})

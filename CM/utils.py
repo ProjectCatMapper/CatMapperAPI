@@ -10,12 +10,36 @@ from collections.abc import Iterable
 import json
 from configparser import ConfigParser
 import threading
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 
 _driver_cache = {}
 _driver_lock = threading.Lock()
 _last_verified = {}
 _QUERY_CANCEL_CHECKER = threading.local()
+_QUERY_TRANSACTIONS = ContextVar("catmapper_query_transactions", default=None)
+
+
+@contextmanager
+def query_transaction(database, driver):
+    """Share one transaction with helpers that call getDriver/getQuery."""
+    database = database.lower()
+    active = _QUERY_TRANSACTIONS.get() or {}
+    if database in active:
+        raise RuntimeError("Nested transactions for the same database are not supported")
+    with driver.session() as session, session.begin_transaction() as transaction:
+        token = _QUERY_TRANSACTIONS.set({**active, database: (driver, transaction)})
+        try:
+            yield
+            transaction.commit()
+        except BaseException:
+            transaction.rollback()
+            raise
+        finally:
+            _QUERY_TRANSACTIONS.reset(token)
+
+
 _CYPHER_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _CYPHER_ELEMENT_ID_PATTERN = re.compile(r"^[A-Za-z0-9:_-]+$")
 VALID_VARIABLE_CATEGORY_TYPE_VALUES = {
@@ -148,6 +172,9 @@ def getDriver(database):
     Automatically handles defunct connections.
     """
     database = database.lower()
+    active = _QUERY_TRANSACTIONS.get() or {}
+    if database in active:
+        return active[database][0]
     
     with _driver_lock:
         now = datetime.now()
@@ -284,11 +311,13 @@ def getQuery(query, driver, params=None, type="dict", max_retries=3, **kwargs):
     """
     params = params.copy() if params else {}
     params.update(kwargs)
+    transaction = next((tx for active_driver, tx in (_QUERY_TRANSACTIONS.get() or {}).values()
+                        if active_driver is driver), None)
     
     for attempt in range(max_retries):
         try:
             check_query_cancellation()
-            with driver.session() as session:
+            with (nullcontext(transaction) if transaction is not None else driver.session()) as session:
                 result = session.run(query, params)
                 
                 # Consume results BEFORE session closes
@@ -323,6 +352,10 @@ def getQuery(query, driver, params=None, type="dict", max_retries=3, **kwargs):
                     raise ValueError(f"Invalid type parameter: '{type}'. Must be 'records', 'dict', or 'list'")
                     
         except Exception as e:
+            if transaction is not None:
+                # Retrying one query inside a failed transaction can never
+                # restore it; the enclosing operation must roll back.
+                raise
             if isinstance(e, QueryCancelledError):
                 raise
             error_msg = str(e).lower()

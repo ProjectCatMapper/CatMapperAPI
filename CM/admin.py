@@ -13,6 +13,10 @@
 
 from .utils import *
 from . import context_policy
+from .merge_references import (
+    replace_exact, replace_context, plan_merge_references, validate_merge_choice,
+    validate_merge_plan, apply_reference_updates,
+)
 from .metadata import *
 from .log import createLog
 from .event_types import get_allowed_event_types, validate_event_type, validate_event_rows
@@ -1119,66 +1123,48 @@ def replaceProperty(cmid, property, old, new, database, datasetID = None, Key = 
     """
     try:
         driver = getDriver(database)
-        context_policy.validate_rows(driver, [
-            {"CMID": category, property: new}
-            for category in (cmid if isinstance(cmid, list) else [cmid])
-        ])
-        if property == "parentContext":
-            # Select stored values and decode JSON rather than comparing the
-            # entire serialized object with a bare CMID.
-            rows = getQuery("""
-                MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
-                WHERE c.CMID IN $cmids AND r.parentContext IS NOT NULL
-                  AND ($datasetID IS NULL OR d.CMID = $datasetID)
-                  AND ($key IS NULL OR r.Key = $key)
-                RETURN elementId(r) AS relID, r.parentContext AS value
-            """, driver, type="dict", params={
-                "cmids": cmid if isinstance(cmid, list) else [cmid],
-                "datasetID": datasetID, "key": Key,
-            })
-            updates = []
-            for row in rows:
-                value = _replace_parent_context_cmid(row["value"], old, new)
-                if value != row["value"]:
-                    updates.append({"relID": row["relID"], "value": value})
-            if updates:
-                getQuery("""
-                    UNWIND $updates AS update
-                    MATCH ()-[r:USES]->()
-                    WHERE elementId(r) = update.relID
-                    SET r.parentContext = update.value
-                """, driver, params={"updates": updates})
-            return f"Completed {cmid} property {property}"
-        if datasetID is None and Key is None:
-            query = f"""
-            unwind $cmid as cmid
-            match (:CATEGORY {{CMID: cmid}})<-[r:USES]-(:DATASET) 
-            where not r.{property} is null
-            with r, [i in r.{property} | case when i = $old then $new else i end] as prop
-            set r.{property} = prop
-            """
-        else:
-            if len(cmid) > 0:
-                raise Exception("cmid must be a single value, not a list")
-            query = f"""
-            match (:CATEGORY {{CMID: $cmid}})<-[r:USES {{Key: $key}}]-(:DATASET {{CMID: $datasetID}}) 
-            where not r.{property} is null
-            with r, [i in r.{property} | case when i = $old then $new else i end] as prop
-            set r.{property} = prop
-            """
-        getQuery(query, driver, params={
-            "cmid": cmid,
-            "datasetID": datasetID,
-            "key": Key,
-            "old": old,
-            "new": new
-        })
+        property = sanitize_cypher_identifier(property, "property")
+        cmids = cmid if isinstance(cmid, list) else [cmid]
+        rows = getQuery("""
+            MATCH (c:CATEGORY)<-[r:USES]-(d:DATASET)
+            WHERE c.CMID IN $cmids AND r[$property] IS NOT NULL
+                AND ($datasetID IS NULL OR d.CMID = $datasetID)
+                AND ($key IS NULL OR r.Key = $key)
+            RETURN c.CMID AS CMID,elementId(r) AS relID,r[$property] AS value
+        """, driver, params={"cmids": cmids, "property": property,
+                              "datasetID": datasetID, "key": Key})
+        updates, proposed = [], []
+        for row in rows:
+            value = (replace_context(row["value"], old, new) if property == "parentContext"
+                     else replace_exact(row["value"], old, new))
+            if value != row["value"]:
+                updates.append({"relID": row["relID"], "properties": {property: value}})
+                proposed.append({"CMID": row["CMID"], property: value})
+        context_policy.validate_rows(driver, proposed)
+        validate_event_rows(proposed, driver)
+        apply_reference_updates(driver, updates)
         return f"Completed {cmid} property {property}"
     except Exception as e:
         return str(e), 500
 
+
+def mergeNodes(keepcmid, deletecmid, user, database, remove_cyclic_parents=None,
+               cyclic_parent_token=None):
+    """Commit source rewrites, node merge, logs and reconciliation together."""
+    try:
+        driver = getDriver(database)
+        with query_transaction(database, driver):
+            result = _merge_nodes(keepcmid, deletecmid, user, database,
+                                  remove_cyclic_parents, cyclic_parent_token)
+            if isinstance(result, tuple) and result[1] >= 400:
+                raise RuntimeError(result[0])
+        return result
+    except Exception as exc:
+        return str(exc), 500
+
 #Main function for merging nodes
-def mergeNodes(keepcmid,deletecmid,user,database):
+def _merge_nodes(keepcmid, deletecmid, user, database, remove_cyclic_parents=None,
+                 cyclic_parent_token=None):
     """
     Merges nodes in a Neo4j database based on specified CMIDs.
 
@@ -1199,6 +1185,11 @@ def mergeNodes(keepcmid,deletecmid,user,database):
         
         driver = getDriver(database)
 
+        getQuery("""MATCH (n) WHERE n.CMID IN $cmids
+            WITH n ORDER BY n.CMID WITH collect(n) AS nodes
+            CALL apoc.lock.nodes(nodes)""", driver,
+            params={"cmids": [keepcmid, deletecmid]})
+
         results = [f"Started Combining {deletecmid} into {keepcmid}"]
 
         keep_summary = getNodeMergeSummary(keepcmid, driver)
@@ -1217,52 +1208,23 @@ def mergeNodes(keepcmid,deletecmid,user,database):
                 f"Delete {deletecmid} ({delete_summary.get('CMName')}) is {delete_label}."
             )
         
-        results = results + [addCMNameRel(database, keepcmid)]
-        results = results + [addCMNameRel(database, deletecmid)]
+        plan = plan_merge_references(driver, keepcmid, deletecmid,
+                                     remove_cyclic_parents=remove_cyclic_parents is True,
+                                     lock=True)
+        validate_merge_choice(plan, remove_cyclic_parents, cyclic_parent_token)
+        validate_merge_plan(driver, plan)
 
-        # get EC relID
-        query = """
-        unwind $cmid as cmid match (c:CATEGORY {CMID: cmid})<-[r:USES]-(d:DATASET {CMID: "SD11"}) return elementId(r) as relID
-            """
+        for cmid in (keepcmid, deletecmid):
+            name_result = addCMNameRel(database, cmid)
+            if isinstance(name_result, tuple) and name_result[1] >= 400:
+                raise RuntimeError(name_result[0])
+            results.append(name_result)
 
-        relID = getQuery(query, driver, params = {"cmid": keepcmid}, type = "list")
-
-        results = results + ["relID to keep"]
-        results = results + relID
-
-        validate_event_rows(getQuery("""
-            MATCH (:DATASET)-[r:USES]->(c:CATEGORY)
-            WHERE r.parentContext IS NOT NULL AND (
-                c.CMID IN $cmids OR ANY(value IN
-                    CASE WHEN valueType(r.parentContext) STARTS WITH 'LIST<'
-                         THEN r.parentContext ELSE [r.parentContext] END
-                    WHERE toString(value) CONTAINS $deletecmid))
-            RETURN r.parentContext AS parentContext
-        """, driver, params={"cmids": [keepcmid, deletecmid], "deletecmid": deletecmid}), driver)
-
-        # replace the CMID in the USES relationships
-        contextProps = getQuery(
-            "match (m:PROPERTY) where m.relationship is not null return m.CMName as property", driver, type = "list")
-        contextProps.append("parentContext") 
-
-        # Find references in source USES properties directly. Derived graph
-        # edges may be absent or stale, especially for parentContext-only refs.
-        cmids = getQuery("""
-            MATCH (c:CATEGORY)<-[r:USES]-(:DATASET)
-            WHERE ANY(prop IN $contextProps WHERE
-                ANY(value IN CASE WHEN valueType(r[prop]) STARTS WITH 'LIST<'
-                    THEN r[prop] ELSE [r[prop]] END
-                    WHERE toString(value) CONTAINS $deletecmid))
-            RETURN DISTINCT c.CMID AS cmid
-        """, driver, params={"deletecmid": deletecmid, "contextProps": contextProps},
-            type="list")
-
-        for property in contextProps:
-            results = results + [f"updating {property} with new CMID"]
-            replacement = replaceProperty(cmid=cmids, property=property,
-                                         old=deletecmid, new=keepcmid, database=database)
-            if isinstance(replacement, tuple) and replacement[1] == 500:
-                raise RuntimeError(f"Failed to update {property}: {replacement[0]}")
+        internal_dataset = "AD941" if database.lower() == "archamap" else "SD11"
+        relID = getQuery("""MATCH (:CATEGORY {CMID: $cmid})<-[r:USES]-
+            (:DATASET {CMID: $datasetID}) RETURN elementId(r) AS relID""",
+            driver, params={"cmid": keepcmid, "datasetID": internal_dataset}, type="list")
+        apply_reference_updates(driver, plan["updates"])
 
         # determine the merge label from the resolved primary domain
         if len(keepcmid) > 1 and keepcmid[1] == "D":
@@ -1287,19 +1249,6 @@ def mergeNodes(keepcmid,deletecmid,user,database):
 
             getQuery(query, driver, keepcmid=keepcmid, deletecmid=deletecmid)
 
-            query = f"""
-            MATCH (c:DATASET)-[e1:MERGING]->(k:CATEGORY {{CMID: $keepcmid}})
-            MATCH (c)-[e2:MERGING]->(d:CATEGORY {{CMID: $deletecmid}})
-            WHERE e1.stack     = e2.stack
-            AND e1.Key       = e2.Key
-
-            WITH  e2
-
-            DELETE e2
-            """
-
-            getQuery(query, driver, keepcmid=keepcmid, deletecmid=deletecmid)
-        
         # combine the nodes
 
         query = f"""
@@ -1317,6 +1266,10 @@ def mergeNodes(keepcmid,deletecmid,user,database):
         merged = getQuery(query, driver, keepcmid=keepcmid, deletecmid=deletecmid, type = "list")
         if not keepcmid in merged:
             raise Exception(f"Failed to merge {deletecmid} into {keepcmid}")
+
+        if remove_cyclic_parents is True:
+            getQuery("""MATCH (n:CATEGORY {CMID: $cmid})-[r:CONTAINS]->(n)
+                DELETE r""", driver, params={"cmid": keepcmid})
 
         # create deleted node and "IS" relationship to remaining node
         # Preserve the old CMName on the DELETED marker node.
@@ -1350,7 +1303,7 @@ def mergeNodes(keepcmid,deletecmid,user,database):
             # this query does a merge with errors such as turning lists into strings
             query = """
             unwind $cmid as cmid 
-            match (:DATASET {CMID: "SD11"})-[r:USES]->({CMID: cmid}) 
+            match (:DATASET {CMID: $datasetID})-[r:USES]->({CMID: cmid})
             with collect(r) as rels
 
             WITH CASE
@@ -1381,7 +1334,7 @@ def mergeNodes(keepcmid,deletecmid,user,database):
             RETURN count(*) AS mergedCount
             """
 
-            getQuery(query = query, driver = driver, cmid=keepcmid, relID=relID)
+            getQuery(query = query, driver = driver, cmid=keepcmid, relID=relID, datasetID=internal_dataset)
 
         # need to update USES ties
 
@@ -1389,9 +1342,10 @@ def mergeNodes(keepcmid,deletecmid,user,database):
             "unwind $keepcmid as cmid match (n {CMID: cmid}) return elementId(n) as id", driver = driver, keepcmid=keepcmid, type = "list")
         results = results + ["id is:", id]
         createLog(id=id, type="node",
-                  log=f"merged {deletecmid} into {keepcmid}", user=user, driver=driver)
+                  log=f"merged {deletecmid} into {keepcmid}; remove cyclical parents: {remove_cyclic_parents}", user=user, driver=driver)
 
-        _require_process_uses_success(processUSES(database=database, CMID=keepcmid, user="0"))
+        affected = sorted({keepcmid} | {row["CMID"] for row in plan["validationRows"]})
+        _require_process_uses_success(processUSES(database=database, CMID=affected, user="0"))
 
         results = results + \
             [f"Completed combining {deletecmid} into {keepcmid}"]
