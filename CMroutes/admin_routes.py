@@ -16,6 +16,7 @@ import os
 from datetime import datetime, timezone
 from uuid import uuid4
 from CM.admin import _selected_admin_relation
+from CM.merge_references import plan_merge_references, validate_merge_choice, validate_merge_plan
 from CM.keys import key_format_issue
 from .auth_utils import verify_request_auth, classify_auth_error_status
 from .extensions import mail
@@ -29,6 +30,9 @@ class InvalidUsesEdit(ValueError):
 
 
 def _validate_uses_edit_request(database, action, input_payload):
+    if action == "merge nodes":
+        _validate_merge_edit_request(database, input_payload or {})
+        return
     if action != "add/edit/delete USES property":
         return
     payload = input_payload or {}
@@ -1360,6 +1364,53 @@ def create_label():
     return {"res": final_values}
 
 
+def _merge_preview(database, keep, discard):
+    if not keep or not discard or keep == discard:
+        raise ValueError("Supply two different CMIDs to merge.")
+    driver = getDriver(database)
+    keep_summary = getNodeMergeSummary(keep, driver)
+    discard_summary = getNodeMergeSummary(discard, driver)
+    if keep_summary["primaryDomain"] != discard_summary["primaryDomain"]:
+        raise ValueError("Primary domain mismatch between nodes to merge.")
+    plan = plan_merge_references(driver, keep, discard)
+    validate_merge_plan(driver, plan)
+    return keep_summary, discard_summary, plan
+
+
+def _validate_merge_edit_request(database, payload):
+    _, _, plan = _merge_preview(database, payload.get("s1_2"), payload.get("s1_3"))
+    validate_merge_choice(plan, payload.get("removeCyclicParents"), payload.get("cyclicParentToken"))
+
+
+@admin_bp.route('/admin/merge-preview', methods=['POST'])
+def admin_merge_preview():
+    try:
+        verify_request_auth(req=request)
+        data = request.get_json(silent=True) or {}
+        database = data.get("database")
+        if not database:
+            raise ValueError("Database is required")
+        keep, discard, plan = _merge_preview(database, data.get("keepcmid"), data.get("deletecmid"))
+        return jsonify({"keep": keep, "discard": discard,
+                        "cyclicParentReferences": plan["cyclicParentReferences"],
+                        "cyclicParentToken": plan["cyclicParentToken"]})
+    except Exception as exc:
+        message = str(exc)
+        return jsonify({"error": message}), classify_auth_error_status(message) or 400
+
+
+def _execute_merge(database, keep, discard, user, payload):
+    options = {}
+    if "removeCyclicParents" in payload:
+        options["remove_cyclic_parents"] = payload["removeCyclicParents"]
+    if "cyclicParentToken" in payload:
+        options["cyclic_parent_token"] = payload["cyclicParentToken"]
+    result = mergeNodes(keep, discard, user, database, **options)
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], int) and result[1] >= 400:
+        raise ValueError(result[0])
+    return result
+
+
 @admin_bp.route('/admin/nodeSummary', methods=['GET'])
 def admin_node_summary():
     try:
@@ -1426,7 +1477,7 @@ def _execute_admin_edit(database, fun, acting_user, input_payload, data):
     if fun == "mergeNodes":
         keepcmid = unlist(data.get('keepcmid').strip())
         deletecmid = unlist(data.get('deletecmid').strip())
-        result = mergeNodes(keepcmid, deletecmid, acting_user, database)
+        result = _execute_merge(database, keepcmid, deletecmid, acting_user, data)
     elif fun == "processUSES":
         CMID = cleanCMID(data.get('CMID'))
         result = processUSES(database=database, CMID=CMID)
@@ -1443,7 +1494,8 @@ def _execute_admin_edit(database, fun, acting_user, input_payload, data):
     elif fun == "add/edit/delete CATEGORY MERGING property":
         result = add_edit_delete_CATEGORY_MERGING(database, acting_user, input_payload)
     elif fun == "merge nodes":
-        result = mergeNodes(input_payload.get('s1_2'), input_payload.get('s1_3'), acting_user, database)
+        result = _execute_merge(database, input_payload.get('s1_2'), input_payload.get('s1_3'),
+                                acting_user, input_payload)
     elif fun == "create new label":
         result = createLabel(database, acting_user, input_payload)
     elif fun == "delete node":

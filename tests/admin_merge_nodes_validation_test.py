@@ -1,8 +1,21 @@
+from contextlib import nullcontext
+import pytest
+from CM import merge_references, event_types
+
+@pytest.fixture(autouse=True)
+def mock_transaction_for_query_stubs(monkeypatch):
+    # These tests exercise merge validation using existing query stubs.
+    # Transaction commit/rollback is covered separately with a transactional driver.
+    monkeypatch.setattr(admin_module, "query_transaction", lambda *args: nullcontext())
+    monkeypatch.setattr(merge_references, "getQuery", lambda *args, **kwargs: admin_module.getQuery(*args, **kwargs))
+    monkeypatch.setattr(event_types, "getQuery", lambda *args, **kwargs: [{"allowedValues": ["HIERARCHY", "SPLIT", "FOLLOWS"]}])
+
 import CM.admin as admin_module
 import CMroutes.admin_routes as admin_routes
 
 
 def test_merge_nodes_rejects_mismatched_primary_domains(monkeypatch):
+    monkeypatch.setattr(admin_module, "getQuery", lambda *args, **kwargs: [])
     monkeypatch.setattr(admin_module, "getDriver", lambda _database: object())
     monkeypatch.setattr(admin_module, "isValidCMID", lambda _cmid, _driver: ["ok"])
 
@@ -85,7 +98,7 @@ def test_merge_nodes_uses_variable_label_for_variable_domain(monkeypatch):
             return []
         if "return c.CMID as cmid" in query:
             return []
-        if "return m.CMName as property" in query:
+        if "RETURN m.CMName AS property" in query:
             return []
         if "CALL apoc.refactor.mergeNodes" in query:
             assert "match (a:VARIABLE {CMID: $keepcmid})" in query
@@ -125,7 +138,7 @@ def test_merge_nodes_allows_variable_domain_when_isvalidcmid_would_reject(monkey
             return []
         if "return c.CMID as cmid" in query:
             return []
-        if "return m.CMName as property" in query:
+        if "RETURN m.CMName AS property" in query:
             return []
         if "CALL apoc.refactor.mergeNodes" in query:
             assert "match (a:VARIABLE {CMID: $keepcmid})" in query
@@ -178,21 +191,17 @@ def test_merge_rewrites_context_only_references_before_dropping_node(monkeypatch
     rewritten = []
 
     def fake_get_query(query, driver, params=None, type=None, **kwargs):
-        if "return m.CMName as property" in query:
+        if "RETURN m.CMName AS property" in query:
             return ["parent"]
-        if "RETURN DISTINCT c.CMID AS cmid" in query:
-            assert "MATCH (c:CATEGORY)<-[r:USES]-(:DATASET)" in query
-            assert params["deletecmid"] == "AM2"
+        if "properties(r) AS properties" in query:
+            assert params["discard"] == "AM2"
             assert "parentContext" in params["contextProps"]
-            # No derived CONTAINS tie connects AM2 to this child.
-            return ["AM99"]
-        if "r.parentContext AS value" in query:
-            assert params["cmids"] == ["AM99"]
-            return [{"relID": "context-only-ref", "value": context}]
+            return [{"relID": "context-only-ref", "CMID": "AM99", "datasetID": "AD1",
+                     "Key": "Key == 1", "properties": {"parentContext": context}}]
         if "UNWIND $updates AS update" in query:
             rewritten.extend(params["updates"])
         if "CALL apoc.refactor.mergeNodes" in query:
-            assert json.loads(rewritten[0]["value"][0])["parent"] == "AM1"
+            assert json.loads(rewritten[0]["properties"]["parentContext"][0])["parent"] == "AM1"
             return ["AM1"]
         return []
 
@@ -200,7 +209,7 @@ def test_merge_rewrites_context_only_references_before_dropping_node(monkeypatch
     result = admin_module.mergeNodes("AM1", "AM2", "admin", "ArchaMap")
     assert isinstance(result, list), result
     assert rewritten[0]["relID"] == "context-only-ref"
-    assert json.loads(rewritten[0]["value"][0])["eventType"] == "HIERARCHY"
+    assert json.loads(rewritten[0]["properties"]["parentContext"][0])["eventType"] == "HIERARCHY"
 
 
 def test_merge_stops_if_context_replacement_fails(monkeypatch):
@@ -209,16 +218,19 @@ def test_merge_stops_if_context_replacement_fails(monkeypatch):
         "CMID": cmid, "CMName": cmid, "primaryDomain": "AREA",
     })
     monkeypatch.setattr(admin_module, "addCMNameRel", lambda *args: None)
-    monkeypatch.setattr(admin_module, "replaceProperty", lambda **kwargs: ("invalid JSON", 500))
+
 
     def fake_get_query(query, driver, **kwargs):
         assert "CALL apoc.refactor.mergeNodes" not in query
+        if "properties(r) AS properties" in query:
+            return [{"relID": "bad", "CMID": "AM99", "datasetID": "AD1", "Key": "Key == 1",
+                     "properties": {"parentContext": ["{bad JSON}"]}}]
         return []
 
     monkeypatch.setattr(admin_module, "getQuery", fake_get_query)
     result = admin_module.mergeNodes("AM1", "AM2", "admin", "ArchaMap")
     assert result[1] == 500
-    assert "Failed to update parentContext: invalid JSON" in result[0]
+    assert "Invalid parentContext JSON" in result[0]
 
 
 def test_parent_context_decode_failure_prevents_partial_replacement(monkeypatch):
@@ -227,8 +239,8 @@ def test_parent_context_decode_failure_prevents_partial_replacement(monkeypatch)
     def fake_get_query(query, driver, **kwargs):
         assert "SET r.parentContext" not in query
         return [
-            {"relID": "valid", "value": ['{"parent":"AM2"}']},
-            {"relID": "invalid", "value": ["{bad JSON}"]},
+            {"relID": "valid", "CMID": "AM99", "value": ['{"parent":"AM2"}']},
+            {"relID": "invalid", "CMID": "AM99", "value": ["{bad JSON}"]},
         ]
 
     monkeypatch.setattr(admin_module, "getQuery", fake_get_query)
