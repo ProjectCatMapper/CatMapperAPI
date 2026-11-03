@@ -1,0 +1,15 @@
+# USES label reconciliation performance
+
+Trigger: large label replacement uploads spend minutes per batch after the USES property write, or changes to `updateLabels` query planning.
+
+On 2026-11-03, an 8,432-row label replacement for SocioMap dataset SD2247 wrote each 500-row batch in under a second but spent approximately 387–402 seconds in follow-up work. Read-only profiling of the category-label recovery lookup measured 1,934,006 database accesses for one CMID and 3,868,012 for two: it traversed all dataset USES ties for every input CMID. Group-label queries also scanned unrelated subtype populations per CMID instead of using CATEGORY(CMID). The August 25 immediate-label-sync change (`d69524f`) put this pre-existing maintenance cost into each upload batch.
+
+`CM/USES.py:updateLabels` now normalizes and deduplicates the requested scope, treats an empty list as no work, and recovers missing CATEGORY labels in one pass using batch membership. Recovery cannot rely on CATEGORY(CMID), because those nodes lack CATEGORY. Subsequent scoped reconciliation and group-label queries explicitly require `USING INDEX SEEK c:CATEGORY(CMID)`. An ordinary `USING INDEX` hint is insufficient: disposable-database tests demonstrated that the planner can still choose a repeated `NodeIndexScan`. The CATEGORY(CMID) index is already present in production; no schema migration is included. Calls without a CMID retain full-database reconciliation.
+
+`CM/upload.py` emits a separate "Reconciling category labels" progress event after default-USES naming work, so the UI no longer attributes the entire delay to alternate names.
+
+Regression coverage includes scalar, duplicate, empty and full scopes; recovery of a missing CATEGORY label; stale-label removal; labels contributed by multiple sources; unchanged source relationship properties and unrelated categories; and idempotency. Disposable Neo4j tests cover Cypher 5 and 25, bound database accesses for a 500-CMID recovery batch relative to one CMID, and require index seeks without scans in every scoped group query. Real-DB tests remain opt-in and require an explicitly disposable target.
+
+Validation: 154 unit tests passed across USES updates, label synchronization, source safety, default naming, upload validation, jobs, and category domains. Seventeen integration cases passed on disposable Neo4j 2026.06.0 with APOC, including both Cypher versions and the existing source-safety cases.
+
+This work is authorized for local commits only and is retained on `codex/uses-label-performance` in isolated parent/API worktrees. Production workers bind-mount `/mnt/storage/app/CatMapperAPI`, so edits in that checkout are visible to new processes without deployment. The initial edits were briefly visible there before the bind mount was noticed; both shared checkouts were restored to their recorded starting revisions, and production source checksums were verified against the originals. Existing API processes and the active upload were not restarted. No push, deployment, or direct live graph repair was performed.

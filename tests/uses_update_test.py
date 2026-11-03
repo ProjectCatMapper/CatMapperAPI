@@ -28,6 +28,38 @@ def test_updatelabels_replaces_stale_domain_labels(monkeypatch):
     assert "NOT label IN currentLabels" in label_query
 
 
+@pytest.mark.parametrize("cmids", ["SM21903", ["SM21903", "SM21903"]])
+def test_updatelabels_scopes_and_indexes_every_group_lookup(monkeypatch, cmids):
+    calls = []
+    monkeypatch.setattr(uses_module, "getDriver", lambda _: object())
+
+    def query(query, driver, **kwargs):
+        calls.append((query, kwargs.get("params", {})))
+        if kwargs.get("type") == "df":
+            return pd.DataFrame([{"label": "DIALECT", "group": "LANGUOID"}])
+        return [1]
+
+    monkeypatch.setattr(uses_module, "getQuery", query)
+    result = uses_module.updateLabels("sociomap", CMID=cmids)
+
+    assert not isinstance(result, tuple), result
+    recovery_query, params = calls[0]
+    assert params == {"CMID": ["SM21903"]}
+    assert "unwind" not in recovery_query.lower()
+    assert "c.CMID IN $CMID" in recovery_query
+    group_query, params = calls[-1]
+    assert params == {"cmid": ["SM21903"]}
+    assert "c:CATEGORY:`DIALECT`" in group_query
+    assert "USING INDEX SEEK c:CATEGORY(CMID)" in group_query
+
+
+def test_updatelabels_empty_scope_does_not_touch_database(monkeypatch):
+    monkeypatch.setattr(
+        uses_module, "getDriver", lambda _: pytest.fail("Empty scope must not query")
+    )
+    assert uses_module.updateLabels("sociomap", CMID=[]) == []
+
+
 def test_updateuses_runs_full_database_when_cmid_missing(monkeypatch):
     captured = {}
 
