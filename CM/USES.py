@@ -297,13 +297,22 @@ return count(*) as count
 # if no CMID is set, it updates labels for all
 def updateLabels(database, CMID=None):
     try:
+        if isinstance(CMID, str):
+            CMID = [CMID]
+        if CMID is not None:
+            CMID = list(dict.fromkeys(CMID))
+            if not CMID:
+                return []
         driver = getDriver(database)
         logs = []
         if CMID is not None:
             msg = "setting CATEGORY label on CMID"
             logs.append(msg)
             count = getQuery(
-                "unwind $CMID as cmid match (c {CMID: cmid})<-[:USES]-(:DATASET) where not 'CATEGORY' in labels(c) set c:CATEGORY return count(distinct c)", driver, params={"CMID": CMID}, type = "list")
+                # Missing CATEGORY labels cannot use the CATEGORY(CMID) index.
+                # Filter the whole batch in one pass instead of traversing all
+                # dataset USES ties again for every input CMID.
+                "match (c)<-[:USES]-(:DATASET) where c.CMID IN $CMID and not 'CATEGORY' in labels(c) set c:CATEGORY return count(distinct c)", driver, params={"CMID": CMID}, type = "list")
             msg = f"Set CATEGORY label for {count[0]} nodes"
             logs.append(msg)
         else:
@@ -317,13 +326,18 @@ def updateLabels(database, CMID=None):
         if CMID is not None:
             unwind = "unwind $cmid as cmid"
             match = "{CMID: cmid}"
+            # INDEX alone also permits a repeated index scan. Require a seek
+            # so every row starts at its category, even with skewed statistics.
+            category_index = "USING INDEX SEEK c:CATEGORY(CMID)"
         else:
             unwind = ""
             match = ""
+            category_index = ""
 
         query = f"""
         {unwind}
         MATCH (c:CATEGORY {match})<-[r:USES]-(:DATASET)
+        {category_index}
         WHERE r.label IS NOT NULL
         WITH c,
              apoc.coll.toSet(apoc.coll.flatten(collect(DISTINCT [r.label, "CATEGORY"]), true)) AS currentLabels
@@ -352,7 +366,8 @@ def updateLabels(database, CMID=None):
             group = labels.loc[i, 'group']
             query = f"""
                 {unwind}
-                match (d:DATASET)-[r:USES]->(c:`{label}` {match}) 
+                match (d:DATASET)-[r:USES]->(c:CATEGORY:`{label}` {match})
+                {category_index}
                 set c:`{group}`
                 return count(distinct c)
             """

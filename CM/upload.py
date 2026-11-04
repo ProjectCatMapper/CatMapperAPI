@@ -4021,6 +4021,12 @@ def input_Nodes_Uses(
                 # USES tie (SD11/AD941), never to the uploaded source tie.
                 _add_cmnames_to_default_uses(database, result)
 
+                if "label" in linkProperties:
+                    updateLog(
+                        f"log/{user}uploadProgress.txt",
+                        "Reconciling category labels",
+                        write="a",
+                    )
                 _sync_updated_uses_labels(
                     database,
                     cmids_from_result,
