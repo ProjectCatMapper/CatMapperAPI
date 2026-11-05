@@ -15,6 +15,7 @@ from rdflib import Graph
 
 from .linked_data import (
     ONTOLOGY_VERSION,
+    _collision_map,
     enrich_assertion_geometries,
     normalize_database,
     project_assertion,
@@ -75,14 +76,16 @@ RETURN d.CMID AS datasetCmid,
        properties(r)['culture'] AS culture,
        properties(r)['geoCoords'] AS geoCoords,
        properties(r)['geoPolygon'] AS geoPolygon,
+       properties(r)['assertionId'] AS assertionId,
        r.logID AS stableDiscriminator
 """
 
 COLLISION_EXPORT_QUERY = """
 MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
-WITH d.CMID AS datasetCmid, r.Key AS key, c.CMID AS conceptCmid, count(r) AS multiplicity
+WITH d.CMID AS datasetCmid, r.Key AS key, c.CMID AS conceptCmid, count(r) AS multiplicity,
+     collect({assertionId: properties(r)['assertionId'], stableDiscriminator: r.logID}) AS identities
 WHERE multiplicity > 1
-RETURN datasetCmid, key, conceptCmid, multiplicity
+RETURN datasetCmid, key, conceptCmid, multiplicity, identities
 """
 
 HIERARCHY_EXPORT_QUERY = """
@@ -117,14 +120,7 @@ def iter_bulk_graphs(database):
     """Stream independently serializable graph fragments for a full snapshot."""
     database = normalize_database(database)
     driver = getDriver(database)
-    collisions = {
-        (
-            str(row.get("datasetCmid") or ""),
-            str(row.get("key") or ""),
-            str(row.get("conceptCmid") or ""),
-        ): int(row.get("multiplicity") or 1)
-        for row in getQuery(COLLISION_EXPORT_QUERY, driver=driver, type="dict")
-    }
+    collisions = _collision_map(getQuery(COLLISION_EXPORT_QUERY, driver=driver, type="dict"))
 
     for row in _stream_query(driver, NODE_EXPORT_QUERY):
         labels = set(row.get("labels") or [])

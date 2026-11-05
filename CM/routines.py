@@ -2344,7 +2344,7 @@ def getInappropriateprops_Nodes_Rels(database, mail=None, return_type="data"):
         query = """
         MATCH (p:PROPERTY)
         WHERE p.type = "relationship"
-        WITH collect(p.CMName) + ['logID'] AS allowedRelProps
+        WITH collect(p.CMName) + ['logID', 'assertionId'] AS allowedRelProps
         MATCH (n:CATEGORY)<-[r:USES]-(d:DATASET)
         WITH n.CMID as n,r,d.CMID as d, allowedRelProps,
             [k IN keys(r) WHERE NOT k IN allowedRelProps] AS invalidProps

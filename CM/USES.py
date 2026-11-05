@@ -5,6 +5,7 @@ from . import context_policy
 from .event_types import get_allowed_event_types, validate_parent_context_events, validate_stored_event_contexts
 from .metadata import getPropertiesMetadata
 from .log import createLog
+from .assertion_identity import NEW_ASSERTION_ID, ensure_assertion_ids
 
 
 # These are derived category-to-category links. Source assertions (USES),
@@ -161,7 +162,7 @@ def mergeUSES(database, CMID, Key, datasetID, properties = None):
     validate_stored_event_contexts(driver, [CMID])
 
     if properties is None:
-        properties = "{properties: {`.*`: 'combine'}}"
+        properties = "{properties: {assertionId: 'discard', `.*`: 'combine'}}"
         
     query = f"""
     match (:DATASET {{CMID: $datasetID}})-[r:USES {{Key: $Key}}]->(:CATEGORY {{CMID: $CMID}})
@@ -172,7 +173,9 @@ def mergeUSES(database, CMID, Key, datasetID, properties = None):
     query = f"""
     match (:DATASET {{CMID: $datasetID}})-[r:USES {{Key: $Key}}]->(:CATEGORY {{CMID: $CMID}})
     with collect(r) as rels
+    with rels, head(rels).assertionId as assertionId
     call apoc.refactor.mergeRelationships(rels,{properties}) yield rel
+    set rel.assertionId = assertionId
     return count(*) as count
     """
     result = getQuery(query, driver=driver, params={"CMID": CMID, "Key": Key, "datasetID": datasetID}, type = 'list')
@@ -565,6 +568,8 @@ def processUSES(database, CMID=None, user="0", detailed = True):
                 raise RuntimeError(f"{step_name} failed: {result[0]}")
             return result
 
+        ensure_assertion_ids(driver, cmid_list)
+
         # Update alternative names
         print("updating alternate names")
         updateAltNamesResults = unwrap_step(
@@ -783,8 +788,9 @@ def addCMNameRel(database, CMID=None):
             WITH DISTINCT c
             MATCH (d:DATASET) WHERE d.CMID = "{datasetID}"
             CREATE (c)<-[r:USES]-(d)
-            SET r.Key = "Key == " + c.CMID,
-                r.label = ['CATEGORY'],
+            SET r.assertionId = {NEW_ASSERTION_ID},
+                r.Key = "Key == " + c.CMID,
+                r.label = 'CATEGORY',
                 r.Name = [c.CMName]
             return elementId(r) as relID
         '''
