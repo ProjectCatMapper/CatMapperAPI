@@ -33,15 +33,15 @@ def createLog(id, type, log, user, driver,isDataset = False):
         for single_id, single_log in zip(id, log)
     ]
 
-    if isDataset:
-        search_label = "DATASET"
-    else:
-        search_label = "CATEGORY"
+    # The caller already resolved the node by elementId. Legacy category,
+    # PROPERTY, and LABEL nodes need audit/ownership updates even without
+    # CATEGORY; requiring that label silently dropped their logs.
+    search_label = ":DATASET" if isDataset else ""
     
     if type == "node":
         query = f"""
         UNWIND $rows AS row
-        MATCH (l:{search_label}) WHERE elementId(l) = row.id
+        MATCH (l{search_label}) WHERE elementId(l) = row.id
         CREATE (log:LOG {{timestamp: row.timestamp, action: row.action}})
         SET log.user = row.user
         SET l.modifiedByOtherUser =
