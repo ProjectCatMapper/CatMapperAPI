@@ -41,7 +41,7 @@ def validate_event_type(value, allowed_values, *, normalize_legacy=False):
 
 
 def parent_context_entries(value):
-    """Decode scalar/list JSON and mappings without swallowing malformed entries."""
+    """Decode contexts, ignoring blank objects but retaining incomplete assertions."""
     if is_empty_event_value(value):
         return []
     if isinstance(value, str):
@@ -69,6 +69,11 @@ def parent_context_entries(value):
         return [entry for item in value for entry in parent_context_entries(item)]
     if not isinstance(value, dict):
         raise ValueError("parentContext entry must be a JSON object")
+    # Spreadsheet grouping and older USES records can contain empty objects.
+    # They assert no context; any populated field still requires validation.
+    if all(is_empty_event_value(field) or (isinstance(field, str) and not field.strip())
+           for field in value.values()):
+        return []
     return [value]
 
 
