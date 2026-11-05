@@ -21,6 +21,7 @@ from .merge_references import (
 from .metadata import *
 from .log import createLog
 from .event_types import get_allowed_event_types, validate_event_type, validate_event_rows
+from .validation_errors import validation_location
 from .USES import processUSES
 from .USES import (
     addCMNameRel,
@@ -1152,16 +1153,21 @@ def replaceProperty(cmid, property, old, new, database, datasetID = None, Key = 
             WHERE c.CMID IN $cmids AND r[$property] IS NOT NULL
                 AND ($datasetID IS NULL OR d.CMID = $datasetID)
                 AND ($key IS NULL OR r.Key = $key)
-            RETURN c.CMID AS CMID,elementId(r) AS relID,r[$property] AS value
+            RETURN c.CMID AS CMID,elementId(r) AS relID,r[$property] AS value,
+                d.CMID AS datasetID,r.Key AS Key
         """, driver, params={"cmids": cmids, "property": property,
                               "datasetID": datasetID, "key": Key})
         updates, proposed = [], []
         for row in rows:
-            value = (replace_context(row["value"], old, new) if property == "parentContext"
-                     else replace_exact(row["value"], old, new))
+            try:
+                value = (replace_context(row["value"], old, new) if property == "parentContext"
+                         else replace_exact(row["value"], old, new))
+            except ValueError as exc:
+                raise ValueError(f"{validation_location(row)}: {exc}") from exc
             if value != row["value"]:
                 updates.append({"relID": row["relID"], "properties": {property: value}})
-                proposed.append({"CMID": row["CMID"], property: value})
+                proposed.append({"CMID": row["CMID"], "datasetID": row.get("datasetID"),
+                                 "Key": row.get("Key"), "relID": row["relID"], property: value})
         context_policy.validate_rows(driver, proposed)
         validate_event_rows(proposed, driver)
         apply_reference_updates(driver, updates)
@@ -1507,9 +1513,10 @@ def moveUSESties(database,user,input,dataset,tabledata):
     USES_to_change = [row for row in tabledata if row['optionA'] != 'From']
     
     validate_event_rows(getQuery("""
-        MATCH (:DATASET)-[r:USES]->(c:CATEGORY)
+        MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
         WHERE elementId(r) = $relID OR c.CMID IN $cmids
-        RETURN r.parentContext AS parentContext
+        RETURN r.parentContext AS parentContext,
+            c.CMID AS CMID,d.CMID AS datasetID,r.Key AS Key,elementId(r) AS relID
     """, driver, params={"relID": rel_id, "cmids": [CMID_from, CMID_to] + [
         row['CMID'] for row in USES_to_change]}), driver)
 

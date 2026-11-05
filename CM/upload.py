@@ -2576,8 +2576,11 @@ def input_Nodes_Uses(
     )
 
     # Reject invalid event columns and embedded JSON before any database write.
-    validate_event_rows(dataset.to_dict(orient="records"), driver)
-    context_policy.validate_rows(driver, dataset.to_dict(orient="records"))
+    validate_event_rows(dataset.to_dict(orient="records"), driver, spreadsheet=True)
+    context_policy.validate_rows(driver, [
+        {**row, "_spreadsheet_row": number}
+        for number, row in enumerate(dataset.to_dict(orient="records"), 1)
+    ])
 
     # adhoc ID used for joining and filtering output purposes.
     updateLog(f"log/{user}uploadProgress.txt", "Creating import ID", write="a")
@@ -3173,7 +3176,7 @@ def input_Nodes_Uses(
         _validate_parent_label_compatibility(dataset, cmid_metadata, driver, user)
         check_query_cancellation()
             
-    validate_event_rows(dataset.to_dict(orient="records"), driver)
+    validate_event_rows(dataset.to_dict(orient="records"), driver, spreadsheet=True)
 
     if "eventType" in dataset.columns and "eventDate" not in dataset.columns:
         dataset["eventDate"] = np.nan
@@ -3754,7 +3757,7 @@ def input_Nodes_Uses(
         )
         dataset = combine_names_and_altNames(dataset, "Name", "altNames")
 
-    validate_event_rows(dataset.to_dict(orient="records"), driver)
+    validate_event_rows(dataset.to_dict(orient="records"), driver, spreadsheet=True)
 
     #cleans parentContext json strings by removing parentContext if no parent or no eventData or eventType
     if "parentContext" in dataset.columns: 
