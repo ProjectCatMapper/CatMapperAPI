@@ -229,6 +229,26 @@ def _editable_node_label(cmid, driver):
     if "LABEL" in labels:
         return "LABEL"
 
+    # Legacy categories can retain their domain labels without CATEGORY or
+    # USES ties. Recognize their recorded type without relabeling them or
+    # inventing a source assertion just to permit an administrative edit.
+    if re.fullmatch(r"(?:AM|SM)[0-9]+", str(cmid)):
+        category_labels = getQuery(
+            query="""
+            MATCH (l:LABEL)
+            WHERE l.CMName IN $labels
+              AND l.groupLabel IS NOT NULL
+              AND NOT l.groupLabel IN ['DATASET', 'CATEGORY', 'ALL NODES', 'ANY DOMAIN']
+            RETURN l.CMName AS label
+            LIMIT 1
+            """,
+            driver=driver,
+            params={"labels": sorted(labels)},
+            type="dict",
+        )
+        if category_labels:
+            return "CATEGORY"
+
     raise ValueError(f"{cmid} has no editable node label.")
 
 #Function used by deleteNode to get elementId for either a single or list of CMIDs
