@@ -115,7 +115,7 @@ def test_upload_new_category_and_multivalue_direction(monkeypatch, database, lab
     if allowed:
         policy.validate_rows(object(), rows, fixture_policy(database))
     else:
-        with pytest.raises(ValueError, match="row 17"):
+        with pytest.raises(ValueError, match="Row 17"):
             policy.validate_rows(object(), rows, fixture_policy(database))
 
 

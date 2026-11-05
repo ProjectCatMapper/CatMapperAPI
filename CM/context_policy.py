@@ -8,6 +8,7 @@ import os
 import re
 
 from .utils import getQuery
+from .validation_errors import validation_location
 
 
 STRUCTURAL = {"CATEGORY", "DATASET", "USER", "ALL NODES", "ANY DOMAIN"}
@@ -162,15 +163,18 @@ def validate_rows(driver, rows, policy=None):
                 relabeled[cmid] = label
     if relabeled:
         # Check assertions received by the category and assertions referencing it.
-        stored = getQuery("""MATCH (:DATASET)-[u:USES]->(c:CATEGORY)
-            WHERE c.CMID IN $cmids RETURN c.CMID AS CMID, properties(u) AS properties""",
+        stored = getQuery("""MATCH (d:DATASET)-[u:USES]->(c:CATEGORY)
+            WHERE c.CMID IN $cmids RETURN c.CMID AS CMID, properties(u) AS properties,
+                d.CMID AS datasetID,elementId(u) AS relID""",
             driver, params={"cmids": list(relabeled)})
-        references = getQuery("""MATCH (:DATASET)-[u:USES]->(c:CATEGORY)
+        references = getQuery("""MATCH (d:DATASET)-[u:USES]->(c:CATEGORY)
             UNWIND $properties AS prop
-            WITH c,u,prop WHERE any(ref IN apoc.coll.flatten([coalesce(u[prop],[])],true) WHERE ref IN $cmids)
-            RETURN DISTINCT c.CMID AS CMID,properties(u) AS properties""", driver,
+            WITH d,c,u,prop WHERE any(ref IN apoc.coll.flatten([coalesce(u[prop],[])],true) WHERE ref IN $cmids)
+            RETURN DISTINCT c.CMID AS CMID,properties(u) AS properties,
+                d.CMID AS datasetID,elementId(u) AS relID""", driver,
             params={"cmids": list(relabeled), "properties": list(policy["properties"])})
         affected = [{**row["properties"], "CMID": row["CMID"],
+                     "datasetID": row.get("datasetID"), "relID": row.get("relID"),
                      "label": relabeled.get(row["CMID"], "")} for row in stored + references]
         fetch_metadata(affected)
         rows += affected
@@ -187,7 +191,7 @@ def validate_rows(driver, rows, policy=None):
             for ref in values(row.get(prop)):
                 if (len(destination) != 1 or not destination.issubset(set(rule["allowed"]))
                         or metadata.get(ref) != {rule["sourceDomain"]}):
-                    errors.append(f"row {row.get('_spreadsheet_row', number)} {cmid or '<new category>'}: "
+                    errors.append(f"{validation_location(row, number)}: "
                                   f"{prop}={ref} would create {rule['relationship']} "
                                   f"from {rule['sourceDomain']} to {', '.join(sorted(str(x) for x in destination)) or 'unknown domain'}")
     if errors:

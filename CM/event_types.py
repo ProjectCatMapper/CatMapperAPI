@@ -2,6 +2,7 @@
 import json
 import math
 from .utils import getQuery
+from .validation_errors import validation_location
 
 
 def get_allowed_event_types(driver):
@@ -95,7 +96,7 @@ def validate_parent_context_events(value, allowed_values, *, normalize_legacy=Fa
     return entries
 
 
-def validate_event_rows(rows, driver, *, normalize_legacy=False):
+def validate_event_rows(rows, driver, *, normalize_legacy=False, spreadsheet=False):
     """Validate all input rows before a write, including embedded JSON values."""
     rows = list(rows)
     if not any("parentContext" in row or "eventType" in row for row in rows):
@@ -111,14 +112,16 @@ def validate_event_rows(rows, driver, *, normalize_legacy=False):
                 validate_parent_context_events(row["parentContext"], allowed,
                                                normalize_legacy=normalize_legacy)
         except ValueError as exc:
-            raise ValueError(f"Row {row.get('_spreadsheet_row', index + 1)}: {exc}") from exc
+            location = validation_location(row, index + 1, spreadsheet=spreadsheet)
+            raise ValueError(f"{location}: {exc}") from exc
 
 
 def validate_stored_event_contexts(driver, cmids=None):
     rows = getQuery("""
-        MATCH (:DATASET)-[r:USES]->(c:CATEGORY)
+        MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
         WHERE ($cmids IS NULL OR c.CMID IN $cmids)
           AND (r.parentContext IS NOT NULL OR r.eventType IS NOT NULL)
-        RETURN r.parentContext AS parentContext, r.eventType AS eventType
+        RETURN r.parentContext AS parentContext, r.eventType AS eventType,
+            c.CMID AS CMID, d.CMID AS datasetID, r.Key AS Key, elementId(r) AS relID
     """, driver, params={"cmids": cmids})
     validate_event_rows(rows, driver, normalize_legacy=True)

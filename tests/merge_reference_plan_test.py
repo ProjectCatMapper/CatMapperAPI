@@ -114,10 +114,12 @@ def test_invalid_actual_replacement_is_rejected_before_writes(monkeypatch):
     monkeypatch.setattr(admin, 'getDriver', lambda database: object())
     def query(text, *args, **kwargs):
         assert 'SET ' not in text
-        return [{'CMID': 'SM9', 'relID': 'rel', 'value': ['SM2', 'SM8']}]
+        return [{'CMID': 'SM9', 'relID': 'rel', 'datasetID': 'SD1', 'Key': 'ID == 9',
+                 'value': ['SM2', 'SM8']}]
     monkeypatch.setattr(admin, 'getQuery', query)
     def validate(driver, rows):
-        assert rows == [{'CMID': 'SM9', 'language': ['SM1', 'SM8']}]
+        assert rows == [{'CMID': 'SM9', 'datasetID': 'SD1', 'Key': 'ID == 9',
+                         'relID': 'rel', 'language': ['SM1', 'SM8']}]
         raise ValueError('wrong reference domain')
     monkeypatch.setattr(context_policy, 'validate_rows', validate)
     assert admin.replaceProperty(['SM9'], 'language', 'SM2', 'SM1', 'SocioMap') == ('wrong reference domain', 500)

@@ -5,6 +5,7 @@ import json
 from . import context_policy
 from .event_types import parent_context_entries, validate_event_rows
 from .utils import getQuery
+from .validation_errors import validation_location
 
 
 def replace_exact(value, old, new):
@@ -76,7 +77,10 @@ def plan_merge_references(driver, keep, discard, *, remove_cyclic_parents=False,
                 continue
             value = original[prop]
             if prop == 'parentContext':
-                updated = replace_context(value, discard, keep)
+                try:
+                    updated = replace_context(value, discard, keep)
+                except ValueError as exc:
+                    raise ValueError(f"{validation_location(row)}: {exc}") from exc
                 self_parent = final_cmid == keep and any(
                     entry.get('parent') == keep for entry in parent_context_entries(updated))
             else:
@@ -98,7 +102,9 @@ def plan_merge_references(driver, keep, discard, *, remove_cyclic_parents=False,
         if changes:
             updates.append({'relID': row['relID'], 'properties': changes})
         if changes or row['CMID'] in (keep, discard):
-            validation.append({'CMID': final_cmid, **proposed})
+            validation.append({'CMID': final_cmid, '_source_cmid': row['CMID'],
+                               **{key: row[key] for key in ('datasetID', 'Key', 'relID')},
+                               **proposed})
     fingerprint = hashlib.sha256(json.dumps([keep, discard, cycles],
         sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     return {'updates': updates, 'validationRows': validation,

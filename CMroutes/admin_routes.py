@@ -73,7 +73,10 @@ def _validate_uses_edit_request(database, action, input_payload):
         raise InvalidUsesEdit("The selected property no longer exists on this USES tie. Refresh the tie list.")
     if operation != "delete":
         try:
-            context_policy.validate_rows(getDriver(database), [{"CMID": cmid, prop: payload.get("s1_3")}])
+            context_policy.validate_rows(getDriver(database), [{
+                "CMID": cmid, "datasetID": dataset_id, "Key": props.get("Key"),
+                "relID": props["id"], prop: payload.get("s1_3"),
+            }])
         except ValueError as exc:
             raise InvalidUsesEdit(str(exc)) from exc
 
