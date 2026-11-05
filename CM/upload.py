@@ -1,5 +1,7 @@
 """upload.py"""
 
+from .assertion_identity import NEW_ASSERTION_ID
+
 from .utils import *
 from . import context_policy
 from .event_types import validate_event_rows
@@ -27,7 +29,7 @@ warnings.simplefilter("error", UserWarning)
 _UPLOAD_LOG_LISTENER = threading.local()
 _UPLOAD_LOG_TIMING = threading.local()
 _JSON_UPLOAD_PROPERTIES = {"parentContext", "geoCoords", "geo"}
-_INTERNAL_OWNER_PROPERTY_NAMES = {"ownerUserId", "modifiedByOtherUser"}
+_INTERNAL_OWNER_PROPERTY_NAMES = {"ownerUserId", "modifiedByOtherUser", "assertionId"}
 _RESERVED_USES_UPLOAD_PROPERTIES = {"dataset"}
 
 
@@ -471,7 +473,7 @@ def createUSES(links, database, user, ownershipMetadata=None):
         MATCH (a:DATASET) WHERE row.datasetID = a.CMID
         MATCH (b:CATEGORY) WHERE row.CMID = b.CMID
         MERGE (a)-[r:USES {{Key: row['Key']}}]->(b)
-        {onCreate}SET r.status = 'update', {keys_string}
+        {onCreate}SET r.assertionId = {NEW_ASSERTION_ID}, r.status = 'update', {keys_string}
         RETURN elementId(b) AS nodeID, elementId(r) as relID, r.Key as Key, a.CMID as datasetID, b.CMID as CMID,b.CMName as CMName, {return_props}
         """
 

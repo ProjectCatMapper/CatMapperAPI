@@ -1,4 +1,5 @@
 from .utils import getQuery
+from .assertion_identity import NEW_ASSERTION_ID
 import re
 from datetime import datetime, timezone
 
@@ -66,8 +67,10 @@ def createLog(id, type, log, user, driver,isDataset = False):
             WHEN toString(l.ownerUserId) <> toString(row.user) THEN true
             ELSE coalesce(l.modifiedByOtherUser, false)
           END
+        SET l.assertionId = coalesce(l.assertionId, {NEW_ASSERTION_ID})
         SET l.logID = custom.formatProperties([l.logID, elementId(log)], 'list', ';')[0].prop
         """
+        query = query.replace("{NEW_ASSERTION_ID}", NEW_ASSERTION_ID)
     else:
         raise ValueError("error: type must be 'node' or 'relation'")
 

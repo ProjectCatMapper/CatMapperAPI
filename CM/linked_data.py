@@ -13,6 +13,7 @@ from rdflib.namespace import DCAT, DCTERMS, OWL, PROV, SKOS, XSD
 
 from .utils import getDriver, getQuery
 from .assertion_index import assertion_digest, lookup_assertion, remember_assertions
+from .assertion_identity import assertion_token, validate_collision_groups
 
 
 ONTOLOGY_VERSION = "2026.08.18"
@@ -120,9 +121,10 @@ RETURN d.CMID AS datasetCmid,
        properties(r)['culture'] AS culture,
        properties(r)['geoCoords'] AS geoCoords,
        properties(r)['geoPolygon'] AS geoPolygon,
+       properties(r)['assertionId'] AS assertionId,
        r.logID AS stableDiscriminator
 ORDER BY datasetCmid, key, conceptCmid,
-         coalesce(apoc.convert.toJson(r.logID), '')
+         coalesce(properties(r)['assertionId'], apoc.convert.toJson(r.logID), '')
 SKIP $offset
 LIMIT $limit
 """
@@ -135,9 +137,10 @@ ASSERTION_LOOKUP_QUERY = ASSERTION_QUERY.replace(
 COLLISION_QUERY = """
 MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
 WHERE d.CMID = $cmid OR c.CMID = $cmid
-WITH d.CMID AS datasetCmid, r.Key AS key, c.CMID AS conceptCmid, count(r) AS multiplicity
+WITH d.CMID AS datasetCmid, r.Key AS key, c.CMID AS conceptCmid, count(r) AS multiplicity,
+     collect({assertionId: properties(r)['assertionId'], stableDiscriminator: r.logID}) AS identities
 WHERE multiplicity > 1
-RETURN datasetCmid, key, conceptCmid, multiplicity
+RETURN datasetCmid, key, conceptCmid, multiplicity, identities
 """
 
 HIERARCHY_QUERY = """
@@ -264,18 +267,16 @@ def assertion_iri(assertion, multiplicity=1) -> URIRef:
     base_digest = assertion_digest(*parts)
     suffix = ""
     if int(multiplicity or 1) > 1:
-        discriminator = assertion.get("stableDiscriminator")
-        if discriminator in (None, "", []):
-            raise MalformedPublicResource(
-                "Duplicate USES assertion lacks a stable public identity discriminator."
-            )
-        encoded = json.dumps(discriminator, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        suffix = "-" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
+        try:
+            suffix = "-" + assertion_token(assertion)
+        except ValueError as exc:
+            raise MalformedPublicResource(str(exc)) from exc
     return URIRef(f"{RESOURCE_BASE}/{parts[0]}/assertion/uses/{base_digest}{suffix}")
 
 
-def geometry_iri(database: str, assertion, geometry_key: str) -> URIRef:
-    assertion_id = str(assertion_iri({**dict(assertion), "database": normalize_database(database)})).rsplit("/", 1)[-1]
+def geometry_iri(database: str, assertion, geometry_key: str, *, assertion_uri=None) -> URIRef:
+    assertion_id = str(assertion_uri or assertion_iri(
+        {**dict(assertion), "database": normalize_database(database)})).rsplit("/", 1)[-1]
     digest = hashlib.sha256(str(geometry_key).encode("utf-8")).hexdigest()[:24]
     return URIRef(f"{RESOURCE_BASE}/{normalize_database(database)}/geometry/uses/{assertion_id}/{digest}")
 
@@ -379,14 +380,14 @@ def _add_assertion_geometries(graph, database, row, assertion):
         literal = _canonical_geojson_literal(geojson_value)
         if literal is None:
             continue
-        geometry = geometry_iri(database, row, f"geoCoords:{index}:{literal}")
+        geometry = geometry_iri(database, row, f"geoCoords:{index}:{literal}", assertion_uri=assertion)
         graph.add((assertion, GEO.hasGeometry, geometry))
         graph.add((geometry, RDF.type, GEO.Geometry))
         graph.add((geometry, GEO.asGeoJSON, Literal(literal, datatype=GEO.geoJSONLiteral)))
         graph.add((geometry, CAT.geometryRole, CAT.DatasetAssertionGeometry))
 
     for geom_id in _as_values(row.get("geoPolygon")):
-        geometry = geometry_iri(database, row, f"geoPolygon:{geom_id}")
+        geometry = geometry_iri(database, row, f"geoPolygon:{geom_id}", assertion_uri=assertion)
         graph.add((assertion, GEO.hasGeometry, geometry))
         graph.add((geometry, RDF.type, GEO.Geometry))
         graph.add((geometry, CAT.geometryRole, CAT.DatasetAssertionGeometry))
@@ -453,6 +454,11 @@ def fetch_assertion_projection(database, assertion_id, geometry_id=None):
     if identity is None:
         raise ResourceNotFound("Public assertion not found.")
     rows = getQuery(ASSERTION_LOOKUP_QUERY, driver=getDriver(database), params=identity, type="dict")
+    if len(rows) > 1:
+        try:
+            validate_collision_groups([{"identities": rows, "multiplicity": len(rows)}])
+        except ValueError as exc:
+            raise MalformedPublicResource(str(exc)) from exc
     graph = Graph()
     _bind_namespaces(graph)
     wanted = URIRef(f"{RESOURCE_BASE}/{database}/assertion/uses/{assertion_id}")
@@ -543,6 +549,14 @@ def project_resource(database, record, assertions=None, multiplicities=None, hie
         graph.add((subject, DCTERMS.isReplacedBy, replacement_iri))
 
     multiplicities = multiplicities or {}
+    seen_assertions = set()
+    for row in assertions or []:
+        identity = (str(row.get("datasetCmid") or ""), str(row.get("key") or ""),
+                    str(row.get("conceptCmid") or ""))
+        iri = assertion_iri({**row, "database": database}, multiplicities.get(identity, 1))
+        if iri in seen_assertions:
+            raise MalformedPublicResource("Multiple source ties would collapse into one RDF assertion.")
+        seen_assertions.add(iri)
     for assertion in assertions or []:
         _add_assertion(graph, database, assertion, multiplicities)
 
@@ -562,6 +576,10 @@ def project_resource(database, record, assertions=None, multiplicities=None, hie
 
 
 def _collision_map(rows):
+    try:
+        validate_collision_groups(rows or [])
+    except ValueError as exc:
+        raise MalformedPublicResource(str(exc)) from exc
     return {
         (str(row.get("datasetCmid") or ""), str(row.get("key") or ""), str(row.get("conceptCmid") or "")):
             int(row.get("multiplicity") or 1)

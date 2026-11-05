@@ -42,6 +42,7 @@ def test_surface_area_presence_does_not_change_reconciliation(monkeypatch, surfa
         metadata.append({"property": "areakm2", "relationship": None})
     monkeypatch.setattr(uses, "getPropertiesMetadata", lambda **_: metadata)
     monkeypatch.setattr(uses, "validate_stored_event_contexts", lambda *a: None)
+    monkeypatch.setattr(uses, "ensure_assertion_ids", lambda *a: 0)
     for name in ["updateAltNames", "updateLabels", "mergeDupRelations", "updateContains"]:
         monkeypatch.setattr(uses, name, lambda **_: [])
     called = []

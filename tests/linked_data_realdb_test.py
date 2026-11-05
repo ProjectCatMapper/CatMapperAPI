@@ -43,37 +43,17 @@ def test_live_assertion_page_has_one_resource_per_projected_tie(realdb_database)
 
 @pytest.mark.realdb
 def test_live_duplicate_assertion_groups_have_stable_distinct_discriminators(realdb_database):
-    if realdb_database.lower() != "archamap":
-        pytest.skip("The current collision fixture exists in ArchaMap")
-    driver = getDriver("archamap")
-    groups = getQuery(
-        """
-        MATCH (d:DATASET)-[r:USES]->(c:CATEGORY)
-        WITH d.CMID AS datasetCmid, r.Key AS key, c.CMID AS conceptCmid, count(r) AS multiplicity
-        WHERE multiplicity > 1
-        RETURN datasetCmid, key, conceptCmid, multiplicity
-        ORDER BY datasetCmid, key, conceptCmid
-        LIMIT 1
-        """,
-        driver=driver,
-        type="dict",
-    )
-    assert groups
-    group = groups[0]
-    rows = getQuery(
-        """
-        MATCH (d:DATASET {CMID: $datasetCmid})-[r:USES]->(c:CATEGORY {CMID: $conceptCmid})
-        WHERE r.Key = $key
-        RETURN d.CMID AS datasetCmid, r.Key AS key, c.CMID AS conceptCmid,
-               r.logID AS stableDiscriminator
-        """,
-        driver=driver,
-        params=group,
-        type="dict",
-    )
-    iris = {
-        assertion_iri({**row, "database": "archamap"}, group["multiplicity"])
-        for row in rows
-    }
-    assert len(iris) == len(rows) == group["multiplicity"]
-    assert all("4:" not in str(iri) for iri in iris)
+    from CM.assertion_identity import COLLISION_GROUP_QUERY, validate_collision_groups
+    groups = getQuery(COLLISION_GROUP_QUERY, driver=getDriver(realdb_database),
+                      params={"cmids": None}, type="dict")
+    validate_collision_groups(groups)
+    # Cover every group in either database. Testing only the first historical
+    # duplicate missed the White Mountain collisions introduced by later moves.
+    for group in groups:
+        assert all(row["assertionId"] for row in group["identities"]), group["conceptCmid"]
+        iris = {assertion_iri({**row, "database": realdb_database.lower(),
+                              "datasetCmid": group["datasetCmid"], "key": group["key"],
+                              "conceptCmid": group["conceptCmid"]}, group["multiplicity"])
+                for row in group["identities"]}
+        assert len(iris) == group["multiplicity"]
+        assert all("4:" not in str(iri) for iri in iris)

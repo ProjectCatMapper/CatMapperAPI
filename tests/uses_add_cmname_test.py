@@ -31,6 +31,8 @@ def test_add_cmname_rel_only_targets_default_dataset(
     assert "NOT c.CMName IN coalesce(r.Name, [])" in queries[0]["query"]
     assert "coalesce(r.Name, []) + [c.CMName]" in queries[0]["query"]
     assert "NOT (c)<-[:USES]-(:DATASET" in queries[1]["query"]
+    assert "r.label = 'CATEGORY'" in queries[1]["query"]
+    assert "r.assertionId = substring(replace(randomUUID()" in queries[1]["query"]
 
 
 def test_upload_passes_only_created_cmids_to_default_uses(monkeypatch):

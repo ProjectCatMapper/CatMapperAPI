@@ -13,6 +13,7 @@
 
 from .utils import *
 from . import context_policy
+from .assertion_identity import NEW_ASSERTION_ID
 from .merge_references import (
     replace_exact, replace_context, plan_merge_references, validate_merge_choice,
     validate_merge_plan, apply_reference_updates,
@@ -43,6 +44,7 @@ _USES_SELF_CONTEXT_PROPERTY_EXCEPTIONS = {"district", "parent"}
 _USES_SELF_CONTEXT_RELATIONSHIP_EXCEPTIONS = {"AREA_OF", "CONTAINS"}
 _INTERNAL_OWNER_PROPERTY_NAMES = {"ownerUserId", "modifiedByOtherUser"}
 _PROTECTED_USES_PROPERTY_NAMES = {
+    "assertionId",
     "createdAt",
     "createdByUserId",
     "contributionId",
@@ -1345,7 +1347,7 @@ def _merge_nodes(keepcmid, deletecmid, user, database, remove_cyclic_parents=Non
             WITH relIDfirst,
                 [prop IN listProps | [prop,'combine']] +
                     [prop IN stringProps | [prop,'retain']] +
-                    [['language','retain']] AS allProps,listProps+['language'] AS listPropsPluslanguage
+                    [['language','retain'], ['assertionId','discard']] AS allProps,listProps+['language'] AS listPropsPluslanguage
             
             WITH relIDfirst, apoc.map.fromPairs(allProps) AS props,listPropsPluslanguage
 
@@ -1599,9 +1601,12 @@ def moveUSESties(database,user,input,dataset,tabledata):
           {owner_guard}
         MATCH (to)
         WHERE to.CMID = $CMID_to
+        SET r.assertionId = coalesce(r.assertionId, {new_assertion_id})
+        WITH r, to
         CALL apoc.refactor.to(r, to) YIELD input, output
         RETURN elementId(output) AS relID
         """.format(
+            new_assertion_id=NEW_ASSERTION_ID,
             owner_guard=_owner_scoped_uses_guard(
                 "r",
                 actor_user_id,
@@ -2190,6 +2195,12 @@ def _merge_uses_relationship_properties(relationships, CMID, Key, datasetID):
     merged_props = {}
     conflicts = []
     for prop, entries in props_by_name.items():
+        if prop == "assertionId":
+            # A merge retains the first relationship's identity, never a list.
+            first_id = (relationships[0].get("props") or {}).get(prop)
+            if first_id is not None:
+                merged_props[prop] = first_id
+            continue
         non_null_entries = [entry for entry in entries if entry["value"] is not None]
         if not non_null_entries:
             continue
