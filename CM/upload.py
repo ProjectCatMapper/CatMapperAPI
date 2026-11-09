@@ -249,6 +249,20 @@ def createNodes(df, database,isDataset, user, uniqueID=None, ownershipMetadata=N
                     f"Error: {uniqueID} must be unique for each row, but found duplicates."
                 )
 
+        # A property name can be defined for both a node and a relationship.
+        # Restrict this lookup to node definitions for the kind being created;
+        # otherwise CATEGORY relationship metadata admits USES.parent here.
+        node_scope = 'DATASET' if isDataset else 'CATEGORY'
+        allowed_properties = getQuery(
+            "MATCH (p:PROPERTY) WHERE p.type = 'node' "
+            "AND coalesce(p.internal, false) = false "
+            "AND (p.nodeType CONTAINS $node_scope OR p.nodeType = 'NO EDIT') "
+            "return p.CMName as property",
+            driver, params={"node_scope": node_scope}, type="list",
+        )
+        if isDataset and "parent" in df.columns and "parent" in allowed_properties:
+            df["parent"] = df["parent"].apply(_normalize_semicolon_value_list)
+
         #Creates new nodes and assigns new_id to database
         updateLog(f"log/{user}uploadProgress.txt", "getting new ID", write="a")
         newID = getAvailableID(
@@ -282,15 +296,6 @@ def createNodes(df, database,isDataset, user, uniqueID=None, ownershipMetadata=N
             col for col in df.columns if "label" not in col and "uniqueID" not in col
         ]
 
-        if isDataset:
-            allowed_properties = getQuery(
-                "MATCH (p:PROPERTY) WHERE coalesce(p.internal, false) = false AND (p.nodeType CONTAINS 'DATASET' or p.nodeType='NO EDIT') return p.CMName as property", driver, type="list"
-            )
-        else:
-            allowed_properties = getQuery(
-                "MATCH (p:PROPERTY) WHERE coalesce(p.internal, false) = false AND (p.nodeType CONTAINS 'CATEGORY' or p.nodeType='NO EDIT') return p.CMName as property", driver, type="list"
-            )
-        
         vars = [v for v in vars if v in allowed_properties] + ['importID']
         
         # missing_vars = [var for var in vars if var not in properties]
