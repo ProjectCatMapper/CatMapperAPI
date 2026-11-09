@@ -119,6 +119,7 @@ def get_upload_properties(database):
             row
             for row in rows
             if not bool((row or {}).get("internal"))
+            and (row or {}).get("property") != "assertionId"
         ]
 
         node_properties = {}

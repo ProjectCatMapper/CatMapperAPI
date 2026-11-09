@@ -104,7 +104,7 @@ def _build_dataset_query(cmid, domain):
     
     if "CATEGORY" in domain:
         query = base_query + """
-        UNWIND keys(r) AS property
+        UNWIND [key IN keys(r) WHERE key <> 'assertionId'] AS property
         RETURN DISTINCT 
             a.CMName AS datasetName, 
             a.CMID AS datasetID,
@@ -118,7 +118,7 @@ def _build_dataset_query(cmid, domain):
     else:
         query = base_query + """
         WHERE NOT isEmpty([i IN r.label WHERE i IN apoc.coll.flatten([$domain], true)])
-        UNWIND keys(r) AS property
+        UNWIND [key IN keys(r) WHERE key <> 'assertionId'] AS property
         RETURN DISTINCT 
             a.CMName AS datasetName, 
             a.CMID AS datasetID,
