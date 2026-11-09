@@ -839,13 +839,13 @@ def getCMID(database, cmid):
         query1 = """
 unwind $cmid as cmid
 match (c {CMID: cmid})
-unwind keys(c) as nodeProperties
+unwind [key in keys(c) where key <> 'assertionId'] as nodeProperties
 return elementId(c) as nodeID, nodeProperties, c[nodeProperties] as nodeValues
 """
         query2 = """
 unwind $cmid as cmid
 match (c {CMID: cmid})<-[r:USES]-(d)
-unwind keys(r) as relProperties
+unwind [key in keys(r) where key <> 'assertionId'] as relProperties
 return elementId(r) as relID, relProperties, r[relProperties] as relValues
 """
 

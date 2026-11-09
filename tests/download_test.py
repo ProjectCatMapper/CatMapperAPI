@@ -180,3 +180,25 @@ def test_get_advanced_download_raises_explicit_error_when_queries_return_no_rows
         assert str(exc) == "No downloadable records were found for the requested CMIDs: AM404"
     else:
         raise AssertionError("Expected LookupError when advanced download finds no rows")
+
+
+def test_advanced_download_refuses_internal_assertion_id(monkeypatch):
+    import pytest
+    monkeypatch.setattr(download_module, "getDriver", lambda database: object())
+    monkeypatch.setattr(download_module, "getQuery", lambda *a, **kw: pytest.fail("Internal field reached download query"))
+    with pytest.raises(ValueError, match="Properties must include"):
+        download_module.getAdvancedDownload("archamap", "CATEGORY", ["assertionId"], ["AM1"])
+
+
+def test_public_csv_exports_exclude_persistent_assertion_ids(monkeypatch):
+    import CM.routines as routines
+    queries = []
+    monkeypatch.setattr(routines, "getDriver", lambda database: object())
+    def query(query, *args, **kwargs):
+        queries.append(query)
+        return []
+    monkeypatch.setattr(routines, "getQuery", query)
+    routines.backup2CSV("ArchaMap")
+    uses_exports = [q for q in queries if "USESties_" in q]
+    assert len(uses_exports) == 1
+    assert "WHERE key <> 'assertionId'" in uses_exports[0]

@@ -330,7 +330,7 @@ def backup2CSV(database, mail=None):
         query_USES = """
             CALL () {
                 MATCH ()-[r:USES]->()
-                UNWIND keys(r) AS p
+                UNWIND [key IN keys(r) WHERE key <> 'assertionId'] AS p
                 RETURN collect(DISTINCT p) AS props
             }
             WITH [p IN props |

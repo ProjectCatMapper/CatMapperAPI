@@ -172,7 +172,8 @@ def getAdvancedDownload(database,domain, properties,CMIDs):
     if not isinstance(properties, list):
         raise ValueError("Properties must be lists.")
 
-    properties = [str(prop).strip() for prop in properties if str(prop).strip()]
+    properties = [str(prop).strip() for prop in properties
+                  if str(prop).strip() and str(prop).strip().casefold() != "assertionid"]
     if not properties:
         raise ValueError("Properties must include at least one non-empty value.")
         

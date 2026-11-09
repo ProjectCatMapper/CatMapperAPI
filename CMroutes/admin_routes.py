@@ -81,6 +81,7 @@ def _validate_uses_edit_request(database, action, input_payload):
             raise InvalidUsesEdit(str(exc)) from exc
 
 _ADMIN_USES_NON_ADDABLE_COMPONENT_PROPERTIES = {
+    "assertionid",
     "eventdate",
     "eventtype",
     "latitude",
@@ -1173,7 +1174,8 @@ def admin_usesproperties():
         temp_list = []
         for record in result:
             n = dict(record["n"].items())
-            r = dict(record["r"].items())
+            r = {key: value for key, value in record["r"].items()
+                 if key != "assertionId"}
             r["id"] = record["r"].element_id
             d = dict(record["d"].items())
             temp_list.append((n, r, d))
@@ -1300,7 +1302,8 @@ def admin_category_merging_properties():
         temp_list = []
         for record in result:
             n = dict(record["n"].items())
-            r = dict(record["r"].items())
+            r = {key: value for key, value in record["r"].items()
+                 if key != "assertionId"}
             r["id"] = record["r"].element_id
             d = dict(record["d"].items())
             temp_list.append((n, r, d))

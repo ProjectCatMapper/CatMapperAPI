@@ -53,13 +53,13 @@ class FakeSession:
                 [
                     {
                         "n": {"CMName": "Domain", "CMID": "AM1", "elementId": "n1"},
-                        "r": FakeRelationship({"Key": "A"}, "rel-1"),
+                        "r": FakeRelationship({"Key": "A", "assertionId": "a" * 16}, "rel-1"),
                         "d": {"CMName": "Dataset A", "CMID": "D1"},
                     }
                 ]
             )
         if "p.type='relationship'" in query:
-            return FakeCursor([{"property": "Key"}, {"property": "year"}])
+            return FakeCursor([{"property": "Key"}, {"property": "year"}, {"property": "assertionId"}])
         if "MATCH (p:LABEL)" in query:
             return [{"p.CMName": "AREA"}, {"p.CMName": "ALL NODES"}, {"p.CMName": "LANGUOID"}]
         return FakeCursor([])
@@ -268,6 +268,7 @@ def test_admin_usesproperties_returns_records_and_allowed_props(client, monkeypa
     payload = response.get_json()
     assert payload["error"] == ""
     assert len(payload["r"]) == 1
+    assert "assertionId" not in payload["r"][0][1]
     assert set(payload["r1"]) == {"Key", "year"}
 
 

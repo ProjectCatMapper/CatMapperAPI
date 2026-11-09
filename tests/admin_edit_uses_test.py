@@ -110,7 +110,7 @@ def test_admin_uses_edit_rejects_internal_authorization_property(monkeypatch):
         admin.add_edit_delete_USES("sociomap", "tester", payload)
 
 
-@pytest.mark.parametrize("property_name", ["logID", " log ", "CREATEDBYUSERID", "contributionId"])
+@pytest.mark.parametrize("property_name", ["logID", " log ", "CREATEDBYUSERID", "contributionId", "assertionId"])
 def test_admin_uses_delete_rejects_internal_uses_metadata_property(monkeypatch, property_name):
     payload = _base_input()
     payload["s1_1"] = "delete"
@@ -938,3 +938,13 @@ def test_add_edit_delete_node_rejects_restricted_identifier_wrong_domain(monkeyp
 
     with pytest.raises(ValueError, match="FIPS.*AREA"):
         admin.add_edit_delete_Node("sociomap", "tester", payload)
+
+
+@pytest.mark.parametrize("operation", ["add", "edit", "delete"])
+def test_assertion_id_cannot_be_changed_even_by_direct_admin_request(monkeypatch, operation):
+    payload = _base_input()
+    payload.update(s1_1=operation, s1_8="assertionId")
+    monkeypatch.setattr(admin, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin, "getQuery", lambda *a, **kw: pytest.fail("Queried database for protected edit"))
+    with pytest.raises(PermissionError, match="internal USES metadata"):
+        admin.add_edit_delete_USES("archamap", "tester", payload)

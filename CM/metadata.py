@@ -149,15 +149,15 @@ def getLabelsMetadata(driver):
 def getPropertiesMetadata(driver, include_internal=True):
     query = """
     match (n:PROPERTY) 
-    WHERE $includeInternal OR coalesce(n.internal, false) = false
+    WHERE $includeInternal OR (coalesce(n.internal, false) = false AND n.CMName <> 'assertionId')
     return n.CMName as property, n.type as type, 
     n.relationship as relationship, n.description as description, 
     n.display as display, n.group as group,
     n.metaType as metaType, n.search as search,
     n.translation as translation, n.allowedValues as allowedValues,
     n.nodeType as nodeType, n.groupLabel as groupLabel,
-    coalesce(n.internal, false) as internal,
-    coalesce(n.editable, true) as editable
+    (coalesce(n.internal, false) OR n.CMName = 'assertionId') as internal,
+    (coalesce(n.editable, true) AND n.CMName <> 'assertionId') as editable
     """
     data = getQuery(
         query=query,
@@ -180,7 +180,7 @@ def getNodeProperties(database, domain, CMID):
         unwind $CMID as cmid
         match (c:CATEGORY {CMID: cmid})<-[r:USES]-(d:DATASET)
         with distinct apoc.coll.toSet(apoc.coll.flatten(collect(keys(c) + keys(r)))) as properties
-        with [i in properties where not i in ["log","logID","CMName","CMID","names","label"]] as properties
+        with [i in properties where not i in ["assertionId","log","logID","CMName","CMID","names","label"]] as properties
         unwind properties as property
         return property
         """
@@ -189,7 +189,7 @@ def getNodeProperties(database, domain, CMID):
         unwind $CMID as cmid
         match (d:DATASET {CMID: cmid})
         with distinct apoc.coll.toSet(collect(keys(d))) as properties
-        with [i in properties where not i in ["log","logID","CMName","CMID","names"]] as properties
+        with [i in properties where not i in ["assertionId","log","logID","CMName","CMID","names"]] as properties
         unwind properties as property
         return property
         """
