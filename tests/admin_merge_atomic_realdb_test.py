@@ -32,6 +32,10 @@ def isolated_graph(monkeypatch):
     if target.hostname not in {'localhost', '127.0.0.1'} or target.port in {None, 7687, 17687, 27687, 37687}:
         pytest.fail('Refusing to use a production or nonlocal database for destructive fixture setup')
     driver = GraphDatabase.driver(uri, auth=None)
+    with driver.session() as session:
+        session.run('CREATE INDEX category_cmid IF NOT EXISTS FOR (n:CATEGORY) ON (n.CMID)').consume()
+        session.run('CREATE INDEX dataset_cmid IF NOT EXISTS FOR (n:DATASET) ON (n.CMID)').consume()
+        session.run('CALL db.awaitIndexes(60)').consume()
     monkeypatch.setenv('CATMAPPER_CONTEXT_POLICY', 'metadata')
     for database in ('sociomap', 'archamap'):
         monkeypatch.setitem(utils._driver_cache, database, driver)
@@ -83,6 +87,38 @@ def seed(driver, database='SocioMap'):
 def snapshot(driver):
     return (utils.getQuery('MATCH (n) RETURN elementId(n) AS id,labels(n) AS labels,properties(n) AS properties ORDER BY id', driver),
             utils.getQuery('MATCH (a)-[r]->(b) RETURN elementId(r) AS id,elementId(a) AS start,elementId(b) AS end,type(r) AS type,properties(r) AS properties ORDER BY id', driver))
+
+
+def test_reference_search_filters_longer_ids_and_keeps_exact_json_references(isolated_graph):
+    ids = seed(isolated_graph)
+    with isolated_graph.session() as session:
+        session.run('''MATCH (d:DATASET {CMID:'external'})
+            CREATE (a:CATEGORY:AREA {CMID:'SM100', CMName:'Unrelated'}),
+                   (b:CATEGORY:AREA {CMID:'SM101', CMName:'Exact reference'}),
+                   (c:CATEGORY:AREA {CMID:'SM102', CMName:'Change reference'}),
+                   (d)-[:USES {Key:'Key == unrelated',parent:['SM10'],
+                     parentContext:['{"parent":"SM10","note":"SM1"}']}]->(a),
+                   (d)-[:USES {Key:'Key == exact',parentContext:['{"parent":"SM1"}']}]->(b),
+                   (d)-[:USES {Key:'Key == change',parent:['SM2']}]->(c)''').consume()
+    plan = plan_merge_references(isolated_graph, ids['keep'], ids['drop'], include_keep_references=True)
+    validated = {row['_source_cmid'] for row in plan['validationRows']}
+    assert 'SM100' not in validated
+    assert {'SM101', 'SM102'} <= validated
+    assert 'SM101' not in plan['reconcileCMIDs']
+    assert 'SM102' in plan['reconcileCMIDs']
+
+
+def test_category_lookup_uses_index(isolated_graph):
+    ids = seed(isolated_graph)
+    with isolated_graph.session() as session:
+        result = session.run('PROFILE MATCH (n:CATEGORY {CMID:$cmid}) RETURN n.CMID', cmid=ids['keep'])
+        plan = result.consume().profile
+        def operators(node):
+            return [node['operatorType']] + [item for child in node.get('children', []) for item in operators(child)]
+        names = operators(plan)
+        assert any('IndexSeek' in name for name in names), names
+        assert not any('Scan' in name for name in names), names
+    assert admin.getNodeMergeSummary(ids['keep'], isolated_graph)['primaryDomain'] == 'AREA'
 
 
 @pytest.mark.parametrize('database', ['SocioMap', 'ArchaMap'])

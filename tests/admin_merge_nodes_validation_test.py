@@ -32,6 +32,17 @@ def test_merge_nodes_rejects_mismatched_primary_domains(monkeypatch):
     assert "Primary domain mismatch" in result[0]
 
 
+def test_indexed_merge_lock_rechecks_both_targets_before_writes(monkeypatch):
+    monkeypatch.setattr(admin_module, 'getDriver', lambda _: object())
+    monkeypatch.setattr(admin_module, 'getNodeMergeSummary', lambda cmid, driver: {
+        'CMID': cmid, 'CMName': cmid, 'primaryDomain': 'AREA', 'labels': ['CATEGORY', 'AREA']})
+    monkeypatch.setattr(admin_module, 'getQuery', lambda *args, **kwargs: [{'count': 1}])
+    monkeypatch.setattr(admin_module, 'plan_merge_references', lambda *a, **k: pytest.fail('Preflight continued'))
+    result = admin_module.mergeNodes('AM1', 'AM2', 'user', 'ArchaMap')
+    assert result[1] == 500
+    assert 'changed or are ambiguous' in result[0]
+
+
 @pytest.mark.parametrize("keep,discard,expected", [
     ("CATEGORY", "AREA", True), ("AREA", "CATEGORY", True),
     ("CATEGORY", "CATEGORY", True), ("CATEGORY", "DATASET", False),

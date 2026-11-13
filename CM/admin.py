@@ -419,12 +419,23 @@ def getNodeMergeSummary(cmid, driver):
     if not cmid:
         raise Exception("CMID cannot be empty.")
 
+    label = "CATEGORY" if cmid.startswith(("AM", "SM")) else "DATASET" if cmid.startswith(("AD", "SD")) else None
+    if label:
+        rows = getQuery(query=f"""
+        MATCH (n:{label} {{CMID: $cmid}})
+        RETURN n.CMID AS CMID, n.CMName AS CMName, labels(n) AS labels
+        """, driver=driver, params={"cmid": cmid}, type="dict")
+    else:
+        rows = []
+    # Retain the legacy lookup for deleted and unclassified nodes, and for
+    # unusual CMIDs that do not carry the expected structural label.
     query = """
     UNWIND $cmid AS cmid
     MATCH (n {CMID: cmid})
     RETURN n.CMID AS CMID, n.CMName AS CMName, labels(n) AS labels
     """
-    rows = getQuery(query=query, driver=driver, params={"cmid": [cmid]}, type="dict")
+    if not rows:
+        rows = getQuery(query=query, driver=driver, params={"cmid": [cmid]}, type="dict")
     if not rows:
         raise Exception(f"{cmid} is invalid")
 
@@ -1224,10 +1235,23 @@ def _merge_nodes(keepcmid, deletecmid, user, database, remove_cyclic_parents=Non
         
         driver = getDriver(database)
 
-        getQuery("""MATCH (n) WHERE n.CMID IN $cmids
+        initial_keep = getNodeMergeSummary(keepcmid, driver)
+        initial_delete = getNodeMergeSummary(deletecmid, driver)
+        indexed_lock = True
+        if all("CATEGORY" in (row.get("labels") or []) for row in (initial_keep, initial_delete)):
+            lock_match = "MATCH (n:CATEGORY) USING INDEX SEEK n:CATEGORY(CMID) WHERE n.CMID IN $cmids"
+        elif all("DATASET" in (row.get("labels") or []) for row in (initial_keep, initial_delete)):
+            lock_match = "MATCH (n:DATASET) WHERE n.CMID IN $cmids"
+        else:
+            lock_match = "MATCH (n) WHERE n.CMID IN $cmids"
+            indexed_lock = False
+        locked = getQuery(lock_match + """
             WITH n ORDER BY n.CMID WITH collect(n) AS nodes
-            CALL apoc.lock.nodes(nodes)""", driver,
+            CALL apoc.lock.nodes(nodes)
+            RETURN size(nodes) AS count""", driver,
             params={"cmids": [keepcmid, deletecmid]})
+        if indexed_lock and (not locked or locked[0].get("count") != 2):
+            raise ValueError("Merge targets changed or are ambiguous. Preview the merge again.")
 
         results = [f"Started Combining {deletecmid} into {keepcmid}"]
 
@@ -1390,7 +1414,7 @@ def _merge_nodes(keepcmid, deletecmid, user, database, remove_cyclic_parents=Non
         createLog(id=id, type="node",
                   log=f"merged {deletecmid} into {keepcmid}; remove cyclical parents: {remove_cyclic_parents}", user=user, driver=driver)
 
-        affected = sorted({keepcmid} | {row["CMID"] for row in plan["validationRows"]})
+        affected = plan["reconcileCMIDs"]
         _require_process_uses_success(processUSES(database=database, CMID=affected, user="0"))
 
         results = results + \
