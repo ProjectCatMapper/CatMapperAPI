@@ -272,6 +272,43 @@ def test_admin_usesproperties_returns_records_and_allowed_props(client, monkeypa
     assert set(payload["r1"]) == {"Key", "year"}
 
 
+def test_admin_generic_category_shows_tie_and_category_properties(client, monkeypatch):
+    class GenericSession(FakeUsesPropertyFilterSession):
+        def run(self, query, *args, **kwargs):
+            cursor = super().run(query, *args, **kwargs)
+            if "MATCH (n:CATEGORY)<-[r:USES]" in query:
+                cursor._rows[0]["n"]["labels"] = ["CATEGORY"]
+            return cursor
+
+    class GenericDriver:
+        def session(self):
+            return GenericSession()
+
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: GenericDriver())
+    monkeypatch.setattr(admin_module, "getGroupLabels", lambda cmid, driver: "CATEGORY")
+    monkeypatch.setattr(admin_routes.context_policy, "enabled", lambda: True)
+    monkeypatch.setattr(admin_routes.context_policy, "load_policy", lambda driver: {
+        "labels": {}, "properties": {"polity": {"allowed": ["ETHNICITY"]}}
+    })
+    response = client.get("/admin_add_edit_delete_usesproperties",
+                          query_string={"CMID": "AM1323", "database": "ArchaMap"})
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert len(payload["r"]) == 1
+    assert "polity" in payload["r1"]
+    assert "glottocode" in payload["r1"]
+    assert "mergeOnly" not in payload["r1"]
+
+
+def test_generic_category_group_does_not_include_dataset(monkeypatch):
+    monkeypatch.setattr(admin_module, "getQuery", lambda **kwargs: [["CATEGORY"]])
+    assert admin_module.getGroupLabels("AM1323", object()) == "CATEGORY"
+    monkeypatch.setattr(admin_module, "isValidCMID", lambda *args: ["AM1323"])
+    admin_module.validatePropertyCMID("AM1323", "culture", "CULTURE", object())
+    with pytest.raises(Exception, match="DATASET"):
+        admin_module.validatePropertyCMID("AM1323", "dataset", "DATASET", object())
+
+
 def test_admin_usesproperties_hides_same_domain_contextual_props_except_district(client, monkeypatch):
     monkeypatch.setattr(admin_routes, "getDriver", lambda database: FakeUsesPropertyFilterDriver())
     group_label_calls = []

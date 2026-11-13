@@ -52,6 +52,42 @@ def test_missing_metadata_fails_closed(monkeypatch):
         policy.load_policy(object())
 
 
+def test_generic_category_matches_category_domains_but_not_structural_labels(monkeypatch):
+    data = fixture_policy("archamap")
+    assert policy.node_domains(["CATEGORY"], data) == {policy.GENERIC_CATEGORY}
+    assert policy.node_domains(["CATEGORY", "DATASET"], data) == set()
+    assert policy.property_allowed(policy.GENERIC_CATEGORY, "culture", data)
+    monkeypatch.setenv("CATMAPPER_CONTEXT_POLICY", "metadata")
+    monkeypatch.setattr(policy, "getQuery", lambda *a, **k: [
+        {"cmid": "AM1", "labels": ["CATEGORY"]},
+        {"cmid": "AM2", "labels": ["CATEGORY", "CULTURE"]},
+    ])
+    policy.validate_rows(object(), [{"CMID": "AM1", "culture": "AM2"}], data)
+
+
+def test_generic_category_can_be_context_reference(monkeypatch):
+    data = fixture_policy("archamap")
+    monkeypatch.setenv("CATMAPPER_CONTEXT_POLICY", "metadata")
+    monkeypatch.setattr(policy, "getQuery", lambda *a, **k: [
+        {"cmid": "AM1", "labels": ["CATEGORY", "CERAMIC"]},
+        {"cmid": "AM2", "labels": ["CATEGORY"]},
+    ])
+    policy.validate_rows(object(), [{"CMID": "AM1", "culture": "AM2"}], data)
+
+
+def test_projected_merge_domain_rejects_context_valid_only_for_generic(monkeypatch):
+    data = fixture_policy("archamap")
+    monkeypatch.setenv("CATMAPPER_CONTEXT_POLICY", "metadata")
+    monkeypatch.setattr(policy, "getQuery", lambda *a, **k: [
+        {"cmid": "AM1", "labels": ["CATEGORY"]},
+        {"cmid": "AM2", "labels": ["CATEGORY", "CULTURE"]},
+    ])
+    rows = [{"CMID": "AM1", "culture": "AM2"}]
+    policy.validate_rows(object(), rows, data)
+    with pytest.raises(ValueError, match="Prohibited contextual"):
+        policy.validate_rows(object(), rows, data, domain_overrides={"AM1": "AREA"})
+
+
 @pytest.mark.parametrize("mode,relationship,expected", [
     ("NONE", None, []),
     ("ALL_EXCEPT", "AREA_OF", ["AREA"]),

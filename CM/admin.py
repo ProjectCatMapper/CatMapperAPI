@@ -303,6 +303,8 @@ def getGroupLabels(CMID,driver):
         raise ValueError(f"{cmid} is invalid")
 
     result = result[0]
+    if set(result) == {"CATEGORY"}:
+        return "CATEGORY"
     if "CATEGORY" in result:
         result.remove("CATEGORY")
 
@@ -363,6 +365,8 @@ def _resolve_primary_domain_from_labels(labels, driver):
     For DATASET nodes, primary domain is DATASET.
     """
     labels = [lbl for lbl in (labels or []) if lbl]
+    if set(labels) == {"CATEGORY"}:
+        return "CATEGORY"
     labels_no_structural = [
         lbl for lbl in labels
         if lbl not in {"CATEGORY", "DELETED", "MERGING", "STACK"}
@@ -396,6 +400,11 @@ def _resolve_primary_domain_from_labels(labels, driver):
         raise Exception(f"Unable to determine a unique primary domain (found: {domains}).")
 
     return list(primary_domains)[0]
+
+
+def merge_domains_compatible(keep, discard):
+    domains = {keep, discard}
+    return len(domains) == 1 or ("CATEGORY" in domains and not domains.intersection({"DATASET", "STACK", "MERGING"}))
 
 
 def getNodeMergeSummary(cmid, driver):
@@ -445,7 +454,9 @@ def validatePropertyCMID(value,proptoChange,validgroupLabel,driver):
         grouplabel = getGroupLabels(val,driver)
         #permits GENERICS as parents of other domains
         if not (proptoChange == "parent" and grouplabel == "GENERIC"):
-            if validgroupLabel != grouplabel:
+            generic_category_matches = (grouplabel == "CATEGORY" and
+                                        validgroupLabel not in {"DATASET", "STACK", "MERGING"})
+            if not generic_category_matches and validgroupLabel != grouplabel:
                 raise Exception(f"All {proptoChange} CMIDS should be a {validgroupLabel}")
 
 def validate_parent_context_list(driver,parent_context_list):
@@ -1229,18 +1240,23 @@ def _merge_nodes(keepcmid, deletecmid, user, database, remove_cyclic_parents=Non
 
         keep_label = keep_summary["primaryDomain"]
         delete_label = delete_summary["primaryDomain"]
-        if keep_label != delete_label:
+        if not merge_domains_compatible(keep_label, delete_label):
             raise Exception(
                 f"Primary domain mismatch. "
                 f"Keep {keepcmid} ({keep_summary.get('CMName')}) is {keep_label}; "
                 f"Delete {deletecmid} ({delete_summary.get('CMName')}) is {delete_label}."
             )
         
+        generic_merge = "CATEGORY" in {keep_label, delete_label} and keep_label != delete_label
         plan = plan_merge_references(driver, keepcmid, deletecmid,
                                      remove_cyclic_parents=remove_cyclic_parents is True,
-                                     lock=True)
+                                     lock=True, include_keep_references=generic_merge)
         validate_merge_choice(plan, remove_cyclic_parents, cyclic_parent_token)
-        validate_merge_plan(driver, plan)
+        if generic_merge:
+            domain = delete_label if keep_label == "CATEGORY" else keep_label
+            validate_merge_plan(driver, plan, domain_overrides={keepcmid: domain})
+        else:
+            validate_merge_plan(driver, plan)
 
         for cmid in (keepcmid, deletecmid):
             name_result = addCMNameRel(database, cmid)
@@ -1257,7 +1273,7 @@ def _merge_nodes(keepcmid, deletecmid, user, database, remove_cyclic_parents=Non
         # determine the merge label from the resolved primary domain
         if len(keepcmid) > 1 and keepcmid[1] == "D":
             domain = "DATASET"
-        elif keep_label == "VARIABLE":
+        elif keep_label == "VARIABLE" and delete_label == "VARIABLE":
             domain = "VARIABLE"
         else:
             domain = "CATEGORY"
@@ -1279,9 +1295,11 @@ def _merge_nodes(keepcmid, deletecmid, user, database, remove_cyclic_parents=Non
 
         # combine the nodes
 
+        keep_match = "VARIABLE" if keep_label == "VARIABLE" else domain
+        delete_match = "VARIABLE" if delete_label == "VARIABLE" else domain
         query = f"""
-        match (a:{domain} {{CMID: $keepcmid}})
-        match (b:{domain} {{CMID: $deletecmid}})
+        match (a:{keep_match} {{CMID: $keepcmid}})
+        match (b:{delete_match} {{CMID: $deletecmid}})
         WITH collect(a) + collect(b) AS nodes
         CALL apoc.refactor.mergeNodes(nodes,{{properties: {{
         CMID:'discard',

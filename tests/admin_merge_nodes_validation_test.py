@@ -32,6 +32,56 @@ def test_merge_nodes_rejects_mismatched_primary_domains(monkeypatch):
     assert "Primary domain mismatch" in result[0]
 
 
+@pytest.mark.parametrize("keep,discard,expected", [
+    ("CATEGORY", "AREA", True), ("AREA", "CATEGORY", True),
+    ("CATEGORY", "CATEGORY", True), ("CATEGORY", "DATASET", False),
+    ("CATEGORY", "STACK", False), ("AREA", "ETHNICITY", False),
+])
+def test_generic_merge_domain_compatibility(keep, discard, expected):
+    assert admin_module.merge_domains_compatible(keep, discard) is expected
+
+
+def test_resolve_generic_category_only(monkeypatch):
+    monkeypatch.setattr(admin_module, "getQuery", lambda **kwargs: pytest.fail("Unexpected metadata query"))
+    assert admin_module._resolve_primary_domain_from_labels(["CATEGORY"], object()) == "CATEGORY"
+    with pytest.raises(Exception, match="primary domain"):
+        admin_module._resolve_primary_domain_from_labels(["CATEGORY", "STACK"], object())
+
+
+@pytest.mark.parametrize("keep_domain,discard_domain", [("CATEGORY", "AREA"), ("AREA", "CATEGORY")])
+def test_generic_merge_preview_validates_projected_domain(monkeypatch, keep_domain, discard_domain):
+    monkeypatch.setattr(admin_routes, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin_routes, "getNodeMergeSummary", lambda cmid, driver: {
+        "CMID": cmid, "primaryDomain": keep_domain if cmid == "AM1" else discard_domain})
+    plan = {"validationRows": [], "cyclicParentReferences": [], "cyclicParentToken": "token"}
+    def make_plan(driver, keep, discard, **kwargs):
+        assert kwargs["include_keep_references"] is True
+        return plan
+    monkeypatch.setattr(admin_routes, "plan_merge_references", make_plan)
+    seen = []
+    monkeypatch.setattr(admin_routes, "validate_merge_plan", lambda driver, plan, **kwargs: seen.append(kwargs))
+    admin_routes._merge_preview("ArchaMap", "AM1", "AM2")
+    assert seen == [{"domain_overrides": {"AM1": "AREA"}}]
+
+
+@pytest.mark.parametrize("keep_domain,discard_domain", [("CATEGORY", "AREA"), ("AREA", "CATEGORY")])
+def test_generic_merge_rechecks_projected_domain_before_source_writes(monkeypatch, keep_domain, discard_domain):
+    monkeypatch.setattr(admin_module, "getDriver", lambda database: object())
+    monkeypatch.setattr(admin_module, "getNodeMergeSummary", lambda cmid, driver: {
+        "CMID": cmid, "primaryDomain": keep_domain if cmid == "AM1" else discard_domain})
+    monkeypatch.setattr(admin_module, "getQuery", lambda *args, **kwargs: [])
+    monkeypatch.setattr(admin_module, "plan_merge_references", lambda *args, **kwargs: {
+        "cyclicParentReferences": [], "cyclicParentToken": "token"})
+    monkeypatch.setattr(admin_module, "addCMNameRel", lambda *args: pytest.fail("Source write reached"))
+    def reject(driver, plan, **kwargs):
+        assert kwargs == {"domain_overrides": {"AM1": "AREA"}}
+        raise ValueError("Prohibited contextual relationship")
+    monkeypatch.setattr(admin_module, "validate_merge_plan", reject)
+    result = admin_module.mergeNodes("AM1", "AM2", "user", "ArchaMap")
+    assert result[1] == 500
+    assert "Prohibited contextual relationship" in result[0]
+
+
 def test_admin_node_summary_returns_cmid_name_and_primary_domain(client, monkeypatch):
     monkeypatch.setattr(admin_routes, "getDriver", lambda _database: object())
     monkeypatch.setattr(

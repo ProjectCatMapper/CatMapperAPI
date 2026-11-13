@@ -12,6 +12,7 @@ from .validation_errors import validation_location
 
 
 STRUCTURAL = {"CATEGORY", "DATASET", "USER", "ALL NODES", "ANY DOMAIN"}
+GENERIC_CATEGORY = "__CATEGORY_ANY_DOMAIN__"
 
 
 def enabled():
@@ -115,6 +116,8 @@ def values(value):
 
 
 def node_domains(labels, policy):
+    if set(labels) == {"CATEGORY"}:
+        return {GENERIC_CATEGORY}
     return {policy["labels"][label] for label in labels if label in policy["labels"]}
 
 
@@ -126,10 +129,10 @@ def token(value):
 
 def property_allowed(domain, prop, policy):
     rule = policy["properties"].get(prop)
-    return rule is None or domain in rule["allowed"]
+    return rule is None or (bool(rule["allowed"]) if domain == GENERIC_CATEGORY else domain in rule["allowed"])
 
 
-def validate_rows(driver, rows, policy=None):
+def validate_rows(driver, rows, policy=None, domain_overrides=None):
     if not enabled():
         return
     rows = list(rows)
@@ -151,6 +154,10 @@ def validate_rows(driver, rows, policy=None):
             metadata.update({row["cmid"]: node_domains(row.get("labels") or [], policy) for row in found})
 
     fetch_metadata(rows)
+    for cmid, domain in (domain_overrides or {}).items():
+        if domain not in policy["domains"]:
+            raise ValueError(f"Unknown projected domain for {cmid}: {domain}")
+        metadata[cmid] = {domain}
     # Only actual primary-domain changes need to inspect other source records.
     relabeled = {}
     for row in rows:
@@ -189,8 +196,9 @@ def validate_rows(driver, rows, policy=None):
                        else metadata.get(cmid, set()))
         for prop, rule in policy["properties"].items():
             for ref in values(row.get(prop)):
-                if (len(destination) != 1 or not destination.issubset(set(rule["allowed"]))
-                        or metadata.get(ref) != {rule["sourceDomain"]}):
+                source = metadata.get(ref, set())
+                if (len(destination) != 1 or not all(property_allowed(domain, prop, policy) for domain in destination)
+                        or source not in ({rule["sourceDomain"]}, {GENERIC_CATEGORY})):
                     errors.append(f"{validation_location(row, number)}: "
                                   f"{prop}={ref} would create {rule['relationship']} "
                                   f"from {rule['sourceDomain']} to {', '.join(sorted(str(x) for x in destination)) or 'unknown domain'}")
@@ -211,8 +219,10 @@ def stored_conflicts(driver, cmids=None, properties=None, policy=None):
         WITH d,u,c,prop,ref,source,
             apoc.coll.toSet([label IN labels(c) WHERE $labelDomains[label] IS NOT NULL | $labelDomains[label]]) AS targets,
             apoc.coll.toSet([label IN coalesce(labels(source),[]) WHERE $labelDomains[label] IS NOT NULL | $labelDomains[label]]) AS sources
-        WHERE size(targets)<>1 OR NOT targets[0] IN $rules[prop].allowed
-            OR size(sources)<>1 OR sources[0]<>$rules[prop].sourceDomain
+        WHERE (CASE WHEN labels(c) = ['CATEGORY'] THEN size($rules[prop].allowed) = 0
+                    ELSE size(targets)<>1 OR NOT targets[0] IN $rules[prop].allowed END)
+            OR (CASE WHEN labels(source) = ['CATEGORY'] THEN false
+                     ELSE size(sources)<>1 OR sources[0]<>$rules[prop].sourceDomain END)
         RETURN d.CMID AS datasetID,u.Key AS Key,elementId(u) AS usesID,
             c.CMID AS CMID,c.CMName AS categoryName,prop AS property,ref AS reference,
             source.CMName AS referenceName,
