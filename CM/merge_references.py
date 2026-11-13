@@ -70,24 +70,28 @@ def plan_merge_references(driver, keep, discard, *, remove_cyclic_parents=False,
     rows = getQuery(query, driver, params={'cmids': [keep, discard],
                     'contextProps': props, 'discard': discard, 'keep': keep,
                     'includeKeep': include_keep_references})
-    updates, validation, cycles = [], [], []
+    updates, validation, cycles, reconcile_cmids = [], [], [], {keep}
     for row in rows:
         final_cmid = keep if row['CMID'] == discard else row['CMID']
         original = row['properties']
         proposed = {}
+        references_keep = False
         for prop in props:
             if prop not in original:
                 continue
             value = original[prop]
             if prop == 'parentContext':
                 try:
+                    entries = parent_context_entries(value)
                     updated = replace_context(value, discard, keep)
                 except ValueError as exc:
                     raise ValueError(f"{validation_location(row)}: {exc}") from exc
+                references_keep |= any(entry.get('parent') == keep for entry in entries)
                 self_parent = final_cmid == keep and any(
                     entry.get('parent') == keep for entry in parent_context_entries(updated))
             else:
                 updated = replace_exact(value, discard, keep)
+                references_keep |= keep in context_policy.values(value)
                 self_parent = prop == 'parent' and final_cmid == keep and keep in (
                     updated if isinstance(updated, list) else [updated])
             if self_parent:
@@ -104,14 +108,16 @@ def plan_merge_references(driver, keep, discard, *, remove_cyclic_parents=False,
         changes = {prop: value for prop, value in proposed.items() if value != original[prop]}
         if changes:
             updates.append({'relID': row['relID'], 'properties': changes})
-        if changes or row['CMID'] in (keep, discard) or include_keep_references:
+            reconcile_cmids.add(final_cmid)
+        if changes or row['CMID'] in (keep, discard) or (include_keep_references and references_keep):
             validation.append({'CMID': final_cmid, '_source_cmid': row['CMID'],
                                **{key: row[key] for key in ('datasetID', 'Key', 'relID')},
                                **proposed})
     fingerprint = hashlib.sha256(json.dumps([keep, discard, cycles],
         sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     return {'updates': updates, 'validationRows': validation,
-            'cyclicParentReferences': cycles, 'cyclicParentToken': fingerprint}
+            'cyclicParentReferences': cycles, 'cyclicParentToken': fingerprint,
+            'reconcileCMIDs': sorted(reconcile_cmids)}
 
 
 def validate_merge_choice(plan, choice, token):

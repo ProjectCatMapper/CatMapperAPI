@@ -80,6 +80,27 @@ def test_context_only_reference_is_rewritten_exactly(plan_sources):
     assert values[1] == untouched
 
 
+def test_generic_merge_validates_exact_keep_references_without_reconciling_them(plan_sources):
+    plan_sources.extend([
+        source('SM10', parent=['SM100'], parentContext=['{"parent":"SM100","note":"SM1"}']),
+        source('SM11', polity=['SM1', 'SM10']),
+        source('SM12', parentContext=['{"parent":"SM1","eventType":"HIERARCHY"}']),
+        source('SM13', parent=['SM2']),
+        source('SM1', parent=['SM9']),
+    ])
+    plan = references.plan_merge_references(object(), 'SM1', 'SM2', include_keep_references=True)
+    assert {row['_source_cmid'] for row in plan['validationRows']} == {'SM1', 'SM11', 'SM12', 'SM13'}
+    assert plan['reconcileCMIDs'] == ['SM1', 'SM13']
+    assert plan['updates'] == [{'relID': 'rel-1', 'properties': {'parent': ['SM1']}}]
+
+
+def test_generic_merge_recognizes_delimited_context_values(plan_sources):
+    plan_sources.append(source('SM11', polity='SM9; SM1'))
+    plan = references.plan_merge_references(object(), 'SM1', 'SM2', include_keep_references=True)
+    assert [row['CMID'] for row in plan['validationRows']] == ['SM11']
+    assert plan['reconcileCMIDs'] == ['SM1']
+
+
 @pytest.mark.parametrize('choice', [None, 'false', 0, 1, [], {}])
 def test_cycle_requires_explicit_boolean_choice(plan_sources, choice):
     plan_sources.append(source(parent=['SM2']))
