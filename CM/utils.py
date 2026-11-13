@@ -131,6 +131,8 @@ def node_property_allowed_for_labels(property_name, labels, driver):
     allowed_domains = get_node_property_domain_restriction(property_name)
     if not allowed_domains:
         return True
+    if set(labels or []) == {"CATEGORY"}:
+        return True
     domains = resolve_domains_from_node_labels(labels, driver)
     return bool(domains.intersection(allowed_domains))
 
@@ -138,6 +140,8 @@ def node_property_allowed_for_labels(property_name, labels, driver):
 def validate_node_property_domain_for_labels(cmid, property_name, labels, driver):
     allowed_domains = get_node_property_domain_restriction(property_name)
     if not allowed_domains:
+        return
+    if set(labels or []) == {"CATEGORY"}:
         return
 
     domains = resolve_domains_from_node_labels(labels, driver)

@@ -41,7 +41,8 @@ def replace_context(value, old, new, *, remove_parent=None):
     return result[0] if len(result) == 1 else result or None
 
 
-def plan_merge_references(driver, keep, discard, *, remove_cyclic_parents=False, lock=False):
+def plan_merge_references(driver, keep, discard, *, remove_cyclic_parents=False, lock=False,
+                          include_keep_references=False):
     props = getQuery('MATCH (m:PROPERTY) WHERE m.relationship IS NOT NULL '
                      'RETURN m.CMName AS property', driver, type='list')
     props = list(dict.fromkeys(props + ['parentContext']))
@@ -50,7 +51,8 @@ def plan_merge_references(driver, keep, discard, *, remove_cyclic_parents=False,
         WHERE c.CMID IN $cmids OR ANY(prop IN $contextProps WHERE
             ANY(value IN CASE WHEN valueType(r[prop]) STARTS WITH 'LIST<'
                 THEN r[prop] ELSE [r[prop]] END
-                WHERE toString(value) CONTAINS $discard))
+                WHERE toString(value) CONTAINS $discard OR
+                    ($includeKeep AND toString(value) CONTAINS $keep)))
     """
     if lock:
         query += """
@@ -66,7 +68,8 @@ def plan_merge_references(driver, keep, discard, *, remove_cyclic_parents=False,
         ORDER BY relID
     """
     rows = getQuery(query, driver, params={'cmids': [keep, discard],
-                    'contextProps': props, 'discard': discard})
+                    'contextProps': props, 'discard': discard, 'keep': keep,
+                    'includeKeep': include_keep_references})
     updates, validation, cycles = [], [], []
     for row in rows:
         final_cmid = keep if row['CMID'] == discard else row['CMID']
@@ -101,7 +104,7 @@ def plan_merge_references(driver, keep, discard, *, remove_cyclic_parents=False,
         changes = {prop: value for prop, value in proposed.items() if value != original[prop]}
         if changes:
             updates.append({'relID': row['relID'], 'properties': changes})
-        if changes or row['CMID'] in (keep, discard):
+        if changes or row['CMID'] in (keep, discard) or include_keep_references:
             validation.append({'CMID': final_cmid, '_source_cmid': row['CMID'],
                                **{key: row[key] for key in ('datasetID', 'Key', 'relID')},
                                **proposed})
@@ -120,8 +123,11 @@ def validate_merge_choice(plan, choice, token):
         raise ValueError('Parent references changed. Preview the merge again.')
 
 
-def validate_merge_plan(driver, plan):
-    context_policy.validate_rows(driver, plan['validationRows'])
+def validate_merge_plan(driver, plan, domain_overrides=None):
+    if domain_overrides:
+        context_policy.validate_rows(driver, plan['validationRows'], domain_overrides=domain_overrides)
+    else:
+        context_policy.validate_rows(driver, plan['validationRows'])
     validate_event_rows(plan['validationRows'], driver)
 
 

@@ -15,7 +15,7 @@ import json
 import os
 from datetime import datetime, timezone
 from uuid import uuid4
-from CM.admin import _selected_admin_relation
+from CM.admin import _selected_admin_relation, merge_domains_compatible
 from CM.merge_references import plan_merge_references, validate_merge_choice, validate_merge_plan
 from CM.keys import key_format_issue
 from .auth_utils import verify_request_auth, classify_auth_error_status
@@ -82,6 +82,7 @@ def _validate_uses_edit_request(database, action, input_payload):
 
 _ADMIN_USES_NON_ADDABLE_COMPONENT_PROPERTIES = {
     "assertionid",
+    "dataset",
     "eventdate",
     "eventtype",
     "latitude",
@@ -108,7 +109,7 @@ def _admin_uses_property_reltype_addable(reltype):
         for value in values
         if str(value or "").strip()
     }
-    return "MERGING" not in normalized_values
+    return "MERGING" not in normalized_values and (not normalized_values or "USES" in normalized_values)
 
 
 def _parse_credentials(raw_value):
@@ -1164,7 +1165,7 @@ def admin_usesproperties():
     WHERE p.type='relationship'
       AND coalesce(p.internal, false) = false
     RETURN p.CMName as property, p.groupLabel as groupLabel, p.relationship as relationship,
-           p.reltype as reltype
+           coalesce(p.reltype, p.relType) as reltype
     """
 
     with driver.session() as session:
@@ -1232,7 +1233,7 @@ def admin_usesproperties():
             if allowed_domains:
                 if category_domains is None:
                     category_domains = resolve_domains_from_node_labels(category_labels, driver)
-                if not category_domains.intersection(allowed_domains):
+                if set(category_labels) != {"CATEGORY"} and not category_domains.intersection(allowed_domains):
                     continue
 
             if uses_contextual_property_needs_category_group(
@@ -1376,10 +1377,16 @@ def _merge_preview(database, keep, discard):
     driver = getDriver(database)
     keep_summary = getNodeMergeSummary(keep, driver)
     discard_summary = getNodeMergeSummary(discard, driver)
-    if keep_summary["primaryDomain"] != discard_summary["primaryDomain"]:
+    keep_domain, discard_domain = keep_summary["primaryDomain"], discard_summary["primaryDomain"]
+    if not merge_domains_compatible(keep_domain, discard_domain):
         raise ValueError("Primary domain mismatch between nodes to merge.")
-    plan = plan_merge_references(driver, keep, discard)
-    validate_merge_plan(driver, plan)
+    generic_merge = "CATEGORY" in {keep_domain, discard_domain} and keep_domain != discard_domain
+    plan = plan_merge_references(driver, keep, discard, include_keep_references=generic_merge)
+    if generic_merge:
+        domain = discard_domain if keep_domain == "CATEGORY" else keep_domain
+        validate_merge_plan(driver, plan, domain_overrides={keep: domain})
+    else:
+        validate_merge_plan(driver, plan)
     return keep_summary, discard_summary, plan
 
 
