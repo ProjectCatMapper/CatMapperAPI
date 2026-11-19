@@ -174,17 +174,22 @@ def _get_queries_for_label(label, database):
             ''',
             
             'samples': '''
+                CALL () {
+                    MATCH (label:LABEL)
+                    WHERE label.CMName IS NOT NULL AND label.groupLabel IS NOT NULL
+                    RETURN apoc.map.fromPairs(collect([label.CMName, label.groupLabel])) AS labelDomains
+                }
                 UNWIND $cmid AS cmid
                 MATCH (a:CATEGORY {CMID: cmid})<-[r:USES]-(d:DATASET)
-                WITH a, d, r, 
+                WITH a, d, r, labelDomains,
                     coalesce(d.project, d.CMName) AS Source,
                     d.CMID AS datasetID,
                     d.DatasetVersion AS Version
-                WITH a, d, r, Source, datasetID, Version,
+                WITH a, d, r, Source, datasetID, Version, labelDomains,
                     COLLECT(DISTINCT r.categoryType) AS allCTypes
-                WITH a, d, r, Source, datasetID, Version, allCTypes,
+                WITH a, d, r, Source, datasetID, Version, allCTypes, labelDomains,
                     SIZE([x IN allCTypes WHERE x IS NOT NULL AND x <> '']) AS cTypeCount
-                WITH r, d, Source, datasetID, Version, cTypeCount,
+                WITH r, d, Source, datasetID, Version, cTypeCount, labelDomains,
                     r.Name AS Name,
                     CASE WHEN r.country IS NOT NULL THEN custom.getName(r.country) ELSE null END AS country,
                     CASE WHEN r.district IS NOT NULL THEN custom.getName(r.district) ELSE null END AS district,
@@ -215,6 +220,11 @@ def _get_queries_for_label(label, database):
                     'https://catmapper.org/' + tolower($database) + '/' + datasetID AS `link2`,
                     Version,
                     cType,
+                    [label IN CASE
+                        WHEN r.label IS NULL THEN []
+                        WHEN r.label IS :: LIST<ANY> THEN [x IN r.label | toString(x)]
+                        ELSE [toString(r.label)]
+                    END WHERE labelDomains[label] IS NOT NULL | labelDomains[label]] AS Domain,
                     r.Key AS Key,
                     Link
                 ORDER BY Source, Name
@@ -358,6 +368,7 @@ def _aggregate_samples(samples):
     grouped = defaultdict(lambda: {
         'Name': set(),
         'Key': [],
+        'Domain': set(),
         'Population est.': 0,
         'Sample size': 0
     })
@@ -384,6 +395,12 @@ def _aggregate_samples(samples):
         name = row.get('Name')
         if name:
             group['Name'].add(name)
+
+        domains = row.get('Domain') or []
+        if not isinstance(domains, list):
+            domains = [domains]
+        group['Domain'].update(domain.strip() for domain in domains
+                               if isinstance(domain, str) and domain.strip())
 
         # Aggregate Key values. When rows are combined, join distinct keys using
         # " || " so source keys remain visible without changing row grouping.
@@ -440,6 +457,7 @@ def _aggregate_samples(samples):
             'Link': Link,
             'Name': names_str,
             'Key': keys_str,
+            'Domain': ', '.join(sorted(values['Domain'])),
             'Population est.': pop_est if pop_est > 0 else "",
             'Sample size': sample_size if sample_size > 0 else "",
         })
